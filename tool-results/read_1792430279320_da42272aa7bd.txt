@@ -1,0 +1,994 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * «Подать заявку» — линия агента с заранее включённой нейросетью.
+     5→ *
+     6→ * Ключевое отличие от «Моих заявок»: нейросеть проверяет КАЖДЫЙ документ
+     7→ * сразу при загрузке, ещё до отправки заявки. Если агент по ошибке загрузил
+     8→ * не тот документ (например, страницу паспорта с фото в слот «страница
+     9→ * регистрации») — платформа мгновенно выдаёт ошибку несоответствия вида
+    10→ * документа и просит заменить файл. Заявка уходит только с проверенным
+    11→ * комплектом.
+    12→ *
+    13→ * Раздел также принял на себя нейро-функционал справочника: нового водителя
+    14→ * здесь можно добавить по документам (карточку заполнит нейросеть).
+    15→ */
+    16→import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+    17→import * as XLSX from 'xlsx'
+    18→import {
+    19→  AlertTriangle,
+    20→  ArrowRight,
+    21→  BookOpen,
+    22→  Car,
+    23→  CheckCircle2,
+    24→  ClipboardList,
+    25→  Download,
+    26→  FileSignature,
+    27→  FileSpreadsheet,
+    28→  FileText,
+    29→  IdCard,
+    30→  Info,
+    31→  Loader2,
+    32→  MapPin,
+    33→  RefreshCw,
+    34→  Send,
+    35→  Truck,
+    36→  Upload,
+    37→  UserRoundPlus,
+    38→  XCircle,
+    39→} from 'lucide-react'
+    40→import { DocStatusBadge, ModeBadge, SectionHeader, StatusBadge, type TabProps } from '@/components/platform/common'
+    41→import { Button } from '@/components/ui/button'
+    42→import { Card, CardContent } from '@/components/ui/card'
+    43→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+    44→import { Label } from '@/components/ui/label'
+    45→import { Progress } from '@/components/ui/progress'
+    46→import {
+    47→  Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
+    48→} from '@/components/ui/select'
+    49→import { Separator } from '@/components/ui/separator'
+    50→import DriverIntakeDialog from '@/components/platform/driver-intake'
+    51→import { useToast } from '@/hooks/use-toast'
+    52→import { api } from '@/lib/api'
+    53→import { demoSampleUri, fileToCompressedDataUri, sleep } from '@/lib/demo-media'
+    54→import { money, REQUEST_STATUS_META } from '@/lib/status'
+    55→import type { CarrierDTO, DocStatus, DocType, IntakeDocVerdict, RequestDTO } from '@/lib/types'
+    56→
+    57→const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+    58→
+    59→const SLOT_META: Record<DocType, { label: string; hint: string; icon: typeof IdCard }> = {
+    60→  PASSPORT_PHOTO: { label: 'Паспорт: стр. с фото', hint: 'Разворот с фото и ФИО', icon: IdCard },
+    61→  PASSPORT_REG: { label: 'Паспорт: регистрация', hint: 'Штамп регистрации', icon: MapPin },
+    62→  LICENSE: { label: 'Водительское удостоверение', hint: 'Лицевая сторона ВУ', icon: Car },
+    63→  STS: { label: 'СТС тягача', hint: 'Лицевая сторона СТС', icon: FileText },
+    64→  REQUEST_DOC: { label: 'Заявка (скан)', hint: 'Скан заявки на перевозку', icon: ClipboardList },
+    65→  POA: { label: 'Доверенность', hint: 'На водителя от перевозчика', icon: FileSignature },
+    66→}
+    67→
+    68→interface SlotState {
+    69→  upload: { fileName: string; dataUri: string } | null
+    70→  checking: boolean
+    71→  verdict: IntakeDocVerdict | null
+    72→  error: string | null
+    73→}
+    74→
+    75→const EMPTY_SLOT: SlotState = { upload: null, checking: false, verdict: null, error: null }
+    76→
+    77→const EMPTY_SLOTS: Record<DocType, SlotState> = {
+    78→  PASSPORT_PHOTO: EMPTY_SLOT, PASSPORT_REG: EMPTY_SLOT, LICENSE: EMPTY_SLOT, STS: EMPTY_SLOT, REQUEST_DOC: EMPTY_SLOT, POA: EMPTY_SLOT,
+    79→}
+    80→
+    81→/** госномер: латиница/кириллица — для сопоставления из Excel */
+    82→const PLATE_MAP: Record<string, string> = {
+    83→  'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'У': 'Y', 'Х': 'X',
+    84→}
+    85→const normSpace = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim()
+    86→const normFio = (s: unknown): string => normSpace(s).toUpperCase().replace(/Ё/g, 'Е')
+    87→const normPlate = (s: unknown): string => normSpace(s).toUpperCase().split('').map((c) => PLATE_MAP[c] ?? c).join('')
+    88→
+    89→/** Номер заявки из ячейки Excel: «1042» → «Z-1042», русская «З» → латинская «Z» */
+    90→function normRequestNo(s: unknown): string {
+    91→  let v = normSpace(s).toUpperCase()
+    92→  if (!v) return ''
+    93→  if (/^\d{3,4}$/.test(v)) v = `Z-${v}`
+    94→  v = v.replace(/^З/, 'Z')
+    95→  return v
+    96→}
+    97→
+    98→/** Строка предпросмотра массовой загрузки Excel */
+    99→interface ImportRow {
+   100→  line: number
+   101→  requestNo: string
+   102→  driverName: string
+   103→  truckPlate: string
+   104→  trailerPlate: string
+   105→  requestId?: string
+   106→  driverId?: string
+   107→  truckId?: string
+   108→  trailerId?: string
+   109→  ok: boolean
+   110→  message: string
+   111→}
+   112→
+   113→/** Цвет рамки слота по вердикту нейросети */
+   114→function slotBorder(s: SlotState): string {
+   115→  if (s.checking) return 'border-blue-300 bg-blue-50/30'
+   116→  if (s.error) return 'border-red-300 bg-red-50/40'
+   117→  if (!s.verdict) return 'border-slate-200'
+   118→  switch (s.verdict.status) {
+   119→    case 'PASSED': return 'border-emerald-300 bg-emerald-50/40'
+   120→    case 'MANUAL': return 'border-blue-300 bg-blue-50/30'
+   121→    case 'REUPLOAD': return 'border-amber-300 bg-amber-50/40'
+   122→    case 'REJECTED': return 'border-red-300 bg-red-50/40'
+   123→    default: return 'border-slate-200'
+   124→  }
+   125→}
+   126→
+   127→function confCls(c: number): string {
+   128→  if (c >= 0.95) return 'text-emerald-600'
+   129→  if (c >= 0.6) return 'text-blue-600'
+   130→  return 'text-amber-600'
+   131→}
+   132→
+   133→/** Панель вердикта нейросети под загруженным документом */
+   134→function SlotVerdict({ s, type }: { s: SlotState; type: DocType }) {
+   135→  if (s.checking) {
+   136→    return (
+   137→      <div className="mt-2 flex items-center gap-2 rounded-lg bg-blue-50 px-2.5 py-2 text-xs font-medium text-blue-800" role="status">
+   138→        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+   139→        Нейросеть проверяет вид документа и данные…
+   140→      </div>
+   141→    )
+   142→  }
+   143→  if (s.error) {
+   144→    return (
+   145→      <div className="mt-2 flex items-start gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-xs text-red-700">
+   146→        <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+   147→        {s.error}
+   148→      </div>
+   149→    )
+   150→  }
+   151→  const v = s.verdict
+   152→  if (!v) {
+   153→    return <p className="mt-2 text-[11px] leading-snug text-slate-400">{SLOT_META[type].hint}. Нейросеть проверит документ сразу после загрузки.</p>
+   154→  }
+   155→
+   156→  if (v.status === 'REJECTED') {
+   157→    return (
+   158→      <div className="mt-2 space-y-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 py-2">
+   159→        <div className="flex items-center gap-1.5 text-xs font-semibold text-red-800">
+   160→          <XCircle className="h-3.5 w-3.5" aria-hidden />
+   161→          Отказ нейросети — замените файл
+   162→        </div>
+   163→        <p className="text-[11px] leading-snug text-red-700">{v.message}</p>
+   164→        <p className="text-[11px] leading-snug text-red-600">Заявка не будет отправлена, пока документ не заменён.</p>
+   165→      </div>
+   166→    )
+   167→  }
+   168→  if (v.status === 'REUPLOAD') {
+   169→    return (
+   170→      <div className="mt-2 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
+   171→        <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+   172→          <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+   173→          <DocStatusBadge status={v.status} />
+   174→        </div>
+   175→        <p className="text-[11px] leading-snug text-amber-700">{v.message}</p>
+   176→      </div>
+   177→    )
+   178→  }
+   179→  if (v.status === 'MANUAL') {
+   180→    return (
+   181→      <div className="mt-2 space-y-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2">
+   182→        <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-800">
+   183→          <Info className="h-3.5 w-3.5" aria-hidden />
+   184→          <DocStatusBadge status={v.status} />
+   185→        </div>
+   186→        <p className="text-[11px] leading-snug text-blue-700">{v.message}</p>
+   187→      </div>
+   188→    )
+   189→  }
+   190→  // PASSED: показываем распознанные поля с уверенностью
+   191→  const fieldRows = Object.entries(v.fields)
+   192→    .filter(([, val]) => val)
+   193→    .slice(0, 3)
+   194→  return (
+   195→    <div className="mt-2 space-y-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2">
+   196→      <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800">
+   197→        <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+   198→        Вид документа подтверждён · качество {v.quality}
+   199→      </div>
+   200→      {fieldRows.map(([label, val]) => (
+   201→        <div key={label} className="flex items-baseline justify-between gap-2 text-[11px]">
+   202→          <span className="text-slate-500">{label}:</span>
+   203→          <span className="min-w-0 truncate font-medium text-slate-700">{val}</span>
+   204→          <span className={`shrink-0 font-semibold ${confCls(v.confidence[label] ?? 0)}`}>
+   205→            {v.confidence[label] != null ? `${Math.round((v.confidence[label] ?? 0) * 100)}%` : ''}
+   206→          </span>
+   207→        </div>
+   208→      ))}
+   209→    </div>
+   210→  )
+   211→}
+   212→
+   213→export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps) {
+   214→  const { toast } = useToast()
+   215→  const [requests, setRequests] = useState<RequestDTO[] | null>(null)
+   216→  const [carrier, setCarrier] = useState<CarrierDTO | null>(null)
+   217→  const [loadError, setLoadError] = useState<string | null>(null)
+   218→
+   219→  const [requestId, setRequestId] = useState('')
+   220→  const [slots, setSlots] = useState<Record<DocType, SlotState>>(EMPTY_SLOTS)
+   221→  const [driverId, setDriverId] = useState('')
+   222→  const [truckId, setTruckId] = useState('')
+   223→  const [trailerId, setTrailerId] = useState('')
+   224→  const [submitting, setSubmitting] = useState(false)
+   225→  const [submitted, setSubmitted] = useState<RequestDTO | null>(null)
+   226→  const [intakeOpen, setIntakeOpen] = useState(false)
+   227→  const [examplesOpen, setExamplesOpen] = useState(false)
+   228→  const [excelOpen, setExcelOpen] = useState(false)
+   229→  const [importRows, setImportRows] = useState<ImportRow[] | null>(null)
+   230→  const [importing, setImporting] = useState(false)
+   231→  const fileInputs = useRef<Partial<Record<DocType, HTMLInputElement | null>>>({})
+   232→  const excelInput = useRef<HTMLInputElement | null>(null)
+   233→
+   234→  const load = useCallback(async () => {
+   235→    try {
+   236→      const [reqs, dir] = await Promise.all([api.listRequests(), api.directory()])
+   237→      setRequests(reqs.requests)
+   238→      setCarrier(dir.carriers.find((c) => c.id === activeCarrierId) ?? null)
+   239→      setLoadError(null)
+   240→    } catch (e) {
+   241→      setLoadError(e instanceof Error ? e.message : 'Неизвестная ошибка')
+   242→    }
+   243→  }, [activeCarrierId])
+   244→
+   245→  useEffect(() => { void load() }, [load])
+   246→
+   247→  // при смене перевозчика сбрасываем выбор из справочника
+   248→  useEffect(() => {
+   249→    setDriverId('')
+   250→    setTruckId('')
+   251→    setTrailerId('')
+   252→  }, [activeCarrierId])
+   253→
+   254→  /** Мгновенная нейропроверка загруженного файла */
+   255→  const checkUpload = useCallback(async (type: DocType, fileName: string, dataUri: string) => {
+   256→    setSlots((prev) => ({ ...prev, [type]: { upload: { fileName, dataUri }, checking: true, verdict: null, error: null } }))
+   257→    try {
+   258→      const [res] = await Promise.all([
+   259→        api.checkDocument({ type, fileName, dataUri }),
+   260→        sleep(900), // минимальная пауза, чтобы статус «нейросеть проверяет» был заметен
+   261→      ])
+   262→      setSlots((prev) => ({ ...prev, [type]: { upload: { fileName, dataUri }, checking: false, verdict: res.verdict, error: null } }))
+   263→      const v = res.verdict
+   264→      if (v.status === 'REJECTED') {
+   265→        toast({ title: 'Несоответствие вида документа', description: v.message, variant: 'destructive' })
+   266→      } else if (v.status === 'REUPLOAD') {
+   267→        toast({ title: 'Документ нужно перезагрузить', description: v.message, variant: 'destructive' })
+   268→      } else if (v.status === 'PASSED') {
+   269→        toast({ title: `${SLOT_META[type].label}: принят`, description: 'Вид документа подтверждён нейросетью' })
+   270→      }
+   271→    } catch (e) {
+   272→      const msg = e instanceof Error ? e.message : 'Ошибка проверки'
+   273→      setSlots((prev) => ({ ...prev, [type]: { upload: { fileName, dataUri }, checking: false, verdict: null, error: msg } }))
+   274→    }
+   275→  }, [toast])
+   276→
+   277→  const handleFile = async (type: DocType, file: File) => {
+   278→    try {
+   279→      const dataUri = await fileToCompressedDataUri(file)
+   280→      void checkUpload(type, file.name, dataUri)
+   281→    } catch (e) {
+   282→      toast({ title: 'Ошибка', description: e instanceof Error ? e.message : 'Не удалось прочитать файл', variant: 'destructive' })
+   283→    }
+   284→  }
+   285→
+   286→  const resetAll = () => {
+   287→    setSlots(EMPTY_SLOTS)
+   288→    setRequestId('')
+   289→    setDriverId('')
+   290→    setTruckId('')
+   291→    setTrailerId('')
+   292→    setSubmitted(null)
+   293→    setImportRows(null)
+   294→  }
+   295→
+   296→  const selected = useMemo(
+   297→    () => requests?.find((r) => r.id === requestId) ?? null,
+   298→    [requests, requestId],
+   299→  )
+   300→
+   301→  // доступные цели заявки: свои заявки без документов + открытые рейсы (нужна ставка на площадке)
+   302→  const { mineNeedDocs, needBid } = useMemo(() => {
+   303→    const all = requests ?? []
+   304→    return {
+   305→      mineNeedDocs: all.filter((r) => r.winnerId === activeCarrierId && (r.status === 'AWARDED' || r.status === 'DOCS_REVIEW')),
+   306→      needBid: all.filter((r) => r.status === 'PUBLISHED' && (r.mode === 'AUCTION' || r.mode === 'CLOSED')),
+   307→    }
+   308→  }, [requests, activeCarrierId])
+   309→
+   310→  const drivers = carrier?.drivers ?? []
+   311→  const trucks = carrier?.trucks ?? []
+   312→  const trailers = carrier?.trailers ?? []
+   313→
+   314→  // ——— Массовая подача из Excel ———
+   315→
+   316→  /** Шаблон .xlsx из реальных данных: выигранные рейсы + база аккаунта */
+   317→  const downloadTemplate = () => {
+   318→    const header = ['Заявка', 'Водитель', 'Тягач', 'Прицеп']
+   319→    const rows = mineNeedDocs.slice(0, 5).map((r, i) => [
+   320→      r.number,
+   321→      drivers[i]?.fullName ?? drivers[0]?.fullName ?? 'Иванов Иван Иванович',
+   322→      trucks[i]?.plate ?? trucks[0]?.plate ?? 'А123ВС777',
+   323→      '',
+   324→    ])
+   325→    if (rows.length === 0) {
+   326→      rows.push(['Z-1042', drivers[0]?.fullName ?? 'Иванов Иван Иванович', trucks[0]?.plate ?? 'А123ВС777', ''])
+   327→    }
+   328→    const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
+   329→    ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 16 }]
+   330→    const wb = XLSX.utils.book_new()
+   331→    XLSX.utils.book_append_sheet(wb, ws, 'Заявки')
+   332→    XLSX.writeFile(wb, 'shablon-zayavok.xlsx')
+   333→    toast({ title: 'Шаблон скачан', description: 'Заполните по строке на каждый рейс и загрузите файл обратно' })
+   334→  }
+   335→
+   336→  /** Разбор Excel: строка = заявка + водитель + тягач (+прицеп), сверка с площадкой и базой аккаунта */
+   337→  const parseExcel = async (file: File) => {
+   338→    try {
+   339→      const wb = XLSX.read(await file.arrayBuffer())
+   340→      const ws = wb.Sheets[wb.SheetNames[0]]
+   341→      if (!ws) throw new Error('В файле нет листов')
+   342→      const sheet = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
+   343→      const grid = sheet.filter((row) => Array.isArray(row) && row.some((c) => normSpace(c)))
+   344→      if (grid.length === 0) throw new Error('Лист пуст')
+   345→
+   346→      // колонки: по заголовкам, иначе позиционно (Заявка · Водитель · Тягач · Прицеп)
+   347→      const head = grid[0].map((c) => normSpace(c).toLowerCase())
+   348→      const hasHeader = head.some((h) => /заявк|рейс|водител|тягач|прицеп/.test(h))
+   349→      const col = (re: RegExp, fallback: number): number => {
+   350→        if (hasHeader) {
+   351→          const i = head.findIndex((h) => re.test(h))
+   352→          if (i !== -1) return i
+   353→        }
+   354→        return fallback
+   355→      }
+   356→      const cReq = col(/заявк|рейс/, 0)
+   357→      const cDrv = col(/водител|фио/, 1)
+   358→      const cTrk = col(/тягач|автомоб/, 2)
+   359→      const cTrl = col(/прицеп/, 3)
+   360→      const body = hasHeader ? grid.slice(1) : grid
+   361→
+   362→      const seen = new Set<string>()
+   363→      const rows: ImportRow[] = body.map((cells, idx) => {
+   364→        const requestNo = normRequestNo(cells[cReq])
+   365→        const driverName = normSpace(cells[cDrv])
+   366→        const truckPlate = normSpace(cells[cTrk])
+   367→        const trailerPlate = normSpace(cells[cTrl])
+   368→        const row: ImportRow = {
+   369→          line: idx + (hasHeader ? 2 : 1),
+   370→          requestNo, driverName, truckPlate, trailerPlate,
+   371→          ok: false, message: '',
+   372→        }
+   373→        if (!requestNo && !driverName && !truckPlate) {
+   374→          row.message = 'пустая строка'
+   375→          return row
+   376→        }
+   377→        const byNo = requests?.find((r) => r.number === requestNo)
+   378→        if (!byNo) {
+   379→          row.message = `заявка «${requestNo || '—'}» не найдена на площадке`
+   380→          return row
+   381→        }
+   382→        if (seen.has(byNo.id)) {
+   383→          row.requestId = byNo.id
+   384→          row.message = 'дубликат строки — эта заявка уже подаётся в файле'
+   385→          return row
+   386→        }
+   387→        if (byNo.winnerId !== activeCarrierId) {
+   388→          row.message = 'рейс не закреплён за вашей компанией'
+   389→          return row
+   390→        }
+   391→        if (byNo.status !== 'AWARDED' && byNo.status !== 'DOCS_REVIEW') {
+   392→          row.message = `статус «${REQUEST_STATUS_META[byNo.status].label}» — подача недоступна`
+   393→          return row
+   394→        }
+   395→        const drv = drivers.find((d) => normFio(d.fullName) === normFio(driverName))
+   396→        if (!drv) {
+   397→          row.message = `водитель «${driverName || '—'}» не найден в базе аккаунта`
+   398→          return row
+   399→        }
+   400→        const trk = trucks.find((t) => normPlate(t.plate) === normPlate(truckPlate))
+   401→        if (!trk) {
+   402→          row.message = `тягач «${truckPlate || '—'}» не найден в базе аккаунта`
+   403→          return row
+   404→        }
+   405→        let trl: string | undefined
+   406→        if (trailerPlate && !/^(—|-|нет|без)$/i.test(trailerPlate)) {
+   407→          const found = trailers.find((z) => normPlate(z.plate) === normPlate(trailerPlate))
+   408→          if (!found) {
+   409→            row.message = `прицеп «${trailerPlate}» не найден в базе аккаунта`
+   410→            return row
+   411→          }
+   412→          trl = found.id
+   413→        }
+   414→        seen.add(byNo.id)
+   415→        Object.assign(row, { requestId: byNo.id, driverId: drv.id, truckId: trk.id, trailerId: trl, ok: true, message: 'готова к подаче' })
+   416→        return row
+   417→      })
+   418→
+   419→      setImportRows(rows)
+   420→      setExcelOpen(true)
+   421→    } catch (e) {
+   422→      toast({
+   423→        title: 'Не удалось прочитать Excel',
+   424→        description: e instanceof Error ? e.message : 'Проверьте файл: первая строка — заголовки «Заявка · Водитель · Тягач · Прицеп»',
+   425→        variant: 'destructive',
+   426→      })
+   427→    }
+   428→  }
+   429→
+   430→  const importOkCount = importRows?.filter((r) => r.ok).length ?? 0
+   431→
+   432→  /** Подача всех валидных строк: водитель и ТС вешаются на каждый рейс одним запросом */
+   433→  const runImport = async () => {
+   434→    const ok = (importRows ?? []).filter((r) => r.ok && r.requestId && r.driverId && r.truckId)
+   435→    if (ok.length === 0 || !activeCarrierId) return
+   436→    setImporting(true)
+   437→    try {
+   438→      const res = await api.bulkAssign({
+   439→        carrierId: activeCarrierId,
+   440→        rows: ok.map((r) => ({ requestId: r.requestId!, driverId: r.driverId!, truckId: r.truckId!, trailerId: r.trailerId })),
+   441→      })
+   442→      toast({
+   443→        title: 'Массовая подача завершена',
+   444→        description: `Водитель и ТС назначены: ${res.assigned} из ${res.total}. Фото и документы прикрепляются к каждой заявке отдельно — по одному снимку на документ.`,
+   445→      })
+   446→      setExcelOpen(false)
+   447→      setImportRows(null)
+   448→      await load()
+   449→    } catch (e) {
+   450→      toast({ title: 'Ошибка массовой подачи', description: e instanceof Error ? e.message : 'Ошибка сервера', variant: 'destructive' })
+   451→    } finally {
+   452→      setImporting(false)
+   453→    }
+   454→  }
+   455→
+   456→  // готовность: все 6 документов приняты нейросетью (PASSED/MANUAL), выбраны рейс, водитель и тягач
+   457→  const docsOk = DOC_ORDER.every((t) => {
+   458→    const v = slots[t].verdict
+   459→    return v && (v.status === 'PASSED' || v.status === 'MANUAL')
+   460→  })
+   461→  const checkedCount = DOC_ORDER.filter((t) => slots[t].verdict && !slots[t].checking).length
+   462→  const canSubmit = !!selected && !!driverId && !!truckId && docsOk && !submitting
+   463→
+   464→  const blockers: string[] = []
+   465→  if (!selected) blockers.push('выберите рейс')
+   466→  if (!driverId) blockers.push('выберите водителя')
+   467→  if (!truckId) blockers.push('выберите тягач')
+   468→  if (!docsOk) blockers.push('проверьте документы — все 6 должны быть приняты')
+   469→
+   470→  const submit = async () => {
+   471→    if (!canSubmit || !selected) return
+   472→    setSubmitting(true)
+   473→    try {
+   474→      // 1. назначаем водителя и ТС
+   475→      let req = selected
+   476→      const assigned = await api.action(req.id, 'assign', { carrierId: activeCarrierId, driverId, truckId, trailerId: trailerId || undefined })
+   477→      req = assigned.request
+   478→      // 2. прикрепляем проверенный комплект документов
+   479→      for (const t of DOC_ORDER) {
+   480→        const up = slots[t].upload
+   481→        if (up) await api.uploadDocument(req.id, { type: t, fileName: up.fileName, dataUri: up.dataUri })
+   482→      }
+   483→      // 3. прогон нейропроверки платформы и передача логисту
+   484→      const verified = await api.verifyDocuments(req.id)
+   485→      setSubmitted(verified.request)
+   486→      toast({ title: `Заявка ${verified.request.number} подана`, description: 'Комплект документов проверен нейросетью и отправлен логисту' })
+   487→      await load()
+   488→    } catch (e) {
+   489→      toast({ title: 'Не удалось подать заявку', description: e instanceof Error ? e.message : 'Ошибка сервера', variant: 'destructive' })
+   490→    } finally {
+   491→      setSubmitting(false)
+   492→    }
+   493→  }
+   494→
+   495→  if (loadError) {
+   496→    return (
+   497→      <div className="rounded-xl border border-red-200 bg-red-50 px-6 py-8 text-center">
+   498→        <div className="font-medium text-red-800">Не удалось загрузить данные</div>
+   499→        <div className="mt-1 text-sm text-red-600">{loadError}</div>
+   500→        <Button variant="outline" size="sm" className="mt-3" onClick={() => { setLoadError(null); void load() }}>
+   501→          <RefreshCw className="h-4 w-4" aria-hidden />
+   502→          Повторить
+   503→        </Button>
+   504→      </div>
+   505→    )
+   506→  }
+   507→  if (requests === null) {
+   508→    return (
+   509→      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-6 py-10 text-slate-500">
+   510→        <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" aria-hidden />
+   511→        Загрузка рейсов и справочника…
+   512→      </div>
+   513→    )
+   514→  }
+   515→
+   516→  // ---------- экран успеха ----------
+   517→  if (submitted) {
+   518→    return (
+   519→      <div>
+   520→        <SectionHeader title="Заявка подана" />
+   521→        <Card className="border-emerald-200 bg-emerald-50/50 shadow-sm">
+   522→          <CardContent className="p-6">
+   523→            <div className="flex flex-wrap items-center gap-3">
+   524→              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+   525→                <CheckCircle2 className="h-6 w-6" aria-hidden />
+   526→              </div>
+   527→              <div>
+   528→                <div className="flex flex-wrap items-center gap-2 text-lg font-bold text-slate-900">
+   529→                  Заявка {submitted.number}
+   530→                  <ModeBadge mode={submitted.mode} />
+   531→                  <StatusBadge status={submitted.status} />
+   532→                </div>
+   533→                <div className="text-sm text-slate-600">
+   534→                  {submitted.fromPoint} → {submitted.toPoint} · {submitted.cargo} · погрузка {submitted.loadDate} {submitted.loadWindow}
+   535→                </div>
+   536→              </div>
+   537→            </div>
+   538→            <Separator className="my-4" />
+   539→            <div className="grid gap-2 sm:grid-cols-2">
+   540→              {submitted.documents.map((d) => (
+   541→                <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+   542→                  <span className="truncate text-sm text-slate-700">{SLOT_META[d.type].label}</span>
+   543→                  <DocStatusBadge status={d.status} />
+   544→                </div>
+   545→              ))}
+   546→            </div>
+   547→            <p className="mt-4 text-sm text-slate-600">
+   548→              Комплект прошёл мгновенную нейропроверку при загрузке и отправлен логисту на сверку. Дальнейший статус — во вкладке «Мои заявки».
+   549→            </p>
+   550→            <div className="mt-5 flex flex-wrap gap-2">
+   551→              <Button onClick={() => onNavigate('my')}>
+   552→                Открыть «Мои заявки»
+   553→                <ArrowRight className="h-4 w-4" aria-hidden />
+   554→              </Button>
+   555→              <Button variant="outline" onClick={resetAll}>Подать следующую заявку</Button>
+   556→            </div>
+   557→          </CardContent>
+   558→        </Card>
+   559→      </div>
+   560→    )
+   561→  }
+   562→
+   563→  // ---------- форма подачи ----------
+   564→  return (
+   565→    <div>
+   566→      <SectionHeader
+   567→        title="Подать заявку"
+   568→      >
+   569→        <span className="flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700" role="status">
+   570→          <span className="relative flex h-2 w-2" aria-hidden>
+   571→            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+   572→            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+   573→          </span>
+   574→          Нейросеть активна
+   575→        </span>
+   576→      </SectionHeader>
+   577→
+   578→      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+   579→        <div className="space-y-4">
+   580→          {/* 1 · Рейс */}
+   581→          <Card className="border-slate-200 shadow-sm">
+   582→            <CardContent className="p-4 sm:p-6">
+   583→              <div className="mb-3 flex items-center gap-2">
+   584→                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden>1</span>
+   585→                <h3 className="text-sm font-semibold text-slate-900">Рейс</h3>
+   586→              </div>
+   587→              <Select value={requestId} onValueChange={(v) => setRequestId(v === requestId ? '' : v)}>
+   588→                <SelectTrigger aria-label="Выбор рейса для заявки" className="w-full">
+   589→                  <SelectValue placeholder={mineNeedDocs.length > 0 ? 'Выберите рейс' : 'Нет доступных рейсов'} />
+   590→                </SelectTrigger>
+   591→                <SelectContent>
+   592→                  {mineNeedDocs.length > 0 && (
+   593→                    <SelectGroup>
+   594→                      <SelectLabel>Ваши заявки — дозагрузить документы</SelectLabel>
+   595→                      {mineNeedDocs.map((r) => (
+   596→                        <SelectItem key={r.id} value={r.id}>
+   597→                          {r.number} · {r.fromPoint} → {r.toPoint} · {r.cargo}
+   598→                        </SelectItem>
+   599→                      ))}
+   600→                    </SelectGroup>
+   601→                  )}
+   602→                  {needBid.length > 0 && (
+   603→                    <SelectGroup>
+   604→                      <SelectLabel>Требуют ставку на площадке — недоступно здесь</SelectLabel>
+   605→                      {needBid.map((r) => (
+   606→                        <SelectItem key={r.id} value={`disabled-${r.id}`} disabled>
+   607→                          {r.number} · {r.mode === 'AUCTION' ? 'торги' : 'закрытые ставки'} · подайте ставку на площадке
+   608→                        </SelectItem>
+   609→                      ))}
+   610→                    </SelectGroup>
+   611→                  )}
+   612→                </SelectContent>
+   613→              </Select>
+   614→
+   615→              {selected && (
+   616→                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+   617→                  <div className="flex flex-wrap items-center gap-2">
+   618→                    <span className="font-mono text-sm font-bold text-blue-700">{selected.number}</span>
+   619→                    <ModeBadge mode={selected.mode} />
+   620→                    <StatusBadge status={selected.status} />
+   621→                  </div>
+   622→                  <div className="mt-1.5 grid gap-x-6 gap-y-1 text-sm text-slate-600 sm:grid-cols-2">
+   623→                    <div><span className="text-slate-400">Маршрут:</span> {selected.fromPoint} → {selected.toPoint}</div>
+   624→                    <div><span className="text-slate-400">Груз:</span> {selected.cargo}, {selected.tonnage} т · {selected.truckType}</div>
+   625→                    <div><span className="text-slate-400">Погрузка:</span> {selected.loadDate} {selected.loadWindow}</div>
+   626→                    <div><span className="text-slate-400">Ставка:</span> {money(selected.bestRate ?? selected.startRate)}{selected.status === 'PUBLISHED' ? ' (стартовая)' : ''}</div>
+   627→                  </div>
+   628→                  {selected.status === 'PUBLISHED' && (
+   629→                    <p className="mt-2 text-xs text-amber-700">
+   630→                      Рейс ещё на площадке: при отправке заявки он будет закреплён за вами автоматически.
+   631→                    </p>
+   632→                  )}
+   633→                </div>
+   634→              )}
+   635→            </CardContent>
+   636→          </Card>
+   637→
+   638→          {/* 2 · Документы с мгновенной нейропроверкой */}
+   639→          <Card className="border-slate-200 shadow-sm">
+   640→            <CardContent className="p-4 sm:p-6">
+   641→              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+   642→                <div className="flex items-center gap-2">
+   643→                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden>2</span>
+   644→                  <h3 className="text-sm font-semibold text-slate-900">Документы · нейропроверка при загрузке</h3>
+   645→                </div>
+   646→                <span className="text-xs font-medium text-slate-500">проверено {checkedCount} из 6</span>
+   647→              </div>
+   648→              <Progress value={(checkedCount / 6) * 100} className="mb-2 h-1.5" aria-label={`Проверено документов: ${checkedCount} из 6`} />
+   649→              <p className="mb-4 text-[11px] text-slate-400">Фотографии — одиночные: один снимок в каждый слот, нейросеть проверяет его сразу после загрузки.</p>
+   650→
+   651→              <div className="grid gap-3 sm:grid-cols-2">
+   652→                {DOC_ORDER.map((t) => {
+   653→                  const s = slots[t]
+   654→                  const meta = SLOT_META[t]
+   655→                  const Icon = meta.icon
+   656→                  return (
+   657→                    <div key={t} className={`rounded-xl border p-3 transition-colors ${slotBorder(s)}`}>
+   658→                      <div className="flex items-center justify-between gap-2">
+   659→                        <div className="flex min-w-0 items-center gap-2">
+   660→                          <Icon className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+   661→                          <div className="min-w-0">
+   662→                            <div className="truncate text-xs font-semibold text-slate-800">{meta.label}</div>
+   663→                            <div className="text-[10px] text-slate-400">{meta.hint}</div>
+   664→                          </div>
+   665→                        </div>
+   666→                        {s.verdict && !s.checking && <DocStatusBadge status={s.verdict.status} />}
+   667→                      </div>
+   668→
+   669→                      {s.upload ? (
+   670→                        <div className="mt-2 flex items-center gap-2.5">
+   671→                          <img src={s.upload.dataUri} alt={`Загружено в слот «${meta.label}»`} className="h-16 w-24 shrink-0 rounded-md border border-slate-200 object-cover" />
+   672→                          <div className="min-w-0 flex-1">
+   673→                            <div className="truncate text-[11px] text-slate-500">{s.upload.fileName}</div>
+   674→                            <Button
+   675→                              size="sm"
+   676→                              variant="outline"
+   677→                              className="mt-1 h-7 gap-1 text-xs"
+   678→                              onClick={() => fileInputs.current[t]?.click()}
+   679→                            >
+   680→                              <Upload className="h-3 w-3" aria-hidden />
+   681→                              Заменить файл
+   682→                            </Button>
+   683→                          </div>
+   684→                        </div>
+   685→                      ) : (
+   686→                        <button
+   687→                          type="button"
+   688→                          onClick={() => fileInputs.current[t]?.click()}
+   689→                          className="mt-2 flex w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-white/60 px-3 py-4 text-center transition-colors hover:border-blue-400 hover:bg-blue-50/40"
+   690→                          aria-label={`Загрузить ${meta.label}`}
+   691→                        >
+   692→                          <Upload className="h-4 w-4 text-slate-400" aria-hidden />
+   693→                          <span className="text-xs font-medium text-slate-600">Загрузить фото</span>
+   694→                        </button>
+   695→                      )}
+   696→                      <input
+   697→                        ref={(el) => { fileInputs.current[t] = el }}
+   698→                        type="file"
+   699→                        accept="image/*"
+   700→                        className="hidden"
+   701→                        aria-label={`Файл ${meta.label}`}
+   702→                        onChange={(e) => {
+   703→                          const f = e.target.files?.[0]
+   704→                          if (f) void handleFile(t, f)
+   705→                          e.target.value = ''
+   706→                        }}
+   707→                      />
+   708→                      <SlotVerdict s={s} type={t} />
+   709→                    </div>
+   710→                  )
+   711→                })}
+   712→              </div>
+   713→
+   714→              <div className="mt-4 flex flex-wrap items-center gap-2">
+   715→                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setExamplesOpen(true)}>
+   716→                  <BookOpen className="h-4 w-4 text-blue-600" aria-hidden />
+   717→                  Примеры документов
+   718→                </Button>
+   719→                <span className="text-xs text-muted-foreground">образцы сканов — можно посмотреть перед загрузкой своих фото</span>
+   720→              </div>
+   721→            </CardContent>
+   722→          </Card>
+   723→
+   724→          {/* 3 · Водитель и транспорт */}
+   725→          <Card className="border-slate-200 shadow-sm">
+   726→            <CardContent className="p-4 sm:p-6">
+   727→              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+   728→                <div className="flex items-center gap-2">
+   729→                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden>3</span>
+   730→                  <h3 className="text-sm font-semibold text-slate-900">Водитель и транспорт</h3>
+   731→                </div>
+   732→                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setIntakeOpen(true)}>
+   733→                  <UserRoundPlus className="h-4 w-4 text-blue-600" aria-hidden />
+   734→                  Новый водитель по документам
+   735→                </Button>
+   736→              </div>
+   737→              <div className="grid gap-3 sm:grid-cols-3">
+   738→                <div className="space-y-1.5">
+   739→                  <Label className="text-xs text-slate-600">Водитель (из базы аккаунта)</Label>
+   740→                  <Select value={driverId} onValueChange={setDriverId}>
+   741→                    <SelectTrigger aria-label="Выбор водителя"><SelectValue placeholder={drivers.length ? 'Выберите водителя' : 'База пуста'} /></SelectTrigger>
+   742→                    <SelectContent>
+   743→                      {drivers.map((d) => (
+   744→                        <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>
+   745→                      ))}
+   746→                    </SelectContent>
+   747→                  </Select>
+   748→                </div>
+   749→                <div className="space-y-1.5">
+   750→                  <Label className="text-xs text-slate-600">Тягач</Label>
+   751→                  <Select value={truckId} onValueChange={setTruckId}>
+   752→                    <SelectTrigger aria-label="Выбор тягача"><SelectValue placeholder={trucks.length ? 'Выберите тягач' : 'База пуста'} /></SelectTrigger>
+   753→                    <SelectContent>
+   754→                      {trucks.map((t) => (
+   755→                        <SelectItem key={t.id} value={t.id}>{t.brand} · {t.plate}</SelectItem>
+   756→                      ))}
+   757→                    </SelectContent>
+   758→                  </Select>
+   759→                </div>
+   760→                <div className="space-y-1.5">
+   761→                  <Label className="text-xs text-slate-600">Прицеп (опционально)</Label>
+   762→                  <Select value={trailerId} onValueChange={(v) => setTrailerId(v === 'none' ? '' : v)}>
+   763→                    <SelectTrigger aria-label="Выбор прицепа"><SelectValue placeholder="Без прицепа" /></SelectTrigger>
+   764→                    <SelectContent>
+   765→                      <SelectItem value="none">Без прицепа</SelectItem>
+   766→                      {trailers.map((z) => (
+   767→                        <SelectItem key={z.id} value={z.id}>{z.plate} · {z.type}</SelectItem>
+   768→                      ))}
+   769→                    </SelectContent>
+   770→                  </Select>
+   771→                </div>
+   772→              </div>
+   773→              {drivers.length === 0 && (
+   774→                <p className="mt-3 text-xs text-amber-700">
+   775→                  В базе аккаунта нет водителей — добавьте первого по документам (кнопка выше): нейросеть сама заполнит карточку.
+   776→                </p>
+   777→              )}
+   778→            </CardContent>
+   779→          </Card>
+   780→
+   781→          {/* Отправка */}
+   782→          <Card className="border-slate-200 shadow-sm">
+   783→            <CardContent className="p-4 sm:p-6">
+   784→              <div className="flex flex-wrap items-center justify-between gap-3">
+   785→                <div className="min-w-0">
+   786→                  <div className="text-sm font-semibold text-slate-900">Готовность к отправке</div>
+   787→                  <div className="mt-0.5 text-xs text-muted-foreground">
+   788→                    {blockers.length === 0
+   789→                      ? 'Комплект проверен нейросетью — заявка уйдёт логисту'
+   790→                      : `Осталось: ${blockers.join(', ')}`}
+   791→                  </div>
+   792→                </div>
+   793→                <Button className="gap-2" disabled={!canSubmit} onClick={() => void submit()}>
+   794→                  {submitting ? (
+   795→                    <>
+   796→                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   797→                      Подача заявки…
+   798→                    </>
+   799→                  ) : (
+   800→                    <>
+   801→                      <Send className="h-4 w-4" aria-hidden />
+   802→                      Отправить заявку
+   803→                    </>
+   804→                  )}
+   805→                </Button>
+   806→              </div>
+   807→              {submitting && (
+   808→                <p className="mt-3 flex items-center gap-2 text-xs text-blue-700" role="status">
+   809→                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+   810→                  Закрепляем рейс, прикрепляем документы и передаём логисту…
+   811→                </p>
+   812→              )}
+   813→            </CardContent>
+   814→          </Card>
+   815→        </div>
+   816→
+   817→        {/* Правая колонка */}
+   818→        <div className="space-y-4">
+   819→          <Card className="border-slate-200 shadow-sm">
+   820→            <CardContent className="p-4">
+   821→              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+   822→                <FileSpreadsheet className="h-4 w-4 text-emerald-700" aria-hidden />
+   823→                Массовая подача из Excel
+   824→              </div>
+   825→              <p className="mt-1 text-[11px] leading-snug text-slate-500">
+   826→                Строка = заявка: «Заявка · Водитель · Тягач · Прицеп». Фотографии прикладываются к каждой заявке отдельно, по одной.
+   827→              </p>
+   828→              <div className="mt-3 flex flex-col gap-2">
+   829→                <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={downloadTemplate}>
+   830→                  <Download className="h-3.5 w-3.5" aria-hidden />
+   831→                  Скачать шаблон
+   832→                </Button>
+   833→                <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={() => excelInput.current?.click()}>
+   834→                  <Upload className="h-3.5 w-3.5" aria-hidden />
+   835→                  Загрузить Excel
+   836→                </Button>
+   837→              </div>
+   838→              <input
+   839→                ref={excelInput}
+   840→                type="file"
+   841→                accept=".xlsx,.xls,.csv"
+   842→                className="hidden"
+   843→                aria-label="Файл Excel с заявками"
+   844→                onChange={(e) => {
+   845→                  const f = e.target.files?.[0]
+   846→                  e.target.value = ''
+   847→                  if (f) void parseExcel(f)
+   848→                }}
+   849→              />
+   850→              {mineNeedDocs.length === 0 && (
+   851→                <p className="mt-2 text-[11px] text-amber-700">
+   852→                  Выиграйте рейс на площадке — массовая подача заполняет ваши выигранные заявки.
+   853→                </p>
+   854→              )}
+   855→            </CardContent>
+   856→          </Card>
+   857→          <Card className="border-slate-200 shadow-sm">
+   858→            <CardContent className="p-4">
+   859→              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+   860→                <Truck className="h-4 w-4 text-slate-500" aria-hidden />
+   861→                База аккаунта
+   862→              </div>
+   863→              <Button size="sm" variant="outline" className="mt-3 gap-1.5" onClick={() => onNavigate('directory')}>
+   864→                Открыть базу
+   865→                <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+   866→              </Button>
+   867→            </CardContent>
+   868→          </Card>
+   869→        </div>
+   870→      </div>
+   871→
+   872→      {/* Примеры документов: отдельная кнопка, образцы можно посмотреть */}
+   873→      <Dialog open={examplesOpen} onOpenChange={setExamplesOpen}>
+   874→        <DialogContent className="max-w-2xl">
+   875→          <DialogHeader>
+   876→            <DialogTitle>Примеры документов</DialogTitle>
+   877→            <DialogDescription>
+   878→              Как должен выглядеть скан каждого документа (демо-образцы). Сверяйте с ними свои фотографии перед загрузкой.
+   879→            </DialogDescription>
+   880→          </DialogHeader>
+   881→          <div className="grid max-h-[60vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
+   882→            {DOC_ORDER.map((t) => (
+   883→              <figure key={t} className="rounded-xl border border-slate-200 p-3">
+   884→                <img
+   885→                  src={demoSampleUri(t)}
+   886→                  alt={`Пример документа: ${SLOT_META[t].label}`}
+   887→                  className="w-full rounded-lg border border-slate-100 bg-white"
+   888→                />
+   889→                <figcaption className="mt-2">
+   890→                  <div className="text-xs font-semibold text-slate-800">{SLOT_META[t].label}</div>
+   891→                  <div className="text-[11px] text-slate-500">{SLOT_META[t].hint}</div>
+   892→                </figcaption>
+   893→              </figure>
+   894→            ))}
+   895→          </div>
+   896→          <DialogFooter>
+   897→            <Button variant="outline" onClick={() => setExamplesOpen(false)}>Закрыть</Button>
+   898→          </DialogFooter>
+   899→        </DialogContent>
+   900→      </Dialog>
+   901→
+   902→      {/* Массовая подача из Excel: предпросмотр с проверкой строк */}
+   903→      <Dialog open={excelOpen} onOpenChange={(o) => { setExcelOpen(o); if (!o) setImportRows(null) }}>
+   904→        <DialogContent className="max-w-3xl">
+   905→          <DialogHeader>
+   906→            <DialogTitle>Массовая подача из Excel</DialogTitle>
+   907→            <DialogDescription>
+   908→              Проверьте строки: заявка должна быть вашей выигранной, водитель и тягач — из базы аккаунта. Подтвердите — и данные встанут на все рейсы сразу.
+   909→            </DialogDescription>
+   910→          </DialogHeader>
+   911→          <div className="max-h-[50vh] overflow-auto rounded-xl border border-slate-200 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
+   912→            <table className="w-full min-w-[720px] text-left text-xs">
+   913→              <thead>
+   914→                <tr className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+   915→                  <th scope="col" className="px-3 py-2 font-semibold">Стр.</th>
+   916→                  <th scope="col" className="px-3 py-2 font-semibold">Заявка</th>
+   917→                  <th scope="col" className="px-3 py-2 font-semibold">Водитель</th>
+   918→                  <th scope="col" className="px-3 py-2 font-semibold">Тягач</th>
+   919→                  <th scope="col" className="px-3 py-2 font-semibold">Прицеп</th>
+   920→                  <th scope="col" className="px-3 py-2 font-semibold">Проверка</th>
+   921→                </tr>
+   922→              </thead>
+   923→              <tbody>
+   924→                {(importRows ?? []).map((r) => (
+   925→                  <tr key={r.line} className={`border-t border-slate-100 ${r.ok ? '' : 'bg-red-50/50'}`}>
+   926→                    <td className="px-3 py-2 text-slate-400">{r.line}</td>
+   927→                    <td className="px-3 py-2 font-mono font-semibold text-blue-700">{r.requestNo || '—'}</td>
+   928→                    <td className="px-3 py-2 text-slate-700">{r.driverName || '—'}</td>
+   929→                    <td className="px-3 py-2 font-mono text-slate-700">{r.truckPlate || '—'}</td>
+   930→                    <td className="px-3 py-2 font-mono text-slate-500">{r.trailerPlate || '—'}</td>
+   931→                    <td className="px-3 py-2">
+   932→                      {r.ok ? (
+   933→                        <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+   934→                          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+   935→                          {r.message}
+   936→                        </span>
+   937→                      ) : (
+   938→                        <span className="inline-flex items-center gap-1 text-red-700">
+   939→                          <XCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+   940→                          {r.message}
+   941→                        </span>
+   942→                      )}
+   943→                    </td>
+   944→                  </tr>
+   945→                ))}
+   946→              </tbody>
+   947→            </table>
+   948→          </div>
+   949→          <p className="text-[11px] text-slate-400">
+   950→            Фотографии — одиночные: после подачи откройте каждую заявку и загрузите по одному снимку на документ.
+   951→          </p>
+   952→          <DialogFooter>
+   953→            <Button variant="outline" onClick={() => { setExcelOpen(false); setImportRows(null) }}>Отмена</Button>
+   954→            <Button onClick={() => void runImport()} disabled={importOkCount === 0 || importing}>
+   955→              {importing ? (
+   956→                <>
+   957→                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   958→                  Подача…
+   959→                </>
+   960→              ) : (
+   961→                `Подать заявки: ${importOkCount}`
+   962→              )}
+   963→            </Button>
+   964→          </DialogFooter>
+   965→        </DialogContent>
+   966→      </Dialog>
+   967→
+   968→      {/* Нейро-мастер добавления водителя (карточка заполняется ИИ, запись идёт в базу аккаунта) */}
+   969→      <DriverIntakeDialog
+   970→        open={intakeOpen}
+   971→        onOpenChange={setIntakeOpen}
+   972→        carriers={carrier ? [carrier] : []}
+   973→        defaultCarrierId={activeCarrierId}
+   974→        lockCarrier
+   975→        onSaved={(res) => {
+   976→          toast({
+   977→            title: 'Водитель добавлен в базу аккаунта',
+   978→            description: `${res.driverName}: карточка заполнена нейросетью по документам${res.truckId ? ', тягач распознан из СТС' : ''}`,
+   979→          })
+   980→          void (async () => {
+   981→            const dir = await api.directory().catch(() => null)
+   982→            if (dir) {
+   983→              const me = dir.carriers.find((c) => c.id === activeCarrierId) ?? null
+   984→              setCarrier(me)
+   985→            }
+   986→          })()
+   987→          if (res.driverId) setDriverId(res.driverId)
+   988→          if (res.truckId) setTruckId(res.truckId)
+   989→        }}
+   990→      />
+   991→    </div>
+   992→  )
+   993→}
+   994→

@@ -13,7 +13,7 @@
  * Раздел также принял на себя нейро-функционал справочника: нового водителя
  * здесь можно добавить по документам (карточку заполнит нейросеть).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
   AlertTriangle,
@@ -22,18 +22,23 @@ import {
   Car,
   CheckCircle2,
   ClipboardList,
+  Database,
   Download,
+  FileCheck2,
   FileSignature,
   FileSpreadsheet,
   FileText,
+  Handshake,
   IdCard,
   Info,
   Loader2,
   MapPin,
+  MousePointerClick,
   RefreshCw,
   Send,
   Truck,
   Upload,
+  UserCheck,
   UserRoundPlus,
   XCircle,
 } from 'lucide-react'
@@ -47,6 +52,7 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import DriverIntakeDialog from '@/components/platform/driver-intake'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
@@ -207,6 +213,133 @@ function SlotVerdict({ s, type }: { s: SlotState; type: DocType }) {
         </div>
       ))}
     </div>
+  )
+}
+
+// ——— Визуализация статусов заявки: цветная линия с подсказками при наведении ———
+
+/** Русское склонение: 1 заявка / 2 заявки / 5 заявок */
+function zayavokWord(n: number): string {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return 'заявка'
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'заявки'
+  return 'заявок'
+}
+
+interface PipelineStage {
+  label: string
+  icon: typeof MousePointerClick
+  /** демо-наполнение для визуализации работы на площадке */
+  count: number
+  circle: string
+  ring: string
+  countCls: string
+  line: string
+  tip: string
+}
+
+const PIPELINE_STAGES: PipelineStage[] = [
+  {
+    label: 'Выбор рейса',
+    icon: MousePointerClick,
+    count: 8,
+    circle: 'bg-sky-500',
+    ring: 'ring-sky-100',
+    countCls: 'text-sky-700',
+    line: 'from-sky-200 to-teal-200',
+    tip: 'Начальный этап: перевозчик выбирает рейс на «Площадке заявок» — статусы «Торги» или «Закрытые ставки» — и подаёт ставку.',
+  },
+  {
+    label: 'Согласование ставки',
+    icon: Handshake,
+    count: 5,
+    circle: 'bg-teal-500',
+    ring: 'ring-teal-100',
+    countCls: 'text-teal-700',
+    line: 'from-teal-200 to-violet-200',
+    tip: 'Ставка подана: отдел сбыта АЭМЗ согласует цену по рейсу — побеждает лучшая ставка на понижение.',
+  },
+  {
+    label: 'Подтверждено',
+    icon: CheckCircle2,
+    count: 4,
+    circle: 'bg-violet-500',
+    ring: 'ring-violet-100',
+    countCls: 'text-violet-700',
+    line: 'from-violet-200 to-amber-200',
+    tip: 'Ставка подтверждена, рейс закреплён за перевозчиком. Можно подавать заявку: назначить водителя и загрузить документы.',
+  },
+  {
+    label: 'Документы',
+    icon: FileCheck2,
+    count: 3,
+    circle: 'bg-amber-500',
+    ring: 'ring-amber-100',
+    countCls: 'text-amber-700',
+    line: 'from-amber-200 to-blue-200',
+    tip: 'Заявка комплектуется: паспорт, ВУ, СТС, скан заявки и доверенность — нейросеть проверяет каждый документ сразу при загрузке.',
+  },
+  {
+    label: 'Сверка у логиста',
+    icon: UserCheck,
+    count: 2,
+    circle: 'bg-blue-600',
+    ring: 'ring-blue-100',
+    countCls: 'text-blue-700',
+    line: 'from-blue-200 to-emerald-200',
+    tip: 'Комплект передан логисту АЭМЗ: сверка данных с заявкой и оформление пропуска.',
+  },
+  {
+    label: 'В 1С — готово',
+    icon: Database,
+    count: 6,
+    circle: 'bg-emerald-500',
+    ring: 'ring-emerald-100',
+    countCls: 'text-emerald-700',
+    line: '',
+    tip: 'Данные подтверждены и загружены в 1С. Рейс оформлен — водитель может выезжать на погрузку.',
+  },
+]
+
+function StatusPipeline() {
+  return (
+    <Card className="mb-4 border-slate-200 shadow-sm">
+      <CardContent className="px-3 py-4 sm:px-6">
+        <div className="flex items-start overflow-x-auto pb-1" aria-label="Статусы заявки на площадке">
+          {PIPELINE_STAGES.map((st, i) => {
+            const Icon = st.icon
+            return (
+              <Fragment key={st.label}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`${st.label}: ${st.count} ${zayavokWord(st.count)}`}
+                      className="flex w-24 shrink-0 cursor-default flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:w-auto sm:flex-1"
+                    >
+                      <span className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-sm ring-4 ${st.circle} ${st.ring}`} aria-hidden>
+                        <Icon className="h-5 w-5" />
+                      </span>
+                      <span className={`whitespace-nowrap text-sm font-bold leading-none ${st.countCls}`}>
+                        {st.count} {zayavokWord(st.count)}
+                      </span>
+                      <span className="text-[11px] font-medium leading-tight text-slate-600 sm:text-xs">{st.label}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="max-w-64">
+                    <span className="font-semibold">{st.label}. </span>{st.tip}
+                  </TooltipContent>
+                </Tooltip>
+                {i < PIPELINE_STAGES.length - 1 && (
+                  <div aria-hidden className={`mt-5 h-1 w-7 shrink-0 rounded-full bg-gradient-to-r sm:w-10 ${st.line}`} />
+                )}
+              </Fragment>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -563,17 +696,8 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   // ---------- форма подачи ----------
   return (
     <div>
-      <SectionHeader
-        title="Подать заявку"
-      >
-        <span className="flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700" role="status">
-          <span className="relative flex h-2 w-2" aria-hidden>
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>
-          Нейросеть активна
-        </span>
-      </SectionHeader>
+      <SectionHeader title="Подать заявку" />
+      <StatusPipeline />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
