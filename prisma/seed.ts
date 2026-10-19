@@ -25,6 +25,12 @@ function docSvg(title: string, lines: string[], accent: string): string {
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000)
 const inHours = (h: number) => new Date(Date.now() + h * 3600_000)
 
+/** Дата через N дней (или N дней назад, если N < 0) — для сроков документов */
+const dateInDays = (d: number): string => {
+  const dt = new Date(Date.now() + d * 86_400_000)
+  return `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`
+}
+
 async function main() {
   await db.event.deleteMany()
   await db.document.deleteMany()
@@ -60,20 +66,21 @@ async function main() {
       name: 'ООО «Перевозчик А»', inn: '2310045671', contractNo: '12-А', contractDate: '14.03.2025',
       drivers: {
         create: [
-          { fullName: 'Иванов Иван Иванович', birthDate: '15.05.1990', passport: '99 12 345678', license: '99 12 345678', licenseTill: '12.03.2030', categories: 'C, CE' },
-          { fullName: 'Петров Пётр Сергеевич', birthDate: '22.08.1988', passport: '03 13 992210', license: '23 11 770145', licenseTill: '01.06.2029', categories: 'C' },
+          // сроки медсправки покрывают все состояния подсветки: истёк / истекает / ок
+          { fullName: 'Иванов Иван Иванович', birthDate: '15.05.1990', passport: '99 12 345678', license: '99 12 345678', licenseTill: '12.03.2030', medTill: dateInDays(-12), categories: 'C, CE', createdAt: hoursAgo(24 * 40) },
+          { fullName: 'Петров Пётр Сергеевич', birthDate: '22.08.1988', passport: '03 13 992210', license: '23 11 770145', licenseTill: '01.06.2029', medTill: dateInDays(24), categories: 'C', createdAt: hoursAgo(24 * 12) },
         ],
       },
       trucks: {
         create: [
-          { brand: 'KAMAZ 5490', plate: 'А123ВС777', vin: 'X9622277XKG123456', sts: '99 00 123456', owner: 'ООО «Перевозчик А»' },
-          { brand: 'Scania R450', plate: 'Е456КХ777', vin: 'YS2R4X20005412345', sts: '99 00 778812', owner: 'ООО «Перевозчик А»' },
+          { brand: 'KAMAZ 5490', plate: 'А123ВС777', vin: 'X9622277XKG123456', sts: '99 00 123456', techTill: dateInDays(-5), owner: 'ООО «Перевозчик А»', createdAt: hoursAgo(24 * 40) },
+          { brand: 'Scania R450', plate: 'Е456КХ777', vin: 'YS2R4X20005412345', sts: '99 00 778812', techTill: dateInDays(26), owner: 'ООО «Перевозчик А»', createdAt: hoursAgo(24 * 15) },
         ],
       },
       trailers: {
         create: [
-          { plate: 'АВ124777', sts: '99 00 554411', type: 'Полуприцеп тент' },
-          { plate: 'АВ777023', sts: '99 00 332255', type: 'Полуприцеп реф' },
+          { plate: 'АВ124777', sts: '99 00 554411', type: 'Полуприцеп тент', techTill: dateInDays(58), createdAt: hoursAgo(24 * 40) },
+          { plate: 'АВ777023', sts: '99 00 332255', type: 'Полуприцеп реф', techTill: '—', createdAt: hoursAgo(24 * 20) },
         ],
       },
     },
@@ -84,16 +91,16 @@ async function main() {
       name: 'ООО «Перевозчик Б»', inn: '2310045672', contractNo: '15-Б', contractDate: '02.06.2025',
       drivers: {
         create: [
-          { fullName: 'Сидоров Алексей Владимирович', birthDate: '03.02.1992', passport: '52 04 118872', license: '52 04 118872', licenseTill: '18.09.2028', categories: 'C, CE' },
-          { fullName: 'Кузнецов Дмитрий Олегович', birthDate: '17.11.1985', passport: '52 05 442301', license: '52 05 442301', licenseTill: '25.04.2027', categories: 'C' },
+          { fullName: 'Сидоров Алексей Владимирович', birthDate: '03.02.1992', passport: '52 04 118872', license: '52 04 118872', licenseTill: '18.09.2028', medTill: dateInDays(210), categories: 'C, CE', createdAt: hoursAgo(24 * 33) },
+          { fullName: 'Кузнецов Дмитрий Олегович', birthDate: '17.11.1985', passport: '52 05 442301', license: '52 05 442301', licenseTill: dateInDays(18), medTill: dateInDays(150), categories: 'C', createdAt: hoursAgo(24 * 9) },
         ],
       },
       trucks: {
         create: [
-          { brand: 'Volvo FH460', plate: 'В234МН150', vin: 'YV2RT40A8FA556789', sts: '50 01 223344', owner: 'ООО «Перевозчик Б»' },
+          { brand: 'Volvo FH460', plate: 'В234МН150', vin: 'YV2RT40A8FA556789', sts: '50 01 223344', techTill: dateInDays(74), owner: 'ООО «Перевозчик Б»', createdAt: hoursAgo(24 * 33) },
         ],
       },
-      trailers: { create: [{ plate: 'ВС567150', sts: '50 01 665577', type: 'Полуприцеп борт' }] },
+      trailers: { create: [{ plate: 'ВС567150', sts: '50 01 665577', type: 'Полуприцеп борт', techTill: dateInDays(11), createdAt: hoursAgo(24 * 25) }] },
     },
   })
 
@@ -102,13 +109,13 @@ async function main() {
       name: 'ООО «Перевозчик В»', inn: '2310045673', contractNo: '18-В', contractDate: '21.08.2025',
       drivers: {
         create: [
-          { fullName: 'Морозов Игорь Павлович', birthDate: '09.07.1987', passport: '77 02 551209', license: '77 02 551209', licenseTill: '30.11.2029', categories: 'C, CE' },
+          { fullName: 'Морозов Игорь Павлович', birthDate: '09.07.1987', passport: '77 02 551209', license: '77 02 551209', licenseTill: '30.11.2029', medTill: '—', categories: 'C, CE', createdAt: hoursAgo(24 * 21) },
         ],
       },
       trucks: {
-        create: [{ brand: 'МАЗ 5440', plate: 'М345СО199', vin: 'YM3B544090G012345', sts: '77 03 998811', owner: 'ООО «Перевозчик В»' }],
+        create: [{ brand: 'МАЗ 5440', plate: 'М345СО199', vin: 'YM3B544090G012345', sts: '77 03 998811', techTill: dateInDays(190), owner: 'ООО «Перевозчик В»', createdAt: hoursAgo(24 * 21) }],
       },
-      trailers: { create: [{ plate: 'МВ890199', sts: '77 03 112233', type: 'Полуприцеп контейнеровоз' }] },
+      trailers: { create: [{ plate: 'МВ890199', sts: '77 03 112233', type: 'Полуприцеп контейнеровоз', techTill: dateInDays(120), createdAt: hoursAgo(24 * 14) }] },
     },
   })
 
@@ -117,13 +124,13 @@ async function main() {
       name: 'ООО «Перевозчик Г»', inn: '2310045674', contractNo: '21-Г', contractDate: '05.09.2025',
       drivers: {
         create: [
-          { fullName: 'Волков Сергей Николаевич', birthDate: '28.01.1991', passport: '61 06 773410', license: '61 06 773410', licenseTill: '14.02.2031', categories: 'C, CE' },
+          { fullName: 'Волков Сергей Николаевич', birthDate: '28.01.1991', passport: '61 06 773410', license: '61 06 773410', licenseTill: '14.02.2031', medTill: dateInDays(320), categories: 'C, CE', createdAt: hoursAgo(24 * 7) },
         ],
       },
       trucks: {
-        create: [{ brand: 'MAN TGX', plate: 'Г456УА161', vin: 'WMA06XZZ7CP012345', sts: '61 02 445566', owner: 'ООО «Перевозчик Г»' }],
+        create: [{ brand: 'MAN TGX', plate: 'Г456УА161', vin: 'WMA06XZZ7CP012345', sts: '61 02 445566', techTill: dateInDays(240), owner: 'ООО «Перевозчик Г»', createdAt: hoursAgo(24 * 7) }],
       },
-      trailers: { create: [{ plate: 'ГА901161', sts: '61 02 778899', type: 'Полуприцеп тент' }] },
+      trailers: { create: [{ plate: 'ГА901161', sts: '61 02 778899', type: 'Полуприцеп тент', techTill: dateInDays(310), createdAt: hoursAgo(24 * 5) }] },
     },
   })
 

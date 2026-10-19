@@ -83,6 +83,8 @@ export interface OcrOutput {
   quality: number
   fields: Record<string, string>
   confidences: Record<string, number>
+  /** какой вид документа нейросеть распознала на изображении (для проверки соответствия слоту) */
+  detectedType?: DocType | 'UNKNOWN'
 }
 
 export interface VerifyVerdict {
@@ -93,6 +95,8 @@ export interface VerifyVerdict {
   confidences: Record<string, number>
   issues: string[]
   message: string
+  /** фактически распознанный вид документа (заполняется при первичном вводе) */
+  detectedType?: DocType | 'UNKNOWN' | null
 }
 
 // ---------------- детерминированный псевдослучайный генератор ----------------
@@ -183,7 +187,15 @@ function extractJson(text: string): Record<string, unknown> | null {
   }
 }
 
-export async function vlmOcr(dataUri: string, type: DocType, expected: ExpectedData | null): Promise<OcrOutput | null> {
+const DOC_TYPE_VALUES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+
+export async function vlmOcr(
+  dataUri: string,
+  type: DocType,
+  expected: ExpectedData | null,
+  /** режим первичного ввода: распознаёт фактический вид документа и не отбрасывает «не тот документ» */
+  intake = false,
+): Promise<OcrOutput | null> {
   const fieldList = DOC_FIELDS[type].map((f) => `«${f.label}»`).join(', ')
   const prompt = [
     `Ты — OCR-модуль проверки транспортных документов (аналог PaddleOCR). Тип документа: ${DOC_TYPE_LABEL[type]}.`,
@@ -191,11 +203,18 @@ export async function vlmOcr(dataUri: string, type: DocType, expected: ExpectedD
     `{"quality": <0..100, качество фото: резкость, свет, документ целиком в кадре>,`,
     `"fields": {${fieldList}: <прочитанное значение, "" если не найдено>},`,
     `"confidences": {<поле>: <0..1 уверенность в прочитанном>},`,
-    `"docOk": <true, если это действительно ${DOC_TYPE_LABEL[type]}>}`,
+    ...(intake
+      ? [`"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | UNKNOWN>}`]
+      : [`"docOk": <true, если это действительно ${DOC_TYPE_LABEL[type]}>}`]),
     ...(expected
       ? [`Для справки, ожидаемые в заявке значения: ${JSON.stringify(expected)}. Не подставляй их автоматически — читай только с фото.`]
       : [`Значений для сверки нет — это первичный ввод водителя: заполняй ТОЛЬКО реально прочитанные с изображения значения, ничего не выдумывай.`]),
-    `Если изображение не является документом этого типа — поставь quality < 25 и docOk=false.`,
+    ...(intake
+      ? [`Определи, какой документ реально изображён: страница паспорта с фото, страница регистрации паспорта, водительское удостоверение или СТС.`]
+      : []),
+    ...(intake
+      ? [`Если изображение не является документом заявленного типа — укажи фактический docType.`]
+      : [`Если изображение не является документом этого типа — поставь quality < 25 и docOk=false.`]),
   ].join('\n')
 
   try {
@@ -225,8 +244,15 @@ export async function vlmOcr(dataUri: string, type: DocType, expected: ExpectedD
     if (!json || typeof json.quality !== 'number') return null
     const fields = (json.fields ?? {}) as Record<string, string>
     const confidences = (json.confidences ?? {}) as Record<string, number>
-    if (!json.docOk && json.quality >= 25) return null
-    return { engine: 'GLM-Vision (VLM)', quality: Math.round(json.quality), fields, confidences }
+    const rawType = typeof json.docType === 'string' ? (json.docType as string).trim().toUpperCase() : ''
+    const detectedType = DOC_TYPE_VALUES.includes(rawType as DocType)
+      ? (rawType as DocType)
+      : rawType === 'UNKNOWN' ? 'UNKNOWN' as const : undefined
+    if (!intake && !json.docOk && json.quality >= 25) return null
+    return {
+      engine: 'GLM-Vision (VLM)', quality: Math.round(json.quality), fields, confidences,
+      ...(intake ? { detectedType: detectedType ?? 'UNKNOWN' as const } : detectedType ? { detectedType } : {}),
+    }
   } catch {
     return null
   }
@@ -492,7 +518,40 @@ export function svgOcr(dataUri: string, type: DocType): OcrOutput | null {
   return { engine: 'PaddleOCR-демо (SVG)', quality: Math.round(pseudo('q' + dataUri.slice(-40), 88, 99)), fields, confidences }
 }
 
-/** Анализ одного документа при вводе водителя: распознавание + правила (сверки с заявкой нет) */
+/**
+ * Определяет фактический вид документа по заголовку демо-SVG образца.
+ * Возвращает null, если заголовок не похож ни на один известный документ.
+ */
+export function detectSvgType(dataUri: string): DocType | null {
+  const lines = decodeSvgLines(dataUri)
+  if (!lines) return null
+  const title = lines[0] ?? ''
+  // «ПАСПОРТ РФ · РЕГИСТРАЦИЯ» содержит и «ПАСПОРТ» — проверяем регистрацию первой
+  if (TITLE_HINTS.PASSPORT_REG.test(title)) return 'PASSPORT_REG'
+  if (TITLE_HINTS.PASSPORT_PHOTO.test(title)) return 'PASSPORT_PHOTO'
+  if (TITLE_HINTS.LICENSE.test(title)) return 'LICENSE'
+  if (TITLE_HINTS.STS.test(title)) return 'STS'
+  return null
+}
+
+/** Текст ошибки несоответствия вида документа (для карточки и списка проблем) */
+export function mismatchMessage(declared: DocType, actual: DocType): string {
+  return `Несоответствие вида документа: выбран слот «${DOC_TYPE_LABEL[declared]}», но на изображении распознан «${DOC_TYPE_LABEL[actual]}». Загрузите правильный документ.`
+}
+
+function mismatchVerdict(declared: DocType, actual: DocType, engine: string, quality: number): VerifyVerdict {
+  const msg = mismatchMessage(declared, actual)
+  return {
+    status: 'REJECTED', quality, engine, fields: {}, confidences: {}, issues: [msg], message: msg,
+    detectedType: actual,
+  }
+}
+
+/**
+ * Анализ одного документа при первичном вводе (intake / подача заявки):
+ * сначала проверяется соответствие вида документа выбранному слоту,
+ * затем — качество и распознанные поля (сверки с заявкой нет).
+ */
 export async function analyzeIntakeDoc(
   fileName: string,
   type: DocType,
@@ -500,9 +559,20 @@ export async function analyzeIntakeDoc(
   settings: VerifySettings,
 ): Promise<VerifyVerdict> {
   const isDemoSample = dataUri.startsWith('data:image/svg')
-  let ocr: OcrOutput | null = null
-  if (isDemoSample) ocr = svgOcr(dataUri, type)
-  if (!ocr) ocr = await vlmOcr(dataUri, type, null)
+
+  if (isDemoSample) {
+    const actual = detectSvgType(dataUri)
+    if (actual && actual !== type) return mismatchVerdict(type, actual, 'PaddleOCR-демо (SVG)', 92)
+    const ocr = svgOcr(dataUri, type)
+    if (ocr) return applyRules(ocr, type, {}, settings)
+    return {
+      status: 'REUPLOAD', quality: 30, engine: 'PaddleOCR-демо (SVG)', fields: {}, confidences: {},
+      issues: ['Не удалось определить вид документа — загрузите чёткое изображение'],
+      message: 'Вид документа не определён — загрузите изображение заново',
+    }
+  }
+
+  const ocr = await vlmOcr(dataUri, type, null, true)
   if (!ocr) {
     return {
       status: 'MANUAL',
@@ -514,7 +584,10 @@ export async function analyzeIntakeDoc(
       message: 'Нейросеть недоступна — данные можно ввести вручную',
     }
   }
-  return applyRules(ocr, type, {}, settings)
+  if (ocr.detectedType && ocr.detectedType !== 'UNKNOWN' && ocr.detectedType !== type) {
+    return mismatchVerdict(type, ocr.detectedType, ocr.engine, ocr.quality)
+  }
+  return { ...applyRules(ocr, type, {}, settings), detectedType: ocr.detectedType ?? null }
 }
 
 export interface IntakeDriverDraft {

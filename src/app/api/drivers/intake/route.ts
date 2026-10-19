@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
     confidence: v.confidences,
     issues: v.issues,
     message: v.message,
+    detectedType: v.detectedType ?? null,
   }))
 
   const result: IntakeResult = {

@@ -69,13 +69,23 @@ export function toDocumentDTO(d: PrismaDoc): DocumentDTO {
 }
 
 export function toDriverDTO(d: Driver): DriverDTO {
-  return { id: d.id, carrierId: d.carrierId, fullName: d.fullName, birthDate: d.birthDate, passport: d.passport, license: d.license, licenseTill: d.licenseTill, categories: d.categories }
+  return {
+    id: d.id, carrierId: d.carrierId, fullName: d.fullName, birthDate: d.birthDate, passport: d.passport,
+    license: d.license, licenseTill: d.licenseTill, medTill: d.medTill, categories: d.categories,
+    createdAt: d.createdAt.toISOString(),
+  }
 }
 export function toTruckDTO(t: Truck): TruckDTO {
-  return { id: t.id, carrierId: t.carrierId, brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts, owner: t.owner }
+  return {
+    id: t.id, carrierId: t.carrierId, brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
+    techTill: t.techTill, owner: t.owner, createdAt: t.createdAt.toISOString(),
+  }
 }
 export function toTrailerDTO(t: Trailer): TrailerDTO {
-  return { id: t.id, carrierId: t.carrierId, plate: t.plate, sts: t.sts, type: t.type }
+  return {
+    id: t.id, carrierId: t.carrierId, plate: t.plate, sts: t.sts, type: t.type,
+    techTill: t.techTill, createdAt: t.createdAt.toISOString(),
+  }
 }
 export function toCarrierDTO(
   c: Carrier & { drivers: Driver[]; trucks: Truck[]; trailers: Trailer[]; _count?: { wonRequests: number; bids: number } },

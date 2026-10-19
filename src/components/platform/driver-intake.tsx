@@ -40,7 +40,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { DocStatusBadge } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { fileToCompressedDataUri, sampleSvg, sleep } from '@/lib/demo-media'
+import { fileToCompressedDataUri, DEMO_DOC_SAMPLES, sampleSvg, sleep } from '@/lib/demo-media'
 import { DOC_TYPE_LABEL } from '@/lib/status'
 import type {
   CarrierDTO, DocStatus, DocType, DriverIntakeSaved, IntakeDocVerdict, IntakeDriverDraft, IntakeResult, IntakeTruckDraft, RequestDTO,
@@ -54,12 +54,10 @@ const SCAN_STAGES = [
   'Сверяем данные между собой…',
 ]
 
-const DEMO: Record<DocType, { fileName: string; title: string; lines: string[]; accent: string }> = {
-  PASSPORT_PHOTO: { fileName: 'passport_demo.jpg', title: 'ПАСПОРТ РФ · СТР. С ФОТО', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 07 987654', '10.04.2024', '230-014'], accent: '#0f3b66' },
-  PASSPORT_REG: { fileName: 'passport_reg_demo.jpg', title: 'ПАСПОРТ РФ · РЕГИСТРАЦИЯ', lines: ['11.11.2023  230-014', 'Г. КРАСНОДАР, УЛ. СЕВЕРНАЯ', 'Д. 45, КВ. 12'], accent: '#0f3b66' },
-  LICENSE: { fileName: 'license_demo.jpg', title: 'ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 10 555444', 'C, CE', '14.02.2022', '14.02.2032'], accent: '#5b3413' },
-  STS: { fileName: 'sts_demo.jpg', title: 'СТС ТЯГАЧА', lines: ['Е456КХ123', 'Z942AB76HKB220001', '99 00 654321', 'SCANIA R450', 'ООО «Перевозчик Б»'], accent: '#14532d' },
-}
+/** Демо-образцы: { [вид документа]: { fileName, title, lines, accent } } */
+const DEMO: Record<DocType, { fileName: string; title: string; lines: string[]; accent: string }> = Object.fromEntries(
+  DEMO_DOC_SAMPLES.map((s) => [s.type, { fileName: s.fileName, title: s.title, lines: s.lines, accent: s.accent }]),
+) as Record<DocType, { fileName: string; title: string; lines: string[]; accent: string }>
 
 interface Upload {
   fileName: string

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { toCarrierDTO, toDriverDTO, toTruckDTO } from '@/lib/serialize'
+import { toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } from '@/lib/serialize'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
           fullName: data.fullName,
           birthDate: data.birthDate || '—', passport: data.passport || '—',
           license: data.license || '—', licenseTill: data.licenseTill || '—',
-          categories: data.categories || '—',
+          medTill: data.medTill || '—', categories: data.categories || '—',
         }
         const driver = existing
           ? await db.driver.update({ where: { id: existing.id }, data: payload })
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
       case 'truck': {
         if (!data.carrierId || !data.plate) return NextResponse.json({ error: 'Перевозчик и госномер обязательны' }, { status: 400 })
         const existing = (await db.truck.findMany({ where: { carrierId: data.carrierId } })).find((t) => norm(t.plate) === norm(data.plate))
-        const payload = { brand: data.brand || '—', plate: data.plate, vin: data.vin || '—', sts: data.sts || '—', owner: data.owner || '—' }
+        const payload = { brand: data.brand || '—', plate: data.plate, vin: data.vin || '—', sts: data.sts || '—', techTill: data.techTill || '—', owner: data.owner || '—' }
         const truck = existing
           ? await db.truck.update({ where: { id: existing.id }, data: payload })
           : await db.truck.create({ data: { carrierId: data.carrierId, ...payload } })
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
       }
       case 'trailer': {
         if (!data.carrierId || !data.plate) return NextResponse.json({ error: 'Перевозчик и госномер обязательны' }, { status: 400 })
-        await db.trailer.create({ data: { carrierId: data.carrierId, plate: data.plate, sts: data.sts || '—', type: data.type || '—' } })
+        await db.trailer.create({ data: { carrierId: data.carrierId, plate: data.plate, sts: data.sts || '—', type: data.type || '—', techTill: data.techTill || '—' } })
         break
       }
       default:
@@ -82,5 +82,68 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     console.error('directory create error', e)
     return NextResponse.json({ error: 'Не удалось создать запись' }, { status: 500 })
+  }
+}
+
+/**
+ * PUT /api/directory — обновить запись базы аккаунта { kind, id, data }.
+ * Агент поддерживает актуальность сроков документов (ВУ, медсправка, техосмотр)
+ * и остальных полей карточки.
+ */
+export async function PUT(req: NextRequest) {
+  const body = await req.json().catch(() => null)
+  const { kind, id, data } = (body ?? {}) as { kind?: string; id?: string; data?: Record<string, string> }
+  if (!kind || !id || !data) return NextResponse.json({ error: 'Нужны kind, id и data' }, { status: 400 })
+
+  try {
+    switch (kind) {
+      case 'driver': {
+        const driver = await db.driver.update({
+          where: { id },
+          data: {
+            fullName: data.fullName, birthDate: data.birthDate || '—', passport: data.passport || '—',
+            license: data.license || '—', licenseTill: data.licenseTill || '—',
+            medTill: data.medTill || '—', categories: data.categories || '—',
+          },
+        })
+        return NextResponse.json({ ok: true, driver: toDriverDTO(driver) })
+      }
+      case 'truck': {
+        const truck = await db.truck.update({
+          where: { id },
+          data: {
+            brand: data.brand || '—', plate: data.plate, vin: data.vin || '—', sts: data.sts || '—',
+            techTill: data.techTill || '—', owner: data.owner || '—',
+          },
+        })
+        return NextResponse.json({ ok: true, truck: toTruckDTO(truck) })
+      }
+      case 'trailer': {
+        const trailer = await db.trailer.update({
+          where: { id },
+          data: {
+            plate: data.plate, sts: data.sts || '—', type: data.type || '—',
+            techTill: data.techTill || '—',
+          },
+        })
+        return NextResponse.json({ ok: true, trailer: toTrailerDTO(trailer) })
+      }
+      case 'carrier': {
+        const carrier = await db.carrier.update({
+          where: { id },
+          data: {
+            name: data.name, inn: data.inn, contractNo: data.contractNo || '—',
+            contractDate: data.contractDate || '—',
+            ...(data.access !== undefined ? { access: data.access !== 'false' } : {}),
+          },
+        })
+        return NextResponse.json({ ok: true, carrier: { id: carrier.id, name: carrier.name } })
+      }
+      default:
+        return NextResponse.json({ error: 'Неизвестный kind' }, { status: 400 })
+    }
+  } catch (e) {
+    console.error('directory update error', e)
+    return NextResponse.json({ error: 'Не удалось обновить запись — проверьте данные' }, { status: 500 })
   }
 }

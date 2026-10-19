@@ -13,7 +13,9 @@ export interface DriverDTO {
   passport: string
   license: string
   licenseTill: string
+  medTill: string
   categories: string
+  createdAt: string
 }
 
 export interface TruckDTO {
@@ -23,7 +25,9 @@ export interface TruckDTO {
   plate: string
   vin: string
   sts: string
+  techTill: string
   owner: string
+  createdAt: string
 }
 
 export interface TrailerDTO {
@@ -32,6 +36,8 @@ export interface TrailerDTO {
   plate: string
   sts: string
   type: string
+  techTill: string
+  createdAt: string
 }
 
 export interface CarrierDTO {
@@ -152,6 +158,8 @@ export interface IntakeDocVerdict {
   confidence: Record<string, number>
   issues: string[]
   message: string
+  /** какой вид документа фактически распознан (при несоответствии — не совпадает с type) */
+  detectedType?: DocType | 'UNKNOWN' | null
 }
 
 export interface IntakeCrossCheck {

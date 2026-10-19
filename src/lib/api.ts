@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CarrierDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TruckDTO,
+  CarrierDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TruckDTO,
 } from '@/lib/types'
 
 async function json<T>(res: Response): Promise<T> {
@@ -28,9 +28,16 @@ export const api = {
   intakeDriver: (docs: Partial<Record<string, { fileName: string; dataUri: string }>>) =>
     fetch('/api/drivers/intake', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs }) }).then(json<IntakeResult>),
 
+  /** Мгновенная нейропроверка одного документа при загрузке (соответствие вида + качество + поля) */
+  checkDocument: (body: { type: string; fileName: string; dataUri: string }) =>
+    fetch('/api/documents/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ verdict: IntakeDocVerdict }>),
+
   directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[] }>),
   createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer', data: Record<string, unknown>) =>
     fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean; driver?: DriverDTO; truck?: TruckDTO }>),
+  /** Обновить запись базы аккаунта (в т.ч. сроки действия документов) */
+  updateDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer', id: string, data: Record<string, unknown>) =>
+    fetch('/api/directory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, data }) }).then(json<{ ok: boolean }>),
 
   reports: () => fetch('/api/reports', { cache: 'no-store' }).then(json<ReportSummary>),
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, { cache: 'no-store' }).then(json<{ events: EventFeedItem[] }>),

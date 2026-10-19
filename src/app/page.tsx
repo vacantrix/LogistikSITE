@@ -13,6 +13,7 @@ import type { CarrierDTO } from '@/lib/types'
 
 import DashboardTab from '@/components/platform/dashboard'
 import BoardTab from '@/components/platform/board'
+import ApplyTab from '@/components/platform/apply'
 import MyRequestsTab from '@/components/platform/my-requests'
 import AuctionsTab from '@/components/platform/auctions'
 import VerifyTab from '@/components/platform/verification'
@@ -99,6 +100,7 @@ export default function Page() {
         <>
           {tab === 'dashboard' && <DashboardTab {...tabProps} />}
           {tab === 'board' && <BoardTab {...tabProps} />}
+          {tab === 'apply' && <ApplyTab {...tabProps} />}
           {tab === 'my' && <MyRequestsTab {...tabProps} />}
           {tab === 'auctions' && <AuctionsTab {...tabProps} />}
           {tab === 'verify' && <VerifyTab {...tabProps} />}

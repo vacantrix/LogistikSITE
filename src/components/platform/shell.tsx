@@ -14,6 +14,7 @@ import type { RoleKind, TabKey } from '@/components/platform/common'
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'dashboard', label: 'Сводка', roles: ['logist'] },
   { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier'] },
+  { key: 'apply', label: 'Подать заявку', roles: ['carrier'] },
   { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
   { key: 'auctions', label: 'Торги', roles: ['logist'] },
   { key: 'verify', label: 'Сверка документов', roles: ['logist'] },

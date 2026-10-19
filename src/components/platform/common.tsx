@@ -2,12 +2,14 @@
 
 /** Общие строительные блоки разделов платформы */
 import type { ReactNode } from 'react'
+import { AlertTriangle, Clock } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } from '@/lib/status'
+import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
-export type TabKey = 'dashboard' | 'board' | 'my' | 'auctions' | 'verify' | 'registry' | 'directory' | 'reports' | 'settings'
+export type TabKey = 'dashboard' | 'board' | 'apply' | 'my' | 'auctions' | 'verify' | 'registry' | 'directory' | 'reports' | 'settings'
 
 /** Роль пользователя: сотрудник АЭМЗ (логист) или перевозчик */
 export type RoleKind = 'logist' | 'carrier'
@@ -51,6 +53,20 @@ export function ModeBadge({ mode }: { mode: RequestMode }) {
 export function DocStatusBadge({ status }: { status: DocStatus }) {
   const meta = DOC_STATUS_META[status]
   return <Badge variant="outline" className={`${meta.badge} whitespace-nowrap`}>{meta.label}</Badge>
+}
+
+/** Бейдж срока действия документа: красный «истёк», янтарный «истекает», нейтральный «скоро», обычная дата */
+export function ExpiryBadge({ date, className = '' }: { date?: string | null; className?: string }) {
+  const info = expiryInfo(date)
+  if (info.state === 'none') return <span className={`text-sm text-slate-400 ${className}`}>—</span>
+  if (info.state === 'ok') return <span className={`whitespace-nowrap text-sm text-slate-600 ${className}`}>{info.date}</span>
+  if (info.state === 'soon') return <Badge variant="outline" className={`whitespace-nowrap ${info.badgeCls} ${className}`}>{info.label}</Badge>
+  return (
+    <Badge variant="outline" className={`whitespace-nowrap gap-1 ${info.badgeCls} ${className}`}>
+      {info.state === 'expired' ? <AlertTriangle className="h-3 w-3" aria-hidden /> : <Clock className="h-3 w-3" aria-hidden />}
+      {info.label}
+    </Badge>
+  )
 }
 
 export function SectionHeader({ eyebrow, title, desc, children }: { eyebrow?: string; title: string; desc?: string; children?: ReactNode }) {
