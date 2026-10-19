@@ -11,6 +11,7 @@ import {
   IdCard,
   Loader2,
   MapPin,
+  ScanLine,
   Send,
   Sparkles,
   Truck,
@@ -33,8 +34,10 @@ import {
   StatusBadge,
   type TabProps,
 } from '@/components/platform/common'
+import DriverIntakeDialog from '@/components/platform/driver-intake'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
+import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
 import { DOC_TYPE_LABEL, fmtDateTime, money } from '@/lib/status'
 import type { CarrierDTO, DocStatus, DocType, RequestDTO } from '@/lib/types'
 
@@ -108,45 +111,6 @@ function issueClass(status: DocStatus): string {
   return 'text-slate-500'
 }
 
-/** Читает файл и сжимает до dataUri JPEG (max 1280px, качество 0.8) */
-async function fileToCompressedDataUri(file: File): Promise<string> {
-  const dataUrl = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
-    reader.readAsDataURL(file)
-  })
-  try {
-    const img = document.createElement('img')
-    img.decoding = 'async'
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve()
-      img.onerror = () => reject(new Error('image'))
-      img.src = dataUrl
-    })
-    const max = 1280
-    const scale = Math.min(1, max / Math.max(img.width, img.height, 1))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(img.width * scale))
-    canvas.height = Math.max(1, Math.round(img.height * scale))
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return dataUrl
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-    return canvas.toDataURL('image/jpeg', 0.8)
-  } catch {
-    return dataUrl
-  }
-}
-
-/** Демо-образец документа: SVG → dataUri */
-const sampleSvg = (title: string, lines: string[], accent: string) => {
-  const rows = lines
-    .map((l, i) => `<text x="40" y="${150 + i * 44}" font-family="Arial" font-size="24" fill="#1f2937">${l}</text>`)
-    .join('')
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420"><rect width="640" height="420" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><rect width="640" height="64" rx="14" fill="${accent}"/><text x="40" y="42" font-family="Arial" font-size="24" font-weight="bold" fill="#fff">${title}</text>${rows}</svg>`
-  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`
-}
-
 const DEMO_NAMES: Record<DocType, string> = {
   PASSPORT_PHOTO: 'passport_photo_demo.jpg',
   PASSPORT_REG: 'passport_reg_demo.jpg',
@@ -164,6 +128,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
   const [sel, setSel] = useState<Record<string, SelState>>({})
   const [timelineOpen, setTimelineOpen] = useState<Record<string, boolean>>({})
+  const [intakeReq, setIntakeReq] = useState<RequestDTO | null>(null)
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const load = useCallback(async () => {
@@ -331,6 +296,18 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
     }
   }
 
+  // ——— мастер «Добавить водителя с нейросетью» сохранил водителя ———
+  const handleIntakeSaved = useCallback((res: { driverId: string; truckId?: string; request?: RequestDTO }) => {
+    if (res.request) applyRequest(res.request)
+    if (intakeReq) {
+      setSel((prev) => ({
+        ...prev,
+        [intakeReq.id]: { driverId: res.driverId, truckId: res.truckId, trailerId: TRAILER_NONE },
+      }))
+    }
+    void load() // справочник: подтянуть нового водителя и тягач
+  }, [applyRequest, intakeReq, load])
+
   const carrier = carriers.find((c) => c.id === activeCarrierId) ?? null
   const carrierName = carrier?.name ?? 'перевозчик'
 
@@ -448,6 +425,38 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                           <Users className="h-4 w-4 text-blue-600" aria-hidden />
                           Водитель и автомобиль
                         </h4>
+
+                        {/* Основной путь: добавление водителя сразу с нейросетью */}
+                        <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50/70 p-3.5">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                                <ScanLine className="h-4 w-4 text-blue-700" aria-hidden />
+                                Добавить водителя по документам
+                              </div>
+                              <p className="mt-0.5 max-w-xl text-xs leading-snug text-slate-600">
+                                Загрузите паспорт, ВУ и СТС — нейросеть сама прочитает их, заполнит карточку водителя и тягача,
+                                сверит данные и приложит документы к заявке. Вводить вручную не нужно.
+                              </p>
+                            </div>
+                            <Button
+                              size="sm"
+                              className="gap-1.5"
+                              disabled={busy !== null}
+                              onClick={() => setIntakeReq(r)}
+                              aria-label={`Добавить водителя с нейросетью по заявке ${r.number}`}
+                            >
+                              <ScanLine className="h-4 w-4" aria-hidden />
+                              Добавить водителя
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="mb-2 flex items-center gap-3" aria-hidden>
+                          <span className="text-[11px] uppercase tracking-wide text-slate-400">или выберите из справочника (повторная перевозка)</span>
+                          <span className="h-px flex-1 bg-slate-200" />
+                        </div>
+
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                           <div className="space-y-1.5">
                             <Label htmlFor={`driver-${r.id}`}>Водитель</Label>
@@ -743,6 +752,17 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
           })}
         </div>
       )}
+
+      {/* Мастер «Добавить водителя с нейросетью» */}
+      <DriverIntakeDialog
+        open={intakeReq !== null}
+        onOpenChange={(o) => { if (!o) setIntakeReq(null) }}
+        carriers={carriers}
+        defaultCarrierId={activeCarrierId}
+        lockCarrier
+        request={intakeReq}
+        onSaved={handleIntakeSaved}
+      />
     </section>
   )
 }

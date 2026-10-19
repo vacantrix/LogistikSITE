@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CarrierDTO, EventFeedItem, RequestDTO, ReportSummary, SettingsDTO,
+  CarrierDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TruckDTO,
 } from '@/lib/types'
 
 async function json<T>(res: Response): Promise<T> {
@@ -24,9 +24,13 @@ export const api = {
   verifyDocuments: (id: string) =>
     fetch(`/api/requests/${id}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json<{ request: RequestDTO }>),
 
+  /** Нейросеть распознаёт документы нового водителя и возвращает черновик карточки */
+  intakeDriver: (docs: Partial<Record<string, { fileName: string; dataUri: string }>>) =>
+    fetch('/api/drivers/intake', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs }) }).then(json<IntakeResult>),
+
   directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[] }>),
   createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer', data: Record<string, unknown>) =>
-    fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean }>),
+    fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean; driver?: DriverDTO; truck?: TruckDTO }>),
 
   reports: () => fetch('/api/reports', { cache: 'no-store' }).then(json<ReportSummary>),
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, { cache: 'no-store' }).then(json<{ events: EventFeedItem[] }>),
@@ -34,3 +38,5 @@ export const api = {
   saveSettings: (data: Partial<SettingsDTO>) =>
     fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json<SettingsDTO>),
 }
+
+export type { DriverIntakeSaved }

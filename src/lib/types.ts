@@ -139,3 +139,61 @@ export interface EventFeedItem {
   requestNumber?: string | null
   createdAt: string
 }
+
+// ——— Добавление водителя с нейросетью (intake) ———
+
+/** Вердикт нейросети по одному загруженному документу */
+export interface IntakeDocVerdict {
+  type: DocType
+  status: DocStatus
+  quality: number
+  engine: string
+  fields: Record<string, string>
+  confidence: Record<string, number>
+  issues: string[]
+  message: string
+}
+
+export interface IntakeCrossCheck {
+  label: string
+  ok: boolean
+  detail: string
+}
+
+/** Черновик карточки водителя, заполненный нейросетью */
+export interface IntakeDriverDraft {
+  fullName: string
+  birthDate: string
+  passport: string
+  license: string
+  licenseTill: string
+  categories: string
+  confidence: Record<string, number>
+}
+
+/** Черновик карточки тягача (из СТС), заполненный нейросетью */
+export interface IntakeTruckDraft {
+  brand: string
+  plate: string
+  vin: string
+  sts: string
+  owner: string
+  confidence: Record<string, number>
+}
+
+/** Ответ POST /api/drivers/intake */
+export interface IntakeResult {
+  driver: IntakeDriverDraft
+  truck: IntakeTruckDraft | null
+  crossChecks: IntakeCrossCheck[]
+  documents: IntakeDocVerdict[]
+}
+
+/** Итог сохранения нового водителя */
+export interface DriverIntakeSaved {
+  driverId: string
+  truckId?: string
+  driverName: string
+  existed?: boolean
+  request?: RequestDTO
+}

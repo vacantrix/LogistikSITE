@@ -1,11 +1,12 @@
 'use client'
 
-/** Раздел «Площадка заявок» — агент выбирает заявку и делает ставку */
+/** Раздел «Площадка заявок» — перевозчик выбирает заявку и делает ставку; логист публикует и контролирует */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ArrowRight,
   Gavel,
   Lock,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -105,7 +106,7 @@ function DeadlineCell({ request, now }: { request: RequestDTO; now: number | nul
   )
 }
 
-export default function BoardTab({ activeCarrierId }: TabProps) {
+export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -114,6 +115,7 @@ export default function BoardTab({ activeCarrierId }: TabProps) {
   const [q, setQ] = useState('')
   const [mode, setMode] = useState<ModeFilter>('ALL')
   const [now, setNow] = useState<number | null>(null)
+  const isLogist = role === 'logist'
 
   // диалоги: держим только id, свежие данные берём из списка
   const [detailId, setDetailId] = useState<string | null>(null)
@@ -121,6 +123,14 @@ export default function BoardTab({ activeCarrierId }: TabProps) {
   const [bidAmount, setBidAmount] = useState('')
   const [takeId, setTakeId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+
+  // создание заявки — только логист
+  const [createOpen, setCreateOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [form, setForm] = useState({
+    fromPoint: '', toPoint: '', cargo: '', tonnage: '20', truckType: 'Тент',
+    mode: 'AUCTION' as RequestMode, startRate: '', loadDate: '', loadWindow: '08:00–12:00', deadlineHours: '4',
+  })
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true)
@@ -227,19 +237,60 @@ export default function BoardTab({ activeCarrierId }: TabProps) {
   const sortedBids = (bids: BidDTO[]) => [...bids].sort((a, b) => a.amount - b.amount)
   const bestBid = (bids: BidDTO[]) => (bids.length > 0 ? Math.min(...bids.map((b) => b.amount)) : null)
 
+  // ——— публикация заявки (только логист) ———
+  const doCreate = async () => {
+    if (!form.fromPoint.trim() || !form.toPoint.trim() || !form.cargo.trim() || !form.startRate.trim()) {
+      toast({ title: 'Ошибка', description: 'Заполните направление, груз и стартовую ставку', variant: 'destructive' })
+      return
+    }
+    setCreating(true)
+    try {
+      const { request } = await api.createRequest({
+        fromPoint: form.fromPoint.trim(),
+        toPoint: form.toPoint.trim(),
+        cargo: form.cargo.trim(),
+        tonnage: Number(form.tonnage) || 20,
+        truckType: form.truckType,
+        mode: form.mode,
+        startRate: Number(form.startRate.replace(/\s/g, '')),
+        loadDate: form.loadDate.trim() || '—',
+        loadWindow: form.loadWindow.trim() || '08:00–12:00',
+        ...(form.mode !== 'FIXED' ? { deadline: new Date(Date.now() + Number(form.deadlineHours || 4) * 3600_000).toISOString() } : {}),
+      })
+      setRequests((prev) => [request, ...(prev ?? [])])
+      setCreateOpen(false)
+      setForm((f) => ({ ...f, fromPoint: '', toPoint: '', cargo: '', startRate: '' }))
+      toast({ title: 'Заявка опубликована', description: `${request.number}: ${request.fromPoint} → ${request.toPoint}` })
+    } catch (e) {
+      toast({ title: 'Не удалось опубликовать заявку', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
     <section aria-label="Площадка заявок">
       <SectionHeader
         eyebrow="РЕШЕНИЕ 1 · ПЛОЩАДКА ЗАЯВОК"
-        title="Агент выбирает заявку и делает ставку"
-        desc="Площадка закрытая: доступ только у проверенных перевозчиков с договором. Ставка, документы и статусы — в одном окне."
+        title={isLogist ? 'Публикация и контроль заявок' : 'Агент выбирает заявку и делает ставку'}
+        desc={isLogist
+          ? 'Все заявки площадки, ставки перевозчиков и статусы. Публикация новых заявок, торги и подведение итогов — в этом контуре.'
+          : 'Площадка закрытая: доступ только у проверенных перевозчиков с договором. Ставка, документы и статусы — в одном окне.'}
       >
-        <div className="text-sm font-medium text-slate-700" aria-live="polite">
-          Открыто <span className="text-lg font-bold text-blue-700">{openCount}</span> заявок
+        <div className="flex items-center gap-3">
+          {isLogist && (
+            <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать и опубликовать заявку">
+              <Plus className="h-4 w-4" aria-hidden />
+              Создать заявку
+            </Button>
+          )}
+          <div className="text-sm font-medium text-slate-700" aria-live="polite">
+            Открыто <span className="text-lg font-bold text-blue-700">{openCount}</span> заявок
+          </div>
         </div>
       </SectionHeader>
 
-      {!activeCarrierId && (
+      {!isLogist && !activeCarrierId && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
           Выберите перевозчика в шапке, чтобы действовать от его имени
         </div>
@@ -335,39 +386,57 @@ export default function BoardTab({ activeCarrierId }: TabProps) {
                           <td className="border-b border-slate-100 py-3 pr-3"><RateCell request={r} /></td>
                           <td className="border-b border-slate-100 py-3 pr-3"><DeadlineCell request={r} now={now} /></td>
                           <td className="border-b border-slate-100 py-3" onClick={(e) => e.stopPropagation()}>
-                            {r.status === 'PUBLISHED' && r.mode === 'FIXED' && (
-                              <Button
-                                size="sm"
-                                disabled={!activeCarrierId || busyId !== null}
-                                onClick={() => setTakeId(r.id)}
-                                aria-label={`Взять заявку ${r.number} по фиксированной ставке`}
-                              >
-                                Взять заявку
-                              </Button>
+                            {isLogist ? (
+                              // логист: не участвует в ставках — переходит в торги или смотрит статус
+                              <>
+                                {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
+                                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onNavigate('auctions')} aria-label={`Перейти к торгам по заявке ${r.number}`}>
+                                    <Gavel className="h-4 w-4" aria-hidden />
+                                    К торгам
+                                  </Button>
+                                )}
+                                {r.status === 'PUBLISHED' && r.mode !== 'AUCTION' && (
+                                  <span className="text-xs text-muted-foreground">ожидание перевозчика</span>
+                                )}
+                                {r.status !== 'PUBLISHED' && <StatusBadge status={r.status} />}
+                              </>
+                            ) : (
+                              <>
+                                {r.status === 'PUBLISHED' && r.mode === 'FIXED' && (
+                                  <Button
+                                    size="sm"
+                                    disabled={!activeCarrierId || busyId !== null}
+                                    onClick={() => setTakeId(r.id)}
+                                    aria-label={`Взять заявку ${r.number} по фиксированной ставке`}
+                                  >
+                                    Взять заявку
+                                  </Button>
+                                )}
+                                {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
+                                  <Button
+                                    size="sm"
+                                    disabled={!activeCarrierId || busyId !== null}
+                                    onClick={() => { setBidId(r.id); setBidAmount('') }}
+                                    aria-label={`Сделать ставку по заявке ${r.number}`}
+                                  >
+                                    <Gavel className="h-4 w-4" aria-hidden />
+                                    Сделать ставку
+                                  </Button>
+                                )}
+                                {r.status === 'PUBLISHED' && r.mode === 'CLOSED' && (
+                                  <Button
+                                    size="sm"
+                                    disabled={!activeCarrierId || busyId !== null}
+                                    onClick={() => { setBidId(r.id); setBidAmount('') }}
+                                    aria-label={`Подать закрытую ставку по заявке ${r.number}`}
+                                  >
+                                    <Lock className="h-4 w-4" aria-hidden />
+                                    Подать закрытую ставку
+                                  </Button>
+                                )}
+                                {r.status !== 'PUBLISHED' && <StatusBadge status={r.status} />}
+                              </>
                             )}
-                            {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
-                              <Button
-                                size="sm"
-                                disabled={!activeCarrierId || busyId !== null}
-                                onClick={() => { setBidId(r.id); setBidAmount('') }}
-                                aria-label={`Сделать ставку по заявке ${r.number}`}
-                              >
-                                <Gavel className="h-4 w-4" aria-hidden />
-                                Сделать ставку
-                              </Button>
-                            )}
-                            {r.status === 'PUBLISHED' && r.mode === 'CLOSED' && (
-                              <Button
-                                size="sm"
-                                disabled={!activeCarrierId || busyId !== null}
-                                onClick={() => { setBidId(r.id); setBidAmount('') }}
-                                aria-label={`Подать закрытую ставку по заявке ${r.number}`}
-                              >
-                                <Lock className="h-4 w-4" aria-hidden />
-                                Подать закрытую ставку
-                              </Button>
-                            )}
-                            {r.status !== 'PUBLISHED' && <StatusBadge status={r.status} />}
                           </td>
                         </tr>
                       ))}
@@ -379,15 +448,99 @@ export default function BoardTab({ activeCarrierId }: TabProps) {
             </CardContent>
           </Card>
 
-          {/* Подсказка про закрытую площадку */}
+          {/* Подсказка по роли */}
           <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
             <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" aria-hidden />
             <p>
-              Площадка закрытая: доступ только у перевозчиков, которых мы заранее проверили и с которыми заключили договор.
-              Ставки видны логисту и участникам конкретной заявки — посторонние на площадку не попадают.
+              {isLogist
+                ? 'Внутренний контур: ставки перевозчиков видны вам полностью. Участие в ставках — только у перевозчиков; согласование победителя — в разделе «Торги».'
+                : 'Площадка закрытая: доступ только у перевозчиков, которых мы заранее проверили и с которыми заключили договор. Ставки видны логисту и участникам конкретной заявки — посторонние на площадку не попадают.'}
             </p>
           </div>
         </div>
+      )}
+
+      {/* Диалог создания заявки — только логист */}
+      {isLogist && (
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Новая заявка на перевозку</DialogTitle>
+              <DialogDescription>
+                Заявка будет опубликована на площадке с присвоением сквозного номера Z-XXXX.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-from">Пункт погрузки</Label>
+                <Input id="cr-from" placeholder="Абинск, АЭМЗ" value={form.fromPoint} onChange={(e) => setForm((f) => ({ ...f, fromPoint: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-to">Пункт выгрузки</Label>
+                <Input id="cr-to" placeholder="Порт НМТП" value={form.toPoint} onChange={(e) => setForm((f) => ({ ...f, toPoint: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="cr-cargo">Груз</Label>
+                <Input id="cr-cargo" placeholder="Оборудование" value={form.cargo} onChange={(e) => setForm((f) => ({ ...f, cargo: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-tonnage">Тоннаж, т</Label>
+                <Input id="cr-tonnage" type="number" min={1} value={form.tonnage} onChange={(e) => setForm((f) => ({ ...f, tonnage: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-truck">Тип ТС</Label>
+                <Select value={form.truckType} onValueChange={(v) => setForm((f) => ({ ...f, truckType: v }))}>
+                  <SelectTrigger id="cr-truck"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-mode">Режим отбора</Label>
+                <Select value={form.mode} onValueChange={(v) => setForm((f) => ({ ...f, mode: v as RequestMode }))}>
+                  <SelectTrigger id="cr-mode"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AUCTION">Торги (аукцион на понижение)</SelectItem>
+                    <SelectItem value="FIXED">Фиксированная ставка</SelectItem>
+                    <SelectItem value="CLOSED">Закрытые ставки</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-rate">Стартовая ставка, ₽</Label>
+                <Input id="cr-rate" type="number" min={1000} step={500} placeholder="95000" value={form.startRate} onChange={(e) => setForm((f) => ({ ...f, startRate: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-date">Дата погрузки</Label>
+                <Input id="cr-date" placeholder="25.10.2026" value={form.loadDate} onChange={(e) => setForm((f) => ({ ...f, loadDate: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-window">Окно погрузки</Label>
+                <Input id="cr-window" placeholder="09:00–13:00" value={form.loadWindow} onChange={(e) => setForm((f) => ({ ...f, loadWindow: e.target.value }))} />
+              </div>
+              {form.mode !== 'FIXED' && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="cr-deadline">Приём ставок ещё</Label>
+                  <Select value={form.deadlineHours} onValueChange={(v) => setForm((f) => ({ ...f, deadlineHours: v }))}>
+                    <SelectTrigger id="cr-deadline"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {[['2', '2 часа'], ['4', '4 часа'], ['8', '8 часов'], ['24', '24 часа']].map(([v, l]) => (
+                        <SelectItem key={v} value={v}>{l}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateOpen(false)}>Отмена</Button>
+              <Button onClick={() => void doCreate()} disabled={creating}>
+                {creating ? 'Публикуем…' : 'Опубликовать заявку'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Подтверждение: взять заявку по фиксированной ставке */}

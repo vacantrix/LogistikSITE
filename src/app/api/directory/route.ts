@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { toCarrierDTO } from '@/lib/serialize'
+import { toCarrierDTO, toDriverDTO, toTruckDTO } from '@/lib/serialize'
 
 export const dynamic = 'force-dynamic'
+
+const norm = (s: string) => s.replace(/\s/g, '').toUpperCase()
 
 /** GET /api/directory — справочник: перевозчики с водителями, тягачами и прицепами */
 export async function GET() {
@@ -18,7 +20,12 @@ export async function GET() {
   return NextResponse.json({ carriers: carriers.map(toCarrierDTO) })
 }
 
-/** POST /api/directory — создать запись справочника { kind, data } */
+/**
+ * POST /api/directory — создать запись справочника { kind, data }.
+ * Для водителя и тягача работает идемпотентно: повторное добавление с тем же
+ * ВУ/госномером обновляет существующую запись и возвращает её — это нужно
+ * мастеру «Добавить водителя с нейросетью».
+ */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
   const { kind, data } = (body ?? {}) as { kind?: string; data?: Record<string, string> }
@@ -39,25 +46,29 @@ export async function POST(req: NextRequest) {
       }
       case 'driver': {
         if (!data.carrierId || !data.fullName) return NextResponse.json({ error: 'Перевозчик и ФИО обязательны' }, { status: 400 })
-        await db.driver.create({
-          data: {
-            carrierId: data.carrierId, fullName: data.fullName,
-            birthDate: data.birthDate || '—', passport: data.passport || '—',
-            license: data.license || '—', licenseTill: data.licenseTill || '—',
-            categories: data.categories || '—',
-          },
-        })
-        break
+        const license = data.license && data.license !== '—' ? data.license : ''
+        const existing = license
+          ? (await db.driver.findMany({ where: { carrierId: data.carrierId } })).find((d) => norm(d.license) === norm(license))
+          : null
+        const payload = {
+          fullName: data.fullName,
+          birthDate: data.birthDate || '—', passport: data.passport || '—',
+          license: data.license || '—', licenseTill: data.licenseTill || '—',
+          categories: data.categories || '—',
+        }
+        const driver = existing
+          ? await db.driver.update({ where: { id: existing.id }, data: payload })
+          : await db.driver.create({ data: { carrierId: data.carrierId, ...payload } })
+        return NextResponse.json({ ok: true, driver: toDriverDTO(driver) }, { status: existing ? 200 : 201 })
       }
       case 'truck': {
         if (!data.carrierId || !data.plate) return NextResponse.json({ error: 'Перевозчик и госномер обязательны' }, { status: 400 })
-        await db.truck.create({
-          data: {
-            carrierId: data.carrierId, brand: data.brand || '—', plate: data.plate,
-            vin: data.vin || '—', sts: data.sts || '—', owner: data.owner || '—',
-          },
-        })
-        break
+        const existing = (await db.truck.findMany({ where: { carrierId: data.carrierId } })).find((t) => norm(t.plate) === norm(data.plate))
+        const payload = { brand: data.brand || '—', plate: data.plate, vin: data.vin || '—', sts: data.sts || '—', owner: data.owner || '—' }
+        const truck = existing
+          ? await db.truck.update({ where: { id: existing.id }, data: payload })
+          : await db.truck.create({ data: { carrierId: data.carrierId, ...payload } })
+        return NextResponse.json({ ok: true, truck: toTruckDTO(truck) }, { status: existing ? 200 : 201 })
       }
       case 'trailer': {
         if (!data.carrierId || !data.plate) return NextResponse.json({ error: 'Перевозчик и госномер обязательны' }, { status: 400 })

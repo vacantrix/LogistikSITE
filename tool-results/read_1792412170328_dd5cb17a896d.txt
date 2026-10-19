@@ -1,0 +1,749 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→/** Раздел «Мои заявки» — кабинет агента: водитель и ТС, документы, проверка нейросетью */
+     4→     4→import { useCallback, useEffect, useRef, useState } from 'react'
+     5→     5→import {
+     6→     6→  ArrowRight,
+     7→     7→  Car,
+     8→     8→  FileText,
+     9→     9→  FileX,
+    10→    10→  History,
+    11→    11→  IdCard,
+    12→    12→  Loader2,
+    13→    13→  MapPin,
+    14→    14→  Send,
+    15→    15→  Sparkles,
+    16→    16→  Truck,
+    17→    17→  Upload,
+    18→    18→  Users,
+    19→    19→} from 'lucide-react'
+    20→    20→import { Badge } from '@/components/ui/badge'
+    21→    21→import { Button } from '@/components/ui/button'
+    22→    22→import { Card, CardContent } from '@/components/ui/card'
+    23→    23→import { Label } from '@/components/ui/label'
+    24→    24→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    25→    25→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    26→    26→import {
+    27→    27→  DocStatusBadge,
+    28→    28→  EmptyState,
+    29→    29→  ErrorBlock,
+    30→    30→  LoadingBlock,
+    31→    31→  ModeBadge,
+    32→    32→  SectionHeader,
+    33→    33→  StatusBadge,
+    34→    34→  type TabProps,
+    35→    35→} from '@/components/platform/common'
+    36→    36→import { useToast } from '@/hooks/use-toast'
+    37→    37→import { api } from '@/lib/api'
+    38→    38→import { DOC_TYPE_LABEL, fmtDateTime, money } from '@/lib/status'
+    39→    39→import type { CarrierDTO, DocStatus, DocType, RequestDTO } from '@/lib/types'
+    40→    40→
+    41→    41→const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+    42→    42→
+    43→    43→const DOC_ICONS: Record<DocType, typeof IdCard> = {
+    44→    44→  PASSPORT_PHOTO: IdCard,
+    45→    45→  PASSPORT_REG: MapPin,
+    46→    46→  LICENSE: Car,
+    47→    47→  STS: FileText,
+    48→    48→}
+    49→    49→
+    50→    50→const DOC_SHORT: Record<DocType, string> = {
+    51→    51→  PASSPORT_PHOTO: 'Паспорт (стр. с фото)',
+    52→    52→  PASSPORT_REG: 'Паспорт: регистрация',
+    53→    53→  LICENSE: 'Водительское удостоверение',
+    54→    54→  STS: 'СТС',
+    55→    55→}
+    56→    56→
+    57→    57→const STATUS_ORDER: Record<RequestDTO['status'], number> = {
+    58→    58→  AWARDED: 0,
+    59→    59→  DOCS_REVIEW: 0,
+    60→    60→  AT_LOGIST: 1,
+    61→    61→  CONFIRMED: 2,
+    62→    62→  CLOSED: 3,
+    63→    63→  PUBLISHED: 4,
+    64→    64→}
+    65→    65→
+    66→    66→const TRAILER_NONE = 'NONE'
+    67→    67→
+    68→    68→const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
+    69→    69→
+    70→    70→interface SelState {
+    71→    71→  driverId?: string
+    72→    72→  truckId?: string
+    73→    73→  trailerId?: string
+    74→    74→}
+    75→    75→
+    76→    76→/** Текст-подсказка для агента по статусу заявки */
+    77→    77→function agentLine(r: RequestDTO): { text: string; cls: string } {
+    78→    78→  switch (r.status) {
+    79→    79→    case 'AWARDED':
+    80→    80→      return { text: 'Укажите водителя и ТС, загрузите документы', cls: 'border-amber-200 bg-amber-50 text-amber-900' }
+    81→    81→    case 'DOCS_REVIEW': {
+    82→    82→      const bad = r.documents.some((d) => d.status === 'REUPLOAD' || d.status === 'REJECTED')
+    83→    83→      return bad
+    84→    84→        ? { text: 'Требует исправления: причина по каждому документу, догрузка — в ту же заявку', cls: 'border-amber-300 bg-amber-50 text-amber-900' }
+    85→    85→        : { text: 'Нейросеть проверяет документы', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+    86→    86→    }
+    87→    87→    case 'AT_LOGIST':
+    88→    88→      return { text: 'Комплект у логиста — идёт сверка фото с полями', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+    89→    89→    case 'CONFIRMED':
+    90→    90→      return { text: 'Принята — данные переданы в 1С', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
+    91→    91→    default:
+    92→    92→      return { text: 'Рейс закрыт', cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+    93→    93→  }
+    94→    94→}
+    95→    95→
+    96→    96→/** Цвет процента уверенности распознавания */
+    97→    97→function confClass(c: number): string {
+    98→    98→  if (c >= 0.95) return 'text-emerald-600'
+    99→    99→  if (c >= 0.6) return 'text-blue-600'
+   100→   100→  return 'text-amber-600'
+   101→   101→}
+   102→   102→
+   103→   103→/** Цвет списка замечаний по статусу документа */
+   104→   104→function issueClass(status: DocStatus): string {
+   105→   105→  if (status === 'REJECTED') return 'text-red-600'
+   106→   106→  if (status === 'REUPLOAD') return 'text-amber-600'
+   107→   107→  if (status === 'MANUAL') return 'text-blue-600'
+   108→   108→  return 'text-slate-500'
+   109→   109→}
+   110→   110→
+   111→   111→/** Читает файл и сжимает до dataUri JPEG (max 1280px, качество 0.8) */
+   112→   112→async function fileToCompressedDataUri(file: File): Promise<string> {
+   113→   113→  const dataUrl = await new Promise<string>((resolve, reject) => {
+   114→   114→    const reader = new FileReader()
+   115→   115→    reader.onload = () => resolve(String(reader.result))
+   116→   116→    reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
+   117→   117→    reader.readAsDataURL(file)
+   118→   118→  })
+   119→   119→  try {
+   120→   120→    const img = document.createElement('img')
+   121→   121→    img.decoding = 'async'
+   122→   122→    await new Promise<void>((resolve, reject) => {
+   123→   123→      img.onload = () => resolve()
+   124→   124→      img.onerror = () => reject(new Error('image'))
+   125→   125→      img.src = dataUrl
+   126→   126→    })
+   127→   127→    const max = 1280
+   128→   128→    const scale = Math.min(1, max / Math.max(img.width, img.height, 1))
+   129→   129→    const canvas = document.createElement('canvas')
+   130→   130→    canvas.width = Math.max(1, Math.round(img.width * scale))
+   131→   131→    canvas.height = Math.max(1, Math.round(img.height * scale))
+   132→   132→    const ctx = canvas.getContext('2d')
+   133→   133→    if (!ctx) return dataUrl
+   134→   134→    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+   135→   135→    return canvas.toDataURL('image/jpeg', 0.8)
+   136→   136→  } catch {
+   137→   137→    return dataUrl
+   138→   138→  }
+   139→   139→}
+   140→   140→
+   141→   141→/** Демо-образец документа: SVG → dataUri */
+   142→   142→const sampleSvg = (title: string, lines: string[], accent: string) => {
+   143→   143→  const rows = lines
+   144→   144→    .map((l, i) => `<text x="40" y="${150 + i * 44}" font-family="Arial" font-size="24" fill="#1f2937">${l}</text>`)
+   145→   145→    .join('')
+   146→   146→  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420"><rect width="640" height="420" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><rect width="640" height="64" rx="14" fill="${accent}"/><text x="40" y="42" font-family="Arial" font-size="24" font-weight="bold" fill="#fff">${title}</text>${rows}</svg>`
+   147→   147→  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`
+   148→   148→}
+   149→   149→
+   150→   150→const DEMO_NAMES: Record<DocType, string> = {
+   151→   151→  PASSPORT_PHOTO: 'passport_photo_demo.jpg',
+   152→   152→  PASSPORT_REG: 'passport_reg_demo.jpg',
+   153→   153→  LICENSE: 'license_demo.jpg',
+   154→   154→  STS: 'sts_demo.jpg',
+   155→   155→}
+   156→   156→
+   157→   157→export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps) {
+   158→   158→  const { toast } = useToast()
+   159→   159→  const [requests, setRequests] = useState<RequestDTO[] | null>(null)
+   160→   160→  const [carriers, setCarriers] = useState<CarrierDTO[]>([])
+   161→   161→  const [loading, setLoading] = useState(true)
+   162→   162→  const [error, setError] = useState<string | null>(null)
+   163→   163→  const [busy, setBusy] = useState<string | null>(null)
+   164→   164→  const [verifyingId, setVerifyingId] = useState<string | null>(null)
+   165→   165→  const [sel, setSel] = useState<Record<string, SelState>>({})
+   166→   166→  const [timelineOpen, setTimelineOpen] = useState<Record<string, boolean>>({})
+   167→   167→  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
+   168→   168→
+   169→   169→  const load = useCallback(async () => {
+   170→   170→    try {
+   171→   171→      const [list, dir] = await Promise.all([api.listRequests(), api.directory()])
+   172→   172→      setRequests(list.requests)
+   173→   173→      setCarriers(dir.carriers)
+   174→   174→      setError(null)
+   175→   175→    } catch (e) {
+   176→   176→      setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
+   177→   177→    } finally {
+   178→   178→      setLoading(false)
+   179→   179→    }
+   180→   180→  }, [])
+   181→   181→
+   182→   182→  useEffect(() => {
+   183→   183→    void load()
+   184→   184→  }, [load])
+   185→   185→
+   186→   186→  const applyRequest = useCallback((updated: RequestDTO) => {
+   187→   187→    setRequests((prev) => {
+   188→   188→      const list = prev ?? []
+   189→   189→      const i = list.findIndex((r) => r.id === updated.id)
+   190→   190→      if (i === -1) return [updated, ...list]
+   191→   191→      const next = [...list]
+   192→   192→      next[i] = updated
+   193→   193→      return next
+   194→   194→    })
+   195→   195→  }, [])
+   196→   196→
+   197→   197→  const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Неизвестная ошибка')
+   198→   198→
+   199→   199→  const toastDocVerdict = (docType: DocType, status: DocStatus | undefined, issues: string[], message: string | null) => {
+   200→   200→    const label = DOC_SHORT[docType]
+   201→   201→    switch (status) {
+   202→   202→      case 'PASSED':
+   203→   203→        toast({ title: `${label} принят автоматически`, description: 'Порог уверенности пройден — документ передаётся дальше' })
+   204→   204→        break
+   205→   205→      case 'MANUAL':
+   206→   206→        toast({ title: `${label} — на ручной проверке`, description: 'Логист сверит данные вручную' })
+   207→   207→        break
+   208→   208→      case 'REUPLOAD':
+   209→   209→        toast({ title: `${label}: перезагрузите документ`, description: issues[0] ?? 'Качество или данные не прошли порог' })
+   210→   210→        break
+   211→   211→      case 'REJECTED':
+   212→   212→        toast({ title: `${label}: отказ`, description: issues.join('; ') || message || undefined, variant: 'destructive' })
+   213→   213→        break
+   214→   214→      default:
+   215→   215→        toast({ title: `${label} отправлен на проверку нейросети` })
+   216→   216→    }
+   217→   217→  }
+   218→   218→
+   219→   219→  // ——— загрузка файла через скрытый input ———
+   220→   220→  const handleFile = async (r: RequestDTO, type: DocType, file: File) => {
+   221→   221→    setBusy(`${r.id}:up:${type}`)
+   222→   222→    try {
+   223→   223→      const dataUri = await fileToCompressedDataUri(file)
+   224→   224→      const up = await api.uploadDocument(r.id, { type, fileName: file.name, dataUri })
+   225→   225→      applyRequest(up.request)
+   226→   226→      setVerifyingId(r.id)
+   227→   227→      try {
+   228→   228→        const v = await api.verifyDocuments(r.id)
+   229→   229→        applyRequest(v.request)
+   230→   230→        const doc = v.request.documents.find((d) => d.type === type)
+   231→   231→        toastDocVerdict(type, doc?.status, doc?.issues ?? [], doc?.message ?? null)
+   232→   232→      } finally {
+   233→   233→        setVerifyingId(null)
+   234→   234→      }
+   235→   235→    } catch (e) {
+   236→   236→      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+   237→   237→    } finally {
+   238→   238→      setBusy(null)
+   239→   239→    }
+   240→   240→  }
+   241→   241→
+   242→   242→  // ——— демо: комплект из 4 образцов ———
+   243→   243→  const runDemo = async (r: RequestDTO) => {
+   244→   244→    setBusy(`${r.id}:demo`)
+   245→   245→    try {
+   246→   246→      const samples: [DocType, string][] = [
+   247→   247→        ['PASSPORT_PHOTO', sampleSvg('ПАСПОРТ РФ · СТР. С ФОТО', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678'], '#0f3b66')],
+   248→   248→        ['PASSPORT_REG', sampleSvg('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', ['13.03.2024  230-027', 'Г. АБИНСК, УЛ. ИНТЕРНАЦИОНАЛЬНАЯ', 'Д. 110'], '#0f3b66')],
+   249→   249→        ['LICENSE', sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')],
+   250→   250→        ['STS', sampleSvg('СТС ТЯГАЧА', ['А123ВС777', 'X9622277XKG123456', '99 00 123456'], '#14532d')],
+   251→   251→      ]
+   252→   252→      for (const [type, dataUri] of samples) {
+   253→   253→        const up = await api.uploadDocument(r.id, { type, fileName: DEMO_NAMES[type], dataUri })
+   254→   254→        applyRequest(up.request)
+   255→   255→      }
+   256→   256→      setVerifyingId(r.id)
+   257→   257→      const v = await api.verifyDocuments(r.id)
+   258→   258→      applyRequest(v.request)
+   259→   259→      const passed = v.request.documents.filter((d) => d.status === 'PASSED').length
+   260→   260→      toast({
+   261→   261→        title: 'Проверка завершена',
+   262→   262→        description: `Автоматически принято: ${passed} из ${v.request.documents.length}. Итоги по каждому документу — в карточке заявки.`,
+   263→   263→      })
+   264→   264→    } catch (e) {
+   265→   265→      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+   266→   266→    } finally {
+   267→   267→      setVerifyingId(null)
+   268→   268→      setBusy(null)
+   269→   269→    }
+   270→   270→  }
+   271→   271→
+   272→   272→  // ——— демо: заведомо размытое ВУ ———
+   273→   273→  const runBlurDemo = async (r: RequestDTO) => {
+   274→   274→    setBusy(`${r.id}:blur`)
+   275→   275→    try {
+   276→   276→      const dataUri = sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')
+   277→   277→      const up = await api.uploadDocument(r.id, { type: 'LICENSE', fileName: 'license_blur_demo.jpg', dataUri })
+   278→   278→      applyRequest(up.request)
+   279→   279→      setVerifyingId(r.id)
+   280→   280→      try {
+   281→   281→        const v = await api.verifyDocuments(r.id)
+   282→   282→        applyRequest(v.request)
+   283→   283→        const doc = v.request.documents.find((d) => d.type === 'LICENSE')
+   284→   284→        if (doc?.status === 'REUPLOAD') {
+   285→   285→          toast({ title: 'Брак обнаружен', description: `ВУ получил статус «Перезагрузить документ». ${doc.issues[0] ?? ''}`.trim() })
+   286→   286→        } else {
+   287→   287→          toastDocVerdict('LICENSE', doc?.status, doc?.issues ?? [], doc?.message ?? null)
+   288→   288→        }
+   289→   289→      } finally {
+   290→   290→        setVerifyingId(null)
+   291→   291→      }
+   292→   292→    } catch (e) {
+   293→   293→      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+   294→   294→    } finally {
+   295→   295→      setBusy(null)
+   296→   296→    }
+   297→   297→  }
+   298→   298→
+   299→   299→  // ——— отправить PENDING-документы на проверку ———
+   300→   300→  const doVerify = async (r: RequestDTO) => {
+   301→   301→    setBusy(`${r.id}:verify`)
+   302→   302→    setVerifyingId(r.id)
+   303→   303→    try {
+   304→   304→      const { request } = await api.verifyDocuments(r.id)
+   305→   305→      applyRequest(request)
+   306→   306→      toast({ title: 'Проверка завершена', description: 'Итоги — в блоке «Результаты проверки нейросети»' })
+   307→   307→    } catch (e) {
+   308→   308→      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+   309→   309→    } finally {
+   310→   310→      setVerifyingId(null)
+   311→   311→      setBusy(null)
+   312→   312→    }
+   313→   313→  }
+   314→   314→
+   315→   315→  // ——— сохранить водителя и ТС ———
+   316→   316→  const doAssign = async (r: RequestDTO, s: SelState) => {
+   317→   317→    if (!s.driverId || !s.truckId) return
+   318→   318→    setBusy(`${r.id}:assign`)
+   319→   319→    try {
+   320→   320→      const { request } = await api.action(r.id, 'assign', {
+   321→   321→        driverId: s.driverId,
+   322→   322→        truckId: s.truckId,
+   323→   323→        trailerId: s.trailerId && s.trailerId !== TRAILER_NONE ? s.trailerId : undefined,
+   324→   324→      })
+   325→   325→      applyRequest(request)
+   326→   326→      toast({ title: 'Данные сохранены', description: `${r.number}: водитель и автомобиль указаны` })
+   327→   327→    } catch (e) {
+   328→   328→      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+   329→   329→    } finally {
+   330→   330→      setBusy(null)
+   331→   331→    }
+   332→   332→  }
+   333→   333→
+   334→   334→  const carrier = carriers.find((c) => c.id === activeCarrierId) ?? null
+   335→   335→  const carrierName = carrier?.name ?? 'перевозчик'
+   336→   336→
+   337→   337→  const mine = (requests ?? [])
+   338→   338→    .filter((r) => r.winnerId === activeCarrierId && r.status !== 'PUBLISHED')
+   339→   339→    .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.updatedAt < b.updatedAt ? 1 : -1))
+   340→   340→
+   341→   341→  return (
+   342→   342→    <section aria-label="Мои заявки — кабинет агента">
+   343→   343→      <SectionHeader
+   344→   344→        eyebrow="КАБИНЕТ АГЕНТА"
+   345→   345→        title={`Мои заявки · ${carrierName}`}
+   346→   346→        desc="Выигранные заявки, водитель и машина, документы и статусы — всё в личном кабинете"
+   347→   347→      />
+   348→   348→
+   349→   349→      {!activeCarrierId && (
+   350→   350→        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+   351→   351→          Выберите перевозчика в шапке, чтобы действовать от его имени
+   352→   352→        </div>
+   353→   353→      )}
+   354→   354→
+   355→   355→      {loading && <LoadingBlock label="Загружаем ваши заявки…" />}
+   356→   356→      {!loading && error && <ErrorBlock message={error} onRetry={() => void load()} />}
+   357→   357→
+   358→   358→      {!loading && !error && requests && activeCarrierId && mine.length === 0 && (
+   359→   359→        <div className="space-y-4">
+   360→   360→          <EmptyState
+   361→   361→            title="Пока нет выигранных заявок"
+   362→   362→            hint="Перейдите на Площадку заявок: возьмите заявку с фиксированной ставкой или выиграйте торги"
+   363→   363→          />
+   364→   364→          <div className="flex justify-center">
+   365→   365→            <Button onClick={() => onNavigate('board')} className="gap-2" aria-label="Перейти к площадке заявок">
+   366→   366→              <Truck className="h-4 w-4" aria-hidden />
+   367→   367→              К площадке заявок
+   368→   368→            </Button>
+   369→   369→          </div>
+   370→   370→        </div>
+   371→   371→      )}
+   372→   372→
+   373→   373→      {!loading && !error && requests && activeCarrierId && mine.length > 0 && (
+   374→   374→        <div className="space-y-5">
+   375→   375→          {mine.map((r) => {
+   376→   376→            const s: SelState = sel[r.id] ?? {
+   377→   377→              driverId: r.driverId ?? undefined,
+   378→   378→              truckId: r.truckId ?? undefined,
+   379→   379→              trailerId: r.trailerId ?? TRAILER_NONE,
+   380→   380→            }
+   381→   381→            const line = agentLine(r)
+   382→   382→            const inControl = r.status === 'AWARDED' || r.status === 'DOCS_REVIEW'
+   383→   383→            const hasPending = r.documents.some((d) => d.status === 'PENDING')
+   384→   384→            const compact = r.status === 'CONFIRMED' || r.status === 'CLOSED'
+   385→   385→
+   386→   386→            return (
+   387→   387→              <Card key={r.id} className="border-slate-200 shadow-sm">
+   388→   388→                <CardContent className="space-y-4 p-4 sm:p-6">
+   389→   389→                  {/* Шапка карточки */}
+   390→   390→                  <div className="flex flex-wrap items-start justify-between gap-3">
+   391→   391→                    <div className="min-w-0">
+   392→   392→                      <div className="flex flex-wrap items-center gap-2">
+   393→   393→                        <h3 className="text-lg font-bold text-slate-900">Заявка {r.number}</h3>
+   394→   394→                        <ModeBadge mode={r.mode} />
+   395→   395→                        <StatusBadge status={r.status} />
+   396→   396→                      </div>
+   397→   397→                      <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-600">
+   398→   398→                        {r.fromPoint}
+   399→   399→                        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+   400→   400→                        {r.toPoint}
+   401→   401→                        <span className="text-slate-300" aria-hidden>·</span>
+   402→   402→                        {r.cargo}, {r.tonnage} т
+   403→   403→                      </p>
+   404→   404→                    </div>
+   405→   405→                    <div className="text-right">
+   406→   406→                      <div className="text-xs text-muted-foreground">Итоговая ставка</div>
+   407→   407→                      <div className="text-lg font-bold text-slate-900">{money(r.bestRate)}</div>
+   408→   408→                    </div>
+   409→   409→                  </div>
+   410→   410→
+   411→   411→                  {/* Статусная строка для агента */}
+   412→   412→                  <div className={`rounded-lg border px-3 py-2 text-sm font-medium ${line.cls}`} role="status">
+   413→   413→                    {line.text}
+   414→   414→                  </div>
+   415→   415→
+   416→   416→                  {/* Компактные бейджи для подтверждённых/закрытых заявок */}
+   417→   417→                  {compact && (
+   418→   418→                    <div className="flex flex-wrap gap-2">
+   419→   419→                      {r.passPackage && (
+   420→   420→                        <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
+   421→   421→                          Пакет на пропуск сформирован
+   422→   422→                        </Badge>
+   423→   423→                      )}
+   424→   424→                      {r.etrnStatus === 'SENT' && (
+   425→   425→                        <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-800">
+   426→   426→                          ЭТрН отправлена
+   427→   427→                        </Badge>
+   428→   428→                      )}
+   429→   429→                      {r.etrnStatus === 'SIGNED' && (
+   430→   430→                        <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
+   431→   431→                          ЭТрН подписана
+   432→   432→                        </Badge>
+   433→   433→                      )}
+   434→   434→                      {r.winnerName && (
+   435→   435→                        <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
+   436→   436→                          Перевозчик: {r.winnerName}
+   437→   437→                        </Badge>
+   438→   438→                      )}
+   439→   439→                    </div>
+   440→   440→                  )}
+   441→   441→
+   442→   442→                  {/* ——— Панель управления (AWARDED / DOCS_REVIEW) ——— */}
+   443→   443→                  {inControl && (
+   444→   444→                    <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+   445→   445→                      {/* a) Водитель и автомобиль */}
+   446→   446→                      <div>
+   447→   447→                        <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
+   448→   448→                          <Users className="h-4 w-4 text-blue-600" aria-hidden />
+   449→   449→                          Водитель и автомобиль
+   450→   450→                        </h4>
+   451→   451→                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+   452→   452→                          <div className="space-y-1.5">
+   453→   453→                            <Label htmlFor={`driver-${r.id}`}>Водитель</Label>
+   454→   454→                            <Select
+   455→   455→                              value={s.driverId ?? ''}
+   456→   456→                              onValueChange={(v) => setSel((prev) => ({ ...prev, [r.id]: { ...s, driverId: v } }))}
+   457→   457→                            >
+   458→   458→                              <SelectTrigger id={`driver-${r.id}`} aria-label="Выбор водителя">
+   459→   459→                                <SelectValue placeholder="Выберите водителя" />
+   460→   460→                              </SelectTrigger>
+   461→   461→                              <SelectContent>
+   462→   462→                                {carrier?.drivers.map((d) => (
+   463→   463→                                  <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>
+   464→   464→                                ))}
+   465→   465→                              </SelectContent>
+   466→   466→                            </Select>
+   467→   467→                          </div>
+   468→   468→                          <div className="space-y-1.5">
+   469→   469→                            <Label htmlFor={`truck-${r.id}`}>Тягач</Label>
+   470→   470→                            <Select
+   471→   471→                              value={s.truckId ?? ''}
+   472→   472→                              onValueChange={(v) => setSel((prev) => ({ ...prev, [r.id]: { ...s, truckId: v } }))}
+   473→   473→                            >
+   474→   474→                              <SelectTrigger id={`truck-${r.id}`} aria-label="Выбор тягача">
+   475→   475→                                <SelectValue placeholder="Выберите тягач" />
+   476→   476→                              </SelectTrigger>
+   477→   477→                              <SelectContent>
+   478→   478→                                {carrier?.trucks.map((t) => (
+   479→   479→                                  <SelectItem key={t.id} value={t.id}>{`${t.brand} · ${t.plate}`}</SelectItem>
+   480→   480→                                ))}
+   481→   481→                              </SelectContent>
+   482→   482→                            </Select>
+   483→   483→                          </div>
+   484→   484→                          <div className="space-y-1.5">
+   485→   485→                            <Label htmlFor={`trailer-${r.id}`}>Прицеп (опционально)</Label>
+   486→   486→                            <Select
+   487→   487→                              value={s.trailerId ?? TRAILER_NONE}
+   488→   488→                              onValueChange={(v) => setSel((prev) => ({ ...prev, [r.id]: { ...s, trailerId: v } }))}
+   489→   489→                            >
+   490→   490→                              <SelectTrigger id={`trailer-${r.id}`} aria-label="Выбор прицепа">
+   491→   491→                                <SelectValue placeholder="Без прицепа" />
+   492→   492→                              </SelectTrigger>
+   493→   493→                              <SelectContent>
+   494→   494→                                <SelectItem value={TRAILER_NONE}>Без прицепа</SelectItem>
+   495→   495→                                {carrier?.trailers.map((t) => (
+   496→   496→                                  <SelectItem key={t.id} value={t.id}>{`${t.plate} · ${t.type}`}</SelectItem>
+   497→   497→                                ))}
+   498→   498→                              </SelectContent>
+   499→   499→                            </Select>
+   500→   500→                          </div>
+   501→   501→                        </div>
+   502→   502→                        <div className="mt-3 flex flex-wrap items-center gap-2">
+   503→   503→                          <Button
+   504→   504→                            size="sm"
+   505→   505→                            disabled={!s.driverId || !s.truckId || busy !== null}
+   506→   506→                            onClick={() => void doAssign(r, s)}
+   507→   507→                            aria-label={`Сохранить водителя и автомобиль по заявке ${r.number}`}
+   508→   508→                          >
+   509→   509→                            {busy === `${r.id}:assign` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+   510→   510→                            Сохранить данные
+   511→   511→                          </Button>
+   512→   512→                          <span className="text-xs text-muted-foreground">С этими данными нейросеть сверит документы</span>
+   513→   513→                        </div>
+   514→   514→                      </div>
+   515→   515→
+   516→   516→                      {/* b) Документы — 4 слота */}
+   517→   517→                      <div>
+   518→   518→                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+   519→   519→                          <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+   520→   520→                            <FileText className="h-4 w-4 text-blue-600" aria-hidden />
+   521→   521→                            Документы (4 файла к заявке)
+   522→   522→                          </h4>
+   523→   523→                          {hasPending && (
+   524→   524→                            <Button
+   525→   525→                              size="sm"
+   526→   526→                              variant="outline"
+   527→   527→                              className="gap-1.5"
+   528→   528→                              disabled={busy !== null}
+   529→   529→                              onClick={() => void doVerify(r)}
+   530→   530→                              aria-label={`Отправить документы заявки ${r.number} на проверку нейросети`}
+   531→   531→                            >
+   532→   532→                              <Send className="h-4 w-4" aria-hidden />
+   533→   533→                              Отправить на проверку
+   534→   534→                            </Button>
+   535→   535→                          )}
+   536→   536→                        </div>
+   537→   537→                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+   538→   538→                          {DOC_ORDER.map((type) => {
+   539→   539→                            const doc = r.documents.find((d) => d.type === type)
+   540→   540→                            const Icon = DOC_ICONS[type]
+   541→   541→                            const key = `${r.id}:${type}`
+   542→   542→                            return (
+   543→   543→                              <div
+   544→   544→                                key={type}
+   545→   545→                                className={`flex flex-col rounded-xl border p-3 ${doc ? 'border-slate-200 bg-white' : 'border-dashed border-slate-300 bg-white/70'}`}
+   546→   546→                              >
+   547→   547→                                <div className="mb-2 flex items-start justify-between gap-2">
+   548→   548→                                  <span className="flex items-center gap-2">
+   549→   549→                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700" aria-hidden>
+   550→   550→                                      <Icon className="h-4 w-4" />
+   551→   551→                                    </span>
+   552→   552→                                    <span className="text-xs font-semibold leading-tight text-slate-800">{DOC_TYPE_LABEL[type]}</span>
+   553→   553→                                  </span>
+   554→   554→                                  {doc ? (
+   555→   555→                                    <DocStatusBadge status={doc.status} />
+   556→   556→                                  ) : (
+   557→   557→                                    <Badge variant="outline" className="border-slate-200 bg-slate-100 text-[10px] text-slate-500">Не загружен</Badge>
+   558→   558→                                  )}
+   559→   559→                                </div>
+   560→   560→
+   561→   561→                                {doc && (
+   562→   562→                                  <img
+   563→   563→                                    src={doc.dataUri}
+   564→   564→                                    alt={`Документ «${DOC_TYPE_LABEL[type]}» — ${doc.fileName}`}
+   565→   565→                                    className="mb-2 h-20 w-full rounded-md border border-slate-200 object-cover"
+   566→   566→                                  />
+   567→   567→                                )}
+   568→   568→
+   569→   569→                                <div className="mb-2 min-h-0 flex-1 space-y-1">
+   570→   570→                                  {doc?.quality != null && (
+   571→   571→                                    <div className="text-[11px] text-muted-foreground">Качество: {doc.quality}</div>
+   572→   572→                                  )}
+   573→   573→                                  {doc?.message && <p className="text-[11px] leading-snug text-slate-600">{doc.message}</p>}
+   574→   574→                                  {doc && doc.issues.map((is, i) => (
+   575→   575→                                    <p key={i} className={`text-[11px] leading-snug ${issueClass(doc.status)}`}>• {is}</p>
+   576→   576→                                  ))}
+   577→   577→                                </div>
+   578→   578→
+   579→   579→                                <input
+   580→   580→                                  ref={(el) => {
+   581→   581→                                    fileInputs.current[key] = el
+   582→   582→                                  }}
+   583→   583→                                  type="file"
+   584→   584→                                  accept="image/*"
+   585→   585→                                  className="hidden"
+   586→   586→                                  aria-label={`Загрузить ${DOC_TYPE_LABEL[type]}`}
+   587→   587→                                  onChange={(e) => {
+   588→   588→                                    const f = e.target.files?.[0]
+   589→   589→                                    e.target.value = ''
+   590→   590→                                    if (f) void handleFile(r, type, f)
+   591→   591→                                  }}
+   592→   592→                                />
+   593→   593→                                <Button
+   594→   594→                                  size="sm"
+   595→   595→                                  variant={doc ? 'outline' : 'default'}
+   596→   596→                                  className="w-full gap-1.5"
+   597→   597→                                  disabled={busy !== null}
+   598→   598→                                  onClick={() => fileInputs.current[key]?.click()}
+   599→   599→                                  aria-label={doc ? `Заменить ${DOC_TYPE_LABEL[type]}` : `Загрузить ${DOC_TYPE_LABEL[type]}`}
+   600→   600→                                >
+   601→   601→                                  {busy === `${r.id}:up:${type}`
+   602→   602→                                    ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   603→   603→                                    : <Upload className="h-4 w-4" aria-hidden />}
+   604→   604→                                  {doc ? 'Заменить' : 'Загрузить файл'}
+   605→   605→                                </Button>
+   606→   606→                              </div>
+   607→   607→                            )
+   608→   608→                          })}
+   609→   609→                        </div>
+   610→   610→                      </div>
+   611→   611→
+   612→   612→                      {/* c) Демо-кнопки */}
+   613→   613→                      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+   614→   614→                        <Button
+   615→   615→                          size="sm"
+   616→   616→                          variant="outline"
+   617→   617→                          className="gap-1.5"
+   618→   618→                          disabled={busy !== null}
+   619→   619→                          onClick={() => void runDemo(r)}
+   620→   620→                          aria-label={`Загрузить демо-образцы документов по заявке ${r.number}`}
+   621→   621→                        >
+   622→   622→                          {busy === `${r.id}:demo` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
+   623→   623→                          Загрузить образцы документов (демо)
+   624→   624→                        </Button>
+   625→   625→                        <Button
+   626→   626→                          size="sm"
+   627→   627→                          variant="outline"
+   628→   628→                          className="gap-1.5"
+   629→   629→                          disabled={busy !== null}
+   630→   630→                          onClick={() => void runBlurDemo(r)}
+   631→   631→                          aria-label={`Загрузить демо-образец с браком по заявке ${r.number}`}
+   632→   632→                        >
+   633→   633→                          {busy === `${r.id}:blur` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileX className="h-4 w-4" aria-hidden />}
+   634→   634→                          Брак: размытое ВУ (демо)
+   635→   635→                        </Button>
+   636→   636→                        {verifyingId === r.id && (
+   637→   637→                          <span className="flex items-center gap-1.5 text-sm font-medium text-blue-700" role="status">
+   638→   638→                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+   639→   639→                            Нейросеть проверяет…
+   640→   640→                          </span>
+   641→   641→                        )}
+   642→   642→                      </div>
+   643→   643→                    </div>
+   644→   644→                  )}
+   645→   645→
+   646→   646→                  {/* ——— Результаты проверки нейросети ——— */}
+   647→   647→                  {r.documents.length > 0 && (
+   648→   648→                    <div className="rounded-xl border border-slate-200 p-4">
+   649→   649→                      <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
+   650→   650→                        <Sparkles className="h-4 w-4 text-blue-600" aria-hidden />
+   651→   651→                        Результаты проверки нейросети
+   652→   652→                      </h4>
+   653→   653→                      <div className="space-y-3">
+   654→   654→                        {r.documents.map((doc) => (
+   655→   655→                          <div key={doc.id} className="rounded-lg border border-slate-200 bg-white p-3">
+   656→   656→                            <div className="flex flex-wrap items-center gap-2">
+   657→   657→                              <span className="text-sm font-semibold text-slate-900">{DOC_TYPE_LABEL[doc.type]}</span>
+   658→   658→                              <DocStatusBadge status={doc.status} />
+   659→   659→                              {doc.engine && (
+   660→   660→                                <Badge variant="outline" className="border-slate-200 text-[11px] font-normal text-slate-500">
+   661→   661→                                  движок: {doc.engine}
+   662→   662→                                </Badge>
+   663→   663→                              )}
+   664→   664→                              {doc.quality != null && (
+   665→   665→                                <span className="text-xs text-muted-foreground">качество фото: {doc.quality}</span>
+   666→   666→                              )}
+   667→   667→                            </div>
+   668→   668→                            {doc.message && <p className="mt-1 text-xs text-slate-600">{doc.message}</p>}
+   669→   669→                            {doc.fields && Object.keys(doc.fields).length > 0 && (
+   670→   670→                              <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
+   671→   671→                                <Table>
+   672→   672→                                  <TableHeader>
+   673→   673→                                    <TableRow>
+   674→   674→                                      <TableHead className="h-8 text-xs">Поле</TableHead>
+   675→   675→                                      <TableHead className="h-8 text-xs">С документа</TableHead>
+   676→   676→                                      <TableHead className="h-8 text-xs">Уверенность</TableHead>
+   677→   677→                                    </TableRow>
+   678→   678→                                  </TableHeader>
+   679→   679→                                  <TableBody>
+   680→   680→                                    {Object.entries(doc.fields).map(([k, v]) => {
+   681→   681→                                      const c = doc.confidence?.[k]
+   682→   682→                                      return (
+   683→   683→                                        <TableRow key={k}>
+   684→   684→                                          <TableCell className="py-1.5 text-xs text-slate-600">{k}</TableCell>
+   685→   685→                                          <TableCell className="py-1.5 text-xs font-medium text-slate-900">{v || '—'}</TableCell>
+   686→   686→                                          <TableCell className="py-1.5">
+   687→   687→                                            {c != null ? (
+   688→   688→                                              <span className={`text-xs font-semibold ${confClass(c)}`}>{Math.round(c * 100)}%</span>
+   689→   689→                                            ) : (
+   690→   690→                                              <span className="text-xs text-muted-foreground">—</span>
+   691→   691→                                            )}
+   692→   692→                                          </TableCell>
+   693→   693→                                        </TableRow>
+   694→   694→                                      )
+   695→   695→                                    })}
+   696→   696→                                  </TableBody>
+   697→   697→                                </Table>
+   698→   698→                              </div>
+   699→   699→                            )}
+   700→   700→                            {doc.issues.length > 0 && (
+   701→   701→                              <ul className="mt-2 space-y-0.5">
+   702→   702→                                {doc.issues.map((is, i) => (
+   703→   703→                                  <li key={i} className={`text-xs ${issueClass(doc.status)}`}>• {is}</li>
+   704→   704→                                ))}
+   705→   705→                              </ul>
+   706→   706→                            )}
+   707→   707→                          </div>
+   708→   708→                        ))}
+   709→   709→                      </div>
+   710→   710→                    </div>
+   711→   711→                  )}
+   712→   712→
+   713→   713→                  {/* ——— История заявки ——— */}
+   714→   714→                  <div className="border-t border-slate-200 pt-3">
+   715→   715→                    <button
+   716→   716→                      type="button"
+   717→   717→                      onClick={() => setTimelineOpen((prev) => ({ ...prev, [r.id]: !prev[r.id] }))}
+   718→   718→                      className="flex items-center gap-1.5 text-sm font-medium text-blue-700 transition-colors hover:text-blue-900"
+   719→   719→                      aria-expanded={!!timelineOpen[r.id]}
+   720→   720→                    >
+   721→   721→                      <History className="h-4 w-4" aria-hidden />
+   722→   722→                      {timelineOpen[r.id] ? 'Скрыть историю' : 'Показать историю'}
+   723→   723→                    </button>
+   724→   724→                    {timelineOpen[r.id] && (
+   725→   725→                      r.events.length === 0 ? (
+   726→   726→                        <p className="mt-2 text-sm text-muted-foreground">Событий пока нет</p>
+   727→   727→                      ) : (
+   728→   728→                        <ul className={`ml-1 mt-2 max-h-40 space-y-1.5 overflow-y-auto border-l-2 border-slate-200 pl-3 pr-1 ${THIN_SCROLL}`}>
+   729→   729→                          {r.events.map((e) => (
+   730→   730→                            <li key={e.id} className="relative text-xs leading-snug">
+   731→   731→                              <span className="absolute -left-[19px] top-1.5 h-2 w-2 rounded-full bg-blue-600" aria-hidden />
+   732→   732→                              <span className="text-slate-800">{e.message}</span>
+   733→   733→                              <span className="ml-2 whitespace-nowrap text-muted-foreground">{fmtDateTime(e.createdAt)}</span>
+   734→   734→                            </li>
+   735→   735→                          ))}
+   736→   736→                        </ul>
+   737→   737→                      )
+   738→   738→                    )}
+   739→   739→                  </div>
+   740→   740→                </CardContent>
+   741→   741→              </Card>
+   742→   742→            )
+   743→   743→          })}
+   744→   744→        </div>
+   745→   745→      )}
+   746→   746→    </section>
+   747→   747→  )
+   748→   748→}
+   749→   749→

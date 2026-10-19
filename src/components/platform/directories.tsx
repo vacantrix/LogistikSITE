@@ -1,11 +1,12 @@
 'use client'
 
-/** «Справочники» — единый справочник: перевозчики, водители, тягачи, прицепы */
+/** «Справочники» — единый справочник: логисту — все перевозчики, перевозчику — только свой парк */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Truck, User, Users, Wrench } from 'lucide-react'
+import { Plus, ScanLine, Truck, User, Users, Wrench } from 'lucide-react'
 import {
   ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
+import DriverIntakeDialog from '@/components/platform/driver-intake'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -85,7 +86,7 @@ function AccessBadge({ access }: { access: boolean }) {
   )
 }
 
-export default function DirectoriesTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate }: TabProps) {
+export default function DirectoriesTab({ activeCarrierId, role, onNavigate: _onNavigate }: TabProps) {
   const { toast } = useToast()
   const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -93,6 +94,14 @@ export default function DirectoriesTab({ activeCarrierId: _activeCarrierId, onNa
   const [addKind, setAddKind] = useState<Kind | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  const [intakeOpen, setIntakeOpen] = useState(false)
+  const isLogist = role === 'logist'
+
+  // перевозчику доступен только его собственный парк — данные конкурентов скрыты
+  const visibleCarriers = useMemo(
+    () => (isLogist ? (carriers ?? []) : (carriers ?? []).filter((c) => c.id === activeCarrierId)),
+    [carriers, isLogist, activeCarrierId],
+  )
 
   const load = useCallback(async () => {
     try {
@@ -107,20 +116,20 @@ export default function DirectoriesTab({ activeCarrierId: _activeCarrierId, onNa
   useEffect(() => { void load() }, [load])
 
   const driversFlat = useMemo(
-    () => (carriers ?? []).flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name }))),
-    [carriers],
+    () => visibleCarriers.flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name }))),
+    [visibleCarriers],
   )
   const trucksFlat = useMemo(
-    () => (carriers ?? []).flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name }))),
-    [carriers],
+    () => visibleCarriers.flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name }))),
+    [visibleCarriers],
   )
   const trailersFlat = useMemo(
-    () => (carriers ?? []).flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name }))),
-    [carriers],
+    () => visibleCarriers.flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name }))),
+    [visibleCarriers],
   )
 
   const openAdd = (kind: Kind) => {
-    setForm({ carrierId: carriers?.[0]?.id ?? '' })
+    setForm({ carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? '') })
     setAddKind(kind)
   }
 
@@ -150,21 +159,27 @@ export default function DirectoriesTab({ activeCarrierId: _activeCarrierId, onNa
   if (error) return <ErrorBlock message={error} onRetry={() => { setError(null); void load() }} />
 
   const addLabel = addKind ? KIND_TITLES[addKind] : ''
+  // у перевозчика вкладка «Перевозчики» недоступна — принудительно ведём на «Водителей»
+  const activeTab: TabKind = !isLogist && tab === 'carriers' ? 'drivers' : tab
 
   return (
     <div>
       <SectionHeader
         eyebrow="РЕШЕНИЕ 2 · СПРАВОЧНИК"
-        title="Единый справочник: водитель вводится один раз"
-        desc="Заполняется с площадки: после подтверждения логистом данные записываются автоматически. При повторной перевозке агент выбирает водителя из списка — документы заново не загружаются."
+        title={isLogist ? 'Единый справочник: водитель вводится один раз' : 'Справочник вашего парка'}
+        desc={isLogist
+          ? 'Заполняется с площадки: после подтверждения логистом данные записываются автоматически. При повторной перевозке агент выбирает водителя из списка — документы заново не загружаются.'
+          : 'Водители и транспорт вашей компании. Данные конкурентов скрыты. Нового водителя добавьте по документам — нейросеть заполнит карточку за вас.'}
       />
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as TabKind)} className="gap-4">
+      <Tabs value={activeTab} onValueChange={(v) => setTab(v as TabKind)} className="gap-4">
         <TabsList className="flex-wrap">
-          <TabsTrigger value="carriers">
-            <Users className="h-4 w-4" aria-hidden />
-            Перевозчики
-          </TabsTrigger>
+          {isLogist && (
+            <TabsTrigger value="carriers">
+              <Users className="h-4 w-4" aria-hidden />
+              Перевозчики
+            </TabsTrigger>
+          )}
           <TabsTrigger value="drivers">
             <User className="h-4 w-4" aria-hidden />
             Водители
@@ -179,7 +194,8 @@ export default function DirectoriesTab({ activeCarrierId: _activeCarrierId, onNa
           </TabsTrigger>
         </TabsList>
 
-        {/* -------- Перевозчики -------- */}
+        {/* -------- Перевозчики (только логист) -------- */}
+        {isLogist && (
         <TabsContent value="carriers">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
@@ -226,16 +242,35 @@ export default function DirectoriesTab({ activeCarrierId: _activeCarrierId, onNa
             </CardContent>
           </Card>
         </TabsContent>
+        )}
 
         {/* -------- Водители -------- */}
         <TabsContent value="drivers">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
+              <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50/70 p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                      <ScanLine className="h-4 w-4 text-blue-700" aria-hidden />
+                      Добавление водителя — сразу с нейросетью
+                    </div>
+                    <p className="mt-0.5 max-w-xl text-xs leading-snug text-slate-600">
+                      Загрузите паспорт, ВУ и СТС — нейросеть прочитает документы, сама заполнит карточку водителя
+                      и тягача, проверит данные на противоречия. Ручной ввод не нужен.
+                    </p>
+                  </div>
+                  <Button size="sm" className="gap-1.5" onClick={() => setIntakeOpen(true)}>
+                    <ScanLine className="h-4 w-4" aria-hidden />
+                    Добавить по документам
+                  </Button>
+                </div>
+              </div>
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="text-sm text-slate-500">Записей: {driversFlat.length}</div>
-                <Button size="sm" onClick={() => openAdd('driver')}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('driver')}>
                   <Plus className="h-4 w-4" aria-hidden />
-                  Добавить водителя
+                  Вручную
                 </Button>
               </div>
               <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
@@ -412,6 +447,22 @@ export default function DirectoriesTab({ activeCarrierId: _activeCarrierId, onNa
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* нейро-мастер добавления водителя */}
+      <DriverIntakeDialog
+        open={intakeOpen}
+        onOpenChange={setIntakeOpen}
+        carriers={isLogist ? (carriers ?? []) : visibleCarriers}
+        defaultCarrierId={isLogist ? null : activeCarrierId}
+        lockCarrier={!isLogist}
+        onSaved={(res) => {
+          toast({
+            title: 'Водитель добавлен в справочник',
+            description: `${res.driverName}: карточка заполнена нейросетью по загруженным документам${res.truckId ? ', тягач распознан из СТС' : ''}`,
+          })
+          void load()
+        }}
+      />
     </div>
   )
 }

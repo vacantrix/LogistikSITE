@@ -9,11 +9,28 @@ import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
 export type TabKey = 'dashboard' | 'board' | 'my' | 'auctions' | 'verify' | 'registry' | 'directory' | 'reports' | 'settings'
 
+/** Роль пользователя: сотрудник АЭМЗ (логист) или перевозчик */
+export type RoleKind = 'logist' | 'carrier'
+
 export interface TabProps {
-  /** какой перевозчик выбран в шапке (действия агента) */
+  /** какой перевозчик выбран в шапке (действия агента); для логиста — null */
   activeCarrierId: string | null
+  /** вид платформы: внутренний контур АЭМЗ или кабинет перевозчика */
+  role: RoleKind
   /** переход на другой раздел (например «Перейти к торгам») */
   onNavigate: (tab: TabKey) => void
+}
+
+/** Раздел, доступный только определённой роли (защитная заглушка) */
+export function RoleNotice({ role }: { role: RoleKind }) {
+  return (
+    <EmptyState
+      title={role === 'logist' ? 'Раздел доступен только перевозчикам' : 'Раздел внутреннего контура АЭМЗ'}
+      hint={role === 'logist'
+        ? 'Переключите роль в шапке на перевозчика, чтобы работать с площадкой от его имени'
+        : 'Этот раздел доступен сотрудникам отдела логистики. Переключите роль в шапке, чтобы вернуться в кабинет перевозчика.'}
+    />
+  )
 }
 
 export function StatusBadge({ status }: { status: RequestStatus }) {
