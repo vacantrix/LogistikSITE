@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============ Directory: carriers, drivers, vehicles ============
+
+model Carrier {
+  id           String    @id @default(cuid())
+  name         String
+  inn          String
+  contractNo   String
+  contractDate String
+  access       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  drivers      Driver[]
+  trucks       Truck[]
+  trailers     Trailer[]
+  bids         Bid[]
+  wonRequests  Request[] @relation("winner")
+}
+
+model Driver {
+  id          String  @id @default(cuid())
+  carrierId   String
+  carrier     Carrier @relation(fields: [carrierId], references: [id])
+  fullName    String
+  birthDate   String
+  passport    String
+  license     String
+  licenseTill String
+  categories  String
+}
+
+model Truck {
+  id        String  @id @default(cuid())
+  carrierId String
+  carrier   Carrier @relation(fields: [carrierId], references: [id])
+  brand     String
+  plate     String
+  vin       String
+  sts       String
+  owner     String
+}
+
+model Trailer {
+  id        String  @id @default(cuid())
+  carrierId String
+  carrier   Carrier @relation(fields: [carrierId], references: [id])
+  plate     String
+  sts       String
+  type      String
+}
+
+// ============ Requests (auctions) / trips ============
+
+model Request {
+  id          String     @id @default(cuid())
+  number      String     @unique
+  fromPoint   String
+  toPoint     String
+  cargo       String
+  tonnage     Float
+  truckType   String
+  mode        String // FIXED | AUCTION | CLOSED
+  startRate   Float
+  bestRate    Float?
+  status      String     @default("PUBLISHED")
+  loadDate    String
+  loadWindow  String
+  deadline    DateTime?
+  winnerId    String?
+  winner      Carrier?   @relation("winner", fields: [winnerId], references: [id])
+  driverId    String?
+  truckId     String?
+  trailerId   String?
+  passPackage Boolean    @default(false)
+  etrnStatus  String     @default("NONE") // NONE | SENT | SIGNED
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  bids        Bid[]
+  documents   Document[]
+  events      Event[]
+}
+
+model Bid {
+  id        String   @id @default(cuid())
+  requestId String
+  request   Request  @relation(fields: [requestId], references: [id])
+  carrierId String
+  carrier   Carrier  @relation(fields: [carrierId], references: [id])
+  amount    Float
+  isWinner  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  requestId  String
+  request    Request  @relation(fields: [requestId], references: [id])
+  type       String // PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS
+  fileName   String
+  dataUri    String
+  status     String   @default("PENDING") // PENDING | PASSED | REUPLOAD | REJECTED | MANUAL
+  quality    Float?
+  engine     String?
+  fields     String? // JSON: recognized fields
+  confidence String? // JSON: per-field confidence 0..1
+  issues     String? // JSON: list of issue strings
+  message    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  requestId String?
+  request   Request? @relation(fields: [requestId], references: [id])
+  type      String
+  message   String
+  createdAt DateTime @default(now())
+}
+
+// ============ Settings: confidence thresholds and rules ============
+
+model Setting {
+  id           String @id @default("main")
+  confReupload Float  @default(0.6)
+  confAuto     Float  @default(0.95)
+  minQuality   Float  @default(60)
+  rules        String @default("{}")
+}

@@ -1,0 +1,36 @@
+/** Клиентский слой запросов к API платформы */
+import type {
+  CarrierDTO, EventFeedItem, RequestDTO, ReportSummary, SettingsDTO,
+} from '@/lib/types'
+
+async function json<T>(res: Response): Promise<T> {
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка запроса (${res.status})`)
+  return data as T
+}
+
+export const api = {
+  listRequests: (params?: { status?: string; mode?: string; q?: string }) => {
+    const qs = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][])
+    return fetch(`/api/requests${qs.toString() ? `?${qs}` : ''}`, { cache: 'no-store' }).then(json<{ requests: RequestDTO[] }>)
+  },
+  getRequest: (id: string) => fetch(`/api/requests/${id}`, { cache: 'no-store' }).then(json<{ request: RequestDTO }>),
+  createRequest: (body: Partial<RequestDTO>) =>
+    fetch('/api/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ request: RequestDTO }>),
+  action: (id: string, action: string, payload: Record<string, unknown> = {}) =>
+    fetch(`/api/requests/${id}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...payload }) }).then(json<{ request: RequestDTO }>),
+  uploadDocument: (id: string, body: { type: string; fileName: string; dataUri: string }) =>
+    fetch(`/api/requests/${id}/documents`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ document: RequestDTO['documents'][number]; request: RequestDTO }>),
+  verifyDocuments: (id: string) =>
+    fetch(`/api/requests/${id}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(json<{ request: RequestDTO }>),
+
+  directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[] }>),
+  createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer', data: Record<string, unknown>) =>
+    fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean }>),
+
+  reports: () => fetch('/api/reports', { cache: 'no-store' }).then(json<ReportSummary>),
+  events: (limit = 30) => fetch(`/api/events?limit=${limit}`, { cache: 'no-store' }).then(json<{ events: EventFeedItem[] }>),
+  settings: () => fetch('/api/settings', { cache: 'no-store' }).then(json<SettingsDTO>),
+  saveSettings: (data: Partial<SettingsDTO>) =>
+    fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(json<SettingsDTO>),
+}

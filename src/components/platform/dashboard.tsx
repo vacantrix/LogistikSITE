@@ -1,0 +1,255 @@
+'use client'
+
+/** Раздел «Сводка» — KPI, пайплайн статусов, журнал событий, быстрые действия */
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Banknote,
+  ChevronRight,
+  ClipboardList,
+  FileBarChart2,
+  RefreshCw,
+  ScanSearch,
+  ShieldCheck,
+  Truck,
+  Warehouse,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  EmptyState,
+  ErrorBlock,
+  KpiCard,
+  LoadingBlock,
+  SectionHeader,
+  type TabProps,
+} from '@/components/platform/common'
+import { api } from '@/lib/api'
+import { REQUEST_STATUS_META, fmtDateTime, money } from '@/lib/status'
+import type { EventFeedItem, ReportSummary, RequestDTO, RequestStatus } from '@/lib/types'
+
+const PIPELINE: RequestStatus[] = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED']
+
+const STEPS = [
+  'Логист публикует заявку',
+  'Агенты делают ставки',
+  'Логист согласовывает лучшую',
+  'Агент загружает документы',
+  'Нейросеть проверяет',
+]
+
+const QUICK_ACTIONS = [
+  { key: 'board', title: 'Площадка заявок', desc: 'Ставки и заявки в работе', icon: Truck },
+  { key: 'verify', title: 'Сверка документов', desc: 'Фото, поля, решение логиста', icon: ScanSearch },
+  { key: 'reports', title: 'Отчёты', desc: 'Экономия и активность перевозчиков', icon: FileBarChart2 },
+  { key: 'registry', title: 'Реестр рейсов', desc: 'Единый реестр для 1С:ERP', icon: Warehouse },
+] as const
+
+export default function DashboardTab({ onNavigate }: TabProps) {
+  const [report, setReport] = useState<ReportSummary | null>(null)
+  const [requests, setRequests] = useState<RequestDTO[]>([])
+  const [events, setEvents] = useState<EventFeedItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      const [r, list, ev] = await Promise.all([api.reports(), api.listRequests(), api.events(15)])
+      setReport(r)
+      setRequests(list.requests)
+      setEvents(ev.events)
+      setError(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const kpi = report?.kpi
+  const counts = Object.fromEntries(
+    PIPELINE.map((s) => [s, requests.filter((r) => r.status === s).length]),
+  ) as Record<RequestStatus, number>
+
+  return (
+    <section aria-label="Сводка платформы">
+      <SectionHeader
+        eyebrow="СВОДКА"
+        title="Платформа привлечённого транспорта"
+        desc="Заявки, торги, документы и передача данных в 1С — состояние всего процесса на одной странице."
+      >
+        <Button onClick={() => void load()} disabled={refreshing} className="gap-2" aria-label="Обновить данные сводки">
+          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
+          Обновить
+        </Button>
+      </SectionHeader>
+
+      {loading && <LoadingBlock label="Загружаем сводку…" />}
+      {!loading && error && <ErrorBlock message={error} onRetry={() => void load()} />}
+
+      {!loading && !error && report && kpi && (
+        <div className="space-y-6">
+          {/* 1. KPI */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <KpiCard
+              icon={<ClipboardList className="h-5 w-5" aria-hidden />}
+              label="Заявки на площадке"
+              value={kpi.openRequests}
+              tone="blue"
+              hint="Опубликованы и ждут ставок перевозчиков"
+            />
+            <KpiCard
+              icon={<Banknote className="h-5 w-5" aria-hidden />}
+              label="Экономия к стартовым ставкам"
+              value={money(kpi.savingsMonth)}
+              tone="green"
+              hint="Разница стартовой и итоговой ставки"
+            />
+            <KpiCard
+              icon={<ScanSearch className="h-5 w-5" aria-hidden />}
+              label="У логиста на сверке"
+              value={kpi.atLogist}
+              tone="amber"
+              hint="Комплекты документов на сверке фото с полями"
+            />
+            <KpiCard
+              icon={<ShieldCheck className="h-5 w-5" aria-hidden />}
+              label="Документов принято автоматически"
+              value={`${kpi.docsAutoShare}%`}
+              tone="navy"
+              hint={`ЭТрН из 1С: ${kpi.etrnShare}%`}
+            />
+          </div>
+
+          {/* 2. Лента статусов (пайплайн) */}
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Лента статусов</CardTitle>
+              <CardDescription>Каждая заявка проходит путь от публикации до закрытия рейса</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-stretch gap-y-3">
+                {PIPELINE.map((s, i) => {
+                  const meta = REQUEST_STATUS_META[s]
+                  return (
+                    <div key={s} className="flex items-center">
+                      {i > 0 && <ChevronRight className="mx-1.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />}
+                      <div className="flex min-w-[104px] flex-col items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                        <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-slate-700">
+                          <span className={`h-2 w-2 rounded-full ${meta.dot}`} aria-hidden />
+                          {meta.short}
+                        </span>
+                        <span className="text-lg font-bold leading-none text-slate-900">{counts[s]}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 3. Журнал событий + быстрые действия */}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <Card className="border-slate-200 shadow-sm lg:col-span-2">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Журнал событий</CardTitle>
+                <CardDescription>Ставки, назначения, проверки — всё, что произошло на платформе</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {events.length === 0 ? (
+                  <EmptyState title="Событий пока нет" hint="События появятся, как только начнётся работа с заявками" />
+                ) : (
+                  <ul
+                    className="max-h-96 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+                    aria-label="Лента последних событий"
+                  >
+                    {events.map((ev) => (
+                      <li key={ev.id} className="flex items-start gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-slate-50">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm leading-snug text-slate-800">{ev.message}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <time dateTime={ev.createdAt}>{fmtDateTime(ev.createdAt)}</time>
+                            {ev.requestNumber && (
+                              <button
+                                type="button"
+                                onClick={() => onNavigate('board')}
+                                className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+                                aria-label={`Открыть заявку ${ev.requestNumber} на площадке заявок`}
+                              >
+                                {ev.requestNumber}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border-slate-200 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Быстрые действия</CardTitle>
+                <CardDescription>Частые разделы — в один клик</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {QUICK_ACTIONS.map((a) => (
+                    <button
+                      key={a.key}
+                      type="button"
+                      onClick={() => onNavigate(a.key)}
+                      className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60"
+                      aria-label={`Перейти в раздел «${a.title}»`}
+                    >
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700 transition-colors group-hover:bg-blue-100" aria-hidden>
+                        <a.icon className="h-5 w-5" />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold leading-tight text-slate-900">{a.title}</span>
+                        <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">{a.desc}</span>
+                      </span>
+                      <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" aria-hidden />
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* 4. Как работает платформа */}
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Как работает платформа</CardTitle>
+              <CardDescription>Пять шагов от публикации заявки до проверенного комплекта документов</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ol className="grid grid-cols-1 gap-3 sm:grid-cols-5">
+                {STEPS.map((step, i) => (
+                  <li key={step} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden>
+                      {i + 1}
+                    </span>
+                    <span className="text-sm font-medium leading-snug text-slate-800">{step}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-4 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+                Дальше — сверка логистом и передача данных в 1С:ERP
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </section>
+  )
+}
