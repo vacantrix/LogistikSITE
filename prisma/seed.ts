@@ -69,6 +69,9 @@ async function main() {
           // сроки медсправки покрывают все состояния подсветки: истёк / истекает / ок
           { fullName: 'Иванов Иван Иванович', birthDate: '15.05.1990', passport: '99 12 345678', license: '99 12 345678', licenseTill: '12.03.2030', medTill: dateInDays(-12), categories: 'C, CE', createdAt: hoursAgo(24 * 40) },
           { fullName: 'Петров Пётр Сергеевич', birthDate: '22.08.1988', passport: '03 13 992210', license: '23 11 770145', licenseTill: '01.06.2029', medTill: dateInDays(24), categories: 'C', createdAt: hoursAgo(24 * 12) },
+          { fullName: 'Ковалёв Андрей Викторович', birthDate: '12.03.1986', passport: '23 14 220018', license: '23 14 220018', licenseTill: '05.05.2030', medTill: dateInDays(95), categories: 'C, CE', createdAt: hoursAgo(24 * 31) },
+          { fullName: 'Егоров Максим Андреевич', birthDate: '07.09.1993', passport: '23 15 771064', license: '23 15 771064', licenseTill: '19.07.2029', medTill: dateInDays(45), categories: 'C', createdAt: hoursAgo(24 * 18) },
+          { fullName: 'Тарасов Олег Дмитриевич', birthDate: '25.12.1984', passport: '52 08 330592', license: '52 08 330592', licenseTill: '11.11.2028', medTill: dateInDays(160), categories: 'C, CE', createdAt: hoursAgo(24 * 6) },
         ],
       },
       trucks: {
@@ -93,6 +96,9 @@ async function main() {
         create: [
           { fullName: 'Сидоров Алексей Владимирович', birthDate: '03.02.1992', passport: '52 04 118872', license: '52 04 118872', licenseTill: '18.09.2028', medTill: dateInDays(210), categories: 'C, CE', createdAt: hoursAgo(24 * 33) },
           { fullName: 'Кузнецов Дмитрий Олегович', birthDate: '17.11.1985', passport: '52 05 442301', license: '52 05 442301', licenseTill: dateInDays(18), medTill: dateInDays(150), categories: 'C', createdAt: hoursAgo(24 * 9) },
+          { fullName: 'Фомин Сергей Петрович', birthDate: '30.06.1989', passport: '52 09 661427', license: '52 09 661427', licenseTill: '23.02.2031', medTill: dateInDays(280), categories: 'C, CE', createdAt: hoursAgo(24 * 27) },
+          { fullName: 'Гусев Павел Романович', birthDate: '14.02.1995', passport: '52 10 884610', license: '52 10 884610', licenseTill: '08.10.2029', medTill: dateInDays(120), categories: 'C', createdAt: hoursAgo(24 * 11) },
+          { fullName: 'Лебедев Артём Игоревич', birthDate: '19.04.1983', passport: '61 11 553876', license: '61 11 553876', licenseTill: '16.08.2028', medTill: dateInDays(-3), categories: 'C, CE', createdAt: hoursAgo(24 * 4) },
         ],
       },
       trucks: {
@@ -110,6 +116,8 @@ async function main() {
       drivers: {
         create: [
           { fullName: 'Морозов Игорь Павлович', birthDate: '09.07.1987', passport: '77 02 551209', license: '77 02 551209', licenseTill: '30.11.2029', medTill: '—', categories: 'C, CE', createdAt: hoursAgo(24 * 21) },
+          { fullName: 'Сазонов Виктор Юрьевич', birthDate: '02.10.1988', passport: '77 12 994523', license: '77 12 994523', licenseTill: '27.03.2030', medTill: dateInDays(200), categories: 'C, CE', createdAt: hoursAgo(24 * 16) },
+          { fullName: 'Носов Роман Алексеевич', birthDate: '08.06.1991', passport: '77 13 441205', license: '77 13 441205', licenseTill: '30.09.2028', medTill: dateInDays(60), categories: 'C', createdAt: hoursAgo(24 * 8) },
         ],
       },
       trucks: {
@@ -125,6 +133,8 @@ async function main() {
       drivers: {
         create: [
           { fullName: 'Волков Сергей Николаевич', birthDate: '28.01.1991', passport: '61 06 773410', license: '61 06 773410', licenseTill: '14.02.2031', medTill: dateInDays(320), categories: 'C, CE', createdAt: hoursAgo(24 * 7) },
+          { fullName: 'Захаров Денис Львович', birthDate: '21.11.1987', passport: '61 14 330917', license: '61 14 330917', licenseTill: '13.01.2030', medTill: dateInDays(150), categories: 'C, CE', createdAt: hoursAgo(24 * 10) },
+          { fullName: 'Куликов Игорь Валерьевич', birthDate: '05.03.1994', passport: '23 16 225840', license: '23 16 225840', licenseTill: '02.12.2029', medTill: dateInDays(90), categories: 'C', createdAt: hoursAgo(24 * 3) },
         ],
       },
       trucks: {
@@ -138,17 +148,17 @@ async function main() {
   const z1042 = await db.request.create({
     data: {
       number: 'Z-1042', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 95000, bestRate: 85900,
+      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 225000, bestRate: 218000,
       status: 'PUBLISHED', loadDate: '20.10.2026', loadWindow: '08:00–12:00',
       deadline: inHours(2.25),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 95 000 ₽, торги до срока', createdAt: hoursAgo(26) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 225 000 ₽, торги до срока', createdAt: hoursAgo(26) } },
     },
   })
   const bids1042 = [
-    { carrier: carrierA, amount: 85900, h: 9.1 },
-    { carrier: carrierB, amount: 86500, h: 9.4 },
-    { carrier: carrierV, amount: 89000, h: 10.2 },
-    { carrier: carrierG, amount: 91500, h: 11.9 },
+    { carrier: carrierA, amount: 218000, h: 9.1 },
+    { carrier: carrierB, amount: 219500, h: 9.4 },
+    { carrier: carrierV, amount: 222000, h: 10.2 },
+    { carrier: carrierG, amount: 224500, h: 11.9 },
   ]
   for (const b of bids1042) {
     await db.bid.create({
@@ -160,17 +170,17 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1043', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Оборудование',
-      tonnage: 18, truckType: 'Реф', mode: 'AUCTION', startRate: 64000, bestRate: null,
+      tonnage: 18, truckType: 'Реф', mode: 'AUCTION', startRate: 196000, bestRate: null,
       status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00',
       deadline: inHours(26),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 64 000 ₽', createdAt: hoursAgo(20) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 196 000 ₽', createdAt: hoursAgo(20) } },
     },
   })
 
   await db.request.create({
     data: {
       number: 'Z-1044', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 120000, bestRate: null,
+      tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 248000, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '08:00–11:00',
       deadline: inHours(28),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: закрытые ставки, участники не видят цены друг друга', createdAt: hoursAgo(14) } },
@@ -180,20 +190,20 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1045', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 98000, bestRate: null,
+      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 232000, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '13:00–17:00',
       deadline: inHours(5.5),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 98 000 ₽', createdAt: hoursAgo(6) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 232 000 ₽', createdAt: hoursAgo(6) } },
     },
   })
 
   await db.request.create({
     data: {
       number: 'Z-1046', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг',
-      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 41000, bestRate: null,
+      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 184000, bestRate: null,
       status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00',
       deadline: inHours(20),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 41 000 ₽', createdAt: hoursAgo(3) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 184 000 ₽', createdAt: hoursAgo(3) } },
     },
   })
 
@@ -201,15 +211,15 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1047', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Оборудование',
-      tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 78000, bestRate: 73500,
+      tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 210000, bestRate: 204500,
       status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierB.id,
       createdAt: hoursAgo(30), updatedAt: hoursAgo(8),
-      bids: { create: [{ carrierId: carrierB.id, amount: 73500, isWinner: true, createdAt: hoursAgo(12) }] },
+      bids: { create: [{ carrierId: carrierB.id, amount: 204500, isWinner: true, createdAt: hoursAgo(12) }] },
       events: {
         create: [
-          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 78 000 ₽', createdAt: hoursAgo(30) },
-          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 73 500 ₽', createdAt: hoursAgo(8) },
+          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 210 000 ₽', createdAt: hoursAgo(30) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 204 500 ₽', createdAt: hoursAgo(8) },
         ],
       },
     },
@@ -217,15 +227,15 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1048', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг',
-      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 44000, bestRate: 41500,
+      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 188000, bestRate: 182500,
       status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00',
       winnerId: carrierB.id,
       createdAt: hoursAgo(28), updatedAt: hoursAgo(7),
-      bids: { create: [{ carrierId: carrierB.id, amount: 41500, isWinner: true, createdAt: hoursAgo(10) }] },
+      bids: { create: [{ carrierId: carrierB.id, amount: 182500, isWinner: true, createdAt: hoursAgo(10) }] },
       events: {
         create: [
-          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 44 000 ₽', createdAt: hoursAgo(28) },
-          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 41 500 ₽', createdAt: hoursAgo(7) },
+          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 188 000 ₽', createdAt: hoursAgo(28) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 182 500 ₽', createdAt: hoursAgo(7) },
         ],
       },
     },
@@ -239,14 +249,14 @@ async function main() {
   const z1039 = await db.request.create({
     data: {
       number: 'Z-1039', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 95000, bestRate: 87500,
+      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 235000, bestRate: 226000,
       status: 'AT_LOGIST', loadDate: '16.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierA.id, driverId: driverA?.id, truckId: truckA?.id, trailerId: trailerA?.id,
       createdAt: hoursAgo(52), updatedAt: hoursAgo(4),
-      bids: { create: [{ carrierId: carrierA.id, amount: 87500, isWinner: true, createdAt: hoursAgo(48) }] },
+      bids: { create: [{ carrierId: carrierA.id, amount: 226000, isWinner: true, createdAt: hoursAgo(48) }] },
       events: {
         create: [
-          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик А» — 87 500 ₽', createdAt: hoursAgo(47) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик А» — 226 000 ₽', createdAt: hoursAgo(47) },
           { type: 'DOC_VERIFIED', message: 'Комплект документов прошёл проверку — передан логисту', createdAt: hoursAgo(4) },
         ],
       },
@@ -301,9 +311,9 @@ async function main() {
   await db.document.create({
     data: {
       requestId: z1039.id, type: 'REQUEST_DOC', fileName: 'zayavka_scan.jpg',
-      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 87 500 РУБ'], '#9a3412'),
+      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 226 000 РУБ'], '#9a3412'),
       status: 'PASSED', quality: 95, engine: 'PaddleOCR-демо',
-      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'Ставка': '87 500 РУБ' }),
+      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'Ставка': '226 000 РУБ' }),
       confidence: JSON.stringify({ 'Номер заявки': 0.997, 'Дата заявки': 0.99, 'Груз': 0.98, 'Ставка': 0.96 }),
       issues: JSON.stringify(['Номер заявки на скане совпал с рейсом Z-1039 — документ принят автоматически']),
       createdAt: hoursAgo(27.6), updatedAt: hoursAgo(27.3),
@@ -323,11 +333,11 @@ async function main() {
 
   // ---------- Реестр: подтверждённые и закрытые рейсы ----------
   const regRows = [
-    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 95000, best: 85900, load: '14.10.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
-    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 68000, best: 64500, load: '08.10.2026', cargo: 'Оборудование', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
-    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 130000, best: 124000, load: '05.10.2026', cargo: 'Контейнеры', route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
-    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 42000, best: 42000, load: '02.10.2026', cargo: 'Клининг', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
-    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 88000, best: 83200, load: '29.09.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },
+    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 238000, best: 224000, load: '14.10.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
+    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 192000, best: 186500, load: '08.10.2026', cargo: 'Оборудование', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
+    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 249000, best: 242000, load: '05.10.2026', cargo: 'Контейнеры', route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
+    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 181000, best: 181000, load: '02.10.2026', cargo: 'Клининг', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
+    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 215000, best: 209000, load: '29.09.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },
   ]
   for (const r of regRows) {
     await db.request.create({

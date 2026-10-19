@@ -57,7 +57,7 @@ export const DEMO_DOC_SAMPLES: DemoDocSample[] = [
   { type: 'PASSPORT_REG', fileName: 'passport_reg_demo.jpg', title: 'ПАСПОРТ РФ · РЕГИСТРАЦИЯ', lines: ['11.11.2023  230-014', 'Г. КРАСНОДАР, УЛ. СЕВЕРНАЯ', 'Д. 45, КВ. 12'], accent: '#0f3b66' },
   { type: 'LICENSE', fileName: 'license_demo.jpg', title: 'ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 10 555444', 'C, CE', '14.02.2022', '14.02.2032'], accent: '#5b3413' },
   { type: 'STS', fileName: 'sts_demo.jpg', title: 'СТС ТЯГАЧА', lines: ['Е456КХ123', 'Z942AB76HKB220001', '99 00 654321', 'SCANIA R450', 'ООО «Перевозчик Б»'], accent: '#14532d' },
-  { type: 'REQUEST_DOC', fileName: 'zayavka_demo.jpg', title: 'ЗАЯВКА НА ПЕРЕВОЗКУ', lines: ['№ Z-1042', '21.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 85 900 РУБ'], accent: '#9a3412' },
+  { type: 'REQUEST_DOC', fileName: 'zayavka_demo.jpg', title: 'ЗАЯВКА НА ПЕРЕВОЗКУ', lines: ['№ Z-1042', '21.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 218 000 РУБ'], accent: '#9a3412' },
   { type: 'POA', fileName: 'doverennost_demo.jpg', title: 'ДОВЕРЕННОСТЬ № 47', lines: ['№ 47', '20.10.2026', 'ООО «ПЕРЕВОЗЧИК Б»', 'ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '31.12.2026'], accent: '#3f6212' },
 ]
 

@@ -31,9 +31,7 @@ import {
   EmptyState,
   ErrorBlock,
   LoadingBlock,
-  ModeBadge,
   SectionHeader,
-  StatusBadge,
   type TabProps,
 } from '@/components/platform/common'
 import DriverIntakeDialog from '@/components/platform/driver-intake'
@@ -70,6 +68,16 @@ const STATUS_ORDER: Record<RequestDTO['status'], number> = {
   CONFIRMED: 2,
   CLOSED: 3,
   PUBLISHED: 4,
+}
+
+/** Цветная точка статуса для списка заявок (вместо плашек) */
+const STATUS_DOT: Record<RequestDTO['status'], string> = {
+  AWARDED: 'bg-amber-500',
+  DOCS_REVIEW: 'bg-blue-500',
+  AT_LOGIST: 'bg-blue-600',
+  CONFIRMED: 'bg-emerald-500',
+  CLOSED: 'bg-slate-400',
+  PUBLISHED: 'bg-slate-300',
 }
 
 const TRAILER_NONE = 'NONE'
@@ -137,6 +145,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
   const [sel, setSel] = useState<Record<string, SelState>>({})
   const [timelineOpen, setTimelineOpen] = useState<Record<string, boolean>>({})
   const [intakeReq, setIntakeReq] = useState<RequestDTO | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const load = useCallback(async () => {
@@ -221,7 +230,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
         ['PASSPORT_REG', sampleSvg('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', ['13.03.2024  230-027', 'Г. АБИНСК, УЛ. ИНТЕРНАЦИОНАЛЬНАЯ', 'Д. 110'], '#0f3b66')],
         ['LICENSE', sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')],
         ['STS', sampleSvg('СТС ТЯГАЧА', ['А123ВС777', 'X9622277XKG123456', '99 00 123456'], '#14532d')],
-        ['REQUEST_DOC', sampleSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', [`№ ${r.number}`, '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'СТАВКА: 87 500 РУБ'], '#9a3412')],
+        ['REQUEST_DOC', sampleSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', [`№ ${r.number}`, '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'СТАВКА: 226 000 РУБ'], '#9a3412')],
         ['POA', sampleSvg('ДОВЕРЕННОСТЬ № 47', ['№ 47', '18.10.2026', 'ООО «ПЕРЕВОЗЧИК А»', 'ИВАНОВ ИВАН ИВАНОВИЧ', '31.12.2026'], '#3f6212')],
       ]
       for (const [type, dataUri] of samples) {
@@ -325,6 +334,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
     .filter((r) => r.winnerId === activeCarrierId && r.status !== 'PUBLISHED')
     .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.updatedAt < b.updatedAt ? 1 : -1))
 
+  /** выбранная в списке заявка (по умолчанию — первая) */
+  const active = mine.find((r) => r.id === activeId) ?? mine[0] ?? null
+
   return (
     <section aria-label="Мои заявки — кабинет агента">
       <SectionHeader title={`Мои заявки · ${carrierName}`} />
@@ -353,29 +365,60 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
         </div>
       )}
 
-      {!loading && !error && requests && activeCarrierId && mine.length > 0 && (
-        <div className="space-y-5">
-          {mine.map((r) => {
-            const s: SelState = sel[r.id] ?? {
-              driverId: r.driverId ?? undefined,
-              truckId: r.truckId ?? undefined,
-              trailerId: r.trailerId ?? TRAILER_NONE,
-            }
-            const line = agentLine(r)
-            const inControl = r.status === 'AWARDED' || r.status === 'DOCS_REVIEW'
-            const hasPending = r.documents.some((d) => d.status === 'PENDING')
-            const compact = r.status === 'CONFIRMED' || r.status === 'CLOSED'
+      {!loading && !error && requests && activeCarrierId && mine.length > 0 && active && (() => {
+        const r = active
+        const s: SelState = sel[r.id] ?? {
+          driverId: r.driverId ?? undefined,
+          truckId: r.truckId ?? undefined,
+          trailerId: r.trailerId ?? TRAILER_NONE,
+        }
+        const line = agentLine(r)
+        const inControl = r.status === 'AWARDED' || r.status === 'DOCS_REVIEW'
+        const hasPending = r.documents.some((d) => d.status === 'PENDING')
+        const compact = r.status === 'CONFIRMED' || r.status === 'CLOSED'
 
-            return (
-              <Card key={r.id} className="border-slate-200 shadow-sm">
-                <CardContent className="space-y-4 p-4 sm:p-6">
+        return (
+          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
+            {/* Список заявок: можно прокрутить вниз и выбрать нужную */}
+            <div className="lg:sticky lg:top-4">
+              <div className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Ваши заявки · {mine.length}</div>
+              <nav aria-label="Список ваших заявок" className={`max-h-56 space-y-2 overflow-y-auto pr-1 sm:max-h-72 lg:max-h-[calc(100vh-9rem)] ${THIN_SCROLL}`}>
+                {mine.map((m) => {
+                  const selected = m.id === r.id
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setActiveId(m.id)}
+                      aria-current={selected ? 'true' : undefined}
+                      className={`w-full rounded-xl border p-3 text-left transition-colors ${selected ? 'border-blue-500 bg-blue-50/70 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-sm font-bold text-blue-700">{m.number}</span>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[m.status]}`} aria-hidden />
+                      </span>
+                      <span className="mt-1 flex items-center gap-1 text-xs text-slate-700">
+                        {m.fromPoint}
+                        <ArrowRight className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                        {m.toPoint}
+                      </span>
+                      <span className="mt-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate text-slate-500">{m.cargo}, {m.tonnage} т</span>
+                        <span className="shrink-0 font-semibold text-slate-900">{money(m.bestRate)}</span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </nav>
+            </div>
+
+            <Card className="border-slate-200 shadow-sm">
+              <CardContent className="space-y-4 p-4 sm:p-6">
                   {/* Шапка карточки */}
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-lg font-bold text-slate-900">Заявка {r.number}</h3>
-                        <ModeBadge mode={r.mode} />
-                        <StatusBadge status={r.status} />
                       </div>
                       <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-600">
                         {r.fromPoint}
@@ -753,11 +796,10 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                     )}
                   </div>
                 </CardContent>
-              </Card>
-            )
-          })}
-        </div>
-      )}
+            </Card>
+          </div>
+        )
+      })()}
 
       {/* Мастер «Добавить водителя с нейросетью» */}
       <DriverIntakeDialog
