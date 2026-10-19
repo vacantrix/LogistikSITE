@@ -57,7 +57,7 @@ import DriverIntakeDialog from '@/components/platform/driver-intake'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { demoSampleUri, fileToCompressedDataUri, sleep } from '@/lib/demo-media'
-import { money, REQUEST_STATUS_META } from '@/lib/status'
+import { rate, REQUEST_STATUS_META } from '@/lib/status'
 import type { CarrierDTO, DocStatus, DocType, IntakeDocVerdict, RequestDTO, RequestStatus } from '@/lib/types'
 
 const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
@@ -776,7 +776,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                     <div><span className="text-slate-400">Маршрут:</span> {selected.fromPoint} → {selected.toPoint}</div>
                     <div><span className="text-slate-400">Груз:</span> {selected.cargo}, {selected.tonnage} т · {selected.truckType}</div>
                     <div><span className="text-slate-400">Погрузка:</span> {selected.loadDate} {selected.loadWindow}</div>
-                    <div><span className="text-slate-400">Ставка:</span> {money(selected.bestRate ?? selected.startRate)}{selected.status === 'PUBLISHED' ? ' (стартовая)' : ''}</div>
+                    <div><span className="text-slate-400">Ставка:</span> {rate(selected.bestRate ?? selected.startRate)}{selected.status === 'PUBLISHED' ? ' (стартовая)' : ''}</div>
                   </div>
                   {selected.status === 'PUBLISHED' && (
                     <p className="mt-2 text-xs text-amber-700">

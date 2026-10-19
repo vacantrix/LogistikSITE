@@ -39,7 +39,7 @@ import {
 } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { fmtDateTime, money, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
+import { fmtDateTime, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
 import type { BidDTO, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
@@ -64,7 +64,7 @@ function RateCell({ request }: { request: RequestDTO }) {
           <Lock className="h-3.5 w-3.5 text-slate-400" aria-hidden />
           Скрыта
         </div>
-        <div className="text-xs text-muted-foreground">старт {money(request.startRate)}</div>
+        <div className="text-xs text-muted-foreground">старт {rate(request.startRate)}</div>
       </div>
     )
   }
@@ -72,14 +72,14 @@ function RateCell({ request }: { request: RequestDTO }) {
     return (
       <div>
         <div className="text-sm font-medium text-slate-500">Ставок нет</div>
-        <div className="text-xs text-muted-foreground">старт {money(request.startRate)}</div>
+        <div className="text-xs text-muted-foreground">старт {rate(request.startRate)}</div>
       </div>
     )
   }
   return (
     <div>
-      <div className="font-semibold text-slate-900">{money(request.bestRate)}</div>
-      <div className="text-xs text-muted-foreground">старт {money(request.startRate)}</div>
+      <div className="font-semibold text-slate-900">{rate(request.bestRate)}</div>
+      <div className="text-xs text-muted-foreground">старт {rate(request.startRate)}</div>
     </div>
   )
 }
@@ -200,7 +200,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     const withMine = !isLogist
     const header = [
       'Заявка', 'Маршрут', 'Груз', 'Тоннаж, т', 'Тип ТС', 'Статус',
-      'Ставка', 'Стартовая, ₽', 'Погрузка', 'Окно', 'Приём ставок до',
+      'Ставка, ₽/т', 'Стартовая, ₽/т', 'Погрузка', 'Окно', 'Приём ставок до',
       ...(withMine ? ['Мой отклик'] : []),
     ]
     const rows = filtered.map((r) => {
@@ -221,7 +221,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
         r.loadDate,
         r.loadWindow,
         r.deadline ? fmtDateTime(r.deadline) : '—',
-        ...(withMine ? [my ? `Ваша ставка: ${my.amount} ₽` : '—'] : []),
+        ...(withMine ? [my ? `Ваша ставка: ${my.amount} ₽/т` : '—'] : []),
       ]
     })
     const cols = [{ wch: 10 }, { wch: 28 }, { wch: 22 }, { wch: 10 }, { wch: 9 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 17 }]
@@ -248,13 +248,13 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     if (!bidReq || !activeCarrierId) return
     const amount = Math.round(Number(bidAmount.replace(/\s/g, '').replace(',', '.')))
     if (!amount || amount <= 0) {
-      toast({ title: 'Ошибка', description: 'Укажите ставку в рублях', variant: 'destructive' })
+      toast({ title: 'Ошибка', description: 'Укажите ставку за тонну', variant: 'destructive' })
       return
     }
     if (bidReq.mode === 'AUCTION') {
       const floor = bidReq.bestRate ?? bidReq.startRate
       if (amount >= floor) {
-        toast({ title: 'Ошибка', description: `Ставка должна быть ниже текущей лучшей (${money(floor)})`, variant: 'destructive' })
+        toast({ title: 'Ошибка', description: `Ставка должна быть ниже текущей лучшей (${rate(floor)})`, variant: 'destructive' })
         return
       }
     }
@@ -262,7 +262,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     try {
       const { request } = await api.action(bidReq.id, 'bid', { carrierId: activeCarrierId, amount })
       applyRequest(request)
-      toast({ title: 'Ставка принята', description: `${request.number} — ${money(amount)}${request.mode === 'CLOSED' ? ' · закрытая ставка' : ''}` })
+      toast({ title: 'Ставка принята', description: `${request.number} — ${rate(amount)}${request.mode === 'CLOSED' ? ' · закрытая ставка' : ''}` })
       closeBid()
     } catch (e) {
       toast({ title: 'Ошибка', description: e instanceof Error ? e.message : 'Не удалось подать ставку', variant: 'destructive' })
@@ -407,7 +407,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                                 <span className="font-semibold text-blue-700">{r.number}</span>
                                 {my && (
                                   <Badge variant="outline" className="whitespace-nowrap border-sky-200 bg-sky-100 text-[10px] text-sky-800">
-                                    Ваша ставка: {money(my.amount)}
+                                    Ваша ставка: {rate(my.amount)}
                                   </Badge>
                                 )}
                               </div>
@@ -533,8 +533,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="cr-rate">Стартовая ставка, ₽</Label>
-                <Input id="cr-rate" type="number" min={1000} step={500} placeholder="95000" value={form.startRate} onChange={(e) => setForm((f) => ({ ...f, startRate: e.target.value }))} />
+                <Label htmlFor="cr-rate">Стартовая ставка, ₽/т</Label>
+                <Input id="cr-rate" type="number" min={2500} max={12000} step={100} placeholder="8400" value={form.startRate} onChange={(e) => setForm((f) => ({ ...f, startRate: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="cr-date">Дата погрузки</Label>
@@ -582,7 +582,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
               <div className="space-y-4">
                 {bidReq.mode === 'AUCTION' && (
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                    Текущая лучшая: <span className="font-semibold text-slate-900">{money(bidReq.bestRate ?? bidReq.startRate)}</span>
+                    Текущая лучшая: <span className="font-semibold text-slate-900">{rate(bidReq.bestRate ?? bidReq.startRate)}</span>
                     {bidReq.bestRate == null && <span className="ml-1 text-muted-foreground">— ставок ещё нет</span>}
                   </div>
                 )}
@@ -593,14 +593,15 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                   </div>
                 )}
                 <div className="space-y-1.5">
-                  <Label htmlFor="bid-amount">Ваша ставка, ₽</Label>
+                  <Label htmlFor="bid-amount">Ваша ставка, ₽/т</Label>
                   <Input
                     id="bid-amount"
                     type="number"
-                    min={1}
-                    step={100}
+                    min={2500}
+                    max={12000}
+                    step={50}
                     inputMode="numeric"
-                    placeholder="Например, 85000"
+                    placeholder="Например, 8200"
                     value={bidAmount}
                     onChange={(e) => setBidAmount(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') void doBid() }}
@@ -642,8 +643,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                   { label: 'Груз', value: `${detailReq.cargo}, ${detailReq.tonnage} т` },
                   { label: 'Тип ТС', value: detailReq.truckType },
                   { label: 'Погрузка', value: `${detailReq.loadDate}, ${detailReq.loadWindow}` },
-                  { label: 'Стартовая ставка', value: money(detailReq.startRate) },
-                  { label: 'Текущая лучшая', value: detailReq.bestRate != null ? money(detailReq.bestRate) : '—' },
+                  { label: 'Стартовая ставка', value: rate(detailReq.startRate) },
+                  { label: 'Текущая лучшая', value: detailReq.bestRate != null ? rate(detailReq.bestRate) : '—' },
                   { label: detailReq.winnerName ? 'Перевозчик' : 'Окончание ставок', value: detailReq.winnerName ?? '—' },
                 ].map((f) => (
                   <div key={f.label} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
@@ -696,7 +697,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                                   </span>
                                 </TableCell>
                                 <TableCell className={isBest ? 'font-semibold text-emerald-700' : 'text-slate-700'}>
-                                  {money(b.amount)}
+                                  {rate(b.amount)}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">{fmtDateTime(b.createdAt)}</TableCell>
                               </TableRow>

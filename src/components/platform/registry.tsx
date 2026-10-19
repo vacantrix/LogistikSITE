@@ -22,7 +22,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import {
-  REGISTRY_STEPS, fmtDateTime, money, num, registryStepIndex,
+  REGISTRY_STEPS, fmtDateTime, rate, num, registryStepIndex,
 } from '@/lib/status'
 import type { DriverDTO, RequestDTO, TrailerDTO, TruckDTO } from '@/lib/types'
 
@@ -206,10 +206,10 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                           {trailer && <span className="text-slate-500"> + {trailer.plate}</span>}
                         </TableCell>
                         <TableCell className="whitespace-nowrap text-slate-600">
-                          {money(r.startRate)} → <span className="font-semibold text-slate-900">{money(r.bestRate)}</span>
+                          {rate(r.startRate)} → <span className="font-semibold text-slate-900">{rate(r.bestRate)}</span>
                         </TableCell>
                         <TableCell className={`whitespace-nowrap font-semibold ${(r.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                          {money(r.savings)}
+                          {rate(r.savings)}
                         </TableCell>
                         <TableCell><DocBadges r={r} /></TableCell>
                         <TableCell><StatusBadge status={r.status} /></TableCell>
@@ -298,12 +298,12 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                 </div>
                 <div>
                   <div className="text-[11px] uppercase tracking-wide text-slate-500">Ставка</div>
-                  <div className="text-sm font-medium text-slate-800">{money(detail.startRate)} → {money(detail.bestRate)}</div>
+                  <div className="text-sm font-medium text-slate-800">{rate(detail.startRate)} → {rate(detail.bestRate)}</div>
                 </div>
                 <div>
                   <div className="text-[11px] uppercase tracking-wide text-slate-500">Экономия</div>
                   <div className={`text-sm font-semibold ${(detail.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                    {money(detail.savings)}
+                    {rate(detail.savings)}
                   </div>
                 </div>
                 <div>
@@ -356,7 +356,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                 {closeTarget && (
                   <>
                     Запись №{closeTarget.number} · {closeTarget.fromPoint} → {closeTarget.toPoint} ·{' '}
-                    {closeTarget.winnerName ?? '—'} — {money(closeTarget.bestRate)}. Рейс будет помечен закрытым
+                    {closeTarget.winnerName ?? '—'} — {rate(closeTarget.bestRate)}. Рейс будет помечен закрытым
                     в реестре, ЭТрН — подписанной. Отчёты для бухгалтерии пересчитаются автоматически.
                   </>
                 )}

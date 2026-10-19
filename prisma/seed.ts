@@ -148,39 +148,39 @@ async function main() {
   const z1042 = await db.request.create({
     data: {
       number: 'Z-1042', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 225000, bestRate: 218000,
+      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 8400, bestRate: 7900,
       status: 'PUBLISHED', loadDate: '20.10.2026', loadWindow: '08:00–12:00',
       deadline: inHours(2.25),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 225 000 ₽, торги до срока', createdAt: hoursAgo(26) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 8 400 ₽/т, торги до срока', createdAt: hoursAgo(26) } },
     },
   })
   const bids1042 = [
-    { carrier: carrierA, amount: 218000, h: 9.1 },
-    { carrier: carrierB, amount: 219500, h: 9.4 },
-    { carrier: carrierV, amount: 222000, h: 10.2 },
-    { carrier: carrierG, amount: 224500, h: 11.9 },
+    { carrier: carrierA, amount: 7900, h: 9.1 },
+    { carrier: carrierB, amount: 8100, h: 9.4 },
+    { carrier: carrierV, amount: 8200, h: 10.2 },
+    { carrier: carrierG, amount: 8350, h: 11.9 },
   ]
   for (const b of bids1042) {
     await db.bid.create({
       data: { requestId: z1042.id, carrierId: b.carrier.id, amount: b.amount, createdAt: hoursAgo(b.h) },
     })
-    await db.event.create({ data: { requestId: z1042.id, type: 'BID_PLACED', message: `${b.carrier.name}: ставка ${b.amount.toLocaleString('ru-RU')} ₽`, createdAt: hoursAgo(b.h) } })
+    await db.event.create({ data: { requestId: z1042.id, type: 'BID_PLACED', message: `${b.carrier.name}: ставка ${b.amount.toLocaleString('ru-RU')} ₽/т`, createdAt: hoursAgo(b.h) } })
   }
 
   await db.request.create({
     data: {
       number: 'Z-1043', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Оборудование',
-      tonnage: 18, truckType: 'Реф', mode: 'AUCTION', startRate: 196000, bestRate: null,
+      tonnage: 18, truckType: 'Реф', mode: 'AUCTION', startRate: 6800, bestRate: null,
       status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00',
       deadline: inHours(26),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 196 000 ₽', createdAt: hoursAgo(20) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 6 800 ₽/т', createdAt: hoursAgo(20) } },
     },
   })
 
   await db.request.create({
     data: {
       number: 'Z-1044', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 248000, bestRate: null,
+      tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 11500, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '08:00–11:00',
       deadline: inHours(28),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: закрытые ставки, участники не видят цены друг друга', createdAt: hoursAgo(14) } },
@@ -190,20 +190,20 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1045', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 232000, bestRate: null,
+      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 9200, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '13:00–17:00',
       deadline: inHours(5.5),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 232 000 ₽', createdAt: hoursAgo(6) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 9 200 ₽/т', createdAt: hoursAgo(6) } },
     },
   })
 
   await db.request.create({
     data: {
       number: 'Z-1046', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг',
-      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 184000, bestRate: null,
+      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 3200, bestRate: null,
       status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00',
       deadline: inHours(20),
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 184 000 ₽', createdAt: hoursAgo(3) } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 3 200 ₽/т', createdAt: hoursAgo(3) } },
     },
   })
 
@@ -211,15 +211,15 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1047', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Оборудование',
-      tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 210000, bestRate: 204500,
+      tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 8800, bestRate: 8200,
       status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierB.id,
       createdAt: hoursAgo(30), updatedAt: hoursAgo(8),
-      bids: { create: [{ carrierId: carrierB.id, amount: 204500, isWinner: true, createdAt: hoursAgo(12) }] },
+      bids: { create: [{ carrierId: carrierB.id, amount: 8200, isWinner: true, createdAt: hoursAgo(12) }] },
       events: {
         create: [
-          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 210 000 ₽', createdAt: hoursAgo(30) },
-          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 204 500 ₽', createdAt: hoursAgo(8) },
+          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 8 800 ₽/т', createdAt: hoursAgo(30) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 8 200 ₽/т', createdAt: hoursAgo(8) },
         ],
       },
     },
@@ -227,15 +227,15 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1048', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг',
-      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 188000, bestRate: 182500,
+      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 4100, bestRate: 3850,
       status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00',
       winnerId: carrierB.id,
       createdAt: hoursAgo(28), updatedAt: hoursAgo(7),
-      bids: { create: [{ carrierId: carrierB.id, amount: 182500, isWinner: true, createdAt: hoursAgo(10) }] },
+      bids: { create: [{ carrierId: carrierB.id, amount: 3850, isWinner: true, createdAt: hoursAgo(10) }] },
       events: {
         create: [
-          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 188 000 ₽', createdAt: hoursAgo(28) },
-          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 182 500 ₽', createdAt: hoursAgo(7) },
+          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 4 100 ₽/т', createdAt: hoursAgo(28) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 3 850 ₽/т', createdAt: hoursAgo(7) },
         ],
       },
     },
@@ -249,14 +249,14 @@ async function main() {
   const z1039 = await db.request.create({
     data: {
       number: 'Z-1039', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции',
-      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 235000, bestRate: 226000,
+      tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 10500, bestRate: 9800,
       status: 'AT_LOGIST', loadDate: '16.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierA.id, driverId: driverA?.id, truckId: truckA?.id, trailerId: trailerA?.id,
       createdAt: hoursAgo(52), updatedAt: hoursAgo(4),
-      bids: { create: [{ carrierId: carrierA.id, amount: 226000, isWinner: true, createdAt: hoursAgo(48) }] },
+      bids: { create: [{ carrierId: carrierA.id, amount: 9800, isWinner: true, createdAt: hoursAgo(48) }] },
       events: {
         create: [
-          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик А» — 226 000 ₽', createdAt: hoursAgo(47) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик А» — 9 800 ₽/т', createdAt: hoursAgo(47) },
           { type: 'DOC_VERIFIED', message: 'Комплект документов прошёл проверку — передан логисту', createdAt: hoursAgo(4) },
         ],
       },
@@ -311,9 +311,9 @@ async function main() {
   await db.document.create({
     data: {
       requestId: z1039.id, type: 'REQUEST_DOC', fileName: 'zayavka_scan.jpg',
-      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 226 000 РУБ'], '#9a3412'),
+      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 9 800 РУБ/Т'], '#9a3412'),
       status: 'PASSED', quality: 95, engine: 'PaddleOCR-демо',
-      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'Ставка': '226 000 РУБ' }),
+      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'Ставка': '9 800 РУБ/Т' }),
       confidence: JSON.stringify({ 'Номер заявки': 0.997, 'Дата заявки': 0.99, 'Груз': 0.98, 'Ставка': 0.96 }),
       issues: JSON.stringify(['Номер заявки на скане совпал с рейсом Z-1039 — документ принят автоматически']),
       createdAt: hoursAgo(27.6), updatedAt: hoursAgo(27.3),
@@ -333,11 +333,11 @@ async function main() {
 
   // ---------- Реестр: подтверждённые и закрытые рейсы ----------
   const regRows = [
-    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 238000, best: 224000, load: '14.10.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
-    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 192000, best: 186500, load: '08.10.2026', cargo: 'Оборудование', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
-    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 249000, best: 242000, load: '05.10.2026', cargo: 'Контейнеры', route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
-    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 181000, best: 181000, load: '02.10.2026', cargo: 'Клининг', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
-    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 215000, best: 209000, load: '29.09.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },
+    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 11200, best: 10400, load: '14.10.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
+    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 5400, best: 5150, load: '08.10.2026', cargo: 'Оборудование', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
+    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 11800, best: 11250, load: '05.10.2026', cargo: 'Контейнеры', route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
+    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 2600, best: 2600, load: '02.10.2026', cargo: 'Клининг', route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
+    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 7600, best: 7300, load: '29.09.2026', cargo: 'Металлоконструкции', route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },
   ]
   for (const r of regRows) {
     await db.request.create({

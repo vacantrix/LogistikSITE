@@ -38,7 +38,7 @@ import DriverIntakeDialog from '@/components/platform/driver-intake'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
-import { DOC_TYPE_LABEL, fmtDateTime, money } from '@/lib/status'
+import { DOC_TYPE_LABEL, fmtDateTime, rate } from '@/lib/status'
 import type { CarrierDTO, DocStatus, DocType, RequestDTO } from '@/lib/types'
 
 const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
@@ -230,7 +230,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
         ['PASSPORT_REG', sampleSvg('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', ['13.03.2024  230-027', 'Г. АБИНСК, УЛ. ИНТЕРНАЦИОНАЛЬНАЯ', 'Д. 110'], '#0f3b66')],
         ['LICENSE', sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')],
         ['STS', sampleSvg('СТС ТЯГАЧА', ['А123ВС777', 'X9622277XKG123456', '99 00 123456'], '#14532d')],
-        ['REQUEST_DOC', sampleSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', [`№ ${r.number}`, '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'СТАВКА: 226 000 РУБ'], '#9a3412')],
+        ['REQUEST_DOC', sampleSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', [`№ ${r.number}`, '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'СТАВКА: 8 200 РУБ/Т'], '#9a3412')],
         ['POA', sampleSvg('ДОВЕРЕННОСТЬ № 47', ['№ 47', '18.10.2026', 'ООО «ПЕРЕВОЗЧИК А»', 'ИВАНОВ ИВАН ИВАНОВИЧ', '31.12.2026'], '#3f6212')],
       ]
       for (const [type, dataUri] of samples) {
@@ -404,7 +404,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                       </span>
                       <span className="mt-1 flex items-center justify-between gap-2 text-xs">
                         <span className="truncate text-slate-500">{m.cargo}, {m.tonnage} т</span>
-                        <span className="shrink-0 font-semibold text-slate-900">{money(m.bestRate)}</span>
+                        <span className="shrink-0 font-semibold text-slate-900">{rate(m.bestRate)}</span>
                       </span>
                     </button>
                   )
@@ -430,7 +430,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                     </div>
                     <div className="text-right">
                       <div className="text-xs text-muted-foreground">Итоговая ставка</div>
-                      <div className="text-lg font-bold text-slate-900">{money(r.bestRate)}</div>
+                      <div className="text-lg font-bold text-slate-900">{rate(r.bestRate)}</div>
                     </div>
                   </div>
 

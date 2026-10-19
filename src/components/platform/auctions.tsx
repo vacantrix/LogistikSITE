@@ -29,7 +29,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { fmtDateTime, money, num, timeLeft } from '@/lib/status'
+import { fmtDateTime, rate, num, timeLeft } from '@/lib/status'
 import type { BidDTO, CarrierDTO, RequestDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
@@ -144,12 +144,12 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
     if (!raiseRequest) return
     const amt = Number(raiseAmount)
     if (!raiseAmount || Number.isNaN(amt) || amt <= raiseRequest.startRate) {
-      setRaiseError(`Новая ставка должна быть выше текущей (${money(raiseRequest.startRate)})`)
+      setRaiseError(`Новая ставка должна быть выше текущей (${rate(raiseRequest.startRate)})`)
       return
     }
     const ok = await runAction(
       raiseRequest.id, 'raise-rate', { amount: amt },
-      'Стартовая ставка повышена', `№${raiseRequest.number}: новая стартовая ставка ${money(amt)}`,
+      'Стартовая ставка повышена', `№${raiseRequest.number}: новая стартовая ставка ${rate(amt)}`,
     )
     if (ok) setRaiseRequest(null)
   }
@@ -160,7 +160,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
     const ok = await runAction(
       request.id, 'award', { bidId: bid.id },
       'Победитель согласован',
-      `№${request.number}: ${bid.carrierName} — ${money(bid.amount)}. Заявка ждёт документы от агента`,
+      `№${request.number}: ${bid.carrierName} — ${rate(bid.amount)}. Заявка ждёт документы от агента`,
     )
     if (ok) setAwardBid(null)
   }
@@ -168,11 +168,11 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
   const confirmOffer = async () => {
     if (!offerRequest || !offerCarrierId) return
     const carrier = carriers.find((c) => c.id === offerCarrierId)
-    const rate = offerRequest.bestRate ?? offerRequest.startRate
+    const offerRate = offerRequest.bestRate ?? offerRequest.startRate
     const ok = await runAction(
       offerRequest.id, 'direct-offer', { carrierId: offerCarrierId },
       'Заявка предложена напрямую',
-      `№${offerRequest.number}: ${carrier?.name ?? 'перевозчик'} — ${money(rate)}`,
+      `№${offerRequest.number}: ${carrier?.name ?? 'перевозчик'} — ${rate(offerRate)}`,
     )
     if (ok) setOfferRequest(null)
   }
@@ -245,9 +245,9 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
 
                   {/* метрики */}
                   <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                    <Metric label="Стартовая ставка" value={money(r.startRate)} />
-                    <Metric label="Лучшая ставка" value={r.bestRate != null ? money(r.bestRate) : 'Ставок нет'} />
-                    <Metric label="Экономия" value={savings != null ? money(savings) : '—'} tone={savings != null ? 'green' : 'default'} />
+                    <Metric label="Стартовая ставка" value={rate(r.startRate)} />
+                    <Metric label="Лучшая ставка" value={r.bestRate != null ? rate(r.bestRate) : 'Ставок нет'} />
+                    <Metric label="Экономия" value={savings != null ? rate(savings) : '—'} tone={savings != null ? 'green' : 'default'} />
                     <Metric label="Ставок" value={String(r.bids.length)} />
                   </div>
 
@@ -280,7 +280,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
                             return (
                               <TableRow key={b.id} className={isBest ? 'bg-emerald-50/60' : undefined}>
                                 <TableCell className="font-medium text-slate-800">{b.carrierName}</TableCell>
-                                <TableCell className="whitespace-nowrap font-semibold text-slate-900">{money(b.amount)}</TableCell>
+                                <TableCell className="whitespace-nowrap font-semibold text-slate-900">{rate(b.amount)}</TableCell>
                                 <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(b.createdAt)}</TableCell>
                                 <TableCell className="whitespace-nowrap text-slate-600">{takenMap.get(b.carrierId) ?? '—'}</TableCell>
                                 <TableCell>
@@ -297,7 +297,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
                                     variant="outline"
                                     disabled={busy === r.id}
                                     onClick={() => setAwardBid({ request: r, bid: b })}
-                                    aria-label={`Выбрать ставку ${b.carrierName} на ${money(b.amount)}`}
+                                    aria-label={`Выбрать ставку ${b.carrierName} на ${rate(b.amount)}`}
                                   >
                                     Выбрать
                                   </Button>
@@ -364,7 +364,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
                   <span className="text-slate-500">Победитель: </span>
                   <span className="font-semibold text-slate-900">{r.winnerName ?? '—'}</span>
                 </div>
-                <div className="text-sm font-semibold text-slate-900">{money(r.bestRate)}</div>
+                <div className="text-sm font-semibold text-slate-900">{rate(r.bestRate)}</div>
                 <StatusBadge status={r.status} />
                 <div className="ml-auto flex items-center gap-3">
                   {r.status === 'AWARDED' && <span className="text-xs text-amber-600">Ожидает документы от агента</span>}
@@ -388,10 +388,10 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
                 {awardBid && (
                   <>
                     Заявка №{awardBid.request.number} · {awardBid.request.fromPoint} → {awardBid.request.toPoint}.
-                    Перевозчик <span className="font-semibold text-slate-900">{awardBid.bid.carrierName}</span> — сумма{' '}
-                    <span className="font-semibold text-emerald-700">{money(awardBid.bid.amount)}</span>
+                    Перевозчик <span className="font-semibold text-slate-900">{awardBid.bid.carrierName}</span> — ставка{' '}
+                    <span className="font-semibold text-emerald-700">{rate(awardBid.bid.amount)}</span>
                     {awardBid.request.startRate > awardBid.bid.amount && (
-                      <> · экономия {money(awardBid.request.startRate - awardBid.bid.amount)}</>
+                      <> · экономия {rate(awardBid.request.startRate - awardBid.bid.amount)}</>
                     )}
                     . После согласования агент получит заявку для загрузки документов.
                   </>
@@ -418,7 +418,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
             <DialogTitle>Предложить заявку напрямую</DialogTitle>
             <DialogDescription>
               {offerRequest && (
-                <>№{offerRequest.number} · {offerRequest.fromPoint} → {offerRequest.toPoint} · ставка {money(offerRequest.bestRate ?? offerRequest.startRate)}</>
+                <>№{offerRequest.number} · {offerRequest.fromPoint} → {offerRequest.toPoint} · ставка {rate(offerRequest.bestRate ?? offerRequest.startRate)}</>
               )}
             </DialogDescription>
           </DialogHeader>
@@ -459,19 +459,19 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="raise-amount">Новая стартовая ставка, ₽</Label>
+            <Label htmlFor="raise-amount">Новая стартовая ставка, ₽/т</Label>
             <Input
               id="raise-amount"
               type="number"
               inputMode="numeric"
-              min={0}
-              step={500}
+              min={2500}
+              step={100}
               placeholder={raiseRequest ? `больше ${raiseRequest.startRate}` : ''}
               value={raiseAmount}
               onChange={(e) => { setRaiseAmount(e.target.value); setRaiseError(null) }}
-              aria-label="Новая стартовая ставка в рублях"
+              aria-label="Новая стартовая ставка в рублях за тонну"
             />
-            {raiseRequest && <div className="text-xs text-slate-500">Текущая стартовая ставка: {money(raiseRequest.startRate)}</div>}
+            {raiseRequest && <div className="text-xs text-slate-500">Текущая стартовая ставка: {rate(raiseRequest.startRate)}</div>}
             {raiseError && <div className="text-xs font-medium text-red-600">{raiseError}</div>}
           </div>
           <DialogFooter>

@@ -12,7 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { api } from '@/lib/api'
-import { money } from '@/lib/status'
+import { rate } from '@/lib/status'
 import type { ReportSummary } from '@/lib/types'
 
 /** «1 заявка / 2 заявки / 5 заявок» */
@@ -79,7 +79,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
         <KpiCard
           icon={<Banknote className="h-5 w-5" aria-hidden />}
           label="Экономия"
-          value={money(kpi?.savingsMonth ?? null)}
+          value={rate(kpi?.savingsMonth ?? null)}
           hint="разница стартовой и итоговой ставки"
           tone="green"
         />
@@ -124,13 +124,13 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                   <span className="font-medium text-slate-700">
                     {d.direction} · {d.count} {plural(d.count, 'заявка', 'заявки', 'заявок')}
                   </span>
-                  <span className="font-semibold text-slate-900">{money(d.avgRate)}</span>
+                  <span className="font-semibold text-slate-900">{rate(d.avgRate)}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="h-3 flex-1 overflow-hidden rounded bg-slate-100">
                     <div className="h-3 rounded bg-blue-600 transition-all" style={{ width: `${width}%` }} />
                   </div>
-                  <span className="shrink-0 text-xs text-slate-500">мин {money(d.minRate)}</span>
+                  <span className="shrink-0 text-xs text-slate-500">мин {rate(d.minRate)}</span>
                 </div>
               </div>
             )
@@ -162,12 +162,12 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                       <TableCell className="whitespace-nowrap font-bold text-blue-700">№{row.number}</TableCell>
                       <TableCell className="text-slate-600">{row.cargo}</TableCell>
                       <TableCell className="whitespace-nowrap text-slate-600">
-                        {money(row.startRate)} → <span className="font-semibold text-slate-900">{money(row.bestRate)}</span>
+                        {rate(row.startRate)} → <span className="font-semibold text-slate-900">{rate(row.bestRate)}</span>
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-right font-semibold text-emerald-600">
                         <span className="inline-flex items-center gap-1">
                           <TrendingDown className="h-3.5 w-3.5" aria-hidden />
-                          {money(row.savings)}
+                          {rate(row.savings)}
                         </span>
                       </TableCell>
                     </TableRow>
@@ -201,7 +201,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                     <TableRow key={c.name}>
                       <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
                       <TableCell className="font-semibold text-slate-800">{c.taken}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right text-slate-700">{money(c.avgRate)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right text-slate-700">{rate(c.avgRate)}</TableCell>
                     </TableRow>
                   ))}
                   {(report?.carriers ?? []).length === 0 && (

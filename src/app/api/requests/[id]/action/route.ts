@@ -4,7 +4,7 @@ import { toRequestDTO } from '@/lib/serialize'
 
 export const dynamic = 'force-dynamic'
 
-const money = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽`
+const money = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽/т`
 
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.

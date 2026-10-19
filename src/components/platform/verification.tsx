@@ -24,7 +24,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { DOC_TYPE_LABEL, money } from '@/lib/status'
+import { DOC_TYPE_LABEL, rate } from '@/lib/status'
 import type { DocType, DocumentDTO, DriverDTO, RequestDTO, TruckDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
@@ -297,7 +297,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                 <SelectContent>
                   {queue.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
-                      №{r.number} · {r.winnerName ?? '—'} · {money(r.bestRate)}
+                      №{r.number} · {r.winnerName ?? '—'} · {rate(r.bestRate)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -320,7 +320,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-bold text-blue-700">№{r.number}</span>
-                      <span className="text-sm font-semibold text-slate-900">{money(r.bestRate)}</span>
+                      <span className="text-sm font-semibold text-slate-900">{rate(r.bestRate)}</span>
                     </div>
                     <div className="mt-0.5 truncate text-xs text-slate-600">{r.fromPoint} → {r.toPoint} · {r.cargo}</div>
                     <div className="mt-0.5 truncate text-xs text-slate-500">{r.winnerName ?? '—'}</div>
@@ -349,7 +349,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     </span>
                   </div>
                   <div className="text-sm text-slate-600">
-                    {selected.fromPoint} → {selected.toPoint} · {selected.cargo} · ставка {money(selected.bestRate)}
+                    {selected.fromPoint} → {selected.toPoint} · {selected.cargo} · ставка {rate(selected.bestRate)}
                   </div>
                 </div>
 

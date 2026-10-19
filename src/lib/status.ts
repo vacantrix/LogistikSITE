@@ -54,6 +54,10 @@ export function registryStepIndex(status: string, passPackage: boolean, etrnStat
 export const money = (v: number | null | undefined): string =>
   v == null ? '—' : `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽`
 
+/** Ставка за тонну (₽/т) — все ставки площадки считаются за тонну груза */
+export const rate = (v: number | null | undefined): string =>
+  v == null ? '—' : `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽/т`
+
 export const num = (v: number): string => new Intl.NumberFormat('ru-RU').format(v)
 
 export function timeLeft(deadline: string | null): { text: string; urgent: boolean } | null {

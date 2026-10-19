@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       loadWindow: loadWindow || '08:00–12:00',
       deadline: deadlineHours ? new Date(Date.now() + Number(deadlineHours) * 3600_000) : null,
       status: 'PUBLISHED',
-      events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована логистом: стартовая ставка ${Number(startRate).toLocaleString('ru-RU')} ₽` } },
+      events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована логистом: стартовая ставка ${Number(startRate).toLocaleString('ru-RU')} ₽/т` } },
     },
     include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true },
   })
