@@ -2,8 +2,10 @@
 
 /** Раздел «Площадка заявок» — перевозчик выбирает заявку и делает ставку; логист публикует и контролирует */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
 import {
   ArrowRight,
+  FileSpreadsheet,
   Gavel,
   Lock,
   Plus,
@@ -37,18 +39,21 @@ import {
 } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { fmtDateTime, money, timeLeft } from '@/lib/status'
+import { fmtDateTime, money, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
 import type { BidDTO, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
 
-type ModeFilter = 'ALL' | RequestMode
+type ModeFilter = 'ALL' | RequestMode | 'MY_BIDS'
 
 const MODE_FILTERS: { value: ModeFilter; label: string }[] = [
   { value: 'ALL', label: 'Все статусы' },
   { value: 'AUCTION', label: 'Торги' },
   { value: 'CLOSED', label: 'Закрытые ставки' },
 ]
+
+/** Только для роли перевозчика: заявки, куда он подавал ставку */
+const MY_BIDS_FILTER: { value: ModeFilter; label: string } = { value: 'MY_BIDS', label: 'Мои отклики' }
 
 /** Ставка в таблице: текущая лучшая и стартовая */
 function RateCell({ request }: { request: RequestDTO }) {
@@ -103,6 +108,17 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const [now, setNow] = useState<number | null>(null)
   const isLogist = role === 'logist'
 
+  /** Пункты фильтра статуса: у перевозчика добавляется «Мои отклики» */
+  const statusFilters = useMemo(
+    () => (isLogist ? MODE_FILTERS : [...MODE_FILTERS, MY_BIDS_FILTER]),
+    [isLogist],
+  )
+
+  // если роль сменилась на логиста — сбрасываем «Мои отклики»
+  useEffect(() => {
+    if (isLogist && mode === 'MY_BIDS') setMode('ALL')
+  }, [isLogist, mode])
+
   // диалоги: держим только id, свежие данные берём из списка
   const [detailId, setDetailId] = useState<string | null>(null)
   const [bidId, setBidId] = useState<string | null>(null)
@@ -156,15 +172,67 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     })
   }, [])
 
+  /** Лучшая (минимальная) ставка активного перевозчика по заявке — для подсветки и фильтра */
+  const myBidOf = useCallback(
+    (r: RequestDTO): BidDTO | null => {
+      if (!activeCarrierId) return null
+      const mine = r.bids.filter((b) => b.carrierId === activeCarrierId)
+      if (mine.length === 0) return null
+      return mine.reduce((best, b) => (b.amount < best.amount ? b : best))
+    },
+    [activeCarrierId],
+  )
+
   const filtered = useMemo(() => {
     const list = requests ?? []
     const needle = q.trim().toLowerCase()
     return list.filter((r) => {
-      if (mode !== 'ALL' && r.mode !== mode) return false
+      if (mode === 'MY_BIDS') {
+        if (!myBidOf(r)) return false
+      } else if (mode !== 'ALL' && r.mode !== mode) return false
       if (!needle) return true
       return [r.number, r.cargo, r.fromPoint, r.toPoint].some((v) => v.toLowerCase().includes(needle))
     })
-  }, [requests, q, mode])
+  }, [requests, q, mode, myBidOf])
+
+  /** Выгрузка текущей выборки в Excel: то, что видно в таблице с учётом фильтров и поиска */
+  const exportExcel = () => {
+    const withMine = !isLogist
+    const header = [
+      'Заявка', 'Маршрут', 'Груз', 'Тоннаж, т', 'Тип ТС', 'Статус',
+      'Ставка', 'Стартовая, ₽', 'Погрузка', 'Окно', 'Приём ставок до',
+      ...(withMine ? ['Мой отклик'] : []),
+    ]
+    const rows = filtered.map((r) => {
+      const my = myBidOf(r)
+      const statusLabel = r.status === 'PUBLISHED'
+        ? (r.mode === 'AUCTION' ? 'Торги' : 'Закрытые ставки')
+        : REQUEST_STATUS_META[r.status].label
+      const rate = r.mode === 'CLOSED' ? 'Скрыта' : (r.bestRate != null ? r.bestRate : '—')
+      return [
+        r.number,
+        `${r.fromPoint} → ${r.toPoint}`,
+        r.cargo,
+        r.tonnage,
+        r.truckType,
+        statusLabel,
+        rate,
+        r.startRate,
+        r.loadDate,
+        r.loadWindow,
+        r.deadline ? fmtDateTime(r.deadline) : '—',
+        ...(withMine ? [my ? `Ваша ставка: ${my.amount} ₽` : '—'] : []),
+      ]
+    })
+    const cols = [{ wch: 10 }, { wch: 28 }, { wch: 22 }, { wch: 10 }, { wch: 9 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 17 }]
+    if (withMine) cols.push({ wch: 19 })
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
+    ws['!cols'] = cols
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Площадка')
+    XLSX.writeFile(wb, 'ploschadka-zayavok.xlsx')
+    toast({ title: 'Выгрузка готова', description: `В файле ${rows.length} заявок — текущая выборка с учётом фильтров и поиска` })
+  }
 
   const openCount = (requests ?? []).filter((r) => r.status === 'PUBLISHED').length
 
@@ -282,11 +350,15 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                   <SelectValue placeholder="Все статусы" />
                 </SelectTrigger>
                 <SelectContent>
-                  {MODE_FILTERS.map((m) => (
+                  {statusFilters.map((m) => (
                     <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <Button variant="outline" onClick={exportExcel} disabled={filtered.length === 0} className="gap-2" aria-label="Выгрузить выборку в Excel">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" aria-hidden />
+                В Excel
+              </Button>
               <Button variant="outline" onClick={() => void load()} disabled={refreshing} className="gap-2" aria-label="Обновить список заявок">
                 <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
                 Обновить
@@ -300,8 +372,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
             <CardContent className="p-4 sm:p-6">
               {filtered.length === 0 ? (
                 <EmptyState
-                  title="Заявок не найдено"
-                  hint="Измените параметры поиска или фильтр статуса"
+                  title={mode === 'MY_BIDS' ? 'Откликов пока нет' : 'Заявок не найдено'}
+                  hint={mode === 'MY_BIDS'
+                    ? 'Заявки, куда перевозчик подавал ставку, появятся в этом списке'
+                    : 'Измените параметры поиска или фильтр статуса'}
                 />
               ) : (
                 <div className="-mx-2 overflow-x-auto px-2">
@@ -320,15 +394,24 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((r) => (
-                        <tr
-                          key={r.id}
-                          onClick={() => setDetailId(r.id)}
-                          className="cursor-pointer align-middle transition-colors hover:bg-blue-50/40"
-                        >
-                          <td className="border-b border-slate-100 py-3 pr-3">
-                            <span className="font-semibold text-blue-700">{r.number}</span>
-                          </td>
+                      {filtered.map((r) => {
+                        const my = myBidOf(r)
+                        return (
+                          <tr
+                            key={r.id}
+                            onClick={() => setDetailId(r.id)}
+                            className={`cursor-pointer align-middle transition-colors hover:bg-blue-50/40 ${my ? 'bg-sky-50/70' : ''}`}
+                          >
+                            <td className="border-b border-slate-100 py-3 pr-3">
+                              <div className="flex flex-col items-start gap-1">
+                                <span className="font-semibold text-blue-700">{r.number}</span>
+                                {my && (
+                                  <Badge variant="outline" className="whitespace-nowrap border-sky-200 bg-sky-100 text-[10px] text-sky-800">
+                                    Ваша ставка: {money(my.amount)}
+                                  </Badge>
+                                )}
+                              </div>
+                            </td>
                           <td className="border-b border-slate-100 py-3 pr-3">
                             <span className="flex items-center gap-1.5 font-medium text-slate-800">
                               {r.fromPoint}
@@ -392,7 +475,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                             )}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
