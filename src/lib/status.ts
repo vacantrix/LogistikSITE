@@ -12,7 +12,6 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: 
 }
 
 export const MODE_META: Record<RequestMode, { label: string; badge: string; icon: string }> = {
-  FIXED: { label: 'Фиксированная ставка', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: '⚡' },
   AUCTION: { label: 'Торги на понижение', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: '📉' },
   CLOSED: { label: 'Закрытые ставки', badge: 'bg-slate-100 text-slate-700 border-slate-200', icon: '🙈' },
 }

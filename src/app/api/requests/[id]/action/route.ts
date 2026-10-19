@@ -8,7 +8,7 @@ const money = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round
 
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.
- * action: bid | take | award | extend | direct-offer | raise-rate |
+ * action: bid | award | extend | direct-offer | raise-rate |
  *         assign | confirm | return | close
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -38,29 +38,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (amt >= floor) return NextResponse.json({ error: `Ставка должна быть ниже текущей лучшей (${money(floor)})` }, { status: 400 })
         }
         await db.bid.create({ data: { requestId: id, carrierId, amount: amt } })
-        if (request.mode !== 'CLOSED' && (request.bestRate == null || amt < request.bestRate)) {
-          await db.request.update({ where: { id }, data: { bestRate: amt } })
-        } else if (request.mode === 'CLOSED' && (request.bestRate == null || amt < request.bestRate)) {
+        if (request.bestRate == null || amt < request.bestRate) {
           await db.request.update({ where: { id }, data: { bestRate: amt } })
         }
         await ev('BID_PLACED', request.mode === 'CLOSED'
           ? `${carrier.name}: подана закрытая ставка`
           : `${carrier.name}: ставка ${money(amt)}`)
-        break
-      }
-
-      case 'take': {
-        const { carrierId } = body as { carrierId: string }
-        if (request.status !== 'PUBLISHED' || request.mode !== 'FIXED') {
-          return NextResponse.json({ error: 'Взять можно только заявку с фиксированной ставкой' }, { status: 400 })
-        }
-        const carrier = await db.carrier.findUnique({ where: { id: carrierId } })
-        if (!carrier) return NextResponse.json({ error: 'Перевозчик не найден' }, { status: 404 })
-        const updated = await db.request.update({
-          where: { id }, data: { status: 'AWARDED', winnerId: carrierId, bestRate: request.startRate },
-        })
-        await ev('REQUEST_TAKEN', `${carrier.name} взял заявку по фиксированной ставке ${money(request.startRate)}`)
-        void updated
         break
       }
 

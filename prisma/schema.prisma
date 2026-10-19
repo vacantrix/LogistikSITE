@@ -72,7 +72,7 @@ model Request {
   cargo       String
   tonnage     Float
   truckType   String
-  mode        String // FIXED | AUCTION | CLOSED
+  mode        String // AUCTION | CLOSED
   startRate   Float
   bestRate    Float?
   status      String     @default("PUBLISHED")

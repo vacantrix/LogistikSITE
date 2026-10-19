@@ -160,9 +160,10 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1043', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Оборудование',
-      tonnage: 18, truckType: 'Реф', mode: 'FIXED', startRate: 64000, bestRate: null,
+      tonnage: 18, truckType: 'Реф', mode: 'AUCTION', startRate: 64000, bestRate: null,
       status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00',
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: фиксированная ставка 64 000 ₽', createdAt: hoursAgo(20) } },
+      deadline: inHours(26),
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 64 000 ₽', createdAt: hoursAgo(20) } },
     },
   })
 
@@ -189,9 +190,10 @@ async function main() {
   await db.request.create({
     data: {
       number: 'Z-1046', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг',
-      tonnage: 10, truckType: 'Тент', mode: 'FIXED', startRate: 41000, bestRate: null,
+      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 41000, bestRate: null,
       status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00',
-      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: фиксированная ставка 41 000 ₽', createdAt: hoursAgo(3) } },
+      deadline: inHours(20),
+      events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 41 000 ₽', createdAt: hoursAgo(3) } },
     },
   })
 
@@ -276,7 +278,7 @@ async function main() {
       data: {
         number: r.number, fromPoint: r.route[0], toPoint: r.route[1], cargo: r.cargo.split(',')[0],
         tonnage: Number(r.cargo.split('т')[0].match(/(\d+)\s*$/)?.[1] ?? 20),
-        truckType: 'Тент', mode: r.best === r.start ? 'FIXED' : 'AUCTION',
+        truckType: 'Тент', mode: 'AUCTION',
         startRate: r.start, bestRate: r.best, status: r.status, loadDate: r.load, loadWindow: '08:00–12:00',
         winnerId: r.carrier.id, passPackage: r.pass, etrnStatus: r.etrn,
         createdAt: hoursAgo(r.h + 24), updatedAt: hoursAgo(r.h),

@@ -1,7 +1,7 @@
 /** Общие DTO платформы (клиент + сервер) */
 
 export type RequestStatus = 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'CONFIRMED' | 'CLOSED'
-export type RequestMode = 'FIXED' | 'AUCTION' | 'CLOSED'
+export type RequestMode = 'AUCTION' | 'CLOSED'
 export type DocStatus = 'PENDING' | 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
 export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS'
 

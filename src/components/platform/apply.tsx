@@ -270,12 +270,11 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
     [requests, requestId],
   )
 
-  // доступные цели заявки: свои заявки без документов + открытые фиксированные рейсы
-  const { mineNeedDocs, openFixed, needBid } = useMemo(() => {
+  // доступные цели заявки: свои заявки без документов + открытые рейсы (нужна ставка на площадке)
+  const { mineNeedDocs, needBid } = useMemo(() => {
     const all = requests ?? []
     return {
       mineNeedDocs: all.filter((r) => r.winnerId === activeCarrierId && (r.status === 'AWARDED' || r.status === 'DOCS_REVIEW')),
-      openFixed: all.filter((r) => r.status === 'PUBLISHED' && r.mode === 'FIXED'),
       needBid: all.filter((r) => r.status === 'PUBLISHED' && (r.mode === 'AUCTION' || r.mode === 'CLOSED')),
     }
   }, [requests, activeCarrierId])
@@ -302,21 +301,16 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
     if (!canSubmit || !selected) return
     setSubmitting(true)
     try {
-      // 1. если рейс ещё открыт и фиксированный — берём его
+      // 1. назначаем водителя и ТС
       let req = selected
-      if (req.status === 'PUBLISHED') {
-        const taken = await api.action(req.id, 'take', { carrierId: activeCarrierId })
-        req = taken.request
-      }
-      // 2. назначаем водителя и ТС
       const assigned = await api.action(req.id, 'assign', { carrierId: activeCarrierId, driverId, truckId, trailerId: trailerId || undefined })
       req = assigned.request
-      // 3. прикрепляем проверенный комплект документов
+      // 2. прикрепляем проверенный комплект документов
       for (const t of DOC_ORDER) {
         const up = slots[t].upload
         if (up) await api.uploadDocument(req.id, { type: t, fileName: up.fileName, dataUri: up.dataUri })
       }
-      // 4. прогон нейропроверки платформы и передача логисту
+      // 3. прогон нейропроверки платформы и передача логисту
       const verified = await api.verifyDocuments(req.id)
       setSubmitted(verified.request)
       toast({ title: `Заявка ${verified.request.number} подана`, description: 'Комплект документов проверен нейросетью и отправлен логисту' })
@@ -353,7 +347,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   if (submitted) {
     return (
       <div>
-        <SectionHeader eyebrow="ЛИНИЯ АГЕНТА · НЕЙРОСЕТЬ ВКЛЮЧЕНА" title="Заявка подана" />
+        <SectionHeader title="Заявка подана" />
         <Card className="border-emerald-200 bg-emerald-50/50 shadow-sm">
           <CardContent className="p-6">
             <div className="flex flex-wrap items-center gap-3">
@@ -422,7 +416,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               </div>
               <Select value={requestId} onValueChange={(v) => setRequestId(v === requestId ? '' : v)}>
                 <SelectTrigger aria-label="Выбор рейса для заявки" className="w-full">
-                  <SelectValue placeholder={mineNeedDocs.length + openFixed.length > 0 ? 'Выберите рейс' : 'Нет доступных рейсов'} />
+                  <SelectValue placeholder={mineNeedDocs.length > 0 ? 'Выберите рейс' : 'Нет доступных рейсов'} />
                 </SelectTrigger>
                 <SelectContent>
                   {mineNeedDocs.length > 0 && (
@@ -431,16 +425,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                       {mineNeedDocs.map((r) => (
                         <SelectItem key={r.id} value={r.id}>
                           {r.number} · {r.fromPoint} → {r.toPoint} · {r.cargo}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
-                  {openFixed.length > 0 && (
-                    <SelectGroup>
-                      <SelectLabel>Открытые рейсы · фиксированная ставка</SelectLabel>
-                      {openFixed.map((r) => (
-                        <SelectItem key={r.id} value={r.id}>
-                          {r.number} · {r.fromPoint} → {r.toPoint} · {money(r.startRate)}
                         </SelectItem>
                       ))}
                     </SelectGroup>

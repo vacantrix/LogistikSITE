@@ -11,16 +11,6 @@ import {
   Search,
   ShieldCheck,
 } from 'lucide-react'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -56,16 +46,12 @@ type ModeFilter = 'ALL' | RequestMode
 
 const MODE_FILTERS: { value: ModeFilter; label: string }[] = [
   { value: 'ALL', label: 'Все режимы' },
-  { value: 'FIXED', label: 'Фиксированная ставка' },
   { value: 'AUCTION', label: 'Торги' },
   { value: 'CLOSED', label: 'Закрытые ставки' },
 ]
 
-/** Ставка в таблице: по режиму заявки */
+/** Ставка в таблице: текущая лучшая и стартовая */
 function RateCell({ request }: { request: RequestDTO }) {
-  if (request.mode === 'FIXED') {
-    return <span className="font-semibold text-slate-900">{money(request.startRate)}</span>
-  }
   if (request.mode === 'CLOSED') {
     return (
       <div>
@@ -95,7 +81,7 @@ function RateCell({ request }: { request: RequestDTO }) {
 
 /** Обратный отсчёт до окончания приёма ставок (без hydration mismatch) */
 function DeadlineCell({ request, now }: { request: RequestDTO; now: number | null }) {
-  if (request.mode === 'FIXED' || !request.deadline) return <span className="text-slate-400">—</span>
+  if (!request.deadline) return <span className="text-slate-400">—</span>
   if (now === null) return <span className="text-slate-400">—</span>
   const tl = timeLeft(request.deadline)
   if (!tl) return <span className="text-slate-400">—</span>
@@ -121,7 +107,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const [detailId, setDetailId] = useState<string | null>(null)
   const [bidId, setBidId] = useState<string | null>(null)
   const [bidAmount, setBidAmount] = useState('')
-  const [takeId, setTakeId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   // создание заявки — только логист
@@ -185,7 +170,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
 
   const detailReq = (requests ?? []).find((r) => r.id === detailId) ?? null
   const bidReq = (requests ?? []).find((r) => r.id === bidId) ?? null
-  const takeReq = (requests ?? []).find((r) => r.id === takeId) ?? null
 
   const closeBid = () => {
     setBidId(null)
@@ -219,21 +203,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     }
   }
 
-  const doTake = async () => {
-    if (!takeReq || !activeCarrierId) return
-    setBusyId(takeReq.id)
-    try {
-      const { request } = await api.action(takeReq.id, 'take', { carrierId: activeCarrierId })
-      applyRequest(request)
-      toast({ title: 'Заявка закреплена за вами', description: `${request.number} — фиксированная ставка ${money(request.startRate)}` })
-      setTakeId(null)
-    } catch (e) {
-      toast({ title: 'Ошибка', description: e instanceof Error ? e.message : 'Не удалось взять заявку', variant: 'destructive' })
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   const sortedBids = (bids: BidDTO[]) => [...bids].sort((a, b) => a.amount - b.amount)
   const bestBid = (bids: BidDTO[]) => (bids.length > 0 ? Math.min(...bids.map((b) => b.amount)) : null)
 
@@ -255,7 +224,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
         startRate: Number(form.startRate.replace(/\s/g, '')),
         loadDate: form.loadDate.trim() || '—',
         loadWindow: form.loadWindow.trim() || '08:00–12:00',
-        ...(form.mode !== 'FIXED' ? { deadline: new Date(Date.now() + Number(form.deadlineHours || 4) * 3600_000).toISOString() } : {}),
+        deadline: new Date(Date.now() + Number(form.deadlineHours || 4) * 3600_000).toISOString(),
       })
       setRequests((prev) => [request, ...(prev ?? [])])
       setCreateOpen(false)
@@ -396,16 +365,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                               </>
                             ) : (
                               <>
-                                {r.status === 'PUBLISHED' && r.mode === 'FIXED' && (
-                                  <Button
-                                    size="sm"
-                                    disabled={!activeCarrierId || busyId !== null}
-                                    onClick={() => setTakeId(r.id)}
-                                    aria-label={`Взять заявку ${r.number} по фиксированной ставке`}
-                                  >
-                                    Взять заявку
-                                  </Button>
-                                )}
                                 {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
                                   <Button
                                     size="sm"
@@ -485,7 +444,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                   <SelectTrigger id="cr-mode"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="AUCTION">Торги (аукцион на понижение)</SelectItem>
-                    <SelectItem value="FIXED">Фиксированная ставка</SelectItem>
                     <SelectItem value="CLOSED">Закрытые ставки</SelectItem>
                   </SelectContent>
                 </Select>
@@ -502,19 +460,17 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 <Label htmlFor="cr-window">Окно погрузки</Label>
                 <Input id="cr-window" placeholder="09:00–13:00" value={form.loadWindow} onChange={(e) => setForm((f) => ({ ...f, loadWindow: e.target.value }))} />
               </div>
-              {form.mode !== 'FIXED' && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="cr-deadline">Приём ставок ещё</Label>
-                  <Select value={form.deadlineHours} onValueChange={(v) => setForm((f) => ({ ...f, deadlineHours: v }))}>
-                    <SelectTrigger id="cr-deadline"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {[['2', '2 часа'], ['4', '4 часа'], ['8', '8 часов'], ['24', '24 часа']].map(([v, l]) => (
-                        <SelectItem key={v} value={v}>{l}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="cr-deadline">Приём ставок ещё</Label>
+                <Select value={form.deadlineHours} onValueChange={(v) => setForm((f) => ({ ...f, deadlineHours: v }))}>
+                  <SelectTrigger id="cr-deadline"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {[['2', '2 часа'], ['4', '4 часа'], ['8', '8 часов'], ['24', '24 часа']].map(([v, l]) => (
+                      <SelectItem key={v} value={v}>{l}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Отмена</Button>
@@ -525,25 +481,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
           </DialogContent>
         </Dialog>
       )}
-
-      {/* Подтверждение: взять заявку по фиксированной ставке */}
-      <AlertDialog open={takeReq !== null} onOpenChange={(o) => { if (!o) setTakeId(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Взять заявку {takeReq?.number}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Заявка закрепляется за вами по фиксированной ставке {money(takeReq?.startRate ?? 0)}.
-              Дальше останется указать водителя и ТС и загрузить документы.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void doTake()} disabled={busyId !== null}>
-              {busyId === takeReq?.id ? 'Закрепляем…' : 'Взять заявку'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Диалог ставки (торги / закрытые ставки) */}
       <Dialog open={bidReq !== null} onOpenChange={(o) => { if (!o) closeBid() }}>
@@ -692,12 +629,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
                   <Lock className="h-4 w-4 shrink-0" aria-hidden />
                   Ставки скрыты до подведения итогов — участники не видят цены друг друга.
-                </div>
-              )}
-
-              {detailReq.mode === 'FIXED' && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                  Фиксированная ставка: <span className="font-semibold">{money(detailReq.startRate)}</span> — торги не проводятся.
                 </div>
               )}
 
