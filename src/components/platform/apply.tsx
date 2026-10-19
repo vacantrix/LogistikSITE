@@ -218,20 +218,9 @@ function SlotVerdict({ s, type }: { s: SlotState; type: DocType }) {
 
 // ——— Визуализация статусов заявки: цветная линия с подсказками при наведении ———
 
-/** Русское склонение: 1 заявка / 2 заявки / 5 заявок */
-function zayavokWord(n: number): string {
-  const m10 = n % 10
-  const m100 = n % 100
-  if (m10 === 1 && m100 !== 11) return 'заявка'
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'заявки'
-  return 'заявок'
-}
-
 interface PipelineStage {
   label: string
   icon: typeof MousePointerClick
-  /** демо-наполнение для визуализации работы на площадке */
-  count: number
   circle: string
   ring: string
   countCls: string
@@ -243,7 +232,6 @@ const PIPELINE_STAGES: PipelineStage[] = [
   {
     label: 'Выбор рейса',
     icon: MousePointerClick,
-    count: 8,
     circle: 'bg-sky-500',
     ring: 'ring-sky-100',
     countCls: 'text-sky-700',
@@ -253,7 +241,6 @@ const PIPELINE_STAGES: PipelineStage[] = [
   {
     label: 'Согласование ставки',
     icon: Handshake,
-    count: 5,
     circle: 'bg-teal-500',
     ring: 'ring-teal-100',
     countCls: 'text-teal-700',
@@ -263,7 +250,6 @@ const PIPELINE_STAGES: PipelineStage[] = [
   {
     label: 'Подтверждено',
     icon: CheckCircle2,
-    count: 4,
     circle: 'bg-violet-500',
     ring: 'ring-violet-100',
     countCls: 'text-violet-700',
@@ -273,7 +259,6 @@ const PIPELINE_STAGES: PipelineStage[] = [
   {
     label: 'Документы',
     icon: FileCheck2,
-    count: 3,
     circle: 'bg-amber-500',
     ring: 'ring-amber-100',
     countCls: 'text-amber-700',
@@ -283,7 +268,6 @@ const PIPELINE_STAGES: PipelineStage[] = [
   {
     label: 'Сверка у логиста',
     icon: UserCheck,
-    count: 2,
     circle: 'bg-blue-600',
     ring: 'ring-blue-100',
     countCls: 'text-blue-700',
@@ -293,7 +277,6 @@ const PIPELINE_STAGES: PipelineStage[] = [
   {
     label: 'В 1С — готово',
     icon: Database,
-    count: 6,
     circle: 'bg-emerald-500',
     ring: 'ring-emerald-100',
     countCls: 'text-emerald-700',
@@ -312,22 +295,40 @@ const STAGE_OF_STATUS: Record<RequestStatus, number> = {
   CLOSED: 5,
 }
 
-function StatusPipeline({ activeIdx }: { activeIdx: number }) {
+/**
+ * Плашка быстрой оценки статуса для агента: отражает положение ВЫБРАННОЙ заявки
+ * на линии этапов. Без выбранного рейса — вся линия серая; с рейсом — подсвечены
+ * текущий этап и все пройденные, остальные серые.
+ */
+function StatusPipeline({ activeIdx, request }: { activeIdx: number; request: RequestDTO | null }) {
+  const hasRequest = request !== null
   return (
     <Card className="mb-4 border-slate-200 shadow-sm">
       <CardContent className="px-3 py-4 sm:px-6">
+        {hasRequest ? (
+          <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+            <span className="font-medium">Заявка</span>
+            <span className="font-mono text-sm font-bold text-blue-700">{request.number}</span>
+            <StatusBadge status={request.status} />
+            <span className="text-slate-400">· этап {activeIdx + 1} из {PIPELINE_STAGES.length}</span>
+          </div>
+        ) : (
+          <div className="mb-3 text-xs text-slate-400">Выберите рейс — и здесь отразится, на каком этапе он находится</div>
+        )}
         <div className="flex items-start overflow-x-auto pb-1" aria-label="Этапы заявки на площадке">
           {PIPELINE_STAGES.map((st, i) => {
             const Icon = st.icon
             const colored = i <= activeIdx
             const isCurrent = i === activeIdx
+            const isDone = hasRequest && i < activeIdx
+            const stateWord = isCurrent ? ' — текущий этап' : isDone ? ' — готово' : hasRequest ? ' — ожидает' : ''
             return (
               <Fragment key={st.label}>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={`${st.label}: ${st.count} ${zayavokWord(st.count)}${isCurrent ? ' — текущий этап' : ''}`}
+                      aria-label={`${st.label}${stateWord}`}
                       className="flex w-24 shrink-0 cursor-default flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:w-auto sm:flex-1"
                     >
                       <span className={`relative flex h-11 w-11 items-center justify-center rounded-full text-white shadow-sm ring-4 ${colored ? st.circle : 'bg-slate-200'} ${colored ? st.ring : 'ring-slate-100'}`} aria-hidden>
@@ -339,8 +340,8 @@ function StatusPipeline({ activeIdx }: { activeIdx: number }) {
                           </span>
                         )}
                       </span>
-                      <span className={`whitespace-nowrap text-sm font-bold leading-none ${colored ? st.countCls : 'text-slate-400'}`}>
-                        {st.count} {zayavokWord(st.count)}
+                      <span className={`whitespace-nowrap text-sm font-bold leading-none ${isDone ? 'text-emerald-600' : isCurrent ? st.countCls : 'text-slate-400'}`}>
+                        {hasRequest ? (isDone ? 'Готово' : isCurrent ? 'Текущий этап' : 'Ожидает') : '\u00A0'}
                       </span>
                       <span className={`text-[11px] leading-tight sm:text-xs ${isCurrent ? 'font-semibold text-slate-900' : colored ? 'font-medium text-slate-600' : 'font-medium text-slate-400'}`}>
                         {st.label}
@@ -349,6 +350,7 @@ function StatusPipeline({ activeIdx }: { activeIdx: number }) {
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="max-w-64">
                     <span className="font-semibold">{st.label}. </span>{st.tip}
+                    {isCurrent && <div className="mt-1 font-semibold">Заявка сейчас на этом этапе</div>}
                   </TooltipContent>
                 </Tooltip>
                 {i < PIPELINE_STAGES.length - 1 && (
@@ -717,7 +719,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   return (
     <div>
       <SectionHeader title="Подать заявку" />
-      <StatusPipeline activeIdx={selected ? STAGE_OF_STATUS[selected.status] : -1} />
+      <StatusPipeline activeIdx={selected ? STAGE_OF_STATUS[selected.status] : -1} request={selected} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
