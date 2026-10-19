@@ -45,7 +45,7 @@ const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:r
 type ModeFilter = 'ALL' | RequestMode
 
 const MODE_FILTERS: { value: ModeFilter; label: string }[] = [
-  { value: 'ALL', label: 'Все режимы' },
+  { value: 'ALL', label: 'Все статусы' },
   { value: 'AUCTION', label: 'Торги' },
   { value: 'CLOSED', label: 'Закрытые ставки' },
 ]
@@ -278,8 +278,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 />
               </div>
               <Select value={mode} onValueChange={(v) => setMode(v as ModeFilter)}>
-                <SelectTrigger className="w-[200px]" aria-label="Фильтр по режиму заявки">
-                  <SelectValue placeholder="Все режимы" />
+                <SelectTrigger className="w-[200px]" aria-label="Фильтр по статусу заявки">
+                  <SelectValue placeholder="Все статусы" />
                 </SelectTrigger>
                 <SelectContent>
                   {MODE_FILTERS.map((m) => (
@@ -301,7 +301,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
               {filtered.length === 0 ? (
                 <EmptyState
                   title="Заявок не найдено"
-                  hint="Измените параметры поиска или фильтр режима"
+                  hint="Измените параметры поиска или фильтр статуса"
                 />
               ) : (
                 <div className="-mx-2 overflow-x-auto px-2">
@@ -313,7 +313,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Груз</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Погрузка</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Тип ТС</th>
-                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Режим</th>
+                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Статус</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Ставка</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">До окончания</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 font-semibold">Действие</th>
@@ -439,7 +439,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="cr-mode">Режим отбора</Label>
+                <Label htmlFor="cr-mode">Статус</Label>
                 <Select value={form.mode} onValueChange={(v) => setForm((f) => ({ ...f, mode: v as RequestMode }))}>
                   <SelectTrigger id="cr-mode"><SelectValue /></SelectTrigger>
                   <SelectContent>

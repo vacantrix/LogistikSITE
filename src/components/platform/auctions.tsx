@@ -211,7 +211,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
             <EmptyState
               icon={<Gavel className="h-10 w-10" aria-hidden />}
               title="Сейчас торгов нет"
-              hint="Опубликуйте заявку на площадке — она появится здесь в режимах «Торги» или «Закрытые ставки»"
+              hint="Опубликуйте заявку на площадке — она появится здесь в статусах «Торги» или «Закрытые ставки»"
             />
           )}
           {live.map((r) => {

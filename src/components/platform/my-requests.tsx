@@ -332,7 +332,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
         <div className="space-y-4">
           <EmptyState
             title="Пока нет выигранных заявок"
-            hint="Перейдите на Площадку заявок: подайте ставку в торгах или закрытым режимом"
+            hint="Перейдите на Площадку заявок: подайте ставку в статусах «Торги» или «Закрытые ставки»"
           />
           <div className="flex justify-center">
             <Button onClick={() => onNavigate('board')} className="gap-2" aria-label="Перейти к площадке заявок">
