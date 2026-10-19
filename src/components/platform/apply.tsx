@@ -58,7 +58,7 @@ import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { demoSampleUri, fileToCompressedDataUri, sleep } from '@/lib/demo-media'
 import { money, REQUEST_STATUS_META } from '@/lib/status'
-import type { CarrierDTO, DocStatus, DocType, IntakeDocVerdict, RequestDTO } from '@/lib/types'
+import type { CarrierDTO, DocStatus, DocType, IntakeDocVerdict, RequestDTO, RequestStatus } from '@/lib/types'
 
 const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 
@@ -302,29 +302,49 @@ const PIPELINE_STAGES: PipelineStage[] = [
   },
 ]
 
-function StatusPipeline() {
+/** Какому этапу линии соответствует каждый статус рейса */
+const STAGE_OF_STATUS: Record<RequestStatus, number> = {
+  PUBLISHED: 0,   // ещё на площадке — «Выбор рейса»
+  AWARDED: 2,     // ставка согласована — «Подтверждено»
+  DOCS_REVIEW: 3, // комплект загружается — «Документы»
+  AT_LOGIST: 4,   // «Сверка у логиста»
+  CONFIRMED: 5,   // «В 1С — готово»
+  CLOSED: 5,
+}
+
+function StatusPipeline({ activeIdx }: { activeIdx: number }) {
   return (
     <Card className="mb-4 border-slate-200 shadow-sm">
       <CardContent className="px-3 py-4 sm:px-6">
-        <div className="flex items-start overflow-x-auto pb-1" aria-label="Статусы заявки на площадке">
+        <div className="flex items-start overflow-x-auto pb-1" aria-label="Этапы заявки на площадке">
           {PIPELINE_STAGES.map((st, i) => {
             const Icon = st.icon
+            const colored = i <= activeIdx
+            const isCurrent = i === activeIdx
             return (
               <Fragment key={st.label}>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      aria-label={`${st.label}: ${st.count} ${zayavokWord(st.count)}`}
+                      aria-label={`${st.label}: ${st.count} ${zayavokWord(st.count)}${isCurrent ? ' — текущий этап' : ''}`}
                       className="flex w-24 shrink-0 cursor-default flex-col items-center gap-1 rounded-lg px-1 py-1 text-center outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:w-auto sm:flex-1"
                     >
-                      <span className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-sm ring-4 ${st.circle} ${st.ring}`} aria-hidden>
+                      <span className={`relative flex h-11 w-11 items-center justify-center rounded-full text-white shadow-sm ring-4 ${colored ? st.circle : 'bg-slate-200'} ${colored ? st.ring : 'ring-slate-100'}`} aria-hidden>
                         <Icon className="h-5 w-5" />
+                        {isCurrent && (
+                          <span className="absolute -right-1 -top-1 flex h-3 w-3">
+                            <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ${st.circle}`} />
+                            <span className={`relative inline-flex h-3 w-3 rounded-full ring-2 ring-white ${st.circle}`} />
+                          </span>
+                        )}
                       </span>
-                      <span className={`whitespace-nowrap text-sm font-bold leading-none ${st.countCls}`}>
+                      <span className={`whitespace-nowrap text-sm font-bold leading-none ${colored ? st.countCls : 'text-slate-400'}`}>
                         {st.count} {zayavokWord(st.count)}
                       </span>
-                      <span className="text-[11px] font-medium leading-tight text-slate-600 sm:text-xs">{st.label}</span>
+                      <span className={`text-[11px] leading-tight sm:text-xs ${isCurrent ? 'font-semibold text-slate-900' : colored ? 'font-medium text-slate-600' : 'font-medium text-slate-400'}`}>
+                        {st.label}
+                      </span>
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="max-w-64">
@@ -332,7 +352,7 @@ function StatusPipeline() {
                   </TooltipContent>
                 </Tooltip>
                 {i < PIPELINE_STAGES.length - 1 && (
-                  <div aria-hidden className={`mt-5 h-1 w-7 shrink-0 rounded-full bg-gradient-to-r sm:w-10 ${st.line}`} />
+                  <div aria-hidden className={`mt-5 h-1 w-7 shrink-0 rounded-full sm:w-10 ${i < activeIdx ? `bg-gradient-to-r ${st.line}` : 'bg-slate-200'}`} />
                 )}
               </Fragment>
             )
@@ -697,7 +717,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   return (
     <div>
       <SectionHeader title="Подать заявку" />
-      <StatusPipeline />
+      <StatusPipeline activeIdx={selected ? STAGE_OF_STATUS[selected.status] : -1} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-4">
