@@ -197,6 +197,40 @@ async function main() {
     },
   })
 
+  // ---------- Выигранные перевозчиком Б: готовятся к подаче заявки ----------
+  await db.request.create({
+    data: {
+      number: 'Z-1047', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Оборудование',
+      tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 78000, bestRate: 73500,
+      status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00',
+      winnerId: carrierB.id,
+      createdAt: hoursAgo(30), updatedAt: hoursAgo(8),
+      bids: { create: [{ carrierId: carrierB.id, amount: 73500, isWinner: true, createdAt: hoursAgo(12) }] },
+      events: {
+        create: [
+          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 78 000 ₽', createdAt: hoursAgo(30) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 73 500 ₽', createdAt: hoursAgo(8) },
+        ],
+      },
+    },
+  })
+  await db.request.create({
+    data: {
+      number: 'Z-1048', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг',
+      tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 44000, bestRate: 41500,
+      status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00',
+      winnerId: carrierB.id,
+      createdAt: hoursAgo(28), updatedAt: hoursAgo(7),
+      bids: { create: [{ carrierId: carrierB.id, amount: 41500, isWinner: true, createdAt: hoursAgo(10) }] },
+      events: {
+        create: [
+          { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 44 000 ₽', createdAt: hoursAgo(28) },
+          { type: 'WINNER_AWARDED', message: 'Логист согласовал победителя: ООО «Перевозчик Б» — 41 500 ₽', createdAt: hoursAgo(7) },
+        ],
+      },
+    },
+  })
+
   // ---------- Z-1039: у логиста (сверка фото и полей) ----------
   const driverA = await db.driver.findFirst({ where: { carrierId: carrierA.id, fullName: 'Иванов Иван Иванович' } })
   const truckA = await db.truck.findFirst({ where: { carrierId: carrierA.id, plate: 'А123ВС777' } })
@@ -262,6 +296,28 @@ async function main() {
       confidence: JSON.stringify({ 'Госномер': 0.99, 'VIN': 0.998, 'Номер СТС': 0.995, 'Владелец': 0.97 }),
       issues: JSON.stringify(['Госномер и VIN совпали с заявкой; собственник может отличаться от водителя — не ошибка']),
       createdAt: hoursAgo(28), updatedAt: hoursAgo(27.7),
+    },
+  })
+  await db.document.create({
+    data: {
+      requestId: z1039.id, type: 'REQUEST_DOC', fileName: 'zayavka_scan.jpg',
+      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 87 500 РУБ'], '#9a3412'),
+      status: 'PASSED', quality: 95, engine: 'PaddleOCR-демо',
+      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'Ставка': '87 500 РУБ' }),
+      confidence: JSON.stringify({ 'Номер заявки': 0.997, 'Дата заявки': 0.99, 'Груз': 0.98, 'Ставка': 0.96 }),
+      issues: JSON.stringify(['Номер заявки на скане совпал с рейсом Z-1039 — документ принят автоматически']),
+      createdAt: hoursAgo(27.6), updatedAt: hoursAgo(27.3),
+    },
+  })
+  await db.document.create({
+    data: {
+      requestId: z1039.id, type: 'POA', fileName: 'doverennost.jpg',
+      dataUri: docSvg('ДОВЕРЕННОСТЬ № 47', ['№ 47', '18.10.2026', 'ООО «ПЕРЕВОЗЧИК А»', 'ИВАНОВ ИВАН ИВАНОВИЧ', '31.12.2026'], '#3f6212'),
+      status: 'PASSED', quality: 93, engine: 'PaddleOCR-демо',
+      fields: JSON.stringify({ 'Номер доверенности': '47', 'Дата выдачи': '18.10.2026', 'Действительна до': '31.12.2026', 'Кем выдана (перевозчик)': 'ООО «ПЕРЕВОЗЧИК А»', 'Представитель (ФИО)': 'ИВАНОВ ИВАН ИВАНОВИЧ' }),
+      confidence: JSON.stringify({ 'Номер доверенности': 0.98, 'Дата выдачи': 0.99, 'Действительна до': 0.995, 'Кем выдана (перевозчик)': 0.97, 'Представитель (ФИО)': 0.98 }),
+      issues: JSON.stringify(['Срок доверенности действителен; представитель совпал с водителем заявки']),
+      createdAt: hoursAgo(27.2), updatedAt: hoursAgo(27),
     },
   })
 

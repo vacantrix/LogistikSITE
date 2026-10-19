@@ -1,0 +1,708 @@
+     1→/**
+     2→ * Движок проверки документов (слайды 10, 21–24).
+     3→ *
+     4→ * Пайплайн: качество фото → тип документа → распознавание (VLM, фолбэк —
+     5→ * детерминированная симуляция PaddleOCR) → сверка с данными заявки → правила.
+     6→ *
+     7→ * Итог — один из четырёх статусов:
+     8→ *   PASSED   — «Передать дальше»: поля распознаны уверенно, проверки пройдены
+     9→ *   REUPLOAD — «Перезагрузить документ»: качество/не тот документ
+    10→ *   REJECTED — «Отказ с причиной»: явное несоответствие при высокой уверенности
+    11→ *   MANUAL   — «Ручная проверка»: результат неоднозначен, решает сотрудник
+    12→ */
+    13→import ZAI from 'z-ai-web-dev-sdk'
+    14→
+    15→export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS'
+    16→
+    17→export const DOC_TYPE_LABEL: Record<DocType, string> = {
+    18→  PASSPORT_PHOTO: 'Паспорт: страница с фото',
+    19→  PASSPORT_REG: 'Паспорт: страница регистрации',
+    20→  LICENSE: 'Водительское удостоверение',
+    21→  STS: 'СТС (лицевая сторона)',
+    22→}
+    23→
+    24→export interface FieldSpec {
+    25→  label: string
+    26→  kind: 'fio' | 'date' | 'passport' | 'license' | 'plate' | 'vin' | 'code' | 'text'
+    27→}
+    28→
+    29→export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
+    30→  PASSPORT_PHOTO: [
+    31→    { label: 'Фамилия', kind: 'fio' },
+    32→    { label: 'Имя', kind: 'fio' },
+    33→    { label: 'Отчество', kind: 'fio' },
+    34→    { label: 'Дата рождения', kind: 'date' },
+    35→    { label: 'Серия и номер', kind: 'passport' },
+    36→    { label: 'Дата выдачи', kind: 'date' },
+    37→    { label: 'Код подразделения', kind: 'code' },
+    38→  ],
+    39→  PASSPORT_REG: [
+    40→    { label: 'Дата регистрации', kind: 'date' },
+    41→    { label: 'Код подразделения', kind: 'code' },
+    42→    { label: 'Адрес регистрации', kind: 'text' },
+    43→  ],
+    44→  LICENSE: [
+    45→    { label: 'ФИО', kind: 'fio' },
+    46→    { label: 'Дата рождения', kind: 'date' },
+    47→    { label: 'Номер ВУ', kind: 'license' },
+    48→    { label: 'Категории', kind: 'text' },
+    49→    { label: 'Дата выдачи', kind: 'date' },
+    50→    { label: 'Действует до', kind: 'date' },
+    51→  ],
+    52→  STS: [
+    53→    { label: 'Госномер', kind: 'plate' },
+    54→    { label: 'VIN', kind: 'vin' },
+    55→    { label: 'Номер СТС', kind: 'passport' },
+    56→    { label: 'Марка', kind: 'text' },
+    57→    { label: 'Владелец', kind: 'text' },
+    58→  ],
+    59→}
+    60→
+    61→export interface ExpectedData {
+    62→  fullName?: string
+    63→  birthDate?: string
+    64→  passport?: string
+    65→  license?: string
+    66→  licenseTill?: string
+    67→  categories?: string
+    68→  plate?: string
+    69→  vin?: string
+    70→  sts?: string
+    71→  owner?: string
+    72→  truckBrand?: string
+    73→}
+    74→
+    75→export interface VerifySettings {
+    76→  confReupload: number // ниже — перезагрузить (0.60)
+    77→  confAuto: number // выше — принято автоматически (0.95)
+    78→  minQuality: number // порог качества фото (60 из 100)
+    79→}
+    80→
+    81→export interface OcrOutput {
+    82→  engine: string
+    83→  quality: number
+    84→  fields: Record<string, string>
+    85→  confidences: Record<string, number>
+    86→  /** какой вид документа нейросеть распознала на изображении (для проверки соответствия слоту) */
+    87→  detectedType?: DocType | 'UNKNOWN'
+    88→}
+    89→
+    90→export interface VerifyVerdict {
+    91→  status: 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
+    92→  quality: number
+    93→  engine: string
+    94→  fields: Record<string, string>
+    95→  confidences: Record<string, number>
+    96→  issues: string[]
+    97→  message: string
+    98→  /** фактически распознанный вид документа (заполняется при первичном вводе) */
+    99→  detectedType?: DocType | 'UNKNOWN' | null
+   100→}
+   101→
+   102→// ---------------- детерминированный псевдослучайный генератор ----------------
+   103→
+   104→function hashStr(s: string): number {
+   105→  let h = 5381
+   106→  for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i)
+   107→  return h >>> 0
+   108→}
+   109→
+   110→function pseudo(seed: string, min: number, max: number): number {
+   111→  const h = hashStr(seed)
+   112→  return min + ((h % 10_000) / 10_000) * (max - min)
+   113→}
+   114→
+   115→// ---------------- симуляция распознавания (фолбэк PaddleOCR) ----------------
+   116→
+   117→function normalizeFio(s: string): string {
+   118→  return s.toUpperCase().replace(/Ё/g, 'Е').replace(/\s+/g, ' ').trim()
+   119→}
+   120→
+   121→function fioEquals(a: string, b: string): boolean {
+   122→  return normalizeFio(a) === normalizeFio(b)
+   123→}
+   124→
+   125→function plateLetters(s: string): string {
+   126→  // А123ВС777 → A123BC777 (латиница к кириллице и обратно)
+   127→  const map: Record<string, string> = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X' }
+   128→  return s.split('').map((c) => map[c] ?? c).join('').toUpperCase()
+   129→}
+   130→
+   131→/** Симуляция: «нейросеть» читает ожидаемые значения с оценками уверенности. */
+   132→export function simulateOcr(seedSource: string, type: DocType, expected: ExpectedData): OcrOutput {
+   133→  const docId = seedSource
+   134→  const blurry = /blur|размыт|noise|dark|смаз/i.test(seedSource)
+   135→  const quality = blurry ? pseudo('q' + docId, 15, 35) : pseudo('q' + docId, 86, 99)
+   136→  const fields: Record<string, string> = {}
+   137→  const confidences: Record<string, number> = {}
+   138→
+   139→  const values: Record<string, string> = {
+   140→    'Фамилия': (expected.fullName ?? '').split(' ')[0] ?? '',
+   141→    'Имя': (expected.fullName ?? '').split(' ')[1] ?? '',
+   142→    'Отчество': (expected.fullName ?? '').split(' ')[2] ?? '',
+   143→    'ФИО': expected.fullName ?? '',
+   144→    'Дата рождения': expected.birthDate ?? '',
+   145→    'Серия и номер': expected.passport ?? '',
+   146→    'Дата выдачи': '10.04.2024',
+   147→    'Код подразделения': '230-027',
+   148→    'Дата регистрации': '13.03.2024',
+   149→    'Адрес регистрации': 'г. Абинск, ул. Интернациональная д. 110',
+   150→    'Номер ВУ': expected.license ?? '',
+   151→    'Категории': expected.categories ?? '',
+   152→    'Действует до': expected.licenseTill ?? '',
+   153→    'Госномер': expected.plate ?? '',
+   154→    'VIN': expected.vin ?? '',
+   155→    'Номер СТС': expected.sts ?? '',
+   156→    'Марка': expected.truckBrand ?? '',
+   157→    'Владелец': expected.owner ?? '',
+   158→  }
+   159→
+   160→  // редкий «промах» распознавания — одна цифра номера отличается (→ несоответствие)
+   161→  const misread = pseudo('mis' + docId, 0, 1) < 0.18
+   162→  for (const f of DOC_FIELDS[type]) {
+   163→    let v = values[f.label] ?? ''
+   164→    if (misread && (f.kind === 'passport' || f.kind === 'license') && v.length > 3) {
+   165→      const i = v.length - 1
+   166→      v = v.slice(0, i) + String((Number(v[i]) + 3) % 10)
+   167→      confidences[f.label] = pseudo('c' + docId + f.label, 0.93, 0.99) // уверенно, но не совпадает
+   168→    } else if (f.kind === 'text' && f.label === 'Адрес регистрации') {
+   169→      confidences[f.label] = pseudo('c' + docId + f.label, 0.42, 0.72) // штамп адреса — слабое место
+   170→    } else {
+   171→      confidences[f.label] = blurry ? pseudo('c' + docId + f.label, 0.3, 0.58) : pseudo('c' + docId + f.label, 0.9, 0.999)
+   172→    }
+   173→    fields[f.label] = v
+   174→  }
+   175→  return { engine: 'PaddleOCR-демо', quality: Math.round(quality), fields, confidences }
+   176→}
+   177→
+   178→// ---------------- распознавание через VLM (основной путь) ----------------
+   179→
+   180→function extractJson(text: string): Record<string, unknown> | null {
+   181→  const m = text.match(/\{[\s\S]*\}/)
+   182→  if (!m) return null
+   183→  try {
+   184→    return JSON.parse(m[0])
+   185→  } catch {
+   186→    return null
+   187→  }
+   188→}
+   189→
+   190→const DOC_TYPE_VALUES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+   191→
+   192→export async function vlmOcr(
+   193→  dataUri: string,
+   194→  type: DocType,
+   195→  expected: ExpectedData | null,
+   196→  /** режим первичного ввода: распознаёт фактический вид документа и не отбрасывает «не тот документ» */
+   197→  intake = false,
+   198→): Promise<OcrOutput | null> {
+   199→  const fieldList = DOC_FIELDS[type].map((f) => `«${f.label}»`).join(', ')
+   200→  const prompt = [
+   201→    `Ты — OCR-модуль проверки транспортных документов (аналог PaddleOCR). Тип документа: ${DOC_TYPE_LABEL[type]}.`,
+   202→    `Прочитай изображение и верни СТРОГО JSON без пояснений:`,
+   203→    `{"quality": <0..100, качество фото: резкость, свет, документ целиком в кадре>,`,
+   204→    `"fields": {${fieldList}: <прочитанное значение, "" если не найдено>},`,
+   205→    `"confidences": {<поле>: <0..1 уверенность в прочитанном>},`,
+   206→    ...(intake
+   207→      ? [`"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | UNKNOWN>}`]
+   208→      : [`"docOk": <true, если это действительно ${DOC_TYPE_LABEL[type]}>}`]),
+   209→    ...(expected
+   210→      ? [`Для справки, ожидаемые в заявке значения: ${JSON.stringify(expected)}. Не подставляй их автоматически — читай только с фото.`]
+   211→      : [`Значений для сверки нет — это первичный ввод водителя: заполняй ТОЛЬКО реально прочитанные с изображения значения, ничего не выдумывай.`]),
+   212→    ...(intake
+   213→      ? [`Определи, какой документ реально изображён: страница паспорта с фото, страница регистрации паспорта, водительское удостоверение или СТС.`]
+   214→      : []),
+   215→    ...(intake
+   216→      ? [`Если изображение не является документом заявленного типа — укажи фактический docType.`]
+   217→      : [`Если изображение не является документом этого типа — поставь quality < 25 и docOk=false.`]),
+   218→  ].join('\n')
+   219→
+   220→  try {
+   221→    const zai = await Promise.race([
+   222→      ZAI.create(),
+   223→      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('init-timeout')), 8000)),
+   224→    ])
+   225→    const response = await Promise.race([
+   226→      zai.chat.completions.createVision({
+   227→        model: 'glm-4.6v',
+   228→        messages: [
+   229→          {
+   230→            role: 'user',
+   231→            content: [
+   232→              { type: 'text', text: prompt },
+   233→              { type: 'image_url', image_url: { url: dataUri } },
+   234→            ],
+   235→          },
+   236→        ],
+   237→        thinking: { type: 'disabled' },
+   238→      }),
+   239→      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('vlm-timeout')), 30000)),
+   240→    ])
+   241→    const content = response.choices[0]?.message?.content
+   242→    if (!content) return null
+   243→    const json = extractJson(content)
+   244→    if (!json || typeof json.quality !== 'number') return null
+   245→    const fields = (json.fields ?? {}) as Record<string, string>
+   246→    const confidences = (json.confidences ?? {}) as Record<string, number>
+   247→    const rawType = typeof json.docType === 'string' ? (json.docType as string).trim().toUpperCase() : ''
+   248→    const detectedType = DOC_TYPE_VALUES.includes(rawType as DocType)
+   249→      ? (rawType as DocType)
+   250→      : rawType === 'UNKNOWN' ? 'UNKNOWN' as const : undefined
+   251→    if (!intake && !json.docOk && json.quality >= 25) return null
+   252→    return {
+   253→      engine: 'GLM-Vision (VLM)', quality: Math.round(json.quality), fields, confidences,
+   254→      ...(intake ? { detectedType: detectedType ?? 'UNKNOWN' as const } : detectedType ? { detectedType } : {}),
+   255→    }
+   256→  } catch {
+   257→    return null
+   258→  }
+   259→}
+   260→
+   261→// ---------------- правила проверки ----------------
+   262→
+   263→const DATE_RE = /^\d{2}\.\d{2}\.\d{4}$/
+   264→const PASSPORT_RE = /^\d{2}\s?\d{2}\s\d{6}$/
+   265→const LICENSE_RE = /^\d{2}\s?\d{2}\s?\d{6}$/
+   266→const CODE_RE = /^\d{3}-\d{3}$/
+   267→const PLATE_RE = /^[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}\s?\d{2,3}$/i
+   268→const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/i
+   269→
+   270→export function parseDateRu(s: string): Date | null {
+   271→  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
+   272→  return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) : null
+   273→}
+   274→
+   275→export function applyRules(
+   276→  ocr: OcrOutput,
+   277→  type: DocType,
+   278→  expected: ExpectedData,
+   279→  settings: VerifySettings,
+   280→): VerifyVerdict {
+   281→  const issues: string[] = []
+   282→  const { fields, confidences } = ocr
+   283→
+   284→  // 1. Качество изображения
+   285→  if (ocr.quality < settings.minQuality) {
+   286→    return {
+   287→      status: 'REUPLOAD', quality: ocr.quality, engine: ocr.engine, fields, confidences, issues,
+   288→      message: `Качество изображения ${ocr.quality} при пороге ${settings.minQuality} — поля не проверяются, загрузите фото заново`,
+   289→    }
+   290→  }
+   291→
+   292→  // 2. Проверка полей: уверенность + сверка с заявкой + формат
+   293→  let lowCount = 0
+   294→  for (const f of DOC_FIELDS[type]) {
+   295→    const value = (fields[f.label] ?? '').trim()
+   296→    const conf = confidences[f.label] ?? 0
+   297→    if (!value) {
+   298→      issues.push(`Поле «${f.label}» не найдено — решает человек`)
+   299→      lowCount++
+   300→      continue
+   301→    }
+   302→    // формат поля
+   303→    const fmtOk =
+   304→      f.kind === 'passport' ? PASSPORT_RE.test(value)
+   305→      : f.kind === 'license' ? LICENSE_RE.test(value)
+   306→      : f.kind === 'code' ? CODE_RE.test(value)
+   307→      : f.kind === 'plate' ? PLATE_RE.test(value)
+   308→      : f.kind === 'vin' ? VIN_RE.test(value)
+   309→      : f.kind === 'date' ? DATE_RE.test(value)
+   310→      : true
+   311→    if (!fmtOk) {
+   312→      issues.push(`Поле «${f.label}»: «${value}» — формат не соответствует правилу, решает человек`)
+   313→      lowCount++
+   314→      continue
+   315→    }
+   316→
+   317→    // сверка с заявкой (где применимо)
+   318→    let mismatch: string | null = null
+   319→    if (f.kind === 'date' && f.label === 'Дата рождения' && expected.birthDate && value !== expected.birthDate) {
+   320→      mismatch = `Дата рождения на документе (${value}) не совпадает с заявкой (${expected.birthDate})`
+   321→    }
+   322→    if (f.kind === 'fio' && f.label === 'ФИО' && expected.fullName && !fioEquals(value, expected.fullName)) {
+   323→      mismatch = `ФИО на документе («${value}») не совпадает с заявкой («${expected.fullName}»)`
+   324→    }
+   325→    if (f.kind === 'fio' && f.label === 'Фамилия' && expected.fullName) {
+   326→      const fam = normalizeFio(expected.fullName).split(' ')[0]
+   327→      if (fam && normalizeFio(value) !== fam) mismatch = `Фамилия на документе («${value}») не совпадает с заявкой («${fam}»)`
+   328→    }
+   329→    if (f.kind === 'passport' && f.label === 'Серия и номер' && expected.passport && value.replace(/\s/g, '') !== expected.passport.replace(/\s/g, '')) {
+   330→      mismatch = `Серия и номер паспорта («${value}») не совпадают с заявкой («${expected.passport}»)`
+   331→    }
+   332→    if (f.kind === 'license' && expected.license && value.replace(/\s/g, '') !== expected.license.replace(/\s/g, '')) {
+   333→      mismatch = `Номер ВУ («${value}») не совпадает с заявкой («${expected.license}»)`
+   334→    }
+   335→    if (f.kind === 'plate' && expected.plate && plateLetters(value) !== plateLetters(expected.plate)) {
+   336→      mismatch = `Госномер («${value}») не совпадает с заявкой («${expected.plate}»)`
+   337→    }
+   338→    if (f.kind === 'vin' && expected.vin && value.toUpperCase() !== expected.vin.toUpperCase()) {
+   339→      mismatch = `VIN («${value}») не совпадает с заявкой («${expected.vin}»)`
+   340→    }
+   341→    if (f.kind === 'date' && f.label === 'Дата выдачи' && expected.birthDate) {
+   342→      const issue = parseDateRu(value)
+   343→      const born = parseDateRu(expected.birthDate)
+   344→      if (issue && born && issue < born) mismatch = `Дата выдачи раньше даты рождения — неверные данные`
+   345→    }
+   346→    if (f.kind === 'date' && f.label === 'Действует до' && type === 'LICENSE') {
+   347→      const till = parseDateRu(value)
+   348→      if (till && till < new Date()) mismatch = `Срок действия ВУ истёк (${value})`
+   349→    }
+   350→    if (f.label === 'Категории' && expected.categories) {
+   351→      const need = expected.categories.toUpperCase().includes('CE') ? ['C', 'CE'] : ['C']
+   352→      const has = value.toUpperCase()
+   353→      const missing = need.filter((c) => !has.includes(c))
+   354→      if (missing.length) issues.push(`Категории: прочитаны «${value}» — для тягача нет ${missing.join(', ')}, решает человек`)
+   355→      else if (conf < settings.confAuto) issues.push(`Категории «${value}» — принято по совпадению с заявкой`)
+   356→    }
+   357→
+   358→    if (mismatch && conf >= settings.confReupload) {
+   359→      // расхождение при высокой уверенности → отказ с причиной
+   360→      issues.push(mismatch)
+   361→      return {
+   362→        status: 'REJECTED', quality: ocr.quality, engine: ocr.engine, fields, confidences, issues,
+   363→        message: mismatch,
+   364→      }
+   365→    }
+   366→    if (mismatch) {
+   367→      issues.push(`${mismatch} (уверенность ниже порога — решает человек)`)
+   368→      lowCount++
+   369→      continue
+   370→    }
+   371→    if (conf < settings.confReupload) {
+   372→      issues.push(`Поле «${f.label}»: уверенность ${conf.toFixed(2)} — ниже порога ${settings.confReupload.toFixed(2)}, решает человек`)
+   373→      lowCount++
+   374→    } else if (conf < settings.confAuto && f.kind !== 'text') {
+   375→      // 0.60–0.95: решают подтверждения — совпадение с заявкой + строгий формат
+   376→      issues.push(`Поле «${f.label}»: уверенность ${conf.toFixed(2)} — принято по подтверждениям (совпадение с заявкой, формат)`)
+   377→    }
+   378→  }
+   379→
+   380→  if (lowCount > 0) {
+   381→    return {
+   382→      status: 'MANUAL', quality: ocr.quality, engine: ocr.engine, fields, confidences, issues,
+   383→      message: 'Результат неоднозначен — требуется ручная проверка сотрудником',
+   384→    }
+   385→  }
+   386→  return {
+   387→    status: 'PASSED', quality: ocr.quality, engine: ocr.engine, fields, confidences, issues,
+   388→    message: 'Документы распознаны, данные совпали — заявка уходит логисту',
+   389→  }
+   390→}
+   391→
+   392→/** Полный цикл: распознавание (VLM → фолбэк) + правила. */
+   393→export async function verifyDocument(
+   394→  docId: string,
+   395→  type: DocType,
+   396→  dataUri: string,
+   397→  expected: ExpectedData,
+   398→  settings: VerifySettings,
+   399→  fileName = '',
+   400→): Promise<VerifyVerdict> {
+   401→  // демо-режим образцов (SVG-заглушки) распознаём детерминированной симуляцией,
+   402→  // реальные фото — сначала через VLM
+   403→  const isDemoSample = dataUri.startsWith('data:image/svg')
+   404→  let ocr: OcrOutput | null = null
+   405→  if (!isDemoSample) ocr = await vlmOcr(dataUri, type, expected)
+   406→  if (!ocr) ocr = simulateOcr(`${fileName}:${docId}`, type, expected)
+   407→  return applyRules(ocr, type, expected, settings)
+   408→}
+   409→
+   410→export function expectedFor(
+   411→  driver: { fullName: string; birthDate: string; passport: string; license: string; licenseTill: string; categories: string } | null,
+   412→  truck: { brand: string; plate: string; vin: string; sts: string; owner: string } | null,
+   413→): ExpectedData {
+   414→  return {
+   415→    fullName: driver?.fullName,
+   416→    birthDate: driver?.birthDate,
+   417→    passport: driver?.passport,
+   418→    license: driver?.license,
+   419→    licenseTill: driver?.licenseTill,
+   420→    categories: driver?.categories,
+   421→    plate: truck?.plate,
+   422→    vin: truck?.vin,
+   423→    sts: truck?.sts,
+   424→    owner: truck?.owner,
+   425→    truckBrand: truck?.brand,
+   426→  }
+   427→}
+   428→
+   429→// ================= Ввод водителя с нейросетью (intake) =================
+   430→// Первичное добавление водителя: документы читаются нейросетью и сразу
+   431→// заполняют карточку водителя и тягача — без ручного ввода.
+   432→
+   433→const FIO_RE = /^[А-ЯЁа-яё-]{2,}(?:\s+[А-ЯЁа-яё-]{2,}){1,2}$/
+   434→
+   435→/** Читает текстовые элементы демо-SVG документа (dataUri) */
+   436→function decodeSvgLines(dataUri: string): string[] | null {
+   437→  try {
+   438→    const comma = dataUri.indexOf(',')
+   439→    if (comma === -1) return null
+   440→    const meta = dataUri.slice(5, comma)
+   441→    const payload = dataUri.slice(comma + 1)
+   442→    const svg = meta.includes('base64')
+   443→      ? Buffer.from(payload, 'base64').toString('utf8')
+   444→      : decodeURIComponent(payload)
+   445→    const texts = [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1].trim()).filter(Boolean)
+   446→    return texts.length >= 2 ? texts : null
+   447→  } catch {
+   448→    return null
+   449→  }
+   450→}
+   451→
+   452→const TITLE_HINTS: Record<DocType, RegExp> = {
+   453→  PASSPORT_PHOTO: /ПАСПОРТ/i,
+   454→  PASSPORT_REG: /РЕГИСТРАЦИЯ/i,
+   455→  LICENSE: /ВОДИТЕЛЬСКОЕ/i,
+   456→  STS: /СТС/i,
+   457→}
+   458→
+   459→/**
+   460→ * Детерминированное «распознавание» демо-образцов (SVG-заглушек):
+   461→ * реально читает текст с изображения и раскладывает по полям документа.
+   462→ */
+   463→export function svgOcr(dataUri: string, type: DocType): OcrOutput | null {
+   464→  const lines = decodeSvgLines(dataUri)
+   465→  if (!lines) return null
+   466→  const [title, ...body] = lines
+   467→  const fields: Record<string, string> = {}
+   468→  const confidences: Record<string, number> = {}
+   469→  for (const f of DOC_FIELDS[type]) {
+   470→    fields[f.label] = ''
+   471→    confidences[f.label] = 0
+   472→  }
+   473→  const put = (label: string, value: string) => {
+   474→    if (!fields[label] && value) {
+   475→      fields[label] = value
+   476→      confidences[label] = pseudo('intake:' + type + label + value, 0.9, 0.999)
+   477→    }
+   478→  }
+   479→  const dates = body.filter((l) => DATE_RE.test(l))
+   480→
+   481→  if (!TITLE_HINTS[type].test(title)) {
+   482→    // загруженный образец не того типа — низкое «качество», правила дадут REUPLOAD
+   483→    return { engine: 'PaddleOCR-демо (SVG)', quality: 20, fields, confidences }
+   484→  }
+   485→
+   486→  if (type === 'PASSPORT_PHOTO') {
+   487→    const fio = body.find((l) => FIO_RE.test(l))
+   488→    if (fio) {
+   489→      const [fam, im, ot] = fio.split(/\s+/)
+   490→      put('Фамилия', fam ?? '')
+   491→      put('Имя', im ?? '')
+   492→      put('Отчество', ot ?? '')
+   493→    }
+   494→    put('Дата рождения', dates[0] ?? '')
+   495→    put('Дата выдачи', dates[1] ?? '')
+   496→    put('Серия и номер', body.find((l) => PASSPORT_RE.test(l)) ?? '')
+   497→    put('Код подразделения', body.find((l) => CODE_RE.test(l)) ?? '')
+   498→  } else if (type === 'PASSPORT_REG') {
+   499→    const head = (body[0] ?? '').split(/\s{2,}|\s+/)
+   500→    put('Дата регистрации', head.find((l) => DATE_RE.test(l)) ?? dates[0] ?? '')
+   501→    put('Код подразделения', head.find((l) => CODE_RE.test(l)) ?? '')
+   502→    const addr = body.slice(head.some((l) => CODE_RE.test(l)) || dates.some((d) => body[0]?.startsWith(d)) ? 1 : 0).join(', ')
+   503→    put('Адрес регистрации', addr)
+   504→  } else if (type === 'LICENSE') {
+   505→    put('ФИО', body.find((l) => FIO_RE.test(l)) ?? '')
+   506→    put('Дата рождения', dates[0] ?? '')
+   507→    put('Дата выдачи', dates[1] ?? '')
+   508→    put('Действует до', dates[2] ?? dates[1] ?? '')
+   509→    put('Номер ВУ', body.find((l) => LICENSE_RE.test(l)) ?? '')
+   510→    put('Категории', body.find((l) => !FIO_RE.test(l) && !DATE_RE.test(l) && !LICENSE_RE.test(l) && /^[A-Za-zА-Яа-я][A-Za-zА-Яа-я,\s]{0,14}$/.test(l)) ?? '')
+   511→  } else if (type === 'STS') {
+   512→    put('Госномер', body.find((l) => PLATE_RE.test(l)) ?? '')
+   513→    put('VIN', body.find((l) => VIN_RE.test(l)) ?? '')
+   514→    put('Номер СТС', body.find((l) => PASSPORT_RE.test(l)) ?? '')
+   515→    put('Владелец', body.find((l) => /«|»/.test(l) || /^(ООО|ИП|ОАО|ЗАО|АО)\b/i.test(l)) ?? '')
+   516→    put('Марка', body.find((l) => /[A-Za-zА-Яа-я]/.test(l) && /\d/.test(l) && !PLATE_RE.test(l) && !VIN_RE.test(l)) ?? '')
+   517→  }
+   518→  return { engine: 'PaddleOCR-демо (SVG)', quality: Math.round(pseudo('q' + dataUri.slice(-40), 88, 99)), fields, confidences }
+   519→}
+   520→
+   521→/**
+   522→ * Определяет фактический вид документа по заголовку демо-SVG образца.
+   523→ * Возвращает null, если заголовок не похож ни на один известный документ.
+   524→ */
+   525→export function detectSvgType(dataUri: string): DocType | null {
+   526→  const lines = decodeSvgLines(dataUri)
+   527→  if (!lines) return null
+   528→  const title = lines[0] ?? ''
+   529→  // «ПАСПОРТ РФ · РЕГИСТРАЦИЯ» содержит и «ПАСПОРТ» — проверяем регистрацию первой
+   530→  if (TITLE_HINTS.PASSPORT_REG.test(title)) return 'PASSPORT_REG'
+   531→  if (TITLE_HINTS.PASSPORT_PHOTO.test(title)) return 'PASSPORT_PHOTO'
+   532→  if (TITLE_HINTS.LICENSE.test(title)) return 'LICENSE'
+   533→  if (TITLE_HINTS.STS.test(title)) return 'STS'
+   534→  return null
+   535→}
+   536→
+   537→/** Текст ошибки несоответствия вида документа (для карточки и списка проблем) */
+   538→export function mismatchMessage(declared: DocType, actual: DocType): string {
+   539→  return `Несоответствие вида документа: выбран слот «${DOC_TYPE_LABEL[declared]}», но на изображении распознан «${DOC_TYPE_LABEL[actual]}». Загрузите правильный документ.`
+   540→}
+   541→
+   542→function mismatchVerdict(declared: DocType, actual: DocType, engine: string, quality: number): VerifyVerdict {
+   543→  const msg = mismatchMessage(declared, actual)
+   544→  return {
+   545→    status: 'REJECTED', quality, engine, fields: {}, confidences: {}, issues: [msg], message: msg,
+   546→    detectedType: actual,
+   547→  }
+   548→}
+   549→
+   550→/**
+   551→ * Анализ одного документа при первичном вводе (intake / подача заявки):
+   552→ * сначала проверяется соответствие вида документа выбранному слоту,
+   553→ * затем — качество и распознанные поля (сверки с заявкой нет).
+   554→ */
+   555→export async function analyzeIntakeDoc(
+   556→  fileName: string,
+   557→  type: DocType,
+   558→  dataUri: string,
+   559→  settings: VerifySettings,
+   560→): Promise<VerifyVerdict> {
+   561→  const isDemoSample = dataUri.startsWith('data:image/svg')
+   562→
+   563→  if (isDemoSample) {
+   564→    const actual = detectSvgType(dataUri)
+   565→    if (actual && actual !== type) return mismatchVerdict(type, actual, 'PaddleOCR-демо (SVG)', 92)
+   566→    const ocr = svgOcr(dataUri, type)
+   567→    if (ocr) return applyRules(ocr, type, {}, settings)
+   568→    return {
+   569→      status: 'REUPLOAD', quality: 30, engine: 'PaddleOCR-демо (SVG)', fields: {}, confidences: {},
+   570→      issues: ['Не удалось определить вид документа — загрузите чёткое изображение'],
+   571→      message: 'Вид документа не определён — загрузите изображение заново',
+   572→    }
+   573→  }
+   574→
+   575→  const ocr = await vlmOcr(dataUri, type, null, true)
+   576→  if (!ocr) {
+   577→    return {
+   578→      status: 'MANUAL',
+   579→      quality: 0,
+   580→      engine: '—',
+   581→      fields: {},
+   582→      confidences: {},
+   583→      issues: ['Нейросеть распознавания недоступна — проверьте документ или заполните карточку вручную'],
+   584→      message: 'Нейросеть недоступна — данные можно ввести вручную',
+   585→    }
+   586→  }
+   587→  if (ocr.detectedType && ocr.detectedType !== 'UNKNOWN' && ocr.detectedType !== type) {
+   588→    return mismatchVerdict(type, ocr.detectedType, ocr.engine, ocr.quality)
+   589→  }
+   590→  return { ...applyRules(ocr, type, {}, settings), detectedType: ocr.detectedType ?? null }
+   591→}
+   592→
+   593→export interface IntakeDriverDraft {
+   594→  fullName: string
+   595→  birthDate: string
+   596→  passport: string
+   597→  license: string
+   598→  licenseTill: string
+   599→  categories: string
+   600→  confidence: Record<string, number>
+   601→}
+   602→
+   603→export interface IntakeTruckDraft {
+   604→  brand: string
+   605→  plate: string
+   606→  vin: string
+   607→  sts: string
+   608→  owner: string
+   609→  confidence: Record<string, number>
+   610→}
+   611→
+   612→export interface IntakeCrossCheck {
+   613→  label: string
+   614→  ok: boolean
+   615→  detail: string
+   616→}
+   617→
+   618→export interface IntakeDraft {
+   619→  driver: IntakeDriverDraft
+   620→  truck: IntakeTruckDraft | null
+   621→  crossChecks: IntakeCrossCheck[]
+   622→}
+   623→
+   624→/** Собирает из распознанных документов черновик карточки водителя (+тягача) со перекрёстными сверками */
+   625→export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>): IntakeDraft {
+   626→  const pick = (type: DocType, label: string): { v: string; c: number } => {
+   627→    const d = docs[type]
+   628→    if (!d) return { v: '', c: 0 }
+   629→    return { v: (d.fields[label] ?? '').trim(), c: d.confidences[label] ?? 0 }
+   630→  }
+   631→  const best = (...cands: { v: string; c: number }[]) =>
+   632→    cands.filter((x) => x.v).sort((a, b) => b.c - a.c)[0] ?? { v: '', c: 0 }
+   633→
+   634→  const pFam = pick('PASSPORT_PHOTO', 'Фамилия')
+   635→  const pIm = pick('PASSPORT_PHOTO', 'Имя')
+   636→  const pOt = pick('PASSPORT_PHOTO', 'Отчество')
+   637→  const pBirth = pick('PASSPORT_PHOTO', 'Дата рождения')
+   638→  const pPass = pick('PASSPORT_PHOTO', 'Серия и номер')
+   639→  const lFio = pick('LICENSE', 'ФИО')
+   640→  const lBirth = pick('LICENSE', 'Дата рождения')
+   641→  const lNum = pick('LICENSE', 'Номер ВУ')
+   642→  const lTill = pick('LICENSE', 'Действует до')
+   643→  const lCats = pick('LICENSE', 'Категории')
+   644→
+   645→  const fullName =
+   646→    pFam.v || lFio.v
+   647→      ? best({ v: [pFam.v, pIm.v, pOt.v].filter(Boolean).join(' '), c: Math.min(...[pFam, pIm, pOt].filter((x) => x.v).map((x) => x.c)) }, lFio).v
+   648→      : ''
+   649→  const birth = best(pBirth, lBirth).v
+   650→
+   651→  const driver: IntakeDriverDraft = {
+   652→    fullName,
+   653→    birthDate: birth,
+   654→    passport: pPass.v,
+   655→    license: lNum.v,
+   656→    licenseTill: lTill.v,
+   657→    categories: lCats.v,
+   658→    confidence: {
+   659→      fullName: best({ v: fullName, c: Math.min(pFam.c, pIm.c) || pFam.c }, lFio).c,
+   660→      birthDate: best(pBirth, lBirth).c,
+   661→      passport: pPass.c,
+   662→      license: lNum.c,
+   663→      licenseTill: lTill.c,
+   664→      categories: lCats.c,
+   665→    },
+   666→  }
+   667→
+   668→  let truck: IntakeTruckDraft | null = null
+   669→  const sPlate = pick('STS', 'Госномер')
+   670→  if (sPlate.v || docs.STS) {
+   671→    truck = {
+   672→      brand: pick('STS', 'Марка').v,
+   673→      plate: sPlate.v,
+   674→      vin: pick('STS', 'VIN').v,
+   675→      sts: pick('STS', 'Номер СТС').v,
+   676→      owner: pick('STS', 'Владелец').v,
+   677→      confidence: {
+   678→        brand: pick('STS', 'Марка').c,
+   679→        plate: sPlate.c,
+   680→        vin: pick('STS', 'VIN').c,
+   681→        sts: pick('STS', 'Номер СТС').c,
+   682→        owner: pick('STS', 'Владелец').c,
+   683→      },
+   684→    }
+   685→  }
+   686→
+   687→  const crossChecks: IntakeCrossCheck[] = []
+   688→  if (pFam.v && lFio.v) {
+   689→    const ok = fioEquals([pFam.v, pIm.v, pOt.v].filter(Boolean).join(' '), lFio.v)
+   690→    crossChecks.push({ label: 'ФИО: паспорт ↔ ВУ', ok, detail: ok ? 'совпадают' : `«${[pFam.v, pIm.v, pOt.v].filter(Boolean).join(' ')}» ↔ «${lFio.v}»` })
+   691→  }
+   692→  if (pBirth.v && lBirth.v) {
+   693→    const ok = pBirth.v === lBirth.v
+   694→    crossChecks.push({ label: 'Дата рождения: паспорт ↔ ВУ', ok, detail: ok ? 'совпадают' : `«${pBirth.v}» ↔ «${lBirth.v}»` })
+   695→  }
+   696→  if (lCats.v) {
+   697→    const has = lCats.v.toUpperCase()
+   698→    const need = ['C', 'CE'].filter((c) => !has.includes(c))
+   699→    crossChecks.push({ label: 'Категории для тягача (C, CE)', ok: need.length === 0, detail: need.length ? `прочитано «${lCats.v}», нет ${need.join(', ')}` : `прочитано «${lCats.v}»` })
+   700→  }
+   701→  if (lTill.v) {
+   702→    const till = parseDateRu(lTill.v)
+   703→    const ok = till ? till >= new Date() : false
+   704→    crossChecks.push({ label: 'Срок действия ВУ', ok, detail: ok ? `действительно до ${lTill.v}` : till ? `истёк ${lTill.v}` : `не распознана дата` })
+   705→  }
+   706→  return { driver, truck, crossChecks }
+   707→}
+   708→

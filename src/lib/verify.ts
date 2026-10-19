@@ -12,13 +12,15 @@
  */
 import ZAI from 'z-ai-web-dev-sdk'
 
-export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS'
+export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA'
 
 export const DOC_TYPE_LABEL: Record<DocType, string> = {
   PASSPORT_PHOTO: 'Паспорт: страница с фото',
   PASSPORT_REG: 'Паспорт: страница регистрации',
   LICENSE: 'Водительское удостоверение',
   STS: 'СТС (лицевая сторона)',
+  REQUEST_DOC: 'Заявка на перевозку (скан)',
+  POA: 'Доверенность',
 }
 
 export interface FieldSpec {
@@ -56,6 +58,19 @@ export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
     { label: 'Марка', kind: 'text' },
     { label: 'Владелец', kind: 'text' },
   ],
+  REQUEST_DOC: [
+    { label: 'Номер заявки', kind: 'text' },
+    { label: 'Дата заявки', kind: 'date' },
+    { label: 'Груз', kind: 'text' },
+    { label: 'Ставка', kind: 'text' },
+  ],
+  POA: [
+    { label: 'Номер доверенности', kind: 'text' },
+    { label: 'Дата выдачи', kind: 'date' },
+    { label: 'Действительна до', kind: 'date' },
+    { label: 'Кем выдана (перевозчик)', kind: 'text' },
+    { label: 'Представитель (ФИО)', kind: 'fio' },
+  ],
 }
 
 export interface ExpectedData {
@@ -70,6 +85,8 @@ export interface ExpectedData {
   sts?: string
   owner?: string
   truckBrand?: string
+  requestNumber?: string
+  cargo?: string
 }
 
 export interface VerifySettings {
@@ -155,6 +172,13 @@ export function simulateOcr(seedSource: string, type: DocType, expected: Expecte
     'Номер СТС': expected.sts ?? '',
     'Марка': expected.truckBrand ?? '',
     'Владелец': expected.owner ?? '',
+    'Номер заявки': expected.requestNumber ?? '',
+    'Дата заявки': '21.10.2026',
+    'Груз': expected.cargo ?? '',
+    'Ставка': '',
+    'Номер доверенности': '47',
+    'Кем выдана (перевозчик)': expected.owner ?? '',
+    'Представитель (ФИО)': expected.fullName ?? '',
   }
 
   // редкий «промах» распознавания — одна цифра номера отличается (→ несоответствие)
@@ -187,7 +211,7 @@ function extractJson(text: string): Record<string, unknown> | null {
   }
 }
 
-const DOC_TYPE_VALUES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+const DOC_TYPE_VALUES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 
 export async function vlmOcr(
   dataUri: string,
@@ -204,13 +228,13 @@ export async function vlmOcr(
     `"fields": {${fieldList}: <прочитанное значение, "" если не найдено>},`,
     `"confidences": {<поле>: <0..1 уверенность в прочитанном>},`,
     ...(intake
-      ? [`"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | UNKNOWN>}`]
+      ? [`"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | REQUEST_DOC | POA | UNKNOWN>}`]
       : [`"docOk": <true, если это действительно ${DOC_TYPE_LABEL[type]}>}`]),
     ...(expected
       ? [`Для справки, ожидаемые в заявке значения: ${JSON.stringify(expected)}. Не подставляй их автоматически — читай только с фото.`]
       : [`Значений для сверки нет — это первичный ввод водителя: заполняй ТОЛЬКО реально прочитанные с изображения значения, ничего не выдумывай.`]),
     ...(intake
-      ? [`Определи, какой документ реально изображён: страница паспорта с фото, страница регистрации паспорта, водительское удостоверение или СТС.`]
+      ? [`Определи, какой документ реально изображён: страница паспорта с фото, страница регистрации паспорта, водительское удостоверение, СТС, заявка на перевозку или доверенность.`]
       : []),
     ...(intake
       ? [`Если изображение не является документом заявленного типа — укажи фактический docType.`]
@@ -343,9 +367,12 @@ export function applyRules(
       const born = parseDateRu(expected.birthDate)
       if (issue && born && issue < born) mismatch = `Дата выдачи раньше даты рождения — неверные данные`
     }
-    if (f.kind === 'date' && f.label === 'Действует до' && type === 'LICENSE') {
+    if (f.kind === 'date' && f.label === 'Действительна до' && (type === 'LICENSE' || type === 'POA')) {
       const till = parseDateRu(value)
-      if (till && till < new Date()) mismatch = `Срок действия ВУ истёк (${value})`
+      if (till && till < new Date()) mismatch = type === 'POA' ? `Срок действия доверенности истёк (${value})` : `Срок действия ВУ истёк (${value})`
+    }
+    if (f.label === 'Номер заявки' && expected.requestNumber && value.toUpperCase() !== expected.requestNumber.toUpperCase()) {
+      mismatch = `Номер заявки на документе («${value}») не совпадает с рейсом (${expected.requestNumber})`
     }
     if (f.label === 'Категории' && expected.categories) {
       const need = expected.categories.toUpperCase().includes('CE') ? ['C', 'CE'] : ['C']
@@ -410,6 +437,7 @@ export async function verifyDocument(
 export function expectedFor(
   driver: { fullName: string; birthDate: string; passport: string; license: string; licenseTill: string; categories: string } | null,
   truck: { brand: string; plate: string; vin: string; sts: string; owner: string } | null,
+  request?: { number: string; cargo: string } | null,
 ): ExpectedData {
   return {
     fullName: driver?.fullName,
@@ -423,6 +451,8 @@ export function expectedFor(
     sts: truck?.sts,
     owner: truck?.owner,
     truckBrand: truck?.brand,
+    requestNumber: request?.number,
+    cargo: request?.cargo,
   }
 }
 
@@ -454,6 +484,8 @@ const TITLE_HINTS: Record<DocType, RegExp> = {
   PASSPORT_REG: /РЕГИСТРАЦИЯ/i,
   LICENSE: /ВОДИТЕЛЬСКОЕ/i,
   STS: /СТС/i,
+  REQUEST_DOC: /ЗАЯВКА/i,
+  POA: /ДОВЕРЕННОСТЬ/i,
 }
 
 /**
@@ -514,6 +546,17 @@ export function svgOcr(dataUri: string, type: DocType): OcrOutput | null {
     put('Номер СТС', body.find((l) => PASSPORT_RE.test(l)) ?? '')
     put('Владелец', body.find((l) => /«|»/.test(l) || /^(ООО|ИП|ОАО|ЗАО|АО)\b/i.test(l)) ?? '')
     put('Марка', body.find((l) => /[A-Za-zА-Яа-я]/.test(l) && /\d/.test(l) && !PLATE_RE.test(l) && !VIN_RE.test(l)) ?? '')
+  } else if (type === 'REQUEST_DOC') {
+    put('Номер заявки', body.find((l) => /Z-\d{3,4}/i.test(l))?.match(/Z-\d{3,4}/i)?.[0] ?? '')
+    put('Дата заявки', dates[0] ?? '')
+    put('Груз', body.find((l) => /ГРУЗ/i.test(l))?.replace(/^.*?:\s*/i, '') ?? '')
+    put('Ставка', body.find((l) => /СТАВКА|₽|РУБ/i.test(l))?.replace(/^.*?:\s*/i, '') ?? '')
+  } else if (type === 'POA') {
+    put('Номер доверенности', body.find((l) => /№\s*\d+/i.test(l))?.replace(/^.*?№\s*/i, '') ?? '')
+    put('Дата выдачи', dates[0] ?? '')
+    put('Действительна до', dates[dates.length - 1] ?? '')
+    put('Кем выдана (перевозчик)', body.find((l) => /«|»/.test(l) || /^(ООО|ИП|ОАО|ЗАО|АО)\b/i.test(l)) ?? '')
+    put('Представитель (ФИО)', body.find((l) => FIO_RE.test(l)) ?? '')
   }
   return { engine: 'PaddleOCR-демо (SVG)', quality: Math.round(pseudo('q' + dataUri.slice(-40), 88, 99)), fields, confidences }
 }
@@ -527,6 +570,8 @@ export function detectSvgType(dataUri: string): DocType | null {
   if (!lines) return null
   const title = lines[0] ?? ''
   // «ПАСПОРТ РФ · РЕГИСТРАЦИЯ» содержит и «ПАСПОРТ» — проверяем регистрацию первой
+  if (TITLE_HINTS.REQUEST_DOC.test(title)) return 'REQUEST_DOC'
+  if (TITLE_HINTS.POA.test(title)) return 'POA'
   if (TITLE_HINTS.PASSPORT_REG.test(title)) return 'PASSPORT_REG'
   if (TITLE_HINTS.PASSPORT_PHOTO.test(title)) return 'PASSPORT_PHOTO'
   if (TITLE_HINTS.LICENSE.test(title)) return 'LICENSE'

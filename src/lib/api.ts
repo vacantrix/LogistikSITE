@@ -32,6 +32,10 @@ export const api = {
   checkDocument: (body: { type: string; fileName: string; dataUri: string }) =>
     fetch('/api/documents/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ verdict: IntakeDocVerdict }>),
 
+  /** Массовая подача заявок из Excel: назначение водителя/ТС на список выигранных рейсов */
+  bulkAssign: (body: { carrierId: string; rows: { requestId: string; driverId: string; truckId: string; trailerId?: string }[] }) =>
+    fetch('/api/requests/bulk-assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ assigned: number; total: number; results: { requestId: string; number: string; ok: boolean; error?: string }[] }>),
+
   directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[] }>),
   createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer', data: Record<string, unknown>) =>
     fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean; driver?: DriverDTO; truck?: TruckDTO }>),

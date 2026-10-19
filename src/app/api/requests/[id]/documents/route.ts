@@ -11,7 +11,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { type, fileName, dataUri } = (body ?? {}) as { type?: string; fileName?: string; dataUri?: string }
 
   if (!type || !fileName || !dataUri) return NextResponse.json({ error: 'Нужны type, fileName и dataUri' }, { status: 400 })
-  if (!['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS'].includes(type)) {
+  if (!['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA'].includes(type)) {
     return NextResponse.json({ error: 'Неизвестный тип документа' }, { status: 400 })
   }
   if (dataUri.length > 12_000_000) return NextResponse.json({ error: 'Файл слишком большой (до ~8 МБ)' }, { status: 400 })

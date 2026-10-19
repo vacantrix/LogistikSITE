@@ -29,7 +29,7 @@ import type { DocType, DocumentDTO, DriverDTO, RequestDTO, TruckDTO } from '@/li
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 
 /** госномер: латиница/кириллица — взаимно однозначное приведение */
 const PLATE_MAP: Record<string, string> = {
@@ -58,7 +58,7 @@ interface VerifyRow {
 }
 
 function buildRows(
-  type: DocType, doc: DocumentDTO, driver: DriverDTO | null, truck: TruckDTO | null,
+  type: DocType, doc: DocumentDTO, driver: DriverDTO | null, truck: TruckDTO | null, requestNumber: string | null,
 ): VerifyRow[] {
   const f = (k: string) => doc.fields?.[k]?.trim() ?? ''
   const c = (k: string) => (doc.confidence?.[k] != null ? doc.confidence[k] : null)
@@ -84,6 +84,23 @@ function buildRows(
       { label: 'Дата рождения', expected: driver?.birthDate ?? null, actual: f('Дата рождения'), conf: c('Дата рождения'), kind: 'text' },
       { label: 'Номер ВУ', expected: driver?.license ?? null, actual: f('Номер ВУ'), conf: c('Номер ВУ'), kind: 'digits' },
       { label: 'Действует до', expected: driver?.licenseTill ?? null, actual: f('Действует до'), conf: c('Действует до'), kind: 'text' },
+    ]
+  }
+  if (type === 'REQUEST_DOC') {
+    return [
+      { label: 'Номер заявки', expected: requestNumber, actual: f('Номер заявки'), conf: c('Номер заявки'), kind: 'text' },
+      { label: 'Дата заявки', expected: null, actual: f('Дата заявки'), conf: c('Дата заявки'), kind: 'text' },
+      { label: 'Груз', expected: null, actual: f('Груз'), conf: c('Груз'), kind: 'text' },
+      { label: 'Ставка', expected: null, actual: f('Ставка'), conf: c('Ставка'), kind: 'text' },
+    ]
+  }
+  if (type === 'POA') {
+    return [
+      { label: 'Номер доверенности', expected: null, actual: f('Номер доверенности'), conf: c('Номер доверенности'), kind: 'text' },
+      { label: 'Дата выдачи', expected: null, actual: f('Дата выдачи'), conf: c('Дата выдачи'), kind: 'text' },
+      { label: 'Действительна до', expected: null, actual: f('Действительна до'), conf: c('Действительна до'), kind: 'text' },
+      { label: 'Кем выдана (перевозчик)', expected: null, actual: f('Кем выдана (перевозчик)'), conf: c('Кем выдана (перевозчик)'), kind: 'text' },
+      { label: 'Представитель (ФИО)', expected: driver?.fullName ?? null, actual: f('Представитель (ФИО)'), conf: c('Представитель (ФИО)'), kind: 'fio' },
     ]
   }
   return [
@@ -409,7 +426,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {buildRows(activeDoc.type, activeDoc, driver, truck).map((row) => {
+                            {buildRows(activeDoc.type, activeDoc, driver, truck, selected?.number ?? null).map((row) => {
                               const mismatch =
                                 row.expected != null && row.actual !== '' &&
                                 normValue(row.expected, row.kind) !== normValue(row.actual, row.kind)

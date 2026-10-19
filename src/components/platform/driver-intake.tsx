@@ -232,8 +232,10 @@ export default function DriverIntakeDialog({ open, onOpenChange, carriers, defau
   }
 
   const fillDemo = () => {
+    // intake — только документы водителя/тягача: паспорт, ВУ, СТС, регистрация
+    const intakeTypes: DocType[] = ['PASSPORT_PHOTO', 'LICENSE', 'STS', 'PASSPORT_REG']
     setUploads(Object.fromEntries(
-      (Object.keys(DEMO) as DocType[]).map((t) => [t, { fileName: DEMO[t].fileName, dataUri: sampleSvg(DEMO[t].title, DEMO[t].lines, DEMO[t].accent) }]),
+      intakeTypes.map((t) => [t, { fileName: DEMO[t].fileName, dataUri: sampleSvg(DEMO[t].title, DEMO[t].lines, DEMO[t].accent) }]),
     ))
     toast({ title: 'Демо-образцы загружены', description: 'Паспорт, ВУ и СТС водителя Петрова П.С. — нажмите «Распознать документы»' })
   }

@@ -14,20 +14,24 @@
  * здесь можно добавить по документам (карточку заполнит нейросеть).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as XLSX from 'xlsx'
 import {
   AlertTriangle,
   ArrowRight,
+  BookOpen,
   Car,
   CheckCircle2,
+  ClipboardList,
+  Download,
+  FileSignature,
+  FileSpreadsheet,
   FileText,
-  FileWarning,
   IdCard,
   Info,
   Loader2,
   MapPin,
   RefreshCw,
   Send,
-  Sparkles,
   Truck,
   Upload,
   UserRoundPlus,
@@ -36,6 +40,7 @@ import {
 import { DocStatusBadge, ModeBadge, SectionHeader, StatusBadge, type TabProps } from '@/components/platform/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -45,17 +50,19 @@ import { Separator } from '@/components/ui/separator'
 import DriverIntakeDialog from '@/components/platform/driver-intake'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { demoSampleName, demoSampleUri, fileToCompressedDataUri, sleep } from '@/lib/demo-media'
-import { money } from '@/lib/status'
+import { demoSampleUri, fileToCompressedDataUri, sleep } from '@/lib/demo-media'
+import { money, REQUEST_STATUS_META } from '@/lib/status'
 import type { CarrierDTO, DocStatus, DocType, IntakeDocVerdict, RequestDTO } from '@/lib/types'
 
-const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 
 const SLOT_META: Record<DocType, { label: string; hint: string; icon: typeof IdCard }> = {
   PASSPORT_PHOTO: { label: 'Паспорт: стр. с фото', hint: 'Разворот с фото и ФИО', icon: IdCard },
   PASSPORT_REG: { label: 'Паспорт: регистрация', hint: 'Штамп регистрации', icon: MapPin },
   LICENSE: { label: 'Водительское удостоверение', hint: 'Лицевая сторона ВУ', icon: Car },
   STS: { label: 'СТС тягача', hint: 'Лицевая сторона СТС', icon: FileText },
+  REQUEST_DOC: { label: 'Заявка (скан)', hint: 'Скан заявки на перевозку', icon: ClipboardList },
+  POA: { label: 'Доверенность', hint: 'На водителя от перевозчика', icon: FileSignature },
 }
 
 interface SlotState {
@@ -66,6 +73,42 @@ interface SlotState {
 }
 
 const EMPTY_SLOT: SlotState = { upload: null, checking: false, verdict: null, error: null }
+
+const EMPTY_SLOTS: Record<DocType, SlotState> = {
+  PASSPORT_PHOTO: EMPTY_SLOT, PASSPORT_REG: EMPTY_SLOT, LICENSE: EMPTY_SLOT, STS: EMPTY_SLOT, REQUEST_DOC: EMPTY_SLOT, POA: EMPTY_SLOT,
+}
+
+/** госномер: латиница/кириллица — для сопоставления из Excel */
+const PLATE_MAP: Record<string, string> = {
+  'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'У': 'Y', 'Х': 'X',
+}
+const normSpace = (s: unknown): string => String(s ?? '').replace(/\s+/g, ' ').trim()
+const normFio = (s: unknown): string => normSpace(s).toUpperCase().replace(/Ё/g, 'Е')
+const normPlate = (s: unknown): string => normSpace(s).toUpperCase().split('').map((c) => PLATE_MAP[c] ?? c).join('')
+
+/** Номер заявки из ячейки Excel: «1042» → «Z-1042», русская «З» → латинская «Z» */
+function normRequestNo(s: unknown): string {
+  let v = normSpace(s).toUpperCase()
+  if (!v) return ''
+  if (/^\d{3,4}$/.test(v)) v = `Z-${v}`
+  v = v.replace(/^З/, 'Z')
+  return v
+}
+
+/** Строка предпросмотра массовой загрузки Excel */
+interface ImportRow {
+  line: number
+  requestNo: string
+  driverName: string
+  truckPlate: string
+  trailerPlate: string
+  requestId?: string
+  driverId?: string
+  truckId?: string
+  trailerId?: string
+  ok: boolean
+  message: string
+}
 
 /** Цвет рамки слота по вердикту нейросети */
 function slotBorder(s: SlotState): string {
@@ -174,16 +217,19 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [requestId, setRequestId] = useState('')
-  const [slots, setSlots] = useState<Record<DocType, SlotState>>({
-    PASSPORT_PHOTO: EMPTY_SLOT, PASSPORT_REG: EMPTY_SLOT, LICENSE: EMPTY_SLOT, STS: EMPTY_SLOT,
-  })
+  const [slots, setSlots] = useState<Record<DocType, SlotState>>(EMPTY_SLOTS)
   const [driverId, setDriverId] = useState('')
   const [truckId, setTruckId] = useState('')
   const [trailerId, setTrailerId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState<RequestDTO | null>(null)
   const [intakeOpen, setIntakeOpen] = useState(false)
+  const [examplesOpen, setExamplesOpen] = useState(false)
+  const [excelOpen, setExcelOpen] = useState(false)
+  const [importRows, setImportRows] = useState<ImportRow[] | null>(null)
+  const [importing, setImporting] = useState(false)
   const fileInputs = useRef<Partial<Record<DocType, HTMLInputElement | null>>>({})
+  const excelInput = useRef<HTMLInputElement | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -237,32 +283,14 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
     }
   }
 
-  /** Демо: правильные образцы во все 4 слота */
-  const fillDemo = () => {
-    for (const t of DOC_ORDER) {
-      void checkUpload(t, demoSampleName(t), demoSampleUri(t))
-    }
-    toast({ title: 'Демо-образцы загружены', description: 'Нейросеть проверяет каждый слот — вердикты появятся через секунду' })
-  }
-
-  /** Демо-ошибка: в слоты загружены ЧУЖИЕ документы (как в примере агента) */
-  const fillDemoMismatch = () => {
-    void checkUpload('PASSPORT_REG', 'passport_demo.jpg', demoSampleUri('PASSPORT_PHOTO'))
-    void checkUpload('STS', 'license_demo.jpg', demoSampleUri('LICENSE'))
-    toast({
-      title: 'Документы перепутаны (демо)',
-      description: 'В слот «регистрация» загружена страница с фото, в СТС — ВУ. Нейросеть должна выдать ошибку несоответствия.',
-      variant: 'destructive',
-    })
-  }
-
   const resetAll = () => {
-    setSlots({ PASSPORT_PHOTO: EMPTY_SLOT, PASSPORT_REG: EMPTY_SLOT, LICENSE: EMPTY_SLOT, STS: EMPTY_SLOT })
+    setSlots(EMPTY_SLOTS)
     setRequestId('')
     setDriverId('')
     setTruckId('')
     setTrailerId('')
     setSubmitted(null)
+    setImportRows(null)
   }
 
   const selected = useMemo(
@@ -283,7 +311,149 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const trucks = carrier?.trucks ?? []
   const trailers = carrier?.trailers ?? []
 
-  // готовность: все 4 документа приняты нейросетью (PASSED/MANUAL), выбраны рейс, водитель и тягач
+  // ——— Массовая подача из Excel ———
+
+  /** Шаблон .xlsx из реальных данных: выигранные рейсы + база аккаунта */
+  const downloadTemplate = () => {
+    const header = ['Заявка', 'Водитель', 'Тягач', 'Прицеп']
+    const rows = mineNeedDocs.slice(0, 5).map((r, i) => [
+      r.number,
+      drivers[i]?.fullName ?? drivers[0]?.fullName ?? 'Иванов Иван Иванович',
+      trucks[i]?.plate ?? trucks[0]?.plate ?? 'А123ВС777',
+      '',
+    ])
+    if (rows.length === 0) {
+      rows.push(['Z-1042', drivers[0]?.fullName ?? 'Иванов Иван Иванович', trucks[0]?.plate ?? 'А123ВС777', ''])
+    }
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
+    ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 16 }, { wch: 16 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Заявки')
+    XLSX.writeFile(wb, 'shablon-zayavok.xlsx')
+    toast({ title: 'Шаблон скачан', description: 'Заполните по строке на каждый рейс и загрузите файл обратно' })
+  }
+
+  /** Разбор Excel: строка = заявка + водитель + тягач (+прицеп), сверка с площадкой и базой аккаунта */
+  const parseExcel = async (file: File) => {
+    try {
+      const wb = XLSX.read(await file.arrayBuffer())
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      if (!ws) throw new Error('В файле нет листов')
+      const sheet = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
+      const grid = sheet.filter((row) => Array.isArray(row) && row.some((c) => normSpace(c)))
+      if (grid.length === 0) throw new Error('Лист пуст')
+
+      // колонки: по заголовкам, иначе позиционно (Заявка · Водитель · Тягач · Прицеп)
+      const head = grid[0].map((c) => normSpace(c).toLowerCase())
+      const hasHeader = head.some((h) => /заявк|рейс|водител|тягач|прицеп/.test(h))
+      const col = (re: RegExp, fallback: number): number => {
+        if (hasHeader) {
+          const i = head.findIndex((h) => re.test(h))
+          if (i !== -1) return i
+        }
+        return fallback
+      }
+      const cReq = col(/заявк|рейс/, 0)
+      const cDrv = col(/водител|фио/, 1)
+      const cTrk = col(/тягач|автомоб/, 2)
+      const cTrl = col(/прицеп/, 3)
+      const body = hasHeader ? grid.slice(1) : grid
+
+      const seen = new Set<string>()
+      const rows: ImportRow[] = body.map((cells, idx) => {
+        const requestNo = normRequestNo(cells[cReq])
+        const driverName = normSpace(cells[cDrv])
+        const truckPlate = normSpace(cells[cTrk])
+        const trailerPlate = normSpace(cells[cTrl])
+        const row: ImportRow = {
+          line: idx + (hasHeader ? 2 : 1),
+          requestNo, driverName, truckPlate, trailerPlate,
+          ok: false, message: '',
+        }
+        if (!requestNo && !driverName && !truckPlate) {
+          row.message = 'пустая строка'
+          return row
+        }
+        const byNo = requests?.find((r) => r.number === requestNo)
+        if (!byNo) {
+          row.message = `заявка «${requestNo || '—'}» не найдена на площадке`
+          return row
+        }
+        if (seen.has(byNo.id)) {
+          row.requestId = byNo.id
+          row.message = 'дубликат строки — эта заявка уже подаётся в файле'
+          return row
+        }
+        if (byNo.winnerId !== activeCarrierId) {
+          row.message = 'рейс не закреплён за вашей компанией'
+          return row
+        }
+        if (byNo.status !== 'AWARDED' && byNo.status !== 'DOCS_REVIEW') {
+          row.message = `статус «${REQUEST_STATUS_META[byNo.status].label}» — подача недоступна`
+          return row
+        }
+        const drv = drivers.find((d) => normFio(d.fullName) === normFio(driverName))
+        if (!drv) {
+          row.message = `водитель «${driverName || '—'}» не найден в базе аккаунта`
+          return row
+        }
+        const trk = trucks.find((t) => normPlate(t.plate) === normPlate(truckPlate))
+        if (!trk) {
+          row.message = `тягач «${truckPlate || '—'}» не найден в базе аккаунта`
+          return row
+        }
+        let trl: string | undefined
+        if (trailerPlate && !/^(—|-|нет|без)$/i.test(trailerPlate)) {
+          const found = trailers.find((z) => normPlate(z.plate) === normPlate(trailerPlate))
+          if (!found) {
+            row.message = `прицеп «${trailerPlate}» не найден в базе аккаунта`
+            return row
+          }
+          trl = found.id
+        }
+        seen.add(byNo.id)
+        Object.assign(row, { requestId: byNo.id, driverId: drv.id, truckId: trk.id, trailerId: trl, ok: true, message: 'готова к подаче' })
+        return row
+      })
+
+      setImportRows(rows)
+      setExcelOpen(true)
+    } catch (e) {
+      toast({
+        title: 'Не удалось прочитать Excel',
+        description: e instanceof Error ? e.message : 'Проверьте файл: первая строка — заголовки «Заявка · Водитель · Тягач · Прицеп»',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const importOkCount = importRows?.filter((r) => r.ok).length ?? 0
+
+  /** Подача всех валидных строк: водитель и ТС вешаются на каждый рейс одним запросом */
+  const runImport = async () => {
+    const ok = (importRows ?? []).filter((r) => r.ok && r.requestId && r.driverId && r.truckId)
+    if (ok.length === 0 || !activeCarrierId) return
+    setImporting(true)
+    try {
+      const res = await api.bulkAssign({
+        carrierId: activeCarrierId,
+        rows: ok.map((r) => ({ requestId: r.requestId!, driverId: r.driverId!, truckId: r.truckId!, trailerId: r.trailerId })),
+      })
+      toast({
+        title: 'Массовая подача завершена',
+        description: `Водитель и ТС назначены: ${res.assigned} из ${res.total}. Фото и документы прикрепляются к каждой заявке отдельно — по одному снимку на документ.`,
+      })
+      setExcelOpen(false)
+      setImportRows(null)
+      await load()
+    } catch (e) {
+      toast({ title: 'Ошибка массовой подачи', description: e instanceof Error ? e.message : 'Ошибка сервера', variant: 'destructive' })
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // готовность: все 6 документов приняты нейросетью (PASSED/MANUAL), выбраны рейс, водитель и тягач
   const docsOk = DOC_ORDER.every((t) => {
     const v = slots[t].verdict
     return v && (v.status === 'PASSED' || v.status === 'MANUAL')
@@ -295,7 +465,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   if (!selected) blockers.push('выберите рейс')
   if (!driverId) blockers.push('выберите водителя')
   if (!truckId) blockers.push('выберите тягач')
-  if (!docsOk) blockers.push('проверьте документы — все 4 должны быть приняты')
+  if (!docsOk) blockers.push('проверьте документы — все 6 должны быть приняты')
 
   const submit = async () => {
     if (!canSubmit || !selected) return
@@ -473,9 +643,10 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                   <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden>2</span>
                   <h3 className="text-sm font-semibold text-slate-900">Документы · нейропроверка при загрузке</h3>
                 </div>
-                <span className="text-xs font-medium text-slate-500">проверено {checkedCount} из 4</span>
+                <span className="text-xs font-medium text-slate-500">проверено {checkedCount} из 6</span>
               </div>
-              <Progress value={(checkedCount / 4) * 100} className="mb-4 h-1.5" aria-label={`Проверено документов: ${checkedCount} из 4`} />
+              <Progress value={(checkedCount / 6) * 100} className="mb-2 h-1.5" aria-label={`Проверено документов: ${checkedCount} из 6`} />
+              <p className="mb-4 text-[11px] text-slate-400">Фотографии — одиночные: один снимок в каждый слот, нейросеть проверяет его сразу после загрузки.</p>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 {DOC_ORDER.map((t) => {
@@ -541,14 +712,11 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={fillDemo}>
-                  <Sparkles className="h-4 w-4 text-blue-600" aria-hidden />
-                  Демо-образцы (правильные)
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setExamplesOpen(true)}>
+                  <BookOpen className="h-4 w-4 text-blue-600" aria-hidden />
+                  Примеры документов
                 </Button>
-                <Button size="sm" variant="outline" className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50" onClick={fillDemoMismatch}>
-                  <FileWarning className="h-4 w-4" aria-hidden />
-                  Демо-ошибка: не тот документ
-                </Button>
+                <span className="text-xs text-muted-foreground">образцы сканов — можно посмотреть перед загрузкой своих фото</span>
               </div>
             </CardContent>
           </Card>
@@ -651,6 +819,44 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-700" aria-hidden />
+                Массовая подача из Excel
+              </div>
+              <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                Строка = заявка: «Заявка · Водитель · Тягач · Прицеп». Фотографии прикладываются к каждой заявке отдельно, по одной.
+              </p>
+              <div className="mt-3 flex flex-col gap-2">
+                <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={downloadTemplate}>
+                  <Download className="h-3.5 w-3.5" aria-hidden />
+                  Скачать шаблон
+                </Button>
+                <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={() => excelInput.current?.click()}>
+                  <Upload className="h-3.5 w-3.5" aria-hidden />
+                  Загрузить Excel
+                </Button>
+              </div>
+              <input
+                ref={excelInput}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                aria-label="Файл Excel с заявками"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = ''
+                  if (f) void parseExcel(f)
+                }}
+              />
+              {mineNeedDocs.length === 0 && (
+                <p className="mt-2 text-[11px] text-amber-700">
+                  Выиграйте рейс на площадке — массовая подача заполняет ваши выигранные заявки.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <Card className="border-slate-200 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <Truck className="h-4 w-4 text-slate-500" aria-hidden />
                 База аккаунта
               </div>
@@ -662,6 +868,102 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
           </Card>
         </div>
       </div>
+
+      {/* Примеры документов: отдельная кнопка, образцы можно посмотреть */}
+      <Dialog open={examplesOpen} onOpenChange={setExamplesOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Примеры документов</DialogTitle>
+            <DialogDescription>
+              Как должен выглядеть скан каждого документа (демо-образцы). Сверяйте с ними свои фотографии перед загрузкой.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid max-h-[60vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
+            {DOC_ORDER.map((t) => (
+              <figure key={t} className="rounded-xl border border-slate-200 p-3">
+                <img
+                  src={demoSampleUri(t)}
+                  alt={`Пример документа: ${SLOT_META[t].label}`}
+                  className="w-full rounded-lg border border-slate-100 bg-white"
+                />
+                <figcaption className="mt-2">
+                  <div className="text-xs font-semibold text-slate-800">{SLOT_META[t].label}</div>
+                  <div className="text-[11px] text-slate-500">{SLOT_META[t].hint}</div>
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExamplesOpen(false)}>Закрыть</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Массовая подача из Excel: предпросмотр с проверкой строк */}
+      <Dialog open={excelOpen} onOpenChange={(o) => { setExcelOpen(o); if (!o) setImportRows(null) }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Массовая подача из Excel</DialogTitle>
+            <DialogDescription>
+              Проверьте строки: заявка должна быть вашей выигранной, водитель и тягач — из базы аккаунта. Подтвердите — и данные встанут на все рейсы сразу.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-auto rounded-xl border border-slate-200 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
+            <table className="w-full min-w-[720px] text-left text-xs">
+              <thead>
+                <tr className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                  <th scope="col" className="px-3 py-2 font-semibold">Стр.</th>
+                  <th scope="col" className="px-3 py-2 font-semibold">Заявка</th>
+                  <th scope="col" className="px-3 py-2 font-semibold">Водитель</th>
+                  <th scope="col" className="px-3 py-2 font-semibold">Тягач</th>
+                  <th scope="col" className="px-3 py-2 font-semibold">Прицеп</th>
+                  <th scope="col" className="px-3 py-2 font-semibold">Проверка</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(importRows ?? []).map((r) => (
+                  <tr key={r.line} className={`border-t border-slate-100 ${r.ok ? '' : 'bg-red-50/50'}`}>
+                    <td className="px-3 py-2 text-slate-400">{r.line}</td>
+                    <td className="px-3 py-2 font-mono font-semibold text-blue-700">{r.requestNo || '—'}</td>
+                    <td className="px-3 py-2 text-slate-700">{r.driverName || '—'}</td>
+                    <td className="px-3 py-2 font-mono text-slate-700">{r.truckPlate || '—'}</td>
+                    <td className="px-3 py-2 font-mono text-slate-500">{r.trailerPlate || '—'}</td>
+                    <td className="px-3 py-2">
+                      {r.ok ? (
+                        <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+                          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+                          {r.message}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-red-700">
+                          <XCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          {r.message}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-400">
+            Фотографии — одиночные: после подачи откройте каждую заявку и загрузите по одному снимку на документ.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setExcelOpen(false); setImportRows(null) }}>Отмена</Button>
+            <Button onClick={() => void runImport()} disabled={importOkCount === 0 || importing}>
+              {importing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  Подача…
+                </>
+              ) : (
+                `Подать заявки: ${importOkCount}`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Нейро-мастер добавления водителя (карточка заполняется ИИ, запись идёт в базу аккаунта) */}
       <DriverIntakeDialog

@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowRight,
   Car,
+  ClipboardList,
+  FileSignature,
   FileText,
   FileX,
   History,
@@ -41,13 +43,15 @@ import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
 import { DOC_TYPE_LABEL, fmtDateTime, money } from '@/lib/status'
 import type { CarrierDTO, DocStatus, DocType, RequestDTO } from '@/lib/types'
 
-const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 
 const DOC_ICONS: Record<DocType, typeof IdCard> = {
   PASSPORT_PHOTO: IdCard,
   PASSPORT_REG: MapPin,
   LICENSE: Car,
   STS: FileText,
+  REQUEST_DOC: ClipboardList,
+  POA: FileSignature,
 }
 
 const DOC_SHORT: Record<DocType, string> = {
@@ -55,6 +59,8 @@ const DOC_SHORT: Record<DocType, string> = {
   PASSPORT_REG: 'Паспорт: регистрация',
   LICENSE: 'Водительское удостоверение',
   STS: 'СТС',
+  REQUEST_DOC: 'Заявка (скан)',
+  POA: 'Доверенность',
 }
 
 const STATUS_ORDER: Record<RequestDTO['status'], number> = {
@@ -116,6 +122,8 @@ const DEMO_NAMES: Record<DocType, string> = {
   PASSPORT_REG: 'passport_reg_demo.jpg',
   LICENSE: 'license_demo.jpg',
   STS: 'sts_demo.jpg',
+  REQUEST_DOC: 'zayavka_scan_demo.jpg',
+  POA: 'doverennost_demo.jpg',
 }
 
 export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps) {
@@ -204,7 +212,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
     }
   }
 
-  // ——— демо: комплект из 4 образцов ———
+  // ——— демо: комплект из 6 образцов ———
   const runDemo = async (r: RequestDTO) => {
     setBusy(`${r.id}:demo`)
     try {
@@ -213,6 +221,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
         ['PASSPORT_REG', sampleSvg('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', ['13.03.2024  230-027', 'Г. АБИНСК, УЛ. ИНТЕРНАЦИОНАЛЬНАЯ', 'Д. 110'], '#0f3b66')],
         ['LICENSE', sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')],
         ['STS', sampleSvg('СТС ТЯГАЧА', ['А123ВС777', 'X9622277XKG123456', '99 00 123456'], '#14532d')],
+        ['REQUEST_DOC', sampleSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', [`№ ${r.number}`, '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'СТАВКА: 87 500 РУБ'], '#9a3412')],
+        ['POA', sampleSvg('ДОВЕРЕННОСТЬ № 47', ['№ 47', '18.10.2026', 'ООО «ПЕРЕВОЗЧИК А»', 'ИВАНОВ ИВАН ИВАНОВИЧ', '31.12.2026'], '#3f6212')],
       ]
       for (const [type, dataUri] of samples) {
         const up = await api.uploadDocument(r.id, { type, fileName: DEMO_NAMES[type], dataUri })
@@ -523,7 +533,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                           <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                             <FileText className="h-4 w-4 text-blue-600" aria-hidden />
-                            Документы (4 файла к заявке)
+                            Документы (6 файлов к заявке)
                           </h4>
                           {hasPending && (
                             <Button
@@ -539,7 +549,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                             </Button>
                           )}
                         </div>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                           {DOC_ORDER.map((type) => {
                             const doc = r.documents.find((d) => d.type === type)
                             const Icon = DOC_ICONS[type]

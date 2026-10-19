@@ -29,7 +29,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const driver = request.driverId ? await db.driver.findUnique({ where: { id: request.driverId } }) : null
   const truck = request.truckId ? await db.truck.findUnique({ where: { id: request.truckId } }) : null
-  const expected = expectedFor(driver, truck)
+  const expected = expectedFor(driver, truck, { number: request.number, cargo: request.cargo })
 
   const pending = request.documents.filter((d) => d.status === 'PENDING')
   if (pending.length === 0) {
@@ -73,8 +73,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     }),
   )
 
-  // пересчёт статуса заявки по комплекту
-  const allTypes: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+  // пересчёт статуса заявки по комплекту (6 документов: паспорт, регистрация, ВУ, СТС, заявка, доверенность)
+  const allTypes: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
   const docsAfter = await db.document.findMany({ where: { requestId: id } })
   const complete = allTypes.every((t) => docsAfter.some((d) => d.type === t))
   const anyPending = docsAfter.some((d) => d.status === 'PENDING')

@@ -6,7 +6,7 @@ import type { DocType } from '@/lib/verify'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
-const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
+const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 
 /**
  * POST /api/documents/check — мгновенная нейропроверка одного документа при загрузке.
