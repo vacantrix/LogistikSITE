@@ -150,9 +150,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   return (
     <div>
       <SectionHeader
-        eyebrow="ТЕХНИЧЕСКАЯ БАЗА · РЕЕСТР"
-        title="Реестр привлечённого транспорта: одна запись — один рейс"
-        desc="Заявки, ставки, документы и затраты — в одном реестре; отчёты для бухгалтерии строятся без переписки."
+        title="Реестр рейсов"
       >
         <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
           Записей: {rows.length}

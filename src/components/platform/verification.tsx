@@ -217,9 +217,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   return (
     <div>
       <SectionHeader
-        eyebrow="РЕШЕНИЕ 2 · СВЕРКА ЛОГИСТОМ"
-        title="Фото и распознанные данные рядом"
-        desc="Поля заполнены нейросетью, расхождения подсвечены — глазами проверяется итог. «Подтвердить» — данные уходят в 1С, «Вернуть агенту» — агент получает причину."
+        title="Сверка документов"
       >
         <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
           В очереди: {queue.length}

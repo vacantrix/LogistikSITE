@@ -60,9 +60,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
   return (
     <div>
       <SectionHeader
-        eyebrow="РЕШЕНИЕ 1 · ЭФФЕКТ ПЛОЩАДКИ"
-        title="Экономия и прозрачные ставки вместо переписки"
-        desc="Что завод видит в отчётах площадки: экономия, ставки по направлениям, конкуренция и история заявок."
+        title="Отчёты"
       >
         <Button size="sm" variant="outline" onClick={refresh} disabled={refreshing}>
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
@@ -96,14 +94,12 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
           icon={<ShieldCheck className="h-5 w-5" aria-hidden />}
           label="Документов принято автоматически"
           value={kpi ? `${kpi.docsAutoShare}%` : '—'}
-          hint="сомнительные случаи всегда смотрит человек"
           tone="navy"
         />
         <KpiCard
           icon={<FileCheck className="h-5 w-5" aria-hidden />}
           label="ЭТрН сформированы из 1С"
           value={kpi ? `${kpi.etrnShare}%` : '—'}
-          hint="модуль «Логистика.Про», подпись КЭП и МЧД"
           tone="violet"
         />
       </div>

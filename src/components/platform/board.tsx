@@ -270,13 +270,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
 
   return (
     <section aria-label="Площадка заявок">
-      <SectionHeader
-        eyebrow="РЕШЕНИЕ 1 · ПЛОЩАДКА ЗАЯВОК"
-        title={isLogist ? 'Публикация и контроль заявок' : 'Агент выбирает заявку и делает ставку'}
-        desc={isLogist
-          ? 'Все заявки площадки, ставки перевозчиков и статусы. Публикация новых заявок, торги и подведение итогов — в этом контуре.'
-          : 'Площадка закрытая: доступ только у проверенных перевозчиков с договором. Ставка, документы и статусы — в одном окне.'}
-      >
+      <SectionHeader title="Площадка заявок">
         <div className="flex items-center gap-3">
           {isLogist && (
             <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать и опубликовать заявку">
@@ -444,19 +438,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                   </table>
                 </div>
               )}
-              <p className="mt-3 text-xs text-muted-foreground">Нажмите на строку, чтобы увидеть детали заявки и историю ставок.</p>
             </CardContent>
           </Card>
-
-          {/* Подсказка по роли */}
-          <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" aria-hidden />
-            <p>
-              {isLogist
-                ? 'Внутренний контур: ставки перевозчиков видны вам полностью. Участие в ставках — только у перевозчиков; согласование победителя — в разделе «Торги».'
-                : 'Площадка закрытая: доступ только у перевозчиков, которых мы заранее проверили и с которыми заключили договор. Ставки видны логисту и участникам конкретной заявки — посторонние на площадку не попадают.'}
-            </p>
-          </div>
         </div>
       )}
 

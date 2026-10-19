@@ -26,7 +26,6 @@ import {
   Loader2,
   MapPin,
   RefreshCw,
-  ScanLine,
   Send,
   Sparkles,
   Truck,
@@ -34,7 +33,7 @@ import {
   UserRoundPlus,
   XCircle,
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { DocStatusBadge, ModeBadge, SectionHeader, StatusBadge, type TabProps } from '@/components/platform/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -43,7 +42,6 @@ import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { DocStatusBadge, ModeBadge, SectionHeader, StatusBadge, type TabProps } from '@/components/platform/common'
 import DriverIntakeDialog from '@/components/platform/driver-intake'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
@@ -402,9 +400,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   return (
     <div>
       <SectionHeader
-        eyebrow="ЛИНИЯ АГЕНТА · НЕЙРОСЕТЬ ВКЛЮЧЕНА"
         title="Подать заявку"
-        desc="Нейросеть платформы проверяет каждый документ сразу при загрузке: соответствие вида, качество и читаемость полей. Перепутанный документ не пройдёт — платформа укажет, что именно не совпало."
       >
         <span className="flex items-center gap-2 rounded-full border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700" role="status">
           <span className="relative flex h-2 w-2" aria-hidden>
@@ -495,9 +491,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                 </div>
                 <span className="text-xs font-medium text-slate-500">проверено {checkedCount} из 4</span>
               </div>
-              <p className="mb-3 text-xs text-slate-500">
-                Слот задаёт вид документа. Нейросеть сразу определяет, что изображено на фото: если загружен другой документ — будет ошибка несоответствия.
-              </p>
               <Progress value={(checkedCount / 4) * 100} className="mb-4 h-1.5" aria-label={`Проверено документов: ${checkedCount} из 4`} />
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -669,68 +662,14 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
           </Card>
         </div>
 
-        {/* Правая колонка: как работает нейропроверка */}
+        {/* Правая колонка */}
         <div className="space-y-4">
-          <Card className="border-emerald-200 bg-emerald-50/40 shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <ScanLine className="h-4 w-4 text-emerald-700" aria-hidden />
-                Как работает нейропроверка
-              </div>
-              <ol className="mt-3 space-y-2.5 text-xs leading-snug text-slate-600">
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white" aria-hidden>1</span>
-                  Загружаете фото в слот с нужным видом документа.
-                </li>
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white" aria-hidden>2</span>
-                  Нейросеть сразу определяет фактический вид документа. Перепутали страницу паспорта — увидите ошибку несоответствия ещё до отправки.
-                </li>
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white" aria-hidden>3</span>
-                  Проверяются качество фото и читаемость обязательных полей.
-                </li>
-                <li className="flex gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white" aria-hidden>4</span>
-                  Вердикт: <b>принят</b> — идёт в комплект; <b>ручная проверка</b> — решает логист; <b>отказ</b> — замените файл.
-                </li>
-              </ol>
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-4">
-              <div className="text-sm font-semibold text-slate-900">Цветовые обозначения</div>
-              <div className="mt-3 space-y-2 text-xs text-slate-600">
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">Принят</Badge>
-                  вид подтверждён, поля распознаны
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">Ручная проверка</Badge>
-                  неоднозначно — решает логист
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Перезагрузить</Badge>
-                  низкое качество фото
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">Отказ</Badge>
-                  не тот документ / данные не совпали
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <Truck className="h-4 w-4 text-slate-500" aria-hidden />
                 База аккаунта
               </div>
-              <p className="mt-2 text-xs leading-snug text-slate-600">
-                Водители и транспорт берутся из вашего справочника. Данные всех записей и сроки документов — во вкладке «Справочники».
-              </p>
               <Button size="sm" variant="outline" className="mt-3 gap-1.5" onClick={() => onNavigate('directory')}>
                 Открыть базу
                 <ArrowRight className="h-3.5 w-3.5" aria-hidden />

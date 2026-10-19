@@ -317,11 +317,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
 
   return (
     <section aria-label="Мои заявки — кабинет агента">
-      <SectionHeader
-        eyebrow="КАБИНЕТ АГЕНТА"
-        title={`Мои заявки · ${carrierName}`}
-        desc="Выигранные заявки, водитель и машина, документы и статусы — всё в личном кабинете"
-      />
+      <SectionHeader title={`Мои заявки · ${carrierName}`} />
 
       {!activeCarrierId && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">

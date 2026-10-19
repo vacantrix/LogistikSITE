@@ -14,7 +14,7 @@ import {
   Warehouse,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   EmptyState,
   ErrorBlock,
@@ -28,14 +28,6 @@ import { REQUEST_STATUS_META, fmtDateTime, money } from '@/lib/status'
 import type { EventFeedItem, ReportSummary, RequestDTO, RequestStatus } from '@/lib/types'
 
 const PIPELINE: RequestStatus[] = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED']
-
-const STEPS = [
-  'Логист публикует заявку',
-  'Агенты делают ставки',
-  'Логист согласовывает лучшую',
-  'Агент загружает документы',
-  'Нейросеть проверяет',
-]
 
 const QUICK_ACTIONS = [
   { key: 'board', title: 'Площадка заявок', desc: 'Ставки и заявки в работе', icon: Truck },
@@ -79,11 +71,7 @@ export default function DashboardTab({ onNavigate }: TabProps) {
 
   return (
     <section aria-label="Сводка платформы">
-      <SectionHeader
-        eyebrow="СВОДКА"
-        title="Платформа привлечённого транспорта"
-        desc="Заявки, торги, документы и передача данных в 1С — состояние всего процесса на одной странице."
-      >
+      <SectionHeader title="Сводка">
         <Button onClick={() => void load()} disabled={refreshing} className="gap-2" aria-label="Обновить данные сводки">
           <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
           Обновить
@@ -131,7 +119,6 @@ export default function DashboardTab({ onNavigate }: TabProps) {
           <Card className="border-slate-200 shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Лента статусов</CardTitle>
-              <CardDescription>Каждая заявка проходит путь от публикации до закрытия рейса</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap items-stretch gap-y-3">
@@ -159,7 +146,6 @@ export default function DashboardTab({ onNavigate }: TabProps) {
             <Card className="border-slate-200 shadow-sm lg:col-span-2">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Журнал событий</CardTitle>
-                <CardDescription>Ставки, назначения, проверки — всё, что произошло на платформе</CardDescription>
               </CardHeader>
               <CardContent>
                 {events.length === 0 ? (
@@ -198,7 +184,6 @@ export default function DashboardTab({ onNavigate }: TabProps) {
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Быстрые действия</CardTitle>
-                <CardDescription>Частые разделы — в один клик</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -224,30 +209,6 @@ export default function DashboardTab({ onNavigate }: TabProps) {
               </CardContent>
             </Card>
           </div>
-
-          {/* 4. Как работает платформа */}
-          <Card className="border-slate-200 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Как работает платформа</CardTitle>
-              <CardDescription>Пять шагов от публикации заявки до проверенного комплекта документов</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ol className="grid grid-cols-1 gap-3 sm:grid-cols-5">
-                {STEPS.map((step, i) => (
-                  <li key={step} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden>
-                      {i + 1}
-                    </span>
-                    <span className="text-sm font-medium leading-snug text-slate-800">{step}</span>
-                  </li>
-                ))}
-              </ol>
-              <p className="mt-4 flex items-center gap-1.5 text-sm text-muted-foreground">
-                <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
-                Дальше — сверка логистом и передача данных в 1С:ERP
-              </p>
-            </CardContent>
-          </Card>
         </div>
       )}
     </section>

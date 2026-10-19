@@ -132,9 +132,9 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
 
       <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs">
-          <div>АЭМЗ · Отдел логистики — демо-стенд платформы · данные учебные</div>
+          <div>АЭМЗ · Отдел логистики</div>
           <div className="text-blue-300">
-            {isLogist ? `Вид: внутренний контур · ${role.logistName ?? 'Логист'}` : 'Вид: кабинет перевозчика'} · заявки · торги · документы · нейросеть · 1С:ERP
+            {isLogist ? role.logistName ?? 'Логист' : 'Кабинет перевозчика'}
           </div>
         </div>
       </footer>

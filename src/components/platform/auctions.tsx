@@ -183,9 +183,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
   return (
     <div>
       <SectionHeader
-        eyebrow="РЕШЕНИЕ 1 · СОГЛАСОВАНИЕ"
-        title="Логист согласует победителя торгов"
-        desc="Рядом со ставкой — сколько заявок перевозчик уже взял. Если ставок нет — поднимите стартовую ставку или предложите заявку напрямую."
+        title="Торги"
       >
         <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
           <Clock className="mr-1 h-3.5 w-3.5" aria-hidden />
