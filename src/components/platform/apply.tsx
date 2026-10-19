@@ -71,6 +71,13 @@ const SLOT_META: Record<DocType, { label: string; hint: string; icon: typeof IdC
   POA: { label: 'Доверенность', hint: 'На водителя от перевозчика', icon: FileSignature },
 }
 
+/** Реальные фото-образцы в диалоге «Примеры документов» (лежат в public/examples) */
+const REAL_SAMPLES: Partial<Record<DocType, string>> = {
+  PASSPORT_PHOTO: '/examples/passport-photo.jpg',
+  PASSPORT_REG: '/examples/passport-registration.jpg',
+  STS: '/examples/sts-truck.jpg',
+}
+
 interface SlotState {
   upload: { fileName: string; dataUri: string } | null
   checking: boolean
@@ -1021,23 +1028,42 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
           <DialogHeader>
             <DialogTitle>Примеры документов</DialogTitle>
             <DialogDescription>
-              Как должен выглядеть скан каждого документа (демо-образцы). Сверяйте с ними свои фотографии перед загрузкой.
+              Как должен выглядеть скан каждого документа. Часть образцов — реальные фотографии: сверяйте с ними свои снимки перед загрузкой.
             </DialogDescription>
           </DialogHeader>
           <div className="grid max-h-[60vh] gap-3 overflow-y-auto pr-1 sm:grid-cols-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300">
             {DOC_ORDER.map((t) => (
               <figure key={t} className="rounded-xl border border-slate-200 p-3">
                 <img
-                  src={demoSampleUri(t)}
+                  src={REAL_SAMPLES[t] ?? demoSampleUri(t)}
                   alt={`Пример документа: ${SLOT_META[t].label}`}
                   className="w-full rounded-lg border border-slate-100 bg-white"
                 />
                 <figcaption className="mt-2">
-                  <div className="text-xs font-semibold text-slate-800">{SLOT_META[t].label}</div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-800">
+                    {SLOT_META[t].label}
+                    {REAL_SAMPLES[t] && (
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">реальное фото</span>
+                    )}
+                  </div>
                   <div className="text-[11px] text-slate-500">{SLOT_META[t].hint}</div>
                 </figcaption>
               </figure>
             ))}
+            <figure className="rounded-xl border border-slate-200 p-3">
+              <img
+                src="/examples/sts-trailer.jpg"
+                alt="Пример документа: СТС прицепа"
+                className="w-full rounded-lg border border-slate-100 bg-white"
+              />
+              <figcaption className="mt-2">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-800">
+                  СТС прицепа
+                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">реальное фото</span>
+                </div>
+                <div className="text-[11px] text-slate-500">Если едете с прицепом — лицевая сторона СТС прицепа</div>
+              </figcaption>
+            </figure>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setExamplesOpen(false)}>Закрыть</Button>
