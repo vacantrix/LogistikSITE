@@ -347,6 +347,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
             <Wrench className="h-4 w-4" aria-hidden />
             Прицепы
           </TabsTrigger>
+          {!isLogist && (
+            <TabsTrigger value="cargos">
+              <Boxes className="h-4 w-4" aria-hidden />
+              Грузы
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* -------- Перевозчики (только логист) -------- */}
@@ -411,19 +417,26 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
         </TabsContent>
         )}
 
-        {/* -------- Грузы (справочник грузов, только логист) -------- */}
-        {isLogist && (
+        {/* -------- Грузы (единый справочник: логист ведёт, перевозчик видит те же записи) -------- */}
         <TabsContent value="cargos">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="max-w-xl text-sm text-slate-500">
-                  Единый справочник грузов: заявка ссылается на запись отсюда, поэтому один и тот же груз всегда называется одинаково — в площадке, сверке и отчётах.
+                  {isLogist
+                    ? 'Единый справочник грузов: заявка ссылается на запись отсюда, поэтому один и тот же груз всегда называется одинаково — в площадке, сверке и отчётах.'
+                    : 'Единый справочник грузов платформы — тот же, что у логиста АЭМЗ: груз называется одинаково на площадке, в заявках и отчётах.'}
                 </div>
-                <Button size="sm" onClick={() => openAdd('cargo')}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  Добавить груз
-                </Button>
+                {isLogist ? (
+                  <Button size="sm" onClick={() => openAdd('cargo')}>
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Добавить груз
+                  </Button>
+                ) : (
+                  <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
+                    Только просмотр · ведёт логист АЭМЗ
+                  </Badge>
+                )}
               </div>
               <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
                 <Table>
@@ -435,7 +448,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                       <TableHead>ADR</TableHead>
                       <TableHead>В заявках</TableHead>
                       <TableHead>Добавлен</TableHead>
-                      <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>
+                      {isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -451,24 +464,26 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                         </TableCell>
                         <TableCell className="font-semibold text-slate-800">{c.usageCount}</TableCell>
                         <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(c.createdAt)}</TableCell>
-                        <TableCell>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            aria-label={`Изменить ${c.name}`}
-                            onClick={() => openEdit('cargo', c.id, {
-                              name: c.name, category: c.category, truckType: c.truckType,
-                              dangerous: String(c.dangerous), cargoName: c.name,
-                            })}
-                          >
-                            <Pencil className="h-3.5 w-3.5" aria-hidden />
-                          </Button>
-                        </TableCell>
+                        {isLogist && (
+                          <TableCell>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              aria-label={`Изменить ${c.name}`}
+                              onClick={() => openEdit('cargo', c.id, {
+                                name: c.name, category: c.category, truckType: c.truckType,
+                                dangerous: String(c.dangerous), cargoName: c.name,
+                              })}
+                            >
+                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))}
                     {cargoTypes.length === 0 && (
-                      <TableRow><TableCell colSpan={7} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={isLogist ? 7 : 6} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>
@@ -476,7 +491,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
             </CardContent>
           </Card>
         </TabsContent>
-        )}
         <TabsContent value="drivers">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
