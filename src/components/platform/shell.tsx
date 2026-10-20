@@ -2,7 +2,8 @@
 
 /**
  * Оболочка платформы: тёмно-синяя шапка, селектор «Роль» и два вида платформы:
- *  — внутренний контур АЭМЗ (Логист 1 / Логист 2): управление площадкой, сверка, реестр, отчёты;
+ *  — внутренний контур АЭМЗ (Логист 1 / Логист 2): площадка со встроенными торгами,
+ *    сверка, реестр, справочники, отчёты;
  *  — кабинет перевозчика: участие в отборе рейсов, свои заявки и документы.
  */
 import type { ReactNode } from 'react'
@@ -10,18 +11,17 @@ import { Building2, ShieldCheck, Truck, UserCog } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { RoleKind, TabKey } from '@/components/platform/common'
 
-/** Полный список разделов с пометкой ролей: L — логист, C — перевозчик */
+/** Полный список разделов с пометкой ролей: L — логист, C — перевозчик.
+ *  Сводка удалена (полоса «Требует внимания» на площадке), торги влиты в площадку,
+ *  настройки — будущий административный контур (экран settings.tsx остаётся в коде). */
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
-  { key: 'dashboard', label: 'Сводка', roles: ['logist'] },
   { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier'] },
   { key: 'apply', label: 'Подать заявку', roles: ['carrier'] },
   { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
-  { key: 'auctions', label: 'Торги', roles: ['logist'] },
   { key: 'verify', label: 'Сверка документов', roles: ['logist'] },
   { key: 'registry', label: 'Реестр рейсов', roles: ['logist'] },
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier'] },
   { key: 'reports', label: 'Отчёты', roles: ['logist'] },
-  { key: 'settings', label: 'Настройки', roles: ['logist'] },
 ]
 
 /** Разделы, доступные выбранной роли */

@@ -11,16 +11,13 @@ import { RoleNotice, type TabKey } from '@/components/platform/common'
 import { api } from '@/lib/api'
 import type { CarrierDTO } from '@/lib/types'
 
-import DashboardTab from '@/components/platform/dashboard'
 import BoardTab from '@/components/platform/board'
 import ApplyTab from '@/components/platform/apply'
 import MyRequestsTab from '@/components/platform/my-requests'
-import AuctionsTab from '@/components/platform/auctions'
 import VerifyTab from '@/components/platform/verification'
 import RegistryTab from '@/components/platform/registry'
 import DirectoryTab from '@/components/platform/directories'
 import ReportsTab from '@/components/platform/reports'
-import SettingsTab from '@/components/platform/settings'
 
 const ROLE_STORAGE_KEY = 'aemz-platform-role'
 
@@ -36,7 +33,7 @@ function loadStoredRole(): RoleSelection {
 }
 
 export default function Page() {
-  const [tab, setTab] = useState<TabKey>('dashboard')
+  const [tab, setTab] = useState<TabKey>('board')
   const [carriers, setCarriers] = useState<CarrierDTO[]>([])
   const [role, setRole] = useState<RoleSelection>({ kind: 'logist', logistName: 'Логист 1' })
   // роль восстанавливается из хранилища сразу после монтирования;
@@ -98,16 +95,13 @@ export default function Page() {
         <RoleNotice role={role.kind} />
       ) : (
         <>
-          {tab === 'dashboard' && <DashboardTab {...tabProps} />}
           {tab === 'board' && <BoardTab {...tabProps} />}
           {tab === 'apply' && <ApplyTab {...tabProps} />}
           {tab === 'my' && <MyRequestsTab {...tabProps} />}
-          {tab === 'auctions' && <AuctionsTab {...tabProps} />}
           {tab === 'verify' && <VerifyTab {...tabProps} />}
           {tab === 'registry' && <RegistryTab {...tabProps} />}
           {tab === 'directory' && <DirectoryTab {...tabProps} />}
           {tab === 'reports' && <ReportsTab {...tabProps} />}
-          {tab === 'settings' && <SettingsTab {...tabProps} />}
         </>
       )}
     </Shell>

@@ -21,6 +21,7 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
+import { ToastAction } from '@/components/ui/toast'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
@@ -133,7 +134,6 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [docTab, setDocTab] = useState<DocType | null>(null)
-  const [confirmedNumber, setConfirmedNumber] = useState<string | null>(null)
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnReason, setReturnReason] = useState('')
 
@@ -186,8 +186,12 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
       toast({
         title: 'Данные переданы в 1C:ERP: справочник и реестр',
         description: `Заявка №${r.number} записана в реестр рейсов, пакет на пропуск и ЭТрН сформированы`,
+        action: (
+          <ToastAction altText="Открыть реестр рейсов" onClick={() => onNavigate('registry')}>
+            Открыть реестр
+          </ToastAction>
+        ),
       })
-      setConfirmedNumber(r.number)
       setSelectedId(null)
       setDocTab(null)
       await load()
@@ -256,26 +260,6 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
             ))}
           </div>
         </div>
-      )}
-
-      {/* результат подтверждения */}
-      {confirmedNumber && (
-        <Card className="mb-4 border-emerald-200 bg-emerald-50 shadow-sm">
-          <CardContent className="flex flex-wrap items-center gap-3 p-4">
-            <CheckCheck className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
-            <div className="text-sm font-medium text-emerald-900">
-              Заявка №{confirmedNumber} принята — поиск в реестре рейсов
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="ml-auto border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100"
-              onClick={() => onNavigate('registry')}
-            >
-              Открыть реестр
-            </Button>
-          </CardContent>
-        </Card>
       )}
 
       {queue.length === 0 ? (

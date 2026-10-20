@@ -1,21 +1,40 @@
 'use client'
 
 /** Раздел «Площадка заявок» — перевозчик выбирает заявку и делает ставку; логист публикует и контролирует */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  ClockPlus,
+  EyeOff,
   FileSpreadsheet,
   Gavel,
+  Handshake,
+  History,
   Lock,
   Plus,
   RefreshCw,
+  ScanSearch,
   Search,
+  Send,
   ShieldCheck,
+  Timer,
+  TrendingDown,
+  TrendingUp,
+  Trophy,
+  Undo2,
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -35,12 +54,13 @@ import {
   ModeBadge,
   SectionHeader,
   StatusBadge,
+  DocStatusBadge,
   type TabProps,
 } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { fmtDateTime, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
-import type { BidDTO, RequestDTO, RequestMode } from '@/lib/types'
+import { DOC_TYPE_LABEL, fmtDateTime, num, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
+import type { BidDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
 
@@ -97,6 +117,143 @@ function DeadlineCell({ request, now }: { request: RequestDTO; now: number | nul
   )
 }
 
+/** Компактная метрика торгового стенда */
+function Metric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'green' }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`mt-0.5 text-sm font-bold ${tone === 'green' ? 'text-emerald-600' : 'text-slate-900'}`}>{value}</div>
+    </div>
+  )
+}
+
+/**
+ * Торговый стенд логиста — раскрывается прямо в строке площадки:
+ * обратный отсчёт, метрики, ставки и решения по заявке.
+ */
+function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }: {
+  request: RequestDTO
+  now: number | null
+  busy: boolean
+  onAward: (bid: BidDTO) => void
+  onExtend: () => void
+  onOffer: () => void
+  onRaise: () => void
+}) {
+  const sortedBids = [...request.bids].sort((a, b) => a.amount - b.amount || a.createdAt.localeCompare(b.createdAt))
+  const minBid = sortedBids[0] ?? null
+  const minAmount = minBid?.amount ?? null
+  const savings = request.bestRate != null && request.bestRate < request.startRate ? request.startRate - request.bestRate : null
+  const urgentClock = now !== null && timeLeft(request.deadline)?.urgent === true
+
+  return (
+    <div className="space-y-3 rounded-xl border border-blue-200 bg-white p-4">
+      {/* шапка: маршрут и обратный отсчёт */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="text-sm text-slate-600">
+          {request.fromPoint} → {request.toPoint} · {request.cargo}, {num(request.tonnage)} т
+        </div>
+        <div className="text-right">
+          <div className="text-xs text-muted-foreground">До окончания торгов</div>
+          <div className="mt-0.5 flex items-center justify-end gap-1.5">
+            <Timer className={`h-4 w-4 ${urgentClock ? 'text-red-600' : 'text-slate-500'}`} aria-hidden />
+            <DeadlineCell request={request} now={now} />
+          </div>
+        </div>
+      </div>
+
+      {/* метрики */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric label="Стартовая ставка" value={rate(request.startRate)} />
+        <Metric label="Лучшая ставка" value={request.bestRate != null ? rate(request.bestRate) : 'Ставок нет'} />
+        <Metric label="Экономия" value={savings != null ? rate(savings) : '—'} tone={savings != null ? 'green' : 'default'} />
+        <Metric label="Ставок" value={String(request.bids.length)} />
+      </div>
+
+      {/* ставки: для AUCTION — таблица, для CLOSED — пояснение */}
+      {request.mode === 'CLOSED' ? (
+        <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+          Закрытые ставки: цены участников скрыты до подведения итогов. Согласуйте победителя — сумма раскроется в подтверждении.
+        </div>
+      ) : sortedBids.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+          Ставок пока нет — заявка видна перевозчикам на площадке.
+        </div>
+      ) : (
+        <div className={`max-h-64 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-slate-50">
+                <TableHead>Перевозчик</TableHead>
+                <TableHead>Ставка</TableHead>
+                <TableHead>Время ставки</TableHead>
+                <TableHead />
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortedBids.map((b) => {
+                const isBest = minAmount != null && b.amount === minAmount
+                return (
+                  <TableRow key={b.id} className={isBest ? 'bg-emerald-50/60' : undefined}>
+                    <TableCell className="font-medium text-slate-800">{b.carrierName}</TableCell>
+                    <TableCell className="whitespace-nowrap font-semibold text-slate-900">{rate(b.amount)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(b.createdAt)}</TableCell>
+                    <TableCell>
+                      {isBest && (
+                        <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
+                          <TrendingDown className="mr-1 h-3 w-3" aria-hidden />
+                          Лучшая
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => onAward(b)}
+                        aria-label={`Выбрать ставку ${b.carrierName} на ${rate(b.amount)}`}
+                      >
+                        Выбрать
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* действия над торгом */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+        {minBid ? (
+          <Button size="sm" disabled={busy} onClick={() => onAward(minBid)}>
+            <Trophy className="h-4 w-4" aria-hidden />
+            Согласовать победителя
+          </Button>
+        ) : (
+          <Button size="sm" disabled={busy} onClick={onRaise}>
+            <TrendingUp className="h-4 w-4" aria-hidden />
+            Поднять стартовую ставку
+          </Button>
+        )}
+        <Button size="sm" variant="outline" disabled={busy} onClick={onExtend}>
+          <ClockPlus className="h-4 w-4" aria-hidden />
+          Продлить торги на 2 часа
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={onOffer}>
+          <Send className="h-4 w-4" aria-hidden />
+          Предложить напрямую
+        </Button>
+        {busy && <span className="text-xs text-slate-400">Выполняется…</span>}
+      </div>
+    </div>
+  )
+}
+
 export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
@@ -133,11 +290,26 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     mode: 'AUCTION' as RequestMode, startRate: '', loadDate: '', loadWindow: '08:00–12:00', deadlineHours: '4',
   })
 
+  // торговый стенд и решения логиста (вместо отдельной вкладки «Торги»)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [events, setEvents] = useState<EventFeedItem[]>([])
+  const [awardBid, setAwardBid] = useState<{ request: RequestDTO; bid: BidDTO } | null>(null)
+  const [offerReq, setOfferReq] = useState<RequestDTO | null>(null)
+  const [offerCarriers, setOfferCarriers] = useState<CarrierDTO[]>([])
+  const [offerCarrierId, setOfferCarrierId] = useState('')
+  const [raiseReq, setRaiseReq] = useState<RequestDTO | null>(null)
+  const [raiseAmount, setRaiseAmount] = useState('')
+  const [raiseError, setRaiseError] = useState<string | null>(null)
+
   const load = useCallback(async (silent = false) => {
     if (!silent) setRefreshing(true)
     try {
       const d = await api.listRequests()
       setRequests(d.requests)
+      if (isLogist) {
+        const ev = await api.events(12)
+        setEvents(ev.events)
+      }
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
@@ -145,7 +317,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
       setLoading(false)
       if (!silent) setRefreshing(false)
     }
-  }, [])
+  }, [isLogist])
 
   // первичная загрузка + автообновление каждые 15 секунд
   useEffect(() => {
@@ -234,8 +406,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     toast({ title: 'Выгрузка готова', description: `В файле ${rows.length} заявок — текущая выборка с учётом фильтров и поиска` })
   }
 
-  const openCount = (requests ?? []).filter((r) => r.status === 'PUBLISHED').length
-
   const detailReq = (requests ?? []).find((r) => r.id === detailId) ?? null
   const bidReq = (requests ?? []).find((r) => r.id === bidId) ?? null
 
@@ -274,6 +444,93 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const sortedBids = (bids: BidDTO[]) => [...bids].sort((a, b) => a.amount - b.amount)
   const bestBid = (bids: BidDTO[]) => (bids.length > 0 ? Math.min(...bids.map((b) => b.amount)) : null)
 
+  // ——— действия логиста по торгам (влиты в площадку вместо вкладки «Торги») ———
+  const runAction = useCallback(async (
+    id: string, action: string, payload: Record<string, unknown>, okTitle: string, okDesc: string,
+  ): Promise<boolean> => {
+    setBusyId(id)
+    try {
+      await api.action(id, action, payload)
+      toast({ title: okTitle, description: okDesc })
+      await load(true)
+      return true
+    } catch (e) {
+      toast({
+        title: 'Действие не выполнено',
+        description: e instanceof Error ? e.message : 'Попробуйте ещё раз',
+        variant: 'destructive',
+      })
+      return false
+    } finally {
+      setBusyId(null)
+    }
+  }, [load, toast])
+
+  /** клик по строке: у логиста раскрытие торгов, иначе — детали заявки */
+  const onRowClick = (r: RequestDTO) => {
+    if (isLogist && r.status === 'PUBLISHED') {
+      setExpandedId((cur) => (cur === r.id ? null : r.id))
+    } else {
+      setDetailId(r.id)
+    }
+  }
+
+  const confirmAward = async () => {
+    if (!awardBid) return
+    const { request, bid } = awardBid
+    const ok = await runAction(
+      request.id, 'award', { bidId: bid.id },
+      'Победитель согласован',
+      `№${request.number}: ${bid.carrierName} — ${rate(bid.amount)}. Заявка ждёт документы от агента`,
+    )
+    if (ok) { setAwardBid(null); setExpandedId(null) }
+  }
+
+  const openOffer = async (r: RequestDTO) => {
+    setOfferReq(r)
+    if (offerCarriers.length === 0) {
+      try {
+        const dir = await api.directory()
+        setOfferCarriers(dir.carriers)
+        setOfferCarrierId(dir.carriers[0]?.id ?? '')
+      } catch { /* диалог откроется, список подгрузится при следующей попытке */ }
+    } else {
+      setOfferCarrierId((cur) => (offerCarriers.some((c) => c.id === cur) ? cur : offerCarriers[0]?.id ?? ''))
+    }
+  }
+
+  const confirmOffer = async () => {
+    if (!offerReq || !offerCarrierId) return
+    const carrier = offerCarriers.find((c) => c.id === offerCarrierId)
+    const offerRate = offerReq.bestRate ?? offerReq.startRate
+    const ok = await runAction(
+      offerReq.id, 'direct-offer', { carrierId: offerCarrierId },
+      'Заявка предложена напрямую',
+      `№${offerReq.number}: ${carrier?.name ?? 'перевозчик'} — ${rate(offerRate)}`,
+    )
+    if (ok) { setOfferReq(null); setExpandedId(null) }
+  }
+
+  const openRaise = (r: RequestDTO) => {
+    setRaiseAmount('')
+    setRaiseError(null)
+    setRaiseReq(r)
+  }
+
+  const submitRaise = async () => {
+    if (!raiseReq) return
+    const amt = Number(raiseAmount)
+    if (!raiseAmount || Number.isNaN(amt) || amt <= raiseReq.startRate) {
+      setRaiseError(`Новая ставка должна быть выше текущей (${rate(raiseReq.startRate)})`)
+      return
+    }
+    const ok = await runAction(
+      raiseReq.id, 'raise-rate', { amount: amt },
+      'Стартовая ставка повышена', `№${raiseReq.number}: новая стартовая ставка ${rate(amt)}`,
+    )
+    if (ok) { setRaiseReq(null); setExpandedId(null) }
+  }
+
   // ——— публикация заявки (только логист) ———
   const doCreate = async () => {
     if (!form.fromPoint.trim() || !form.toPoint.trim() || !form.cargo.trim() || !form.startRate.trim()) {
@@ -305,20 +562,51 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     }
   }
 
+  // ——— полоса «Требует внимания»: только реальная работа (вместо удалённой «Сводки») ———
+  const attention = useMemo(() => {
+    if (!isLogist || !requests) return []
+    const items: { key: string; icon: LucideIcon; text: string; onClick: () => void }[] = []
+    const published = requests.filter((r) => r.status === 'PUBLISHED')
+    const closingSoon = published.filter((r) => {
+      if (!r.deadline || now === null) return false
+      const ms = new Date(r.deadline).getTime() - now
+      return ms > 0 && ms <= 3_600_000
+    })
+    if (closingSoon.length > 0) {
+      items.push({
+        key: 'closing', icon: Clock,
+        text: `Закрываются в ближайший час — ${closingSoon.length}`,
+        onClick: () => setExpandedId(closingSoon[0].id),
+      })
+    }
+    const noBids = published.filter((r) => r.bids.length === 0)
+    if (noBids.length > 0) {
+      items.push({
+        key: 'nobids', icon: TrendingUp,
+        text: `Без ставок, стоит поднять цену — ${noBids.length}`,
+        onClick: () => setExpandedId(noBids[0].id),
+      })
+    }
+    const atLogist = requests.filter((r) => r.status === 'AT_LOGIST').length
+    if (atLogist > 0) {
+      items.push({ key: 'verify', icon: ScanSearch, text: `На сверке — ${atLogist}`, onClick: () => onNavigate('verify') })
+    }
+    const needFix = requests.filter((r) => r.status === 'DOCS_REVIEW').length
+    if (needFix > 0) {
+      items.push({ key: 'fix', icon: Undo2, text: `У агента на исправлении — ${needFix}`, onClick: () => onNavigate('verify') })
+    }
+    return items
+  }, [requests, isLogist, now, onNavigate])
+
   return (
     <section aria-label="Площадка заявок">
       <SectionHeader title="Площадка заявок">
-        <div className="flex items-center gap-3">
-          {isLogist && (
-            <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать и опубликовать заявку">
-              <Plus className="h-4 w-4" aria-hidden />
-              Создать заявку
-            </Button>
-          )}
-          <div className="text-sm font-medium text-slate-700" aria-live="polite">
-            Открыто <span className="text-lg font-bold text-blue-700">{openCount}</span> заявок
-          </div>
-        </div>
+        {isLogist && (
+          <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать и опубликовать заявку">
+            <Plus className="h-4 w-4" aria-hidden />
+            Создать заявку
+          </Button>
+        )}
       </SectionHeader>
 
       {!isLogist && !activeCarrierId && (
@@ -332,6 +620,28 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
 
       {!loading && !error && requests && (
         <div className="space-y-4">
+          {/* Полоса «Требует внимания» — появляется только когда есть работа */}
+          {isLogist && attention.length > 0 && (
+            <div
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+              role="status"
+              aria-label="Требует внимания"
+            >
+              <span className="mr-1 text-xs font-bold uppercase tracking-wide text-amber-800">Требует внимания:</span>
+              {attention.map((a) => (
+                <button
+                  key={a.key}
+                  type="button"
+                  onClick={a.onClick}
+                  className="flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100"
+                >
+                  <a.icon className="h-3.5 w-3.5" aria-hidden />
+                  {a.text}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Фильтры */}
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -363,7 +673,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
                 Обновить
               </Button>
-              <span className="ml-auto hidden text-xs text-muted-foreground sm:block">автообновление каждые 15 секунд</span>
             </CardContent>
           </Card>
 
@@ -396,10 +705,11 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                     <tbody>
                       {filtered.map((r) => {
                         const my = myBidOf(r)
+                        const expanded = isLogist && expandedId === r.id && r.status === 'PUBLISHED'
                         return (
+                          <Fragment key={r.id}>
                           <tr
-                            key={r.id}
-                            onClick={() => setDetailId(r.id)}
+                            onClick={() => onRowClick(r)}
                             className={`cursor-pointer align-middle transition-colors hover:bg-blue-50/40 ${my ? 'bg-sky-50/70' : ''}`}
                           >
                             <td className="border-b border-slate-100 py-3 pr-3">
@@ -433,19 +743,23 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                           <td className="border-b border-slate-100 py-3 pr-3"><DeadlineCell request={r} now={now} /></td>
                           <td className="border-b border-slate-100 py-3" onClick={(e) => e.stopPropagation()}>
                             {isLogist ? (
-                              // логист: не участвует в ставках — переходит в торги или смотрит статус
-                              <>
-                                {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
-                                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onNavigate('auctions')} aria-label={`Перейти к торгам по заявке ${r.number}`}>
-                                    <Gavel className="h-4 w-4" aria-hidden />
-                                    К торгам
-                                  </Button>
-                                )}
-                                {r.status === 'PUBLISHED' && r.mode !== 'AUCTION' && (
-                                  <span className="text-xs text-muted-foreground">ожидание перевозчика</span>
-                                )}
-                                {r.status !== 'PUBLISHED' && <StatusBadge status={r.status} />}
-                              </>
+                              // логист: разворачивает торговый стенд прямо в строке или смотрит статус
+                              r.status === 'PUBLISHED' ? (
+                                <Button
+                                  size="sm"
+                                  variant={expandedId === r.id ? 'secondary' : 'outline'}
+                                  className="gap-1.5"
+                                  onClick={(e) => { e.stopPropagation(); onRowClick(r) }}
+                                  aria-expanded={expandedId === r.id}
+                                  aria-label={`Ставки и действия по заявке ${r.number}`}
+                                >
+                                  {r.mode === 'AUCTION' ? <Gavel className="h-4 w-4" aria-hidden /> : <Lock className="h-4 w-4" aria-hidden />}
+                                  {r.mode === 'AUCTION' ? 'Торги' : 'Ставки'}
+                                  {expandedId === r.id ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
+                                </Button>
+                              ) : (
+                                <StatusBadge status={r.status} />
+                              )
                             ) : (
                               <>
                                 {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
@@ -475,6 +789,22 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                             )}
                           </td>
                         </tr>
+                        {expanded && (
+                          <tr>
+                            <td colSpan={9} className="border-b border-slate-100 bg-blue-50/40 px-2 py-3">
+                              <AuctionDesk
+                                request={r}
+                                now={now}
+                                busy={busyId === r.id}
+                                onAward={(bid) => setAwardBid({ request: r, bid })}
+                                onExtend={() => void runAction(r.id, 'extend', {}, 'Торги продлены', `№${r.number}: срок увеличен на 2 часа`)}
+                                onOffer={() => void openOffer(r)}
+                                onRaise={() => openRaise(r)}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                         )
                       })}
                     </tbody>
@@ -483,6 +813,36 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
               )}
             </CardContent>
           </Card>
+
+          {/* Журнал событий — компактный перенос из удалённой «Сводки» */}
+          {isLogist && (
+            <Card className="border-slate-200 shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <History className="h-4 w-4 text-blue-600" aria-hidden />
+                  Журнал событий
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {events.length === 0 ? (
+                  <p className="text-sm text-slate-500">Событий пока нет — они появятся, как только начнётся работа с заявками</p>
+                ) : (
+                  <ul
+                    className="max-h-64 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+                    aria-label="Лента последних событий"
+                  >
+                    {events.map((ev) => (
+                      <li key={ev.id} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-50">
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600" aria-hidden />
+                        <div className="min-w-0 flex-1 text-sm leading-snug text-slate-800">{ev.message}</div>
+                        <time dateTime={ev.createdAt} className="shrink-0 text-xs text-muted-foreground">{fmtDateTime(ev.createdAt)}</time>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -665,6 +1025,30 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 </p>
               </div>
 
+              {/* логист: видит состояние комплекта документов прямо в деталях заявки */}
+              {isLogist && (
+                <div>
+                  <h4 className="mb-2 text-sm font-semibold text-slate-900">Комплект документов ({detailReq.documents.length})</h4>
+                  {detailReq.documents.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-slate-300 px-3 py-3 text-center text-sm text-muted-foreground">
+                      Документы пока не загружены — агент подаст их через «Подать заявку».
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {detailReq.documents.map((d) => (
+                        <span
+                          key={d.id}
+                          className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700"
+                        >
+                          {DOC_TYPE_LABEL[d.type] ?? d.type}
+                          <DocStatusBadge status={d.status} />
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {detailReq.mode === 'AUCTION' && (
                 <div>
                   <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -724,6 +1108,109 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
               )}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* подтверждение согласования победителя (торги влиты в площадку) */}
+      <AlertDialog open={!!awardBid} onOpenChange={(o) => { if (!o) setAwardBid(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Согласовать победителя торгов?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                {awardBid && (
+                  <>
+                    Заявка №{awardBid.request.number} · {awardBid.request.fromPoint} → {awardBid.request.toPoint}.
+                    Перевозчик <span className="font-semibold text-slate-900">{awardBid.bid.carrierName}</span> — ставка{' '}
+                    <span className="font-semibold text-emerald-700">{rate(awardBid.bid.amount)}</span>
+                    {awardBid.request.startRate > awardBid.bid.amount && (
+                      <> · экономия {rate(awardBid.request.startRate - awardBid.bid.amount)}</>
+                    )}
+                    . После согласования агент получит заявку для загрузки документов.
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busyId !== null}
+              onClick={(e) => { e.preventDefault(); void confirmAward() }}
+            >
+              Согласовать
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* прямое предложение перевозчику */}
+      <Dialog open={!!offerReq} onOpenChange={(o) => { if (!o) setOfferReq(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Предложить заявку напрямую</DialogTitle>
+            <DialogDescription>
+              {offerReq && (
+                <>№{offerReq.number} · {offerReq.fromPoint} → {offerReq.toPoint} · ставка {rate(offerReq.bestRate ?? offerReq.startRate)}</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="offer-carrier">Перевозчик</Label>
+            <Select value={offerCarrierId} onValueChange={setOfferCarrierId}>
+              <SelectTrigger id="offer-carrier" aria-label="Выбор перевозчика для прямого предложения">
+                <SelectValue placeholder="Выберите перевозчика" />
+              </SelectTrigger>
+              <SelectContent>
+                {offerCarriers.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name} · взято {c.takenCount}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOfferReq(null)}>Отмена</Button>
+            <Button disabled={!offerCarrierId || busyId !== null} onClick={() => void confirmOffer()}>
+              <Handshake className="h-4 w-4" aria-hidden />
+              Предложить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* поднятие стартовой ставки */}
+      <Dialog open={!!raiseReq} onOpenChange={(o) => { if (!o) setRaiseReq(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Поднять стартовую ставку</DialogTitle>
+            <DialogDescription>
+              {raiseReq && (
+                <>№{raiseReq.number}: ставок нет. Повысьте стартовую ставку, чтобы привлечь перевозчиков.</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="raise-amount">Новая стартовая ставка, ₽/т</Label>
+            <Input
+              id="raise-amount"
+              type="number"
+              inputMode="numeric"
+              min={2500}
+              step={100}
+              placeholder={raiseReq ? `больше ${raiseReq.startRate}` : ''}
+              value={raiseAmount}
+              onChange={(e) => { setRaiseAmount(e.target.value); setRaiseError(null) }}
+              aria-label="Новая стартовая ставка в рублях за тонну"
+            />
+            {raiseReq && <div className="text-xs text-slate-500">Текущая стартовая ставка: {rate(raiseReq.startRate)}</div>}
+            {raiseError && <div className="text-xs font-medium text-red-600">{raiseError}</div>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRaiseReq(null)}>Отмена</Button>
+            <Button disabled={busyId !== null} onClick={() => void submitRaise()}>Поднять ставку</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </section>
