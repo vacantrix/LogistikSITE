@@ -146,12 +146,12 @@ async function main() {
   })
 
   // ---------- Справочник грузов: единые имена, группы, рекомендуемый ТС ----------
+  // Пул грузов ровно тот, что реально ходит в заявках (эталон — площадка перевозчика):
+  // Металлоконструкции, Оборудование, Клининг, Контейнеры. Больше ничего в справочнике нет.
   const cargoMetal = await db.cargoType.create({ data: { name: 'Металлоконструкции', category: 'Металлопрокат', truckType: 'Борт' } })
   const cargoEquipment = await db.cargoType.create({ data: { name: 'Оборудование', category: 'Оборудование', truckType: 'Тент' } })
   const cargoClinker = await db.cargoType.create({ data: { name: 'Клининг', category: 'Минеральные грузы', truckType: 'Тент' } })
   const cargoContainers = await db.cargoType.create({ data: { name: 'Контейнеры', category: 'Контейнеры', truckType: 'Тент' } })
-  const cargoPipes = await db.cargoType.create({ data: { name: 'Трубы стальные', category: 'Металлопрокат', truckType: 'Борт' } })
-  const cargoChem = await db.cargoType.create({ data: { name: 'Химия навалом', category: 'Опасные грузы (ADR)', truckType: 'Тент', dangerous: true } })
 
   // ---------- Активные заявки на площадке ----------
   const z1042 = await db.request.create({
