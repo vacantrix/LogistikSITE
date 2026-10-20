@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CarrierDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TruckDTO,
 } from '@/lib/types'
 
 async function json<T>(res: Response): Promise<T> {
@@ -36,12 +36,12 @@ export const api = {
   bulkAssign: (body: { carrierId: string; rows: { requestId: string; driverId: string; truckId: string; trailerId?: string }[] }) =>
     fetch('/api/requests/bulk-assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ assigned: number; total: number; results: { requestId: string; number: string; ok: boolean; error?: string }[] }>),
 
-  directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[] }>),
-  createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer', data: Record<string, unknown>) =>
-    fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean; driver?: DriverDTO; truck?: TruckDTO }>),
-  /** Обновить запись базы аккаунта (в т.ч. сроки действия документов) */
-  updateDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer', id: string, data: Record<string, unknown>) =>
-    fetch('/api/directory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, data }) }).then(json<{ ok: boolean }>),
+  directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[]; cargoTypes: CargoTypeDTO[] }>),
+  createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo', data: Record<string, unknown>) =>
+    fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean; driver?: DriverDTO; truck?: TruckDTO; cargoType?: CargoTypeDTO }>),
+  /** Обновить запись базы аккаунта (в т.ч. сроки действия документов и справочник грузов) */
+  updateDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo', id: string, data: Record<string, unknown>) =>
+    fetch('/api/directory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, data }) }).then(json<{ ok: boolean; cargoType?: CargoTypeDTO }>),
 
   reports: () => fetch('/api/reports', { cache: 'no-store' }).then(json<ReportSummary>),
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, { cache: 'no-store' }).then(json<{ events: EventFeedItem[] }>),

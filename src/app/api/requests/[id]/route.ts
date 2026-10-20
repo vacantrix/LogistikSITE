@@ -9,7 +9,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const { id } = await params
   const request = await db.request.findUnique({
     where: { id },
-    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true },
+    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
   })
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
   return NextResponse.json({ request: toRequestDTO(request) })

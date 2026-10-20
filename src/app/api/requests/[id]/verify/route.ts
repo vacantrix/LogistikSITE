@@ -36,7 +36,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     // ничего нового — просто вернуть состояние
     const fresh = await db.request.findUnique({
       where: { id },
-      include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true },
+      include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
     })
     return NextResponse.json({ request: toRequestDTO(fresh!) })
   }
@@ -101,7 +101,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   void results
   const fresh = await db.request.findUnique({
     where: { id },
-    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true },
+    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
   })
   return NextResponse.json({ request: toRequestDTO(fresh!) })
 }

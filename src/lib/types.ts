@@ -54,6 +54,17 @@ export interface CarrierDTO {
   bidsCount: number
 }
 
+/** Запись справочника грузов — единый источник названий груза для заявок */
+export interface CargoTypeDTO {
+  id: string
+  name: string
+  category: string
+  truckType: string
+  dangerous: boolean
+  usageCount: number
+  createdAt: string
+}
+
 export interface BidDTO {
   id: string
   carrierId: string
@@ -91,6 +102,10 @@ export interface RequestDTO {
   fromPoint: string
   toPoint: string
   cargo: string
+  /** ссылка на запись справочника грузов (cargoTypeId) */
+  cargoTypeId: string | null
+  /** группа груза из справочника (Металлопрокат, Оборудование…) */
+  cargoCategory: string | null
   tonnage: number
   truckType: string
   mode: RequestMode

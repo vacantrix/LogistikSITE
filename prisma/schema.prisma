@@ -62,6 +62,25 @@ model Trailer {
   createdAt DateTime @default(now())
 }
 
+// ============ Directory: cargos (единый справочник грузов) ============
+
+/**
+ * Справочник грузов — единственный источник названий груза для заявок.
+ * Раньше груз писали вручную в каждой заявке («Труба стальная», «трубы»…),
+ * из-за чего один и тот же груз встречался под разными именами.
+ * Теперь заявка ссылается на запись справочника (cargoTypeId), а `Request.cargo`
+ * хранит денормализованное имя из этой записи — оно всегда одинаковое.
+ */
+model CargoType {
+  id        String    @id @default(cuid())
+  name      String    @unique // «Металлоконструкции» — эталонное имя груза
+  category  String    @default("Прочее") // группа груза: Металлопрокат, Оборудование…
+  truckType String    @default("Тент") // рекомендуемый тип ТС (Тент/Реф/Изотерм/Борт)
+  dangerous Boolean   @default(false) // опасный груз (ADR) — признак для документов
+  createdAt DateTime  @default(now())
+  requests  Request[]
+}
+
 // ============ Requests (auctions) / trips ============
 
 model Request {
@@ -69,7 +88,9 @@ model Request {
   number      String     @unique
   fromPoint   String
   toPoint     String
-  cargo       String
+  cargo       String // денормализованное имя груза из справочника (CargoType.name)
+  cargoTypeId String?
+  cargoType   CargoType? @relation(fields: [cargoTypeId], references: [id])
   tonnage     Float
   truckType   String
   mode        String // AUCTION | CLOSED

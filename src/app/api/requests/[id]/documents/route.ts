@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const fresh = await db.request.findUnique({
     where: { id },
-    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true },
+    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
   })
   return NextResponse.json({ document: toDocumentDTO(doc), request: toRequestDTO(fresh!) }, { status: 201 })
 }

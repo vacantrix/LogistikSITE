@@ -60,7 +60,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { DOC_TYPE_LABEL, fmtDateTime, num, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
-import type { BidDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
+import type { BidDTO, CargoTypeDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
 
@@ -286,9 +286,15 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({
-    fromPoint: '', toPoint: '', cargo: '', tonnage: '20', truckType: 'Тент',
+    fromPoint: '', toPoint: '', cargoId: '', tonnage: '20', truckType: 'Тент',
     mode: 'AUCTION' as RequestMode, startRate: '', loadDate: '', loadWindow: '08:00–12:00', deadlineHours: '4',
   })
+
+  // справочник грузов: груз выбирается из базы — свободный текст больше не источник имён
+  const [cargoTypes, setCargoTypes] = useState<CargoTypeDTO[]>([])
+  const [cargoAddOpen, setCargoAddOpen] = useState(false)
+  const [cargoForm, setCargoForm] = useState({ name: '', category: '', truckType: 'Тент', dangerous: 'false' })
+  const [cargoSaving, setCargoSaving] = useState(false)
 
   // торговый стенд и решения логиста (вместо отдельной вкладки «Торги»)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -332,6 +338,12 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
+
+  // справочник грузов подгружаем, когда логист открывает диалог создания заявки
+  useEffect(() => {
+    if (!createOpen) return
+    void api.directory().then((d) => setCargoTypes(d.cargoTypes)).catch(() => {})
+  }, [createOpen])
 
   const applyRequest = useCallback((updated: RequestDTO) => {
     setRequests((prev) => {
@@ -533,7 +545,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
 
   // ——— публикация заявки (только логист) ———
   const doCreate = async () => {
-    if (!form.fromPoint.trim() || !form.toPoint.trim() || !form.cargo.trim() || !form.startRate.trim()) {
+    if (!form.fromPoint.trim() || !form.toPoint.trim() || !form.cargoId || !form.startRate.trim()) {
       toast({ title: 'Ошибка', description: 'Заполните направление, груз и стартовую ставку', variant: 'destructive' })
       return
     }
@@ -542,7 +554,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
       const { request } = await api.createRequest({
         fromPoint: form.fromPoint.trim(),
         toPoint: form.toPoint.trim(),
-        cargo: form.cargo.trim(),
+        cargoTypeId: form.cargoId,
         tonnage: Number(form.tonnage) || 20,
         truckType: form.truckType,
         mode: form.mode,
@@ -553,12 +565,34 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
       })
       setRequests((prev) => [request, ...(prev ?? [])])
       setCreateOpen(false)
-      setForm((f) => ({ ...f, fromPoint: '', toPoint: '', cargo: '', startRate: '' }))
+      setForm((f) => ({ ...f, fromPoint: '', toPoint: '', cargoId: '', startRate: '' }))
       toast({ title: 'Заявка опубликована', description: `${request.number}: ${request.fromPoint} → ${request.toPoint}` })
     } catch (e) {
       toast({ title: 'Не удалось опубликовать заявку', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
     } finally {
       setCreating(false)
+    }
+  }
+
+  // ——— быстрое добавление груза в справочник прямо из формы заявки ———
+  const submitCargoAdd = async () => {
+    if (!cargoForm.name.trim()) {
+      toast({ title: 'Ошибка', description: 'Укажите название груза', variant: 'destructive' })
+      return
+    }
+    setCargoSaving(true)
+    try {
+      const { cargoType } = await api.createDirectory('cargo', { ...cargoForm })
+      if (cargoType) {
+        setCargoTypes((prev) => [...prev, cargoType].sort((a, b) => a.name.localeCompare(b.name, 'ru')))
+        setForm((f) => ({ ...f, cargoId: cargoType.id, truckType: cargoType.truckType }))
+      }
+      setCargoAddOpen(false)
+      toast({ title: 'Груз добавлен в справочник', description: cargoType ? `${cargoType.name} доступен для всех новых заявок` : undefined })
+    } catch (e) {
+      toast({ title: 'Не удалось добавить груз', description: e instanceof Error ? e.message : 'Проверьте заполнение полей', variant: 'destructive' })
+    } finally {
+      setCargoSaving(false)
     }
   }
 
@@ -866,8 +900,34 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 <Input id="cr-to" placeholder="Порт НМТП" value={form.toPoint} onChange={(e) => setForm((f) => ({ ...f, toPoint: e.target.value }))} />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="cr-cargo">Груз</Label>
-                <Input id="cr-cargo" placeholder="Оборудование" value={form.cargo} onChange={(e) => setForm((f) => ({ ...f, cargo: e.target.value }))} />
+                <Label htmlFor="cr-cargo">Груз (из справочника)</Label>
+                <div className="flex gap-2">
+                  <Select
+                    value={form.cargoId}
+                    onValueChange={(v) => {
+                      const ct = cargoTypes.find((c) => c.id === v)
+                      setForm((f) => ({ ...f, cargoId: v, truckType: ct?.truckType ?? f.truckType }))
+                    }}
+                  >
+                    <SelectTrigger id="cr-cargo" aria-label="Груз из справочника">
+                      <SelectValue placeholder="Выберите груз" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cargoTypes.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}{c.dangerous ? ' · ADR' : ''}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0 gap-1.5"
+                    onClick={() => { setCargoForm({ name: '', category: '', truckType: 'Тент', dangerous: 'false' }); setCargoAddOpen(true) }}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    <span className="hidden sm:inline">Добавить груз</span>
+                  </Button>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="cr-tonnage">Тоннаж, т</Label>
@@ -920,6 +980,57 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Отмена</Button>
               <Button onClick={() => void doCreate()} disabled={creating}>
                 {creating ? 'Публикуем…' : 'Опубликовать заявку'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Диалог быстрого добавления груза в справочник — только логист */}
+      {isLogist && (
+        <Dialog open={cargoAddOpen} onOpenChange={setCargoAddOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Новый груз в справочник</DialogTitle>
+              <DialogDescription>
+                Груз сохранится в базе и станет доступен во всех новых заявках — один и тот же груз всегда называется одинаково.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="nc-name">Название груза</Label>
+                <Input id="nc-name" placeholder="Трубы стальные" value={cargoForm.name} onChange={(e) => setCargoForm((f) => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="nc-category">Группа груза</Label>
+                <Input id="nc-category" placeholder="Металлопрокат" value={cargoForm.category} onChange={(e) => setCargoForm((f) => ({ ...f, category: e.target.value }))} />
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="nc-truck">Рекомендуемое ТС</Label>
+                  <Select value={cargoForm.truckType} onValueChange={(v) => setCargoForm((f) => ({ ...f, truckType: v }))}>
+                    <SelectTrigger id="nc-truck"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="nc-adr">Опасный груз</Label>
+                  <Select value={cargoForm.dangerous} onValueChange={(v) => setCargoForm((f) => ({ ...f, dangerous: v }))}>
+                    <SelectTrigger id="nc-adr"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="false">Нет — обычный груз</SelectItem>
+                      <SelectItem value="true">Да — опасный (ADR)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCargoAddOpen(false)}>Отмена</Button>
+              <Button disabled={cargoSaving} onClick={() => void submitCargoAdd()}>
+                {cargoSaving ? 'Сохраняем…' : 'Добавить и выбрать'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1000,7 +1111,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
 
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {[
-                  { label: 'Груз', value: `${detailReq.cargo}, ${detailReq.tonnage} т` },
+                  { label: 'Груз', value: `${detailReq.cargo}${detailReq.cargoCategory ? ` · ${detailReq.cargoCategory}` : ''}, ${detailReq.tonnage} т` },
                   { label: 'Тип ТС', value: detailReq.truckType },
                   { label: 'Погрузка', value: `${detailReq.loadDate}, ${detailReq.loadWindow}` },
                   { label: 'Стартовая ставка', value: rate(detailReq.startRate) },

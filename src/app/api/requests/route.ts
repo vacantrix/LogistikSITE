@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   }
   const requests = await db.request.findMany({
     where,
-    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true },
+    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
     orderBy: { createdAt: 'desc' },
   })
   return NextResponse.json({ requests: requests.map(toRequestDTO) })
@@ -34,8 +34,18 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
   if (!body) return NextResponse.json({ error: 'Некорректный JSON' }, { status: 400 })
-  const { fromPoint, toPoint, cargo, tonnage, truckType, mode, startRate, loadDate, loadWindow, deadlineHours } = body
-  if (!fromPoint || !toPoint || !cargo || !startRate) {
+  const { fromPoint, toPoint, cargoTypeId, cargo: legacyCargo, tonnage, truckType, mode, startRate, loadDate, loadWindow, deadlineHours } = body
+
+  // груз берём из справочника (единое имя) — свободный текст больше не источник
+  let cargoName: string | null = null
+  if (cargoTypeId) {
+    const cargoType = await db.cargoType.findUnique({ where: { id: cargoTypeId } })
+    if (!cargoType) return NextResponse.json({ error: 'Выбранный груз не найден в справочнике' }, { status: 400 })
+    cargoName = cargoType.name
+  } else if (typeof legacyCargo === 'string' && legacyCargo.trim()) {
+    cargoName = legacyCargo.trim() // обратная совместимость (старые клиенты)
+  }
+  if (!fromPoint || !toPoint || !cargoName || !startRate) {
     return NextResponse.json({ error: 'Заполните направление, груз и стартовую ставку' }, { status: 400 })
   }
   const maxNum = await db.request.findFirst({ orderBy: { number: 'desc' } })
@@ -43,7 +53,7 @@ export async function POST(req: NextRequest) {
   const request = await db.request.create({
     data: {
       number: `Z-${nextN}`,
-      fromPoint, toPoint, cargo,
+      fromPoint, toPoint, cargo: cargoName, cargoTypeId: cargoTypeId ?? null,
       tonnage: Number(tonnage) || 20,
       truckType: truckType || 'Тент',
       mode: mode || 'AUCTION',
@@ -54,7 +64,7 @@ export async function POST(req: NextRequest) {
       status: 'PUBLISHED',
       events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована логистом: стартовая ставка ${Number(startRate).toLocaleString('ru-RU')} ₽/т` } },
     },
-    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true },
+    include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
   })
   return NextResponse.json({ request: toRequestDTO(request) }, { status: 201 })
 }

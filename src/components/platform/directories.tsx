@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   ArrowRight,
+  Boxes,
   CalendarClock,
   CheckCircle2,
   Pencil,
@@ -40,13 +41,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { expiryInfo, rowTint, type ExpiryState } from '@/lib/expiry'
-import type { CarrierDTO, DriverDTO, TrailerDTO, TruckDTO } from '@/lib/types'
+import type { CargoTypeDTO, CarrierDTO, DriverDTO, TrailerDTO, TruckDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-type Kind = 'carrier' | 'driver' | 'truck' | 'trailer'
+type Kind = 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo'
 
-type TabKind = 'carriers' | 'drivers' | 'trucks' | 'trailers'
+type TabKind = 'carriers' | 'cargos' | 'drivers' | 'trucks' | 'trailers'
 
 interface FieldDef {
   key: string
@@ -60,6 +61,10 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
     { key: 'inn', label: 'ИНН', placeholder: '2310045675' },
     { key: 'contractNo', label: 'Договор №', placeholder: '24-Д' },
     { key: 'contractDate', label: 'Дата договора', placeholder: '01.11.2025' },
+  ],
+  cargo: [
+    { key: 'name', label: 'Название груза', placeholder: 'Трубы стальные' },
+    { key: 'category', label: 'Группа груза', placeholder: 'Металлопрокат' },
   ],
   driver: [
     { key: 'fullName', label: 'ФИО', placeholder: 'Смирнов Олег Викторович' },
@@ -88,6 +93,7 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
 
 const KIND_TITLES: Record<Kind, string> = {
   carrier: 'Перевозчики',
+  cargo: 'Грузы',
   driver: 'Водители',
   truck: 'Тягачи (ТС)',
   trailer: 'Прицепы',
@@ -122,6 +128,7 @@ const fmtCreated = (iso: string): string =>
 export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: TabProps) {
   const { toast } = useToast()
   const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
+  const [cargoTypes, setCargoTypes] = useState<CargoTypeDTO[]>([])
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKind>('carriers')
   const [addKind, setAddKind] = useState<Kind | null>(null)
@@ -140,6 +147,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
     try {
       const dir = await api.directory()
       setCarriers(dir.carriers)
+      setCargoTypes(dir.cargoTypes)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
@@ -187,7 +195,11 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   const expiredCount = expiryItems.filter((i) => i.info.state === 'expired').length
 
   const openAdd = (kind: Kind) => {
-    setForm({ carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? '') })
+    setForm(
+      kind === 'cargo'
+        ? { truckType: 'Тент', dangerous: 'false' }
+        : { carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? '') },
+    )
     setEditing(null)
     setAddKind(kind)
   }
@@ -317,6 +329,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
               Перевозчики
             </TabsTrigger>
           )}
+          {isLogist && (
+            <TabsTrigger value="cargos">
+              <Boxes className="h-4 w-4" aria-hidden />
+              Грузы
+            </TabsTrigger>
+          )}
           <TabsTrigger value="drivers">
             <User className="h-4 w-4" aria-hidden />
             Водители
@@ -393,7 +411,72 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
         </TabsContent>
         )}
 
-        {/* -------- Водители -------- */}
+        {/* -------- Грузы (справочник грузов, только логист) -------- */}
+        {isLogist && (
+        <TabsContent value="cargos">
+          <Card className="border-slate-200 shadow-sm">
+            <CardContent className="p-4 sm:p-6">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="max-w-xl text-sm text-slate-500">
+                  Единый справочник грузов: заявка ссылается на запись отсюда, поэтому один и тот же груз всегда называется одинаково — в площадке, сверке и отчётах.
+                </div>
+                <Button size="sm" onClick={() => openAdd('cargo')}>
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Добавить груз
+                </Button>
+              </div>
+              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50">
+                      <TableHead>Груз</TableHead>
+                      <TableHead>Группа</TableHead>
+                      <TableHead>Рекомендуемое ТС</TableHead>
+                      <TableHead>ADR</TableHead>
+                      <TableHead>В заявках</TableHead>
+                      <TableHead>Добавлен</TableHead>
+                      <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {cargoTypes.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
+                        <TableCell className="text-slate-600">{c.category}</TableCell>
+                        <TableCell className="text-slate-600">{c.truckType}</TableCell>
+                        <TableCell>
+                          {c.dangerous
+                            ? <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-50 text-red-700">Опасный (ADR)</Badge>
+                            : <span className="text-slate-400">—</span>}
+                        </TableCell>
+                        <TableCell className="font-semibold text-slate-800">{c.usageCount}</TableCell>
+                        <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(c.createdAt)}</TableCell>
+                        <TableCell>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8"
+                            aria-label={`Изменить ${c.name}`}
+                            onClick={() => openEdit('cargo', c.id, {
+                              name: c.name, category: c.category, truckType: c.truckType,
+                              dangerous: String(c.dangerous), cargoName: c.name,
+                            })}
+                          >
+                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {cargoTypes.length === 0 && (
+                      <TableRow><TableCell colSpan={7} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        )}
         <TabsContent value="drivers">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
@@ -536,9 +619,13 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
           <DialogHeader>
             <DialogTitle>{addKind ? 'Добавить запись' : 'Изменить запись'} — {addLabel}</DialogTitle>
             <DialogDescription>
-              {addKind
-                ? 'Запись появится в базе аккаунта и станет доступна при подаче заявки.'
-                : 'Обновите данные и сроки действия документов — подсветка сроков пересчитается автоматически.'}
+              {addKind === 'cargo' || editing?.kind === 'cargo'
+                ? addKind
+                  ? 'Груз появится в справочнике и будет доступен для выбора во всех новых заявках — один и тот же груз всегда называется одинаково.'
+                  : 'Название груза едино для всех заявок: при переименовании оно обновится и в уже созданных заявках.'
+                : addKind
+                  ? 'Запись появится в базе аккаунта и станет доступна при подаче заявки.'
+                  : 'Обновите данные и сроки действия документов — подсветка сроков пересчитается автоматически.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -570,6 +657,34 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 />
               </div>
             ))}
+
+            {dialogKind === 'cargo' && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="add-truckType">Рекомендуемое ТС</Label>
+                  <Select value={form.truckType ?? 'Тент'} onValueChange={(v) => setForm((f) => ({ ...f, truckType: v }))}>
+                    <SelectTrigger id="add-truckType" aria-label="Рекомендуемое ТС">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="add-dangerous">Опасный груз</Label>
+                  <Select value={form.dangerous ?? 'false'} onValueChange={(v) => setForm((f) => ({ ...f, dangerous: v }))}>
+                    <SelectTrigger id="add-dangerous" aria-label="Опасный груз">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="false">Нет — обычный груз</SelectItem>
+                      <SelectItem value="true">Да — опасный (ADR)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             {editing?.kind === 'carrier' && (
               <div className="space-y-1.5">

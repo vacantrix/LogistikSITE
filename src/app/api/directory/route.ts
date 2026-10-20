@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } from '@/lib/serialize'
+import { toCargoTypeDTO, toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } from '@/lib/serialize'
 
 export const dynamic = 'force-dynamic'
 
 const norm = (s: string) => s.replace(/\s/g, '').toUpperCase()
 
-/** GET /api/directory — справочник: перевозчики с водителями, тягачами и прицепами */
+/** GET /api/directory — справочник: перевозчики с водителями/тягачами/прицепами + справочник грузов */
 export async function GET() {
   const carriers = await db.carrier.findMany({
     include: {
@@ -17,7 +18,11 @@ export async function GET() {
     },
     orderBy: { name: 'asc' },
   })
-  return NextResponse.json({ carriers: carriers.map(toCarrierDTO) })
+  const cargoTypes = await db.cargoType.findMany({
+    include: { _count: { select: { requests: true } } },
+    orderBy: { name: 'asc' },
+  })
+  return NextResponse.json({ carriers: carriers.map(toCarrierDTO), cargoTypes: cargoTypes.map(toCargoTypeDTO) })
 }
 
 /**
@@ -33,6 +38,21 @@ export async function POST(req: NextRequest) {
 
   try {
     switch (kind) {
+      case 'cargo': {
+        // справочник грузов: имя обязательно и уникально — именно оно попадает в заявки
+        if (!data.name?.trim()) return NextResponse.json({ error: 'Название груза обязательно' }, { status: 400 })
+        const dup = (await db.cargoType.findMany()).find((c) => norm(c.name) === norm(data.name.trim()))
+        if (dup) return NextResponse.json({ error: `Груз «${dup.name}» уже есть в справочнике` }, { status: 409 })
+        const cargoType = await db.cargoType.create({
+          data: {
+            name: data.name.trim(),
+            category: data.category?.trim() || 'Прочее',
+            truckType: data.truckType || 'Тент',
+            dangerous: data.dangerous === 'true',
+          },
+        })
+        return NextResponse.json({ ok: true, cargoType: toCargoTypeDTO(cargoType) }, { status: 201 })
+      }
       case 'carrier': {
         if (!data.name || !data.inn) return NextResponse.json({ error: 'Название и ИНН обязательны' }, { status: 400 })
         await db.carrier.create({
@@ -80,6 +100,9 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true }, { status: 201 })
   } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      return NextResponse.json({ error: 'Такой груз уже есть в справочнике' }, { status: 409 })
+    }
     console.error('directory create error', e)
     return NextResponse.json({ error: 'Не удалось создать запись' }, { status: 500 })
   }
@@ -97,6 +120,25 @@ export async function PUT(req: NextRequest) {
 
   try {
     switch (kind) {
+      case 'cargo': {
+        if (!data.name?.trim()) return NextResponse.json({ error: 'Название груза обязательно' }, { status: 400 })
+        const dup = (await db.cargoType.findMany()).find((c) => c.id !== id && norm(c.name) === norm(data.name.trim()))
+        if (dup) return NextResponse.json({ error: `Груз «${dup.name}» уже есть в справочнике` }, { status: 409 })
+        const cargoType = await db.cargoType.update({
+          where: { id },
+          data: {
+            name: data.name.trim(),
+            category: data.category?.trim() || 'Прочее',
+            truckType: data.truckType || 'Тент',
+            dangerous: data.dangerous === 'true',
+          },
+        })
+        // имя груза изменилось — обновляем денормализованную копию в заявках, чтобы всё везде было одинаково
+        if (data.name.trim() !== data.cargoName) {
+          await db.request.updateMany({ where: { cargoTypeId: id }, data: { cargo: data.name.trim() } })
+        }
+        return NextResponse.json({ ok: true, cargoType: toCargoTypeDTO(cargoType) })
+      }
       case 'driver': {
         const driver = await db.driver.update({
           where: { id },

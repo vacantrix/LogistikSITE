@@ -16,7 +16,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({}))
   const action = body.action as string
 
-  const include = { bids: { include: { carrier: true } }, documents: true, events: true, winner: true } as const
+  const include = { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true } as const
 
   const request = await db.request.findUnique({ where: { id }, include })
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })

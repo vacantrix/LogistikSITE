@@ -1,12 +1,24 @@
 /** Сериализация Prisma-моделей в DTO для клиента */
-import type { Carrier, Bid, Document as PrismaDoc, Driver, Event, Request as PrismaRequest, Trailer, Truck } from '@prisma/client'
-import type { BidDTO, CarrierDTO, DocumentDTO, DriverDTO, EventDTO, RequestDTO, TrailerDTO, TruckDTO } from '@/lib/types'
+import type {
+  Carrier, Bid, CargoType, Document as PrismaDoc, Driver, Event, Request as PrismaRequest, Trailer, Truck,
+} from '@prisma/client'
+import type {
+  BidDTO, CargoTypeDTO, CarrierDTO, DocumentDTO, DriverDTO, EventDTO, RequestDTO, TrailerDTO, TruckDTO,
+} from '@/lib/types'
 
 type RequestFull = PrismaRequest & {
   bids: (Bid & { carrier: Carrier })[]
   documents: PrismaDoc[]
   events: Event[]
   winner: Carrier | null
+  cargoType: CargoType | null
+}
+
+export function toCargoTypeDTO(c: CargoType & { _count?: { requests: number } }): CargoTypeDTO {
+  return {
+    id: c.id, name: c.name, category: c.category, truckType: c.truckType, dangerous: c.dangerous,
+    usageCount: c._count?.requests ?? 0, createdAt: c.createdAt.toISOString(),
+  }
 }
 
 export function toRequestDTO(r: RequestFull): RequestDTO {
@@ -17,6 +29,8 @@ export function toRequestDTO(r: RequestFull): RequestDTO {
     fromPoint: r.fromPoint,
     toPoint: r.toPoint,
     cargo: r.cargo,
+    cargoTypeId: r.cargoTypeId,
+    cargoCategory: r.cargoType?.category ?? null,
     tonnage: r.tonnage,
     truckType: r.truckType,
     mode: r.mode as RequestDTO['mode'],
