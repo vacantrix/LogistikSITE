@@ -146,17 +146,20 @@ async function main() {
   })
 
   // ---------- Справочник грузов: единые имена, группы, рекомендуемый ТС ----------
-  // Пул грузов ровно тот, что реально ходит в заявках (эталон — площадка перевозчика):
-  // Металлоконструкции, Оборудование, Клининг, Контейнеры. Больше ничего в справочнике нет.
-  const cargoMetal = await db.cargoType.create({ data: { name: 'Металлоконструкции', category: 'Металлопрокат', truckType: 'Борт' } })
-  const cargoEquipment = await db.cargoType.create({ data: { name: 'Оборудование', category: 'Оборудование', truckType: 'Тент' } })
-  const cargoClinker = await db.cargoType.create({ data: { name: 'Клининг', category: 'Минеральные грузы', truckType: 'Тент' } })
-  const cargoContainers = await db.cargoType.create({ data: { name: 'Контейнеры', category: 'Контейнеры', truckType: 'Тент' } })
+  // Пул грузов — металлургическая продукция АЭМЗ: арматура, проволока, катанка и т.д.
+  // Каждый груз из справочника используется минимум в одной заявке — экраны логиста
+  // и перевозчика всегда показывают один и тот же пул.
+  const cargoRebar = await db.cargoType.create({ data: { name: 'Арматура', category: 'Сортовой прокат', truckType: 'Борт' } })
+  const cargoWire = await db.cargoType.create({ data: { name: 'Проволока', category: 'Метизы', truckType: 'Тент' } })
+  const cargoWireRod = await db.cargoType.create({ data: { name: 'Катанка', category: 'Сортовой прокат', truckType: 'Борт' } })
+  const cargoShaped = await db.cargoType.create({ data: { name: 'Уголок и швеллер', category: 'Фасонный прокат', truckType: 'Борт' } })
+  const cargoSheet = await db.cargoType.create({ data: { name: 'Листовой прокат', category: 'Листовой прокат', truckType: 'Борт' } })
+  const cargoPipes = await db.cargoType.create({ data: { name: 'Трубы стальные', category: 'Трубы', truckType: 'Борт' } })
 
   // ---------- Активные заявки на площадке ----------
   const z1042 = await db.request.create({
     data: {
-      number: 'Z-1042', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции', cargoTypeId: cargoMetal.id,
+      number: 'Z-1042', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 8400, bestRate: 7900,
       status: 'PUBLISHED', loadDate: '20.10.2026', loadWindow: '08:00–12:00',
       deadline: inHours(2.25),
@@ -178,8 +181,8 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1043', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Оборудование', cargoTypeId: cargoEquipment.id,
-      tonnage: 18, truckType: 'Реф', mode: 'AUCTION', startRate: 6800, bestRate: null,
+      number: 'Z-1043', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Листовой прокат', cargoTypeId: cargoSheet.id,
+      tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 6800, bestRate: null,
       status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00',
       deadline: inHours(26),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 6 800 ₽/т', createdAt: hoursAgo(20) } },
@@ -188,7 +191,7 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1044', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции', cargoTypeId: cargoMetal.id,
+      number: 'Z-1044', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 11500, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '08:00–11:00',
       deadline: inHours(28),
@@ -198,7 +201,7 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1045', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции', cargoTypeId: cargoMetal.id,
+      number: 'Z-1045', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 9200, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '13:00–17:00',
       deadline: inHours(5.5),
@@ -208,7 +211,7 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1046', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг', cargoTypeId: cargoClinker.id,
+      number: 'Z-1046', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 3200, bestRate: null,
       status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00',
       deadline: inHours(20),
@@ -219,7 +222,7 @@ async function main() {
   // ---------- Выигранные перевозчиком Б: готовятся к подаче заявки ----------
   await db.request.create({
     data: {
-      number: 'Z-1047', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Оборудование', cargoTypeId: cargoEquipment.id,
+      number: 'Z-1047', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Листовой прокат', cargoTypeId: cargoSheet.id,
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 8800, bestRate: 8200,
       status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierB.id,
@@ -235,7 +238,7 @@ async function main() {
   })
   await db.request.create({
     data: {
-      number: 'Z-1048', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Клининг', cargoTypeId: cargoClinker.id,
+      number: 'Z-1048', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 4100, bestRate: 3850,
       status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00',
       winnerId: carrierB.id,
@@ -257,7 +260,7 @@ async function main() {
 
   const z1039 = await db.request.create({
     data: {
-      number: 'Z-1039', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Металлоконструкции', cargoTypeId: cargoMetal.id,
+      number: 'Z-1039', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Катанка', cargoTypeId: cargoWireRod.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 10500, bestRate: 9800,
       status: 'AT_LOGIST', loadDate: '16.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierA.id, driverId: driverA?.id, truckId: truckA?.id, trailerId: trailerA?.id,
@@ -320,9 +323,9 @@ async function main() {
   await db.document.create({
     data: {
       requestId: z1039.id, type: 'REQUEST_DOC', fileName: 'zayavka_scan.jpg',
-      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 9 800 РУБ/Т'], '#9a3412'),
+      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: КАТАНКА, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 9 800 РУБ/Т'], '#9a3412'),
       status: 'PASSED', quality: 95, engine: 'PaddleOCR-демо',
-      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'Ставка': '9 800 РУБ/Т' }),
+      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'КАТАНКА, 20 Т', 'Ставка': '9 800 РУБ/Т' }),
       confidence: JSON.stringify({ 'Номер заявки': 0.997, 'Дата заявки': 0.99, 'Груз': 0.98, 'Ставка': 0.96 }),
       issues: JSON.stringify(['Номер заявки на скане совпал с рейсом Z-1039 — документ принят автоматически']),
       createdAt: hoursAgo(27.6), updatedAt: hoursAgo(27.3),
@@ -342,11 +345,11 @@ async function main() {
 
   // ---------- Реестр: подтверждённые и закрытые рейсы ----------
   const regRows = [
-    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 11200, best: 10400, load: '14.10.2026', cargo: 'Металлоконструкции', cargoId: cargoMetal.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
-    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 5400, best: 5150, load: '08.10.2026', cargo: 'Оборудование', cargoId: cargoEquipment.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
-    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 11800, best: 11250, load: '05.10.2026', cargo: 'Контейнеры', cargoId: cargoContainers.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
-    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 2600, best: 2600, load: '02.10.2026', cargo: 'Клининг', cargoId: cargoClinker.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
-    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 7600, best: 7300, load: '29.09.2026', cargo: 'Металлоконструкции', cargoId: cargoMetal.id, route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },
+    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 11200, best: 10400, load: '14.10.2026', cargo: 'Катанка', cargoId: cargoWireRod.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
+    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 5400, best: 5150, load: '08.10.2026', cargo: 'Трубы стальные', cargoId: cargoPipes.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
+    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 11800, best: 11250, load: '05.10.2026', cargo: 'Уголок и швеллер', cargoId: cargoShaped.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
+    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 2600, best: 2600, load: '02.10.2026', cargo: 'Проволока', cargoId: cargoWire.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
+    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 7600, best: 7300, load: '29.09.2026', cargo: 'Катанка', cargoId: cargoWireRod.id, route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },
   ]
   for (const r of regRows) {
     await db.request.create({
