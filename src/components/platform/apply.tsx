@@ -1,29 +1,35 @@
 'use client'
 
 /**
- * «Подать документы» (Task 29/30/32/33/35) — единственное место пополнения базы
- * аккаунта. Одна линия = один водитель (проформы водитель|тягач|прицеп в одну
- * строку, фотографии ниже линии); «+» добавляет линию для ручного ввода.
- * Excel из одной таблицы создаёт нужное число линий с подставленными данными,
+ * «Подать документы» (Task 29/30/32/33/35/48) — единственное место пополнения базы
+ * аккаунта. Три вида карточек (Task 48): линия водителя (проформы водитель|тягач|
+ * прицеп в одну строку, фотографии ниже линии), одиночное ТС и одиночный прицеп —
+ * когда нужно добавить не всё сразу, а лишь часть. Внизу — три кнопки добавления:
+ * «Добавить водителя», «Добавить ТС», «Добавить прицеп».
+ * Excel из одной таблицы создаёт линии водителей с подставленными данными,
  * ничего не записывая в базу. Кнопка «Проверить все» последовательно прогоняет
- * линии: сначала проверяет обязательность всех полей и фото (незаполненное
- * подсвечивается красным), затем нейросеть читает фото, заполняет пустые поля
- * и сама допускает карточки в базу (или отклоняет с причинами).
+ * ВСЕ карточки: сначала проверяет обязательные поля (незаполненное подсвечивается
+ * красным), затем для линий водителей нейросеть читает фото, заполняет пустые
+ * поля и сама допускает карточки в базу (или отклоняет с причинами); одиночные
+ * ТС/прицепы допускаются сразу после валидации полей.
  */
 import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import * as XLSX from 'xlsx'
 import {
-  ArrowRight, CheckCircle2, FileSpreadsheet, Plus, ScanLine, Upload,
+  ArrowRight, CarFront, CheckCircle2, FileSpreadsheet, ScanLine, Truck, Upload, UserPlus,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { SectionHeader, type TabProps } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
-import DriverLine, { TRAILER_TYPES, type DriverLineInitial } from '@/components/platform/driver-intake'
+import DriverLine, {
+  TrailerLine, TruckLine, TRAILER_TYPES, type DriverLineInitial,
+} from '@/components/platform/driver-intake'
 
 type LineState = { id: string; initial?: DriverLineInitial; fromExcel: boolean }
+type SoloState = { id: string }
 
 let lineSeq = 0
 const newLineId = () => {
@@ -114,6 +120,8 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const isCarrier = role === 'carrier'
 
   const [lines, setLines] = useState<LineState[]>([{ id: newLineId(), fromExcel: false }])
+  const [trucks, setTrucks] = useState<SoloState[]>([])
+  const [trailers, setTrailers] = useState<SoloState[]>([])
   const [checkingAll, setCheckingAll] = useState(false)
   const [excelName, setExcelName] = useState<string | null>(null)
 
@@ -131,8 +139,24 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
     setLines((cur) => (cur.length > 1 ? cur.filter((l) => l.id !== id) : cur))
   }
 
-  /** «Проверить все»: в каждой линии сначала проверка обязательных полей (незаполненное
-   * подсвечивается), затем нейросеть и допуск; тихий режим — без отдельного тоста на линию */
+  // ——— одиночные карточки «Добавить ТС» / «Добавить прицеп» (Task 48) ———
+  const addTruck = () => setTrucks((cur) => [...cur, { id: newLineId() }])
+  const addTrailer = () => setTrailers((cur) => [...cur, { id: newLineId() }])
+  const removeTruck = (id: string) => {
+    checksRef.current.delete(id)
+    setTrucks((cur) => cur.filter((t) => t.id !== id))
+  }
+  const removeTrailer = (id: string) => {
+    checksRef.current.delete(id)
+    setTrailers((cur) => cur.filter((t) => t.id !== id))
+  }
+
+  /** всего карточек в работе: линии водителей + одиночные ТС и прицепы */
+  const totalCards = lines.length + trucks.length + trailers.length
+
+  /** «Проверить все»: в каждой карточке сначала проверка обязательных полей (незаполненное
+   * подсвечивается), затем допуск; у линий водителей перед допуском работает нейросеть;
+   * тихий режим — без отдельного тоста на карточку */
   const checkAll = async () => {
     if (checkingAll) return
     setCheckingAll(true)
@@ -147,13 +171,13 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
       }
       if (ran === 0) {
         toast({
-          title: 'Все линии уже допущены',
-          description: 'Проверять нечего — все линии уже в базе аккаунта',
+          title: 'Все карточки уже допущены',
+          description: 'Проверять нечего — все карточки уже в базе аккаунта',
         })
       } else {
         toast({
           title: `Проверка завершена: ${ok} из ${ran}`,
-          description: ok === ran ? 'Все линии допущены в базу' : 'Часть линий требует внимания — незаполненное подсвечено красным',
+          description: ok === ran ? 'Все карточки допущены в базу' : 'Часть карточек требует внимания — незаполненное подсвечено красным',
         })
       }
     } finally {
@@ -222,9 +246,9 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
         </Button>
       </div>
 
-      {/* панель «Проверить все» — сама появляется при 2+ линиях (Task 33) */}
+      {/* панель «Проверить все» — сама появляется при 2+ карточках (Task 33/48) */}
       <AnimatePresence>
-        {lines.length >= 2 && (
+        {totalCards >= 2 && (
           <motion.div
             initial={{ opacity: 0, y: -8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -234,7 +258,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
             <div className="flex flex-wrap items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
               <span className="flex items-center gap-1.5 text-sm font-semibold text-blue-900">
                 <ScanLine className="h-4 w-4" aria-hidden />
-                Линий в работе: {lines.length}
+                Карточек в работе: {totalCards}
               </span>
               <span className="flex-1" />
               <Button
@@ -243,8 +267,8 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                 className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
               >
                 <CheckCircle2 className="h-4 w-4" aria-hidden />
-                {checkingAll ? 'Проверяем все линии…' : 'Проверить все'}
-                <Badge variant="outline" className="ml-1 border-slate-500 bg-white/70 text-slate-900">{lines.length}</Badge>
+                {checkingAll ? 'Проверяем все карточки…' : 'Проверить все'}
+                <Badge variant="outline" className="ml-1 border-slate-500 bg-white/70 text-slate-900">{totalCards}</Badge>
               </Button>
             </div>
           </motion.div>
@@ -252,7 +276,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
       </AnimatePresence>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        {/* ——— левая колонка: линии ——— */}
+        {/* ——— левая колонка: карточки (линии водителей + одиночные ТС/прицепы) ——— */}
         <div className="min-w-0 space-y-3">
           {lines.map((line, i) => (
             <DriverLine
@@ -265,14 +289,54 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               onRemove={removeLine}
             />
           ))}
-          <button
-            type="button"
-            onClick={addLine}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-700"
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-            Добавить водителя
-          </button>
+          {trucks.map((truck, i) => (
+            <TruckLine
+              key={truck.id}
+              id={truck.id}
+              index={i}
+              carrierId={activeCarrierId ?? ''}
+              registerCheck={registerCheck}
+              onRemove={removeTruck}
+            />
+          ))}
+          {trailers.map((trailer, i) => (
+            <TrailerLine
+              key={trailer.id}
+              id={trailer.id}
+              index={i}
+              carrierId={activeCarrierId ?? ''}
+              registerCheck={registerCheck}
+              onRemove={removeTrailer}
+            />
+          ))}
+          {/* три кнопки добавления: водитель целиком (с фото и нейросетью)
+              либо только техника — без водителя (Task 48) */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={addLine}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-700"
+            >
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Добавить водителя
+            </button>
+            <button
+              type="button"
+              onClick={addTruck}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-700"
+            >
+              <Truck className="h-4 w-4" aria-hidden />
+              Добавить ТС
+            </button>
+            <button
+              type="button"
+              onClick={addTrailer}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-medium text-slate-600 transition hover:border-blue-400 hover:text-blue-700"
+            >
+              <CarFront className="h-4 w-4" aria-hidden />
+              Добавить прицеп
+            </button>
+          </div>
         </div>
 
         {/* ——— правая колонка: Excel ——— */}

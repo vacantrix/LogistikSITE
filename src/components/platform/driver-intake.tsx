@@ -1,17 +1,21 @@
 'use client'
 
 /**
- * Линия водителя для «Подать документов» (Task 29/30/32/33/35).
+ * Карточки пополнения базы для «Подать документов» (Task 29/30/32/33/35/48).
  *
- * Одна линия = один водитель: проформы [Водитель | Тягач | Прицеп] в одну строку,
- * ниже — 4 слота фотографий. ВСЕ поля проформ и все 4 фото обязательны.
+ * DriverLine (по умолчанию) — линия водителя: проформы [Водитель | Тягач | Прицеп]
+ * в одну строку, ниже — 4 слота фотографий. ВСЕ поля проформ и все 4 фото обязательны.
+ * TruckLine / TrailerLine — одиночные карточки «Добавить ТС» / «Добавить прицеп»
+ * (Task 48): когда нужно пополнить базу только техникой — 5 полей вручную, без фото.
+ *
  * При старте ничего не горит красным, кнопка «Проверить» чёрная и всегда активна;
  * если что-то не заполнено — после нажатия подсвечиваются все пропущенные поля
- * и слоты фото. Когда всё заполнено, кнопка запускает нейросеть: она читает фото,
- * заполняет ТОЛЬКО пустые поля, сверяет данные между документами и сама допускает
- * карточки в базу аккаунта (идемпотентно, по ФИО+ВУ / госномеру) или отклоняет.
+ * и слоты фото. Когда всё заполнено, кнопка линии водителя запускает нейросеть:
+ * она читает фото, заполняет ТОЛЬКО пустые поля, сверяет данные между документами
+ * и сама допускает карточки в базу аккаунта (идемпотентно, по ФИО+ВУ / госномеру)
+ * или отклоняет. Одиночные карточки допускаются сразу после валидации полей.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   BadgeCheck, CarFront, CircleAlert, IdCard, ScanLine, Truck, Trash2, X,
 } from 'lucide-react'
@@ -42,6 +46,10 @@ export const TRUCK_LABELS: Record<string, string> = {
 export const TRAILER_LABELS: Record<string, string> = {
   type: 'Тип прицепа', plate: 'Госномер прицепа', sts: 'СТС прицепа', color: 'Цвет прицепа', owner: 'Собственник прицепа',
 }
+
+/** Черновики полей техники — общие для линии водителя и одиночных карточек (Task 48) */
+export type TruckDraft = { brand: string; plate: string; sts: string; color: string; owner: string }
+export type TrailerDraft = { type: string; plate: string; sts: string; color: string; owner: string }
 
 type Upload = { fileName: string; dataUri: string }
 const LINE_DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
@@ -101,6 +109,66 @@ function FieldInput({
   )
 }
 
+/** Поля тягача — общий блок линии водителя и одиночной карточки «Добавить ТС» (Task 48) */
+function TruckFields({
+  prefix, value, miss, lock, onChange, className = 'space-y-2',
+}: {
+  prefix: string
+  value: TruckDraft
+  miss: (v: string) => boolean
+  lock: boolean
+  onChange: (k: keyof TruckDraft, v: string) => void
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <FieldInput id={`${prefix}-tb`} label="Марка, модель" placeholder="КАМАЗ 54901-CA" value={value.brand} invalid={miss(value.brand)} disabled={lock} onChange={(v) => onChange('brand', v)} />
+      <FieldInput id={`${prefix}-tp`} label="Госномер" placeholder="У783АХ152" value={value.plate} mono invalid={miss(value.plate)} disabled={lock} onChange={(v) => onChange('plate', v)} />
+      <FieldInput id={`${prefix}-ts`} label="СТС" placeholder="99 17 454545" value={value.sts} mono invalid={miss(value.sts)} disabled={lock} onChange={(v) => onChange('sts', v)} />
+      <FieldInput id={`${prefix}-tc`} label="Цвет" placeholder="зелёный" value={value.color} invalid={miss(value.color)} disabled={lock} onChange={(v) => onChange('color', v)} />
+      <FieldInput id={`${prefix}-to`} label="Собственник" placeholder="ООО «Перевозчик Б»" value={value.owner} invalid={miss(value.owner)} disabled={lock} onChange={(v) => onChange('owner', v)} />
+    </div>
+  )
+}
+
+/** Поля прицепа — общий блок линии водителя и одиночной карточки «Добавить прицеп» (Task 48) */
+function TrailerFields({
+  prefix, value, types, miss, lock, onChange, className = 'space-y-2',
+}: {
+  prefix: string
+  value: TrailerDraft
+  types: readonly string[]
+  miss: (v: string) => boolean
+  lock: boolean
+  onChange: (k: keyof TrailerDraft, v: string) => void
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      <div className="min-w-0">
+        <Label htmlFor={`${prefix}-trt`} className={`text-xs ${miss(value.type) ? 'font-semibold text-red-600' : 'text-muted-foreground'}`}>
+          Тип
+          {miss(value.type) && <span aria-hidden> — выберите</span>}
+        </Label>
+        <Select value={value.type} onValueChange={(v) => onChange('type', v)} disabled={lock}>
+          <SelectTrigger id={`${prefix}-trt`} aria-label="Тип прицепа" className={`mt-1 h-8 text-sm ${miss(value.type) ? 'border-red-400 bg-red-50/40 focus:ring-red-300' : ''}`}>
+            <SelectValue placeholder="Выберите тип" />
+          </SelectTrigger>
+          <SelectContent>
+            {types.map((tt) => (
+              <SelectItem key={tt} value={tt}>{tt}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <FieldInput id={`${prefix}-trp`} label="Госномер" placeholder="АТ5546152" value={value.plate} mono invalid={miss(value.plate)} disabled={lock} onChange={(v) => onChange('plate', v)} />
+      <FieldInput id={`${prefix}-trs`} label="СТС" placeholder="52 19 777777" value={value.sts} mono invalid={miss(value.sts)} disabled={lock} onChange={(v) => onChange('sts', v)} />
+      <FieldInput id={`${prefix}-trc`} label="Цвет" placeholder="серый" value={value.color} invalid={miss(value.color)} disabled={lock} onChange={(v) => onChange('color', v)} />
+      <FieldInput id={`${prefix}-tro`} label="Собственник прицепа" placeholder="ООО «Перевозчик Б»" value={value.owner} invalid={miss(value.owner)} disabled={lock} onChange={(v) => onChange('owner', v)} />
+    </div>
+  )
+}
+
 export interface DriverLineProps {
   id: string
   index: number
@@ -135,7 +203,7 @@ export default function DriverLine({
     categories: initial?.driver?.categories ?? '',
   })
   // ——— проформа тягача (5 полей) ———
-  const [t, setT] = useState({
+  const [t, setT] = useState<TruckDraft>({
     brand: initial?.truck?.brand ?? '',
     plate: initial?.truck?.plate ?? '',
     sts: initial?.truck?.sts ?? '',
@@ -143,7 +211,7 @@ export default function DriverLine({
     owner: initial?.truck?.owner ?? '',
   })
   // ——— проформа прицепа (5 полей) ———
-  const [tr, setTr] = useState({
+  const [tr, setTr] = useState<TrailerDraft>({
     type: initial?.trailer?.type ?? '',
     plate: initial?.trailer?.plate ?? '',
     sts: initial?.trailer?.sts ?? '',
@@ -447,12 +515,8 @@ export default function DriverLine({
             <Truck className="h-3.5 w-3.5" aria-hidden />
             Новый тягач
           </div>
-          <div className={`space-y-2 ${admitted ? 'pointer-events-none opacity-70' : ''}`}>
-            <FieldInput id={`${id}-tb`} label="Марка, модель" placeholder="КАМАЗ 54901-CA" value={t.brand} invalid={miss(t.brand)} disabled={lock} onChange={(v) => setTField('brand', v)} />
-            <FieldInput id={`${id}-tp`} label="Госномер" placeholder="У783АХ152" value={t.plate} mono invalid={miss(t.plate)} disabled={lock} onChange={(v) => setTField('plate', v)} />
-            <FieldInput id={`${id}-ts`} label="СТС" placeholder="99 17 454545" value={t.sts} mono invalid={miss(t.sts)} disabled={lock} onChange={(v) => setTField('sts', v)} />
-            <FieldInput id={`${id}-tc`} label="Цвет" placeholder="зелёный" value={t.color} invalid={miss(t.color)} disabled={lock} onChange={(v) => setTField('color', v)} />
-            <FieldInput id={`${id}-to`} label="Собственник" placeholder="ООО «Перевозчик Б»" value={t.owner} invalid={miss(t.owner)} disabled={lock} onChange={(v) => setTField('owner', v)} />
+          <div className={admitted ? 'pointer-events-none opacity-70' : ''}>
+            <TruckFields prefix={id} value={t} miss={miss} lock={lock} onChange={setTField} />
           </div>
         </div>
 
@@ -462,27 +526,8 @@ export default function DriverLine({
             <CarFront className="h-3.5 w-3.5" aria-hidden />
             Новый прицеп
           </div>
-          <div className={`space-y-2 ${admitted ? 'pointer-events-none opacity-70' : ''}`}>
-            <div className="min-w-0">
-              <Label htmlFor={`${id}-trt`} className={`text-xs ${miss(tr.type) ? 'font-semibold text-red-600' : 'text-muted-foreground'}`}>
-                Тип
-                {miss(tr.type) && <span aria-hidden> — выберите</span>}
-              </Label>
-              <Select value={tr.type} onValueChange={(v) => setTrField('type', v)} disabled={lock}>
-                <SelectTrigger id={`${id}-trt`} aria-label="Тип прицепа" className={`mt-1 h-8 text-sm ${miss(tr.type) ? 'border-red-400 bg-red-50/40 focus:ring-red-300' : ''}`}>
-                  <SelectValue placeholder="Выберите тип" />
-                </SelectTrigger>
-                <SelectContent>
-                  {trailerTypes.map((tt) => (
-                    <SelectItem key={tt} value={tt}>{tt}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <FieldInput id={`${id}-trp`} label="Госномер" placeholder="АТ5546152" value={tr.plate} mono invalid={miss(tr.plate)} disabled={lock} onChange={(v) => setTrField('plate', v)} />
-            <FieldInput id={`${id}-trs`} label="СТС" placeholder="52 19 777777" value={tr.sts} mono invalid={miss(tr.sts)} disabled={lock} onChange={(v) => setTrField('sts', v)} />
-            <FieldInput id={`${id}-trc`} label="Цвет" placeholder="серый" value={tr.color} invalid={miss(tr.color)} disabled={lock} onChange={(v) => setTrField('color', v)} />
-            <FieldInput id={`${id}-tro`} label="Собственник прицепа" placeholder="ООО «Перевозчик Б»" value={tr.owner} invalid={miss(tr.owner)} disabled={lock} onChange={(v) => setTrField('owner', v)} />
+          <div className={admitted ? 'pointer-events-none opacity-70' : ''}>
+            <TrailerFields prefix={id} value={tr} types={trailerTypes} miss={miss} lock={lock} onChange={setTrField} />
           </div>
         </div>
       </div>
@@ -562,6 +607,295 @@ export default function DriverLine({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// ——————————————————————————————————————————————————————————————————————————————
+// Одиночные карточки «Добавить ТС» / «Добавить прицеп» (Task 48): пополнение базы
+// только техникой — без водителя и фотографий. 5 обязательных полей, подсветка
+// незаполненного только после «Проверить», допуск сразу после валидации
+// (идемпотентно по госномеру). Участвуют в «Проверить все» через registerCheck.
+// ——————————————————————————————————————————————————————————————————————————————
+
+export interface SoloLineProps {
+  id: string
+  index: number
+  carrierId: string
+  /** регистрация функции проверки карточки для кнопки «Проверить все» */
+  registerCheck: (id: string, fn: ((quiet?: boolean) => Promise<boolean>) | null) => void
+  onRemove: (id: string) => void
+}
+
+/** Шапка одиночной карточки: иконка, заголовок, кнопка проверки и удаления */
+function SoloHeader({
+  icon, title, index, kind, checking, admitted, onCheck, onRemove,
+}: {
+  icon: ReactNode
+  title: string
+  index: number
+  kind: string
+  checking: boolean
+  admitted: boolean
+  onCheck: () => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-600" aria-hidden>
+        {icon}
+      </span>
+      <span className="text-sm font-semibold text-slate-900">{title}</span>
+      {admitted && (
+        <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-700">
+          <BadgeCheck className="h-3 w-3" aria-hidden />
+          допущено в базу
+        </span>
+      )}
+      <span className="flex-1" />
+      {!admitted && (
+        <Button
+          size="sm"
+          onClick={onCheck}
+          disabled={checking}
+          className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
+        >
+          <ScanLine className="h-4 w-4" aria-hidden />
+          {checking ? 'Проверяем…' : 'Проверить'}
+        </Button>
+      )}
+      <Button size="icon" variant="ghost" onClick={onRemove} aria-label={`Убрать карточку ${kind} ${index + 1}`} className="h-8 w-8 text-slate-400 hover:text-red-600">
+        <X className="h-4 w-4" aria-hidden />
+      </Button>
+    </div>
+  )
+}
+
+/** Зелёная плашка допуска одиночной карточки */
+function SoloAdmitted({ title, label, kind, onRemove }: { title: string; label: string; kind: string; onRemove: () => void }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+      <BadgeCheck className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="font-semibold">{title}</span>
+      <span>· {label}</span>
+      <span className="flex-1" />
+      <Button size="sm" variant="outline" className="h-7 gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-100" onClick={onRemove}>
+        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+        Убрать карточку
+      </Button>
+      <span className="sr-only">{kind} записан в справочник аккаунта</span>
+    </div>
+  )
+}
+
+/**
+ * Одиночная карточка «Добавить ТС» — пополняет базу одним тягачом, без водителя
+ * и прицепа. Все 5 полей обязательны: подсветка незаполненного появляется только
+ * после «Проверить» и гаснет при заполнении. Фотографии не требуются — данные
+ * вводятся вручную, допуск сразу после валидации (идемпотентно по госномеру).
+ */
+export function TruckLine({ id, index, carrierId, registerCheck, onRemove }: SoloLineProps) {
+  const { toast } = useToast()
+
+  const [t, setT] = useState<TruckDraft>({ brand: '', plate: '', sts: '', color: '', owner: '' })
+  const [showErrors, setShowErrors] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [admitted, setAdmitted] = useState<string | null>(null)
+
+  const setField = useCallback((k: keyof TruckDraft, v: string) => setT((cur) => ({ ...cur, [k]: v })), [])
+  /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
+  const miss = useCallback((v: string) => showErrors && v.trim() === '', [showErrors])
+  const lock = admitted !== null || checking
+
+  const check = useCallback(async (quiet = false): Promise<boolean> => {
+    if (admitted) return true
+    if (checking) return false
+
+    // ——— валидация «все поля обязательны»: подсветка появляется только здесь ———
+    setShowErrors(true)
+    const missing = (Object.keys(TRUCK_LABELS) as (keyof TruckDraft)[]).filter((k) => t[k].trim() === '')
+    if (missing.length > 0) {
+      if (!quiet) {
+        toast({
+          title: 'Не все поля заполнены',
+          description: `Поля: ${missing.map((k) => TRUCK_LABELS[k]).join(', ')}`,
+          variant: 'destructive',
+        })
+      }
+      return false
+    }
+
+    setChecking(true)
+    try {
+      const res = await api.createDirectory('truck', {
+        carrierId,
+        brand: t.brand.trim(),
+        plate: t.plate.trim(),
+        sts: t.sts.trim(),
+        color: t.color.trim(),
+        owner: t.owner.trim(),
+      })
+      const label = res.truck ? `${res.truck.brand} ${res.truck.plate}` : `${t.brand.trim()} ${t.plate.trim()}`
+      setAdmitted(label)
+      toast({ title: 'ТС допущено в базу', description: label })
+      return true
+    } catch (e) {
+      toast({
+        title: 'Не удалось сохранить ТС',
+        description: e instanceof Error ? e.message : 'Неизвестная ошибка',
+        variant: 'destructive',
+      })
+      return false
+    } finally {
+      setChecking(false)
+    }
+  }, [admitted, checking, t, carrierId, toast])
+
+  // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
+  const checkRef = useRef(check)
+  useEffect(() => {
+    checkRef.current = check
+  })
+  useEffect(() => {
+    registerCheck(id, (quiet) => checkRef.current(quiet))
+    return () => registerCheck(id, null)
+  }, [id, registerCheck])
+
+  return (
+    <section
+      className="rounded-xl border border-slate-200 bg-white p-4"
+      aria-label={`Карточка ТС ${index + 1}`}
+    >
+      <SoloHeader
+        icon={<Truck className="h-3.5 w-3.5" />}
+        title="Новое ТС (тягач)"
+        index={index}
+        kind="ТС"
+        checking={checking}
+        admitted={admitted !== null}
+        onCheck={() => void check()}
+        onRemove={() => onRemove(id)}
+      />
+      {admitted !== null ? (
+        <SoloAdmitted title="ТС допущено в базу" label={admitted} kind="ТС" onRemove={() => onRemove(id)} />
+      ) : (
+        <div className="mt-3">
+          <TruckFields
+            prefix={id}
+            value={t}
+            miss={miss}
+            lock={lock}
+            onChange={setField}
+            className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5"
+          />
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * Одиночная карточка «Добавить прицеп» — пополняет базу одним прицепом, без
+ * водителя и тягача. Все 5 полей (тип — Select) обязательны: подсветка только
+ * после «Проверить». Фотографии не требуются, допуск сразу после валидации.
+ */
+export function TrailerLine({ id, index, carrierId, registerCheck, onRemove }: SoloLineProps) {
+  const { toast } = useToast()
+
+  const [tr, setTr] = useState<TrailerDraft>({ type: '', plate: '', sts: '', color: '', owner: '' })
+  const [showErrors, setShowErrors] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [admitted, setAdmitted] = useState<string | null>(null)
+
+  const setField = useCallback((k: keyof TrailerDraft, v: string) => setTr((cur) => ({ ...cur, [k]: v })), [])
+  /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
+  const miss = useCallback((v: string) => showErrors && v.trim() === '', [showErrors])
+  const lock = admitted !== null || checking
+
+  const check = useCallback(async (quiet = false): Promise<boolean> => {
+    if (admitted) return true
+    if (checking) return false
+
+    // ——— валидация «все поля обязательны»: подсветка появляется только здесь ———
+    setShowErrors(true)
+    const missing = (Object.keys(TRAILER_LABELS) as (keyof TrailerDraft)[]).filter((k) => tr[k].trim() === '')
+    if (missing.length > 0) {
+      if (!quiet) {
+        toast({
+          title: 'Не все поля заполнены',
+          description: `Поля: ${missing.map((k) => TRAILER_LABELS[k]).join(', ')}`,
+          variant: 'destructive',
+        })
+      }
+      return false
+    }
+
+    setChecking(true)
+    try {
+      const res = await api.createDirectory('trailer', {
+        carrierId,
+        type: tr.type || TRAILER_TYPES[0],
+        plate: tr.plate.trim(),
+        sts: tr.sts.trim(),
+        color: tr.color.trim(),
+        owner: tr.owner.trim(),
+      })
+      const label = res.trailer ? `${res.trailer.type} ${res.trailer.plate}` : `${tr.type} ${tr.plate.trim()}`
+      setAdmitted(label)
+      toast({ title: 'Прицеп допущен в базу', description: label })
+      return true
+    } catch (e) {
+      toast({
+        title: 'Не удалось сохранить прицеп',
+        description: e instanceof Error ? e.message : 'Неизвестная ошибка',
+        variant: 'destructive',
+      })
+      return false
+    } finally {
+      setChecking(false)
+    }
+  }, [admitted, checking, tr, carrierId, toast])
+
+  // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
+  const checkRef = useRef(check)
+  useEffect(() => {
+    checkRef.current = check
+  })
+  useEffect(() => {
+    registerCheck(id, (quiet) => checkRef.current(quiet))
+    return () => registerCheck(id, null)
+  }, [id, registerCheck])
+
+  return (
+    <section
+      className="rounded-xl border border-slate-200 bg-white p-4"
+      aria-label={`Карточка прицепа ${index + 1}`}
+    >
+      <SoloHeader
+        icon={<CarFront className="h-3.5 w-3.5" />}
+        title="Новый прицеп"
+        index={index}
+        kind="прицепа"
+        checking={checking}
+        admitted={admitted !== null}
+        onCheck={() => void check()}
+        onRemove={() => onRemove(id)}
+      />
+      {admitted !== null ? (
+        <SoloAdmitted title="Прицеп допущен в базу" label={admitted} kind="Прицеп" onRemove={() => onRemove(id)} />
+      ) : (
+        <div className="mt-3">
+          <TrailerFields
+            prefix={id}
+            value={tr}
+            types={TRAILER_TYPES}
+            miss={miss}
+            lock={lock}
+            onChange={setField}
+            className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5"
+          />
         </div>
       )}
     </section>
