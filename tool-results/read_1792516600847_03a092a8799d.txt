@@ -1,0 +1,794 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * «Справочники» — база аккаунта: логисту — весь парк перевозчиков,
+     5→ * перевозчику — только свой. Все данные агента в одном месте с подсветкой
+     6→ * сроков документов: что истекло и что истекает — видно сразу.
+     7→ * Нейро-функционал (добавление по документам) перенесён во вкладку «Подать заявку».
+     8→ */
+     9→import { useCallback, useEffect, useMemo, useState } from 'react'
+    10→import {
+    11→  AlertTriangle,
+    12→  ArrowRight,
+    13→  Boxes,
+    14→  CalendarClock,
+    15→  CheckCircle2,
+    16→  Pencil,
+    17→  Plus,
+    18→  Truck,
+    19→  User,
+    20→  Users,
+    21→  Wrench,
+    22→} from 'lucide-react'
+    23→import {
+    24→  ErrorBlock, ExpiryBadge, LoadingBlock, SectionHeader, type TabProps,
+    25→} from '@/components/platform/common'
+    26→import { Badge } from '@/components/ui/badge'
+    27→import { Button } from '@/components/ui/button'
+    28→import { Card, CardContent } from '@/components/ui/card'
+    29→import {
+    30→  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+    31→} from '@/components/ui/dialog'
+    32→import { Input } from '@/components/ui/input'
+    33→import { Label } from '@/components/ui/label'
+    34→import {
+    35→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    36→} from '@/components/ui/select'
+    37→import {
+    38→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    39→} from '@/components/ui/table'
+    40→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    41→import { useToast } from '@/hooks/use-toast'
+    42→import { api } from '@/lib/api'
+    43→import { expiryInfo, rowTint, type ExpiryState } from '@/lib/expiry'
+    44→import type { CargoTypeDTO, CarrierDTO, DriverDTO, TrailerDTO, TruckDTO } from '@/lib/types'
+    45→
+    46→const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
+    47→
+    48→type Kind = 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo'
+    49→
+    50→type TabKind = 'carriers' | 'cargos' | 'drivers' | 'trucks' | 'trailers'
+    51→
+    52→interface FieldDef {
+    53→  key: string
+    54→  label: string
+    55→  placeholder?: string
+    56→}
+    57→
+    58→const FORM_FIELDS: Record<Kind, FieldDef[]> = {
+    59→  carrier: [
+    60→    { key: 'name', label: 'Название', placeholder: 'ООО «Перевозчик Д»' },
+    61→    { key: 'inn', label: 'ИНН', placeholder: '2310045675' },
+    62→    { key: 'contractNo', label: 'Договор №', placeholder: '24-Д' },
+    63→    { key: 'contractDate', label: 'Дата договора', placeholder: '01.11.2025' },
+    64→  ],
+    65→  cargo: [
+    66→    { key: 'name', label: 'Название груза', placeholder: 'Трубы стальные' },
+    67→    { key: 'category', label: 'Группа груза', placeholder: 'Металлопрокат' },
+    68→  ],
+    69→  driver: [
+    70→    { key: 'fullName', label: 'ФИО', placeholder: 'Смирнов Олег Викторович' },
+    71→    { key: 'birthDate', label: 'Дата рождения', placeholder: '11.03.1993' },
+    72→    { key: 'passport', label: 'Паспорт (серия и номер)', placeholder: '52 07 123456' },
+    73→    { key: 'license', label: 'Номер ВУ', placeholder: '52 07 123456' },
+    74→    { key: 'licenseTill', label: 'ВУ действует до', placeholder: 'ДД.ММ.ГГГГ' },
+    75→    { key: 'medTill', label: 'Медсправка действует до', placeholder: 'ДД.ММ.ГГГГ' },
+    76→    { key: 'categories', label: 'Категории', placeholder: 'C, CE' },
+    77→  ],
+    78→  truck: [
+    79→    { key: 'brand', label: 'Марка', placeholder: 'MAN TGX' },
+    80→    { key: 'plate', label: 'Госномер', placeholder: 'А321ВС777' },
+    81→    { key: 'vin', label: 'VIN', placeholder: '17 символов' },
+    82→    { key: 'sts', label: 'СТС', placeholder: '99 00 123456' },
+    83→    { key: 'techTill', label: 'Техосмотр до', placeholder: 'ДД.ММ.ГГГГ' },
+    84→    { key: 'owner', label: 'Собственник', placeholder: 'ООО «Перевозчик А»' },
+    85→  ],
+    86→  trailer: [
+    87→    { key: 'plate', label: 'Госномер', placeholder: 'АВ123777' },
+    88→    { key: 'type', label: 'Тип', placeholder: 'Полуприцеп тент' },
+    89→    { key: 'sts', label: 'СТС', placeholder: '99 00 123457' },
+    90→    { key: 'techTill', label: 'Техосмотр до', placeholder: 'ДД.ММ.ГГГГ' },
+    91→  ],
+    92→}
+    93→
+    94→const KIND_TITLES: Record<Kind, string> = {
+    95→  carrier: 'Перевозчики',
+    96→  cargo: 'Грузы',
+    97→  driver: 'Водители',
+    98→  truck: 'Тягачи (ТС)',
+    99→  trailer: 'Прицепы',
+   100→}
+   101→
+   102→/** Запись в блоке «Требуют внимания» */
+   103→interface ExpiryItem {
+   104→  key: string
+   105→  tab: Exclude<TabKind, 'carriers'>
+   106→  icon: typeof User
+   107→  title: string
+   108→  docLabel: string
+   109→  info: ReturnType<typeof expiryInfo>
+   110→  carrierName: string
+   111→}
+   112→
+   113→function AccessBadge({ access }: { access: boolean }) {
+   114→  return access ? (
+   115→    <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
+   116→      Доступ открыт
+   117→    </Badge>
+   118→  ) : (
+   119→    <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
+   120→      Закрыт
+   121→    </Badge>
+   122→  )
+   123→}
+   124→
+   125→const fmtCreated = (iso: string): string =>
+   126→  new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
+   127→
+   128→export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: TabProps) {
+   129→  const { toast } = useToast()
+   130→  const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
+   131→  const [cargoTypes, setCargoTypes] = useState<CargoTypeDTO[]>([])
+   132→  const [error, setError] = useState<string | null>(null)
+   133→  const [tab, setTab] = useState<TabKind>('carriers')
+   134→  const [addKind, setAddKind] = useState<Kind | null>(null)
+   135→  const [editing, setEditing] = useState<{ kind: Kind; id: string } | null>(null)
+   136→  const [form, setForm] = useState<Record<string, string>>({})
+   137→  const [saving, setSaving] = useState(false)
+   138→  const isLogist = role === 'logist'
+   139→
+   140→  // перевозчику доступен только его собственный парк — данные конкурентов скрыты
+   141→  const visibleCarriers = useMemo(
+   142→    () => (isLogist ? (carriers ?? []) : (carriers ?? []).filter((c) => c.id === activeCarrierId)),
+   143→    [carriers, isLogist, activeCarrierId],
+   144→  )
+   145→
+   146→  const load = useCallback(async () => {
+   147→    try {
+   148→      const dir = await api.directory()
+   149→      setCarriers(dir.carriers)
+   150→      setCargoTypes(dir.cargoTypes)
+   151→      setError(null)
+   152→    } catch (e) {
+   153→      setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
+   154→    }
+   155→  }, [])
+   156→
+   157→  useEffect(() => { void load() }, [load])
+   158→
+   159→  const driversFlat = useMemo(
+   160→    () => visibleCarriers.flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name }))),
+   161→    [visibleCarriers],
+   162→  )
+   163→  const trucksFlat = useMemo(
+   164→    () => visibleCarriers.flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name }))),
+   165→    [visibleCarriers],
+   166→  )
+   167→  const trailersFlat = useMemo(
+   168→    () => visibleCarriers.flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name }))),
+   169→    [visibleCarriers],
+   170→  )
+   171→
+   172→  /** Что и когда истекает: все документы с плохими/близкими сроками */
+   173→  const expiryItems = useMemo<ExpiryItem[]>(() => {
+   174→    const items: ExpiryItem[] = []
+   175→    const bad = (i: ReturnType<typeof expiryInfo>) => i.state === 'expired' || i.state === 'warn'
+   176→    for (const c of visibleCarriers) {
+   177→      for (const d of c.drivers) {
+   178→        const v = expiryInfo(d.licenseTill)
+   179→        if (bad(v)) items.push({ key: `${d.id}-lic`, tab: 'drivers', icon: User, title: d.fullName, docLabel: 'Водительское удостоверение', info: v, carrierName: c.name })
+   180→        const m = expiryInfo(d.medTill)
+   181→        if (bad(m)) items.push({ key: `${d.id}-med`, tab: 'drivers', icon: User, title: d.fullName, docLabel: 'Медсправка', info: m, carrierName: c.name })
+   182→      }
+   183→      for (const t of c.trucks) {
+   184→        const v = expiryInfo(t.techTill)
+   185→        if (bad(v)) items.push({ key: t.id, tab: 'trucks', icon: Truck, title: `${t.brand} · ${t.plate}`, docLabel: 'Техосмотр', info: v, carrierName: c.name })
+   186→      }
+   187→      for (const z of c.trailers) {
+   188→        const v = expiryInfo(z.techTill)
+   189→        if (bad(v)) items.push({ key: z.id, tab: 'trailers', icon: Wrench, title: `${z.type} · ${z.plate}`, docLabel: 'Техосмотр', info: v, carrierName: c.name })
+   190→      }
+   191→    }
+   192→    return items.sort((a, b) => (a.info.days ?? 0) - (b.info.days ?? 0))
+   193→  }, [visibleCarriers])
+   194→
+   195→  const expiredCount = expiryItems.filter((i) => i.info.state === 'expired').length
+   196→
+   197→  const openAdd = (kind: Kind) => {
+   198→    setForm(
+   199→      kind === 'cargo'
+   200→        ? { truckType: 'Тент', dangerous: 'false' }
+   201→        : { carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? '') },
+   202→    )
+   203→    setEditing(null)
+   204→    setAddKind(kind)
+   205→  }
+   206→
+   207→  const openEdit = (kind: Kind, id: string, record: Record<string, string>) => {
+   208→    setForm({ ...record })
+   209→    setAddKind(null)
+   210→    setEditing({ kind, id })
+   211→  }
+   212→
+   213→  const closeDialog = () => {
+   214→    setAddKind(null)
+   215→    setEditing(null)
+   216→  }
+   217→
+   218→  const submitAdd = async () => {
+   219→    if (!addKind) return
+   220→    setSaving(true)
+   221→    try {
+   222→      await api.createDirectory(addKind, form)
+   223→      toast({
+   224→        title: 'Запись добавлена в базу',
+   225→        description: `${KIND_TITLES[addKind]}: запись создана и доступна при подаче заявки`,
+   226→      })
+   227→      closeDialog()
+   228→      await load()
+   229→    } catch (e) {
+   230→      toast({
+   231→        title: 'Не удалось добавить запись',
+   232→        description: e instanceof Error ? e.message : 'Проверьте заполнение полей',
+   233→        variant: 'destructive',
+   234→      })
+   235→    } finally {
+   236→      setSaving(false)
+   237→    }
+   238→  }
+   239→
+   240→  const submitEdit = async () => {
+   241→    if (!editing) return
+   242→    setSaving(true)
+   243→    try {
+   244→      await api.updateDirectory(editing.kind, editing.id, form)
+   245→      toast({
+   246→        title: 'Запись обновлена',
+   247→        description: `${KIND_TITLES[editing.kind]}: данные и сроки документов сохранены`,
+   248→      })
+   249→      closeDialog()
+   250→      await load()
+   251→    } catch (e) {
+   252→      toast({
+   253→        title: 'Не удалось обновить запись',
+   254→        description: e instanceof Error ? e.message : 'Проверьте заполнение полей',
+   255→        variant: 'destructive',
+   256→      })
+   257→    } finally {
+   258→      setSaving(false)
+   259→    }
+   260→  }
+   261→
+   262→  if (carriers === null && !error) return <LoadingBlock label="Загрузка базы аккаунта…" />
+   263→  if (error) return <ErrorBlock message={error} onRetry={() => { setError(null); void load() }} />
+   264→
+   265→  const dialogKind = addKind ?? editing?.kind ?? null
+   266→  const addLabel = addKind ? KIND_TITLES[addKind] : editing ? KIND_TITLES[editing.kind] : ''
+   267→  // у перевозчика вкладка «Перевозчики» недоступна — ведём на «Водителей»
+   268→  const activeTab: TabKind = !isLogist && tab === 'carriers' ? 'drivers' : tab
+   269→
+   270→  return (
+   271→    <div>
+   272→      <SectionHeader
+   273→        title={isLogist ? 'Справочники' : 'База вашего аккаунта'}
+   274→      />
+   275→
+   276→      {/* Сроки документов: что и когда истекает */}
+   277→      <Card className={`mb-4 shadow-sm ${expiredCount > 0 ? 'border-red-200 bg-red-50/40' : expiryItems.length > 0 ? 'border-amber-200 bg-amber-50/40' : 'border-emerald-200 bg-emerald-50/40'}`}>
+   278→        <CardContent className="p-4">
+   279→          <div className="flex flex-wrap items-center justify-between gap-2">
+   280→            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+   281→              {expiryItems.length === 0
+   282→                ? <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+   283→                : <CalendarClock className={`h-4 w-4 ${expiredCount > 0 ? 'text-red-600' : 'text-amber-600'}`} aria-hidden />}
+   284→              Сроки документов
+   285→              {expiryItems.length > 0 && (
+   286→                <Badge variant="outline" className={expiredCount > 0 ? 'border-red-300 bg-red-100 text-red-700' : 'border-amber-300 bg-amber-100 text-amber-700'}>
+   287→                  {expiredCount > 0 ? `истекло: ${expiredCount}` : 'требуют внимания'}
+   288→                  {expiryItems.length > expiredCount ? ` · истекают: ${expiryItems.length - expiredCount}` : ''}
+   289→                </Badge>
+   290→              )}
+   291→            </div>
+   292→            <span className="text-[11px] text-slate-500">подсветка: красный — истёк · янтарный — ≤ 30 дней · серый — ≤ 90 дней</span>
+   293→          </div>
+   294→
+   295→          {expiryItems.length === 0 ? (
+   296→            <p className="mt-2 text-sm text-slate-600">
+   297→              Все документы базы действительны — истекающих сроков нет.
+   298→            </p>
+   299→          ) : (
+   300→            <ul className={`mt-3 max-h-56 space-y-1.5 overflow-y-auto pr-1 ${THIN_SCROLL}`}>
+   301→              {expiryItems.map((item) => {
+   302→                const Icon = item.icon
+   303→                return (
+   304→                  <li key={item.key} className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 ${item.info.state === 'expired' ? 'border-red-200 bg-white' : 'border-amber-200 bg-white'}`}>
+   305→                    <Icon className={`h-4 w-4 shrink-0 ${item.info.state === 'expired' ? 'text-red-500' : 'text-amber-500'}`} aria-hidden />
+   306→                    <span className="text-sm font-medium text-slate-800">{item.title}</span>
+   307→                    {isLogist && <span className="text-xs text-slate-400">{item.carrierName}</span>}
+   308→                    <span className="text-xs text-slate-500">{item.docLabel}</span>
+   309→                    <ExpiryBadge date={item.info.date} className="ml-auto" />
+   310→                    <button
+   311→                      onClick={() => setTab(item.tab)}
+   312→                      className="rounded-md px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+   313→                    >
+   314→                      Открыть
+   315→                    </button>
+   316→                  </li>
+   317→                )
+   318→              })}
+   319→            </ul>
+   320→          )}
+   321→        </CardContent>
+   322→      </Card>
+   323→
+   324→      <Tabs value={activeTab} onValueChange={(v) => setTab(v as TabKind)} className="gap-4">
+   325→        <TabsList className="flex-wrap">
+   326→          {isLogist && (
+   327→            <TabsTrigger value="carriers">
+   328→              <Users className="h-4 w-4" aria-hidden />
+   329→              Перевозчики
+   330→            </TabsTrigger>
+   331→          )}
+   332→          {isLogist && (
+   333→            <TabsTrigger value="cargos">
+   334→              <Boxes className="h-4 w-4" aria-hidden />
+   335→              Грузы
+   336→            </TabsTrigger>
+   337→          )}
+   338→          <TabsTrigger value="drivers">
+   339→            <User className="h-4 w-4" aria-hidden />
+   340→            Водители
+   341→          </TabsTrigger>
+   342→          <TabsTrigger value="trucks">
+   343→            <Truck className="h-4 w-4" aria-hidden />
+   344→            Тягачи (ТС)
+   345→          </TabsTrigger>
+   346→          <TabsTrigger value="trailers">
+   347→            <Wrench className="h-4 w-4" aria-hidden />
+   348→            Прицепы
+   349→          </TabsTrigger>
+   350→        </TabsList>
+   351→
+   352→        {/* -------- Перевозчики (только логист) -------- */}
+   353→        {isLogist && (
+   354→        <TabsContent value="carriers">
+   355→          <Card className="border-slate-200 shadow-sm">
+   356→            <CardContent className="p-4 sm:p-6">
+   357→              <div className="mb-3 flex items-center justify-between gap-3">
+   358→                <div className="text-sm text-slate-500">Записей: {(carriers ?? []).length}</div>
+   359→                <Button size="sm" onClick={() => openAdd('carrier')}>
+   360→                  <Plus className="h-4 w-4" aria-hidden />
+   361→                  Добавить перевозчика
+   362→                </Button>
+   363→              </div>
+   364→              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+   365→                <Table>
+   366→                  <TableHeader>
+   367→                    <TableRow className="bg-slate-50">
+   368→                      <TableHead>Название</TableHead>
+   369→                      <TableHead>ИНН</TableHead>
+   370→                      <TableHead>Договор</TableHead>
+   371→                      <TableHead>Доступ</TableHead>
+   372→                      <TableHead>Взято заявок</TableHead>
+   373→                      <TableHead>Ставок</TableHead>
+   374→                      <TableHead>Водители/ТС</TableHead>
+   375→                      <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>
+   376→                    </TableRow>
+   377→                  </TableHeader>
+   378→                  <TableBody>
+   379→                    {(carriers ?? []).map((c) => (
+   380→                      <TableRow key={c.id}>
+   381→                        <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
+   382→                        <TableCell className="font-mono text-xs text-slate-600">{c.inn}</TableCell>
+   383→                        <TableCell className="whitespace-nowrap text-slate-600">№{c.contractNo} от {c.contractDate}</TableCell>
+   384→                        <TableCell><AccessBadge access={c.access} /></TableCell>
+   385→                        <TableCell className="font-semibold text-slate-800">{c.takenCount}</TableCell>
+   386→                        <TableCell className="text-slate-600">{c.bidsCount}</TableCell>
+   387→                        <TableCell className="whitespace-nowrap text-slate-600">
+   388→                          {c.drivers.length} / {c.trucks.length}
+   389→                        </TableCell>
+   390→                        <TableCell>
+   391→                          <Button
+   392→                            size="icon"
+   393→                            variant="ghost"
+   394→                            className="h-8 w-8"
+   395→                            aria-label={`Изменить ${c.name}`}
+   396→                            onClick={() => openEdit('carrier', c.id, { name: c.name, inn: c.inn, contractNo: c.contractNo, contractDate: c.contractDate, access: String(c.access) })}
+   397→                          >
+   398→                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+   399→                          </Button>
+   400→                        </TableCell>
+   401→                      </TableRow>
+   402→                    ))}
+   403→                    {(carriers ?? []).length === 0 && (
+   404→                      <TableRow><TableCell colSpan={8} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+   405→                    )}
+   406→                  </TableBody>
+   407→                </Table>
+   408→              </div>
+   409→            </CardContent>
+   410→          </Card>
+   411→        </TabsContent>
+   412→        )}
+   413→
+   414→        {/* -------- Грузы (справочник грузов, только логист) -------- */}
+   415→        {isLogist && (
+   416→        <TabsContent value="cargos">
+   417→          <Card className="border-slate-200 shadow-sm">
+   418→            <CardContent className="p-4 sm:p-6">
+   419→              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+   420→                <div className="max-w-xl text-sm text-slate-500">
+   421→                  Единый справочник грузов: заявка ссылается на запись отсюда, поэтому один и тот же груз всегда называется одинаково — в площадке, сверке и отчётах.
+   422→                </div>
+   423→                <Button size="sm" onClick={() => openAdd('cargo')}>
+   424→                  <Plus className="h-4 w-4" aria-hidden />
+   425→                  Добавить груз
+   426→                </Button>
+   427→              </div>
+   428→              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+   429→                <Table>
+   430→                  <TableHeader>
+   431→                    <TableRow className="bg-slate-50">
+   432→                      <TableHead>Груз</TableHead>
+   433→                      <TableHead>Группа</TableHead>
+   434→                      <TableHead>Рекомендуемое ТС</TableHead>
+   435→                      <TableHead>ADR</TableHead>
+   436→                      <TableHead>В заявках</TableHead>
+   437→                      <TableHead>Добавлен</TableHead>
+   438→                      <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>
+   439→                    </TableRow>
+   440→                  </TableHeader>
+   441→                  <TableBody>
+   442→                    {cargoTypes.map((c) => (
+   443→                      <TableRow key={c.id}>
+   444→                        <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
+   445→                        <TableCell className="text-slate-600">{c.category}</TableCell>
+   446→                        <TableCell className="text-slate-600">{c.truckType}</TableCell>
+   447→                        <TableCell>
+   448→                          {c.dangerous
+   449→                            ? <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-50 text-red-700">Опасный (ADR)</Badge>
+   450→                            : <span className="text-slate-400">—</span>}
+   451→                        </TableCell>
+   452→                        <TableCell className="font-semibold text-slate-800">{c.usageCount}</TableCell>
+   453→                        <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(c.createdAt)}</TableCell>
+   454→                        <TableCell>
+   455→                          <Button
+   456→                            size="icon"
+   457→                            variant="ghost"
+   458→                            className="h-8 w-8"
+   459→                            aria-label={`Изменить ${c.name}`}
+   460→                            onClick={() => openEdit('cargo', c.id, {
+   461→                              name: c.name, category: c.category, truckType: c.truckType,
+   462→                              dangerous: String(c.dangerous), cargoName: c.name,
+   463→                            })}
+   464→                          >
+   465→                            <Pencil className="h-3.5 w-3.5" aria-hidden />
+   466→                          </Button>
+   467→                        </TableCell>
+   468→                      </TableRow>
+   469→                    ))}
+   470→                    {cargoTypes.length === 0 && (
+   471→                      <TableRow><TableCell colSpan={7} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+   472→                    )}
+   473→                  </TableBody>
+   474→                </Table>
+   475→              </div>
+   476→            </CardContent>
+   477→          </Card>
+   478→        </TabsContent>
+   479→        )}
+   480→        <TabsContent value="drivers">
+   481→          <Card className="border-slate-200 shadow-sm">
+   482→            <CardContent className="p-4 sm:p-6">
+   483→              {!isLogist && (
+   484→                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 p-3">
+   485→                  <p className="max-w-xl text-xs leading-snug text-slate-600">
+   486→                    <b className="text-slate-800">Новый водитель?</b> Добавляйте по документам во вкладке «Подать заявку» — нейросеть сама прочитает паспорт, ВУ и СТС и заполнит карточку.
+   487→                  </p>
+   488→                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onNavigate('apply')}>
+   489→                    Подать заявку
+   490→                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+   491→                  </Button>
+   492→                </div>
+   493→              )}
+   494→              <div className="mb-3 flex items-center justify-between gap-3">
+   495→                <div className="text-sm text-slate-500">Записей: {driversFlat.length}</div>
+   496→                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('driver')}>
+   497→                  <Plus className="h-4 w-4" aria-hidden />
+   498→                  Добавить вручную
+   499→                </Button>
+   500→              </div>
+   501→              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+   502→                <Table>
+   503→                  <TableHeader>
+   504→                    <TableRow className="bg-slate-50">
+   505→                      <TableHead>ФИО</TableHead>
+   506→                      <TableHead>Дата рождения</TableHead>
+   507→                      <TableHead>Паспорт</TableHead>
+   508→                      <TableHead>ВУ (номер)</TableHead>
+   509→                      <TableHead>ВУ действует до</TableHead>
+   510→                      <TableHead>Медсправка до</TableHead>
+   511→                      <TableHead>Категории</TableHead>
+   512→                      <TableHead>Добавлен</TableHead>
+   513→                      {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+   514→                    </TableRow>
+   515→                  </TableHeader>
+   516→                  <TableBody>
+   517→                    {driversFlat.map(({ d, carrierName }) => (
+   518→                      <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('driver', d.id, {
+   519→                        fullName: d.fullName, birthDate: d.birthDate, passport: d.passport, license: d.license,
+   520→                        licenseTill: d.licenseTill === '—' ? '' : d.licenseTill, medTill: d.medTill === '—' ? '' : d.medTill,
+   521→                        categories: d.categories,
+   522→                      })} />
+   523→                    ))}
+   524→                    {driversFlat.length === 0 && (
+   525→                      <TableRow><TableCell colSpan={isLogist ? 8 : 9} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+   526→                    )}
+   527→                  </TableBody>
+   528→                </Table>
+   529→              </div>
+   530→            </CardContent>
+   531→          </Card>
+   532→        </TabsContent>
+   533→
+   534→        {/* -------- Тягачи -------- */}
+   535→        <TabsContent value="trucks">
+   536→          <Card className="border-slate-200 shadow-sm">
+   537→            <CardContent className="p-4 sm:p-6">
+   538→              <div className="mb-3 flex items-center justify-between gap-3">
+   539→                <div className="text-sm text-slate-500">Записей: {trucksFlat.length}</div>
+   540→                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('truck')}>
+   541→                  <Plus className="h-4 w-4" aria-hidden />
+   542→                  Добавить тягач
+   543→                </Button>
+   544→              </div>
+   545→              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+   546→                <Table>
+   547→                  <TableHeader>
+   548→                    <TableRow className="bg-slate-50">
+   549→                      <TableHead>Марка</TableHead>
+   550→                      <TableHead>Госномер</TableHead>
+   551→                      <TableHead>VIN</TableHead>
+   552→                      <TableHead>СТС</TableHead>
+   553→                      <TableHead>Техосмотр до</TableHead>
+   554→                      <TableHead>Собственник</TableHead>
+   555→                      <TableHead>Добавлен</TableHead>
+   556→                      {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+   557→                    </TableRow>
+   558→                  </TableHeader>
+   559→                  <TableBody>
+   560→                    {trucksFlat.map(({ t, carrierName }) => (
+   561→                      <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('truck', t.id, {
+   562→                        brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
+   563→                        techTill: t.techTill === '—' ? '' : t.techTill, owner: t.owner,
+   564→                      })} />
+   565→                    ))}
+   566→                    {trucksFlat.length === 0 && (
+   567→                      <TableRow><TableCell colSpan={isLogist ? 7 : 8} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+   568→                    )}
+   569→                  </TableBody>
+   570→                </Table>
+   571→              </div>
+   572→            </CardContent>
+   573→          </Card>
+   574→        </TabsContent>
+   575→
+   576→        {/* -------- Прицепы -------- */}
+   577→        <TabsContent value="trailers">
+   578→          <Card className="border-slate-200 shadow-sm">
+   579→            <CardContent className="p-4 sm:p-6">
+   580→              <div className="mb-3 flex items-center justify-between gap-3">
+   581→                <div className="text-sm text-slate-500">Записей: {trailersFlat.length}</div>
+   582→                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('trailer')}>
+   583→                  <Plus className="h-4 w-4" aria-hidden />
+   584→                  Добавить прицеп
+   585→                </Button>
+   586→              </div>
+   587→              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+   588→                <Table>
+   589→                  <TableHeader>
+   590→                    <TableRow className="bg-slate-50">
+   591→                      <TableHead>Госномер</TableHead>
+   592→                      <TableHead>Тип</TableHead>
+   593→                      <TableHead>СТС</TableHead>
+   594→                      <TableHead>Техосмотр до</TableHead>
+   595→                      <TableHead>Добавлен</TableHead>
+   596→                      {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+   597→                    </TableRow>
+   598→                  </TableHeader>
+   599→                  <TableBody>
+   600→                    {trailersFlat.map(({ z, carrierName }) => (
+   601→                      <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('trailer', z.id, {
+   602→                        plate: z.plate, type: z.type, sts: z.sts, techTill: z.techTill === '—' ? '' : z.techTill,
+   603→                      })} />
+   604→                    ))}
+   605→                    {trailersFlat.length === 0 && (
+   606→                      <TableRow><TableCell colSpan={isLogist ? 5 : 6} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+   607→                    )}
+   608→                  </TableBody>
+   609→                </Table>
+   610→              </div>
+   611→            </CardContent>
+   612→          </Card>
+   613→        </TabsContent>
+   614→      </Tabs>
+   615→
+   616→      {/* диалог добавления / изменения записи */}
+   617→      <Dialog open={!!dialogKind} onOpenChange={(o) => { if (!o) closeDialog() }}>
+   618→        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+   619→          <DialogHeader>
+   620→            <DialogTitle>{addKind ? 'Добавить запись' : 'Изменить запись'} — {addLabel}</DialogTitle>
+   621→            <DialogDescription>
+   622→              {addKind === 'cargo' || editing?.kind === 'cargo'
+   623→                ? addKind
+   624→                  ? 'Груз появится в справочнике и будет доступен для выбора во всех новых заявках — один и тот же груз всегда называется одинаково.'
+   625→                  : 'Название груза едино для всех заявок: при переименовании оно обновится и в уже созданных заявках.'
+   626→                : addKind
+   627→                  ? 'Запись появится в базе аккаунта и станет доступна при подаче заявки.'
+   628→                  : 'Обновите данные и сроки действия документов — подсветка сроков пересчитается автоматически.'}
+   629→            </DialogDescription>
+   630→          </DialogHeader>
+   631→
+   632→          <div className="space-y-3">
+   633→            {addKind === 'driver' || addKind === 'truck' || addKind === 'trailer' ? (
+   634→              <div className="space-y-1.5">
+   635→                <Label>Перевозчик</Label>
+   636→                <Select value={form.carrierId ?? ''} onValueChange={(v) => setForm((f) => ({ ...f, carrierId: v }))} disabled={!!editing}>
+   637→                  <SelectTrigger aria-label="Выбор перевозчика">
+   638→                    <SelectValue placeholder="Выберите перевозчика" />
+   639→                  </SelectTrigger>
+   640→                  <SelectContent>
+   641→                    {(carriers ?? []).map((c) => (
+   642→                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+   643→                    ))}
+   644→                  </SelectContent>
+   645→                </Select>
+   646→              </div>
+   647→            ) : null}
+   648→
+   649→            {dialogKind && FORM_FIELDS[dialogKind].map((field) => (
+   650→              <div key={field.key} className="space-y-1.5">
+   651→                <Label htmlFor={`add-${field.key}`}>{field.label}</Label>
+   652→                <Input
+   653→                  id={`add-${field.key}`}
+   654→                  placeholder={field.placeholder}
+   655→                  value={form[field.key] ?? ''}
+   656→                  onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
+   657→                />
+   658→              </div>
+   659→            ))}
+   660→
+   661→            {dialogKind === 'cargo' && (
+   662→              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   663→                <div className="space-y-1.5">
+   664→                  <Label htmlFor="add-truckType">Рекомендуемое ТС</Label>
+   665→                  <Select value={form.truckType ?? 'Тент'} onValueChange={(v) => setForm((f) => ({ ...f, truckType: v }))}>
+   666→                    <SelectTrigger id="add-truckType" aria-label="Рекомендуемое ТС">
+   667→                      <SelectValue />
+   668→                    </SelectTrigger>
+   669→                    <SelectContent>
+   670→                      {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+   671→                    </SelectContent>
+   672→                  </Select>
+   673→                </div>
+   674→                <div className="space-y-1.5">
+   675→                  <Label htmlFor="add-dangerous">Опасный груз</Label>
+   676→                  <Select value={form.dangerous ?? 'false'} onValueChange={(v) => setForm((f) => ({ ...f, dangerous: v }))}>
+   677→                    <SelectTrigger id="add-dangerous" aria-label="Опасный груз">
+   678→                      <SelectValue />
+   679→                    </SelectTrigger>
+   680→                    <SelectContent>
+   681→                      <SelectItem value="false">Нет — обычный груз</SelectItem>
+   682→                      <SelectItem value="true">Да — опасный (ADR)</SelectItem>
+   683→                    </SelectContent>
+   684→                  </Select>
+   685→                </div>
+   686→              </div>
+   687→            )}
+   688→
+   689→            {editing?.kind === 'carrier' && (
+   690→              <div className="space-y-1.5">
+   691→                <Label htmlFor="add-access">Доступ к площадке</Label>
+   692→                <Select value={form.access ?? 'true'} onValueChange={(v) => setForm((f) => ({ ...f, access: v }))}>
+   693→                  <SelectTrigger id="add-access" aria-label="Доступ к площадке">
+   694→                    <SelectValue />
+   695→                  </SelectTrigger>
+   696→                  <SelectContent>
+   697→                    <SelectItem value="true">Доступ открыт</SelectItem>
+   698→                    <SelectItem value="false">Закрыт</SelectItem>
+   699→                  </SelectContent>
+   700→                </Select>
+   701→              </div>
+   702→            )}
+   703→          </div>
+   704→
+   705→          <DialogFooter>
+   706→            <Button variant="outline" onClick={closeDialog}>Отмена</Button>
+   707→            <Button disabled={saving} onClick={() => void (addKind ? submitAdd() : submitEdit())}>
+   708→              {saving ? 'Сохранение…' : addKind ? 'Добавить' : 'Сохранить'}
+   709→            </Button>
+   710→          </DialogFooter>
+   711→        </DialogContent>
+   712→      </Dialog>
+   713→    </div>
+   714→  )
+   715→}
+   716→
+   717→// ---------------- строки таблиц с подсветкой сроков ----------------
+   718→
+   719→function DriverRow({ d, carrierName, showCarrier, onEdit }: { d: DriverDTO; carrierName: string; showCarrier: boolean; onEdit: () => void }) {
+   720→  const lic = expiryInfo(d.licenseTill)
+   721→  const med = expiryInfo(d.medTill)
+   722→  const tint = rowTint([lic.state, med.state] as ExpiryState[])
+   723→  return (
+   724→    <TableRow className={tint}>
+   725→      <TableCell className="font-medium text-slate-800">{d.fullName}</TableCell>
+   726→      <TableCell className="whitespace-nowrap text-slate-600">{d.birthDate}</TableCell>
+   727→      <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{d.passport}</TableCell>
+   728→      <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{d.license}</TableCell>
+   729→      <TableCell><ExpiryBadge date={d.licenseTill} /></TableCell>
+   730→      <TableCell><ExpiryBadge date={d.medTill} /></TableCell>
+   731→      <TableCell>
+   732→        <div className="flex flex-wrap gap-1">
+   733→          {d.categories.split(',').map((cat) => cat.trim()).filter(Boolean).map((cat) => (
+   734→            <Badge key={cat} variant="outline" className="border-slate-300 bg-slate-50 text-slate-700">{cat}</Badge>
+   735→          ))}
+   736→        </div>
+   737→      </TableCell>
+   738→      <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(d.createdAt)}</TableCell>
+   739→      {showCarrier && <TableCell className="text-slate-600">{carrierName}</TableCell>}
+   740→      {!showCarrier && (
+   741→        <TableCell>
+   742→          <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${d.fullName}`} onClick={onEdit}>
+   743→            <Pencil className="h-3.5 w-3.5" aria-hidden />
+   744→          </Button>
+   745→        </TableCell>
+   746→      )}
+   747→    </TableRow>
+   748→  )
+   749→}
+   750→
+   751→function TruckRow({ t, carrierName, showCarrier, onEdit }: { t: TruckDTO; carrierName: string; showCarrier: boolean; onEdit: () => void }) {
+   752→  const tech = expiryInfo(t.techTill)
+   753→  return (
+   754→    <TableRow className={rowTint([tech.state])}>
+   755→      <TableCell className="font-medium text-slate-800">{t.brand}</TableCell>
+   756→      <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-800">{t.plate}</TableCell>
+   757→      <TableCell className="whitespace-nowrap font-mono text-xs text-slate-500">{t.vin}</TableCell>
+   758→      <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{t.sts}</TableCell>
+   759→      <TableCell><ExpiryBadge date={t.techTill} /></TableCell>
+   760→      <TableCell className="text-slate-600">{t.owner}</TableCell>
+   761→      <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(t.createdAt)}</TableCell>
+   762→      {showCarrier && <TableCell className="text-slate-600">{carrierName}</TableCell>}
+   763→      {!showCarrier && (
+   764→        <TableCell>
+   765→          <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${t.plate}`} onClick={onEdit}>
+   766→            <Pencil className="h-3.5 w-3.5" aria-hidden />
+   767→          </Button>
+   768→        </TableCell>
+   769→      )}
+   770→    </TableRow>
+   771→  )
+   772→}
+   773→
+   774→function TrailerRow({ z, carrierName, showCarrier, onEdit }: { z: TrailerDTO; carrierName: string; showCarrier: boolean; onEdit: () => void }) {
+   775→  const tech = expiryInfo(z.techTill)
+   776→  return (
+   777→    <TableRow className={rowTint([tech.state])}>
+   778→      <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-800">{z.plate}</TableCell>
+   779→      <TableCell className="text-slate-600">{z.type}</TableCell>
+   780→      <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{z.sts}</TableCell>
+   781→      <TableCell><ExpiryBadge date={z.techTill} /></TableCell>
+   782→      <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(z.createdAt)}</TableCell>
+   783→      {showCarrier && <TableCell className="text-slate-600">{carrierName}</TableCell>}
+   784→      {!showCarrier && (
+   785→        <TableCell>
+   786→          <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${z.plate}`} onClick={onEdit}>
+   787→            <Pencil className="h-3.5 w-3.5" aria-hidden />
+   788→          </Button>
+   789→        </TableCell>
+   790→      )}
+   791→    </TableRow>
+   792→  )
+   793→}
+   794→

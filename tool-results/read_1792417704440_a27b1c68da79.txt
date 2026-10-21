@@ -1,0 +1,733 @@
+     1→'use client'
+     2→
+     3→/** Раздел «Площадка заявок» — перевозчик выбирает заявку и делает ставку; логист публикует и контролирует */
+     4→import { useCallback, useEffect, useMemo, useState } from 'react'
+     5→import {
+     6→  ArrowRight,
+     7→  Gavel,
+     8→  Lock,
+     9→  Plus,
+    10→  RefreshCw,
+    11→  Search,
+    12→  ShieldCheck,
+    13→} from 'lucide-react'
+    14→import {
+    15→  AlertDialog,
+    16→  AlertDialogAction,
+    17→  AlertDialogCancel,
+    18→  AlertDialogContent,
+    19→  AlertDialogDescription,
+    20→  AlertDialogFooter,
+    21→  AlertDialogHeader,
+    22→  AlertDialogTitle,
+    23→} from '@/components/ui/alert-dialog'
+    24→import { Badge } from '@/components/ui/badge'
+    25→import { Button } from '@/components/ui/button'
+    26→import { Card, CardContent } from '@/components/ui/card'
+    27→import {
+    28→  Dialog,
+    29→  DialogContent,
+    30→  DialogDescription,
+    31→  DialogFooter,
+    32→  DialogHeader,
+    33→  DialogTitle,
+    34→} from '@/components/ui/dialog'
+    35→import { Input } from '@/components/ui/input'
+    36→import { Label } from '@/components/ui/label'
+    37→import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+    38→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+    39→import {
+    40→  EmptyState,
+    41→  ErrorBlock,
+    42→  LoadingBlock,
+    43→  ModeBadge,
+    44→  SectionHeader,
+    45→  StatusBadge,
+    46→  type TabProps,
+    47→} from '@/components/platform/common'
+    48→import { useToast } from '@/hooks/use-toast'
+    49→import { api } from '@/lib/api'
+    50→import { fmtDateTime, money, timeLeft } from '@/lib/status'
+    51→import type { BidDTO, RequestDTO, RequestMode } from '@/lib/types'
+    52→
+    53→const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
+    54→
+    55→type ModeFilter = 'ALL' | RequestMode
+    56→
+    57→const MODE_FILTERS: { value: ModeFilter; label: string }[] = [
+    58→  { value: 'ALL', label: 'Все режимы' },
+    59→  { value: 'FIXED', label: 'Фиксированная ставка' },
+    60→  { value: 'AUCTION', label: 'Торги' },
+    61→  { value: 'CLOSED', label: 'Закрытые ставки' },
+    62→]
+    63→
+    64→/** Ставка в таблице: по режиму заявки */
+    65→function RateCell({ request }: { request: RequestDTO }) {
+    66→  if (request.mode === 'FIXED') {
+    67→    return <span className="font-semibold text-slate-900">{money(request.startRate)}</span>
+    68→  }
+    69→  if (request.mode === 'CLOSED') {
+    70→    return (
+    71→      <div>
+    72→        <div className="flex items-center gap-1 font-semibold text-slate-900">
+    73→          <Lock className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+    74→          Скрыта
+    75→        </div>
+    76→        <div className="text-xs text-muted-foreground">старт {money(request.startRate)}</div>
+    77→      </div>
+    78→    )
+    79→  }
+    80→  if (request.bestRate == null) {
+    81→    return (
+    82→      <div>
+    83→        <div className="text-sm font-medium text-slate-500">Ставок нет</div>
+    84→        <div className="text-xs text-muted-foreground">старт {money(request.startRate)}</div>
+    85→      </div>
+    86→    )
+    87→  }
+    88→  return (
+    89→    <div>
+    90→      <div className="font-semibold text-slate-900">{money(request.bestRate)}</div>
+    91→      <div className="text-xs text-muted-foreground">старт {money(request.startRate)}</div>
+    92→    </div>
+    93→  )
+    94→}
+    95→
+    96→/** Обратный отсчёт до окончания приёма ставок (без hydration mismatch) */
+    97→function DeadlineCell({ request, now }: { request: RequestDTO; now: number | null }) {
+    98→  if (request.mode === 'FIXED' || !request.deadline) return <span className="text-slate-400">—</span>
+    99→  if (now === null) return <span className="text-slate-400">—</span>
+   100→  const tl = timeLeft(request.deadline)
+   101→  if (!tl) return <span className="text-slate-400">—</span>
+   102→  return (
+   103→    <span className={`tabular-nums ${tl.urgent ? 'font-semibold text-red-600' : 'text-slate-700'}`}>
+   104→      {tl.text}
+   105→    </span>
+   106→  )
+   107→}
+   108→
+   109→export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps) {
+   110→  const { toast } = useToast()
+   111→  const [requests, setRequests] = useState<RequestDTO[] | null>(null)
+   112→  const [loading, setLoading] = useState(true)
+   113→  const [refreshing, setRefreshing] = useState(false)
+   114→  const [error, setError] = useState<string | null>(null)
+   115→  const [q, setQ] = useState('')
+   116→  const [mode, setMode] = useState<ModeFilter>('ALL')
+   117→  const [now, setNow] = useState<number | null>(null)
+   118→  const isLogist = role === 'logist'
+   119→
+   120→  // диалоги: держим только id, свежие данные берём из списка
+   121→  const [detailId, setDetailId] = useState<string | null>(null)
+   122→  const [bidId, setBidId] = useState<string | null>(null)
+   123→  const [bidAmount, setBidAmount] = useState('')
+   124→  const [takeId, setTakeId] = useState<string | null>(null)
+   125→  const [busyId, setBusyId] = useState<string | null>(null)
+   126→
+   127→  // создание заявки — только логист
+   128→  const [createOpen, setCreateOpen] = useState(false)
+   129→  const [creating, setCreating] = useState(false)
+   130→  const [form, setForm] = useState({
+   131→    fromPoint: '', toPoint: '', cargo: '', tonnage: '20', truckType: 'Тент',
+   132→    mode: 'AUCTION' as RequestMode, startRate: '', loadDate: '', loadWindow: '08:00–12:00', deadlineHours: '4',
+   133→  })
+   134→
+   135→  const load = useCallback(async (silent = false) => {
+   136→    if (!silent) setRefreshing(true)
+   137→    try {
+   138→      const d = await api.listRequests()
+   139→      setRequests(d.requests)
+   140→      setError(null)
+   141→    } catch (e) {
+   142→      setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
+   143→    } finally {
+   144→      setLoading(false)
+   145→      if (!silent) setRefreshing(false)
+   146→    }
+   147→  }, [])
+   148→
+   149→  // первичная загрузка + автообновление каждые 15 секунд
+   150→  useEffect(() => {
+   151→    void load()
+   152→    const t = setInterval(() => void load(true), 15_000)
+   153→    return () => clearInterval(t)
+   154→  }, [load])
+   155→
+   156→  // таймер для обратного отсчёта — только после монтирования
+   157→  useEffect(() => {
+   158→    setNow(Date.now())
+   159→    const t = setInterval(() => setNow(Date.now()), 1000)
+   160→    return () => clearInterval(t)
+   161→  }, [])
+   162→
+   163→  const applyRequest = useCallback((updated: RequestDTO) => {
+   164→    setRequests((prev) => {
+   165→      const list = prev ?? []
+   166→      const i = list.findIndex((r) => r.id === updated.id)
+   167→      if (i === -1) return [updated, ...list]
+   168→      const next = [...list]
+   169→      next[i] = updated
+   170→      return next
+   171→    })
+   172→  }, [])
+   173→
+   174→  const filtered = useMemo(() => {
+   175→    const list = requests ?? []
+   176→    const needle = q.trim().toLowerCase()
+   177→    return list.filter((r) => {
+   178→      if (mode !== 'ALL' && r.mode !== mode) return false
+   179→      if (!needle) return true
+   180→      return [r.number, r.cargo, r.fromPoint, r.toPoint].some((v) => v.toLowerCase().includes(needle))
+   181→    })
+   182→  }, [requests, q, mode])
+   183→
+   184→  const openCount = (requests ?? []).filter((r) => r.status === 'PUBLISHED').length
+   185→
+   186→  const detailReq = (requests ?? []).find((r) => r.id === detailId) ?? null
+   187→  const bidReq = (requests ?? []).find((r) => r.id === bidId) ?? null
+   188→  const takeReq = (requests ?? []).find((r) => r.id === takeId) ?? null
+   189→
+   190→  const closeBid = () => {
+   191→    setBidId(null)
+   192→    setBidAmount('')
+   193→  }
+   194→
+   195→  const doBid = async () => {
+   196→    if (!bidReq || !activeCarrierId) return
+   197→    const amount = Math.round(Number(bidAmount.replace(/\s/g, '').replace(',', '.')))
+   198→    if (!amount || amount <= 0) {
+   199→      toast({ title: 'Ошибка', description: 'Укажите ставку в рублях', variant: 'destructive' })
+   200→      return
+   201→    }
+   202→    if (bidReq.mode === 'AUCTION') {
+   203→      const floor = bidReq.bestRate ?? bidReq.startRate
+   204→      if (amount >= floor) {
+   205→        toast({ title: 'Ошибка', description: `Ставка должна быть ниже текущей лучшей (${money(floor)})`, variant: 'destructive' })
+   206→        return
+   207→      }
+   208→    }
+   209→    setBusyId(bidReq.id)
+   210→    try {
+   211→      const { request } = await api.action(bidReq.id, 'bid', { carrierId: activeCarrierId, amount })
+   212→      applyRequest(request)
+   213→      toast({ title: 'Ставка принята', description: `${request.number} — ${money(amount)}${request.mode === 'CLOSED' ? ' · закрытая ставка' : ''}` })
+   214→      closeBid()
+   215→    } catch (e) {
+   216→      toast({ title: 'Ошибка', description: e instanceof Error ? e.message : 'Не удалось подать ставку', variant: 'destructive' })
+   217→    } finally {
+   218→      setBusyId(null)
+   219→    }
+   220→  }
+   221→
+   222→  const doTake = async () => {
+   223→    if (!takeReq || !activeCarrierId) return
+   224→    setBusyId(takeReq.id)
+   225→    try {
+   226→      const { request } = await api.action(takeReq.id, 'take', { carrierId: activeCarrierId })
+   227→      applyRequest(request)
+   228→      toast({ title: 'Заявка закреплена за вами', description: `${request.number} — фиксированная ставка ${money(request.startRate)}` })
+   229→      setTakeId(null)
+   230→    } catch (e) {
+   231→      toast({ title: 'Ошибка', description: e instanceof Error ? e.message : 'Не удалось взять заявку', variant: 'destructive' })
+   232→    } finally {
+   233→      setBusyId(null)
+   234→    }
+   235→  }
+   236→
+   237→  const sortedBids = (bids: BidDTO[]) => [...bids].sort((a, b) => a.amount - b.amount)
+   238→  const bestBid = (bids: BidDTO[]) => (bids.length > 0 ? Math.min(...bids.map((b) => b.amount)) : null)
+   239→
+   240→  // ——— публикация заявки (только логист) ———
+   241→  const doCreate = async () => {
+   242→    if (!form.fromPoint.trim() || !form.toPoint.trim() || !form.cargo.trim() || !form.startRate.trim()) {
+   243→      toast({ title: 'Ошибка', description: 'Заполните направление, груз и стартовую ставку', variant: 'destructive' })
+   244→      return
+   245→    }
+   246→    setCreating(true)
+   247→    try {
+   248→      const { request } = await api.createRequest({
+   249→        fromPoint: form.fromPoint.trim(),
+   250→        toPoint: form.toPoint.trim(),
+   251→        cargo: form.cargo.trim(),
+   252→        tonnage: Number(form.tonnage) || 20,
+   253→        truckType: form.truckType,
+   254→        mode: form.mode,
+   255→        startRate: Number(form.startRate.replace(/\s/g, '')),
+   256→        loadDate: form.loadDate.trim() || '—',
+   257→        loadWindow: form.loadWindow.trim() || '08:00–12:00',
+   258→        ...(form.mode !== 'FIXED' ? { deadline: new Date(Date.now() + Number(form.deadlineHours || 4) * 3600_000).toISOString() } : {}),
+   259→      })
+   260→      setRequests((prev) => [request, ...(prev ?? [])])
+   261→      setCreateOpen(false)
+   262→      setForm((f) => ({ ...f, fromPoint: '', toPoint: '', cargo: '', startRate: '' }))
+   263→      toast({ title: 'Заявка опубликована', description: `${request.number}: ${request.fromPoint} → ${request.toPoint}` })
+   264→    } catch (e) {
+   265→      toast({ title: 'Не удалось опубликовать заявку', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
+   266→    } finally {
+   267→      setCreating(false)
+   268→    }
+   269→  }
+   270→
+   271→  return (
+   272→    <section aria-label="Площадка заявок">
+   273→      <SectionHeader
+   274→        eyebrow="РЕШЕНИЕ 1 · ПЛОЩАДКА ЗАЯВОК"
+   275→        title={isLogist ? 'Публикация и контроль заявок' : 'Агент выбирает заявку и делает ставку'}
+   276→        desc={isLogist
+   277→          ? 'Все заявки площадки, ставки перевозчиков и статусы. Публикация новых заявок, торги и подведение итогов — в этом контуре.'
+   278→          : 'Площадка закрытая: доступ только у проверенных перевозчиков с договором. Ставка, документы и статусы — в одном окне.'}
+   279→      >
+   280→        <div className="flex items-center gap-3">
+   281→          {isLogist && (
+   282→            <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать и опубликовать заявку">
+   283→              <Plus className="h-4 w-4" aria-hidden />
+   284→              Создать заявку
+   285→            </Button>
+   286→          )}
+   287→          <div className="text-sm font-medium text-slate-700" aria-live="polite">
+   288→            Открыто <span className="text-lg font-bold text-blue-700">{openCount}</span> заявок
+   289→          </div>
+   290→        </div>
+   291→      </SectionHeader>
+   292→
+   293→      {!isLogist && !activeCarrierId && (
+   294→        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+   295→          Выберите перевозчика в шапке, чтобы действовать от его имени
+   296→        </div>
+   297→      )}
+   298→
+   299→      {loading && <LoadingBlock label="Загружаем заявки…" />}
+   300→      {!loading && error && <ErrorBlock message={error} onRetry={() => void load()} />}
+   301→
+   302→      {!loading && !error && requests && (
+   303→        <div className="space-y-4">
+   304→          {/* Фильтры */}
+   305→          <Card className="border-slate-200 shadow-sm">
+   306→            <CardContent className="flex flex-wrap items-center gap-3 p-4">
+   307→              <div className="relative min-w-[220px] flex-1">
+   308→                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
+   309→                <Input
+   310→                  value={q}
+   311→                  onChange={(e) => setQ(e.target.value)}
+   312→                  placeholder="Поиск: номер, груз, маршрут…"
+   313→                  className="pl-9"
+   314→                  aria-label="Поиск по номеру, грузу или маршруту"
+   315→                />
+   316→              </div>
+   317→              <Select value={mode} onValueChange={(v) => setMode(v as ModeFilter)}>
+   318→                <SelectTrigger className="w-[200px]" aria-label="Фильтр по режиму заявки">
+   319→                  <SelectValue placeholder="Все режимы" />
+   320→                </SelectTrigger>
+   321→                <SelectContent>
+   322→                  {MODE_FILTERS.map((m) => (
+   323→                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+   324→                  ))}
+   325→                </SelectContent>
+   326→              </Select>
+   327→              <Button variant="outline" onClick={() => void load()} disabled={refreshing} className="gap-2" aria-label="Обновить список заявок">
+   328→                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
+   329→                Обновить
+   330→              </Button>
+   331→              <span className="ml-auto hidden text-xs text-muted-foreground sm:block">автообновление каждые 15 секунд</span>
+   332→            </CardContent>
+   333→          </Card>
+   334→
+   335→          {/* Таблица заявок */}
+   336→          <Card className="border-slate-200 shadow-sm">
+   337→            <CardContent className="p-4 sm:p-6">
+   338→              {filtered.length === 0 ? (
+   339→                <EmptyState
+   340→                  title="Заявок не найдено"
+   341→                  hint="Измените параметры поиска или фильтр режима"
+   342→                />
+   343→              ) : (
+   344→                <div className="-mx-2 overflow-x-auto px-2">
+   345→                  <table className="w-full min-w-[980px] border-separate border-spacing-0 text-sm">
+   346→                    <thead>
+   347→                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+   348→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">№ заявки</th>
+   349→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Маршрут</th>
+   350→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Груз</th>
+   351→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Погрузка</th>
+   352→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Тип ТС</th>
+   353→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Режим</th>
+   354→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Ставка</th>
+   355→                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">До окончания</th>
+   356→                        <th scope="col" className="border-b border-slate-200 pb-2.5 font-semibold">Действие</th>
+   357→                      </tr>
+   358→                    </thead>
+   359→                    <tbody>
+   360→                      {filtered.map((r) => (
+   361→                        <tr
+   362→                          key={r.id}
+   363→                          onClick={() => setDetailId(r.id)}
+   364→                          className="cursor-pointer align-middle transition-colors hover:bg-blue-50/40"
+   365→                        >
+   366→                          <td className="border-b border-slate-100 py-3 pr-3">
+   367→                            <span className="font-semibold text-blue-700">{r.number}</span>
+   368→                          </td>
+   369→                          <td className="border-b border-slate-100 py-3 pr-3">
+   370→                            <span className="flex items-center gap-1.5 font-medium text-slate-800">
+   371→                              {r.fromPoint}
+   372→                              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+   373→                              {r.toPoint}
+   374→                            </span>
+   375→                          </td>
+   376→                          <td className="border-b border-slate-100 py-3 pr-3 text-slate-700">
+   377→                            {r.cargo}
+   378→                            <span className="ml-1 whitespace-nowrap text-muted-foreground">{r.tonnage} т</span>
+   379→                          </td>
+   380→                          <td className="border-b border-slate-100 py-3 pr-3 text-slate-700">
+   381→                            <div>{r.loadDate}</div>
+   382→                            <div className="text-xs text-muted-foreground">{r.loadWindow}</div>
+   383→                          </td>
+   384→                          <td className="border-b border-slate-100 py-3 pr-3 text-slate-700">{r.truckType}</td>
+   385→                          <td className="border-b border-slate-100 py-3 pr-3"><ModeBadge mode={r.mode} /></td>
+   386→                          <td className="border-b border-slate-100 py-3 pr-3"><RateCell request={r} /></td>
+   387→                          <td className="border-b border-slate-100 py-3 pr-3"><DeadlineCell request={r} now={now} /></td>
+   388→                          <td className="border-b border-slate-100 py-3" onClick={(e) => e.stopPropagation()}>
+   389→                            {isLogist ? (
+   390→                              // логист: не участвует в ставках — переходит в торги или смотрит статус
+   391→                              <>
+   392→                                {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
+   393→                                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onNavigate('auctions')} aria-label={`Перейти к торгам по заявке ${r.number}`}>
+   394→                                    <Gavel className="h-4 w-4" aria-hidden />
+   395→                                    К торгам
+   396→                                  </Button>
+   397→                                )}
+   398→                                {r.status === 'PUBLISHED' && r.mode !== 'AUCTION' && (
+   399→                                  <span className="text-xs text-muted-foreground">ожидание перевозчика</span>
+   400→                                )}
+   401→                                {r.status !== 'PUBLISHED' && <StatusBadge status={r.status} />}
+   402→                              </>
+   403→                            ) : (
+   404→                              <>
+   405→                                {r.status === 'PUBLISHED' && r.mode === 'FIXED' && (
+   406→                                  <Button
+   407→                                    size="sm"
+   408→                                    disabled={!activeCarrierId || busyId !== null}
+   409→                                    onClick={() => setTakeId(r.id)}
+   410→                                    aria-label={`Взять заявку ${r.number} по фиксированной ставке`}
+   411→                                  >
+   412→                                    Взять заявку
+   413→                                  </Button>
+   414→                                )}
+   415→                                {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
+   416→                                  <Button
+   417→                                    size="sm"
+   418→                                    disabled={!activeCarrierId || busyId !== null}
+   419→                                    onClick={() => { setBidId(r.id); setBidAmount('') }}
+   420→                                    aria-label={`Сделать ставку по заявке ${r.number}`}
+   421→                                  >
+   422→                                    <Gavel className="h-4 w-4" aria-hidden />
+   423→                                    Сделать ставку
+   424→                                  </Button>
+   425→                                )}
+   426→                                {r.status === 'PUBLISHED' && r.mode === 'CLOSED' && (
+   427→                                  <Button
+   428→                                    size="sm"
+   429→                                    disabled={!activeCarrierId || busyId !== null}
+   430→                                    onClick={() => { setBidId(r.id); setBidAmount('') }}
+   431→                                    aria-label={`Подать закрытую ставку по заявке ${r.number}`}
+   432→                                  >
+   433→                                    <Lock className="h-4 w-4" aria-hidden />
+   434→                                    Подать закрытую ставку
+   435→                                  </Button>
+   436→                                )}
+   437→                                {r.status !== 'PUBLISHED' && <StatusBadge status={r.status} />}
+   438→                              </>
+   439→                            )}
+   440→                          </td>
+   441→                        </tr>
+   442→                      ))}
+   443→                    </tbody>
+   444→                  </table>
+   445→                </div>
+   446→              )}
+   447→              <p className="mt-3 text-xs text-muted-foreground">Нажмите на строку, чтобы увидеть детали заявки и историю ставок.</p>
+   448→            </CardContent>
+   449→          </Card>
+   450→
+   451→          {/* Подсказка по роли */}
+   452→          <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+   453→            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" aria-hidden />
+   454→            <p>
+   455→              {isLogist
+   456→                ? 'Внутренний контур: ставки перевозчиков видны вам полностью. Участие в ставках — только у перевозчиков; согласование победителя — в разделе «Торги».'
+   457→                : 'Площадка закрытая: доступ только у перевозчиков, которых мы заранее проверили и с которыми заключили договор. Ставки видны логисту и участникам конкретной заявки — посторонние на площадку не попадают.'}
+   458→            </p>
+   459→          </div>
+   460→        </div>
+   461→      )}
+   462→
+   463→      {/* Диалог создания заявки — только логист */}
+   464→      {isLogist && (
+   465→        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+   466→          <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
+   467→            <DialogHeader>
+   468→              <DialogTitle>Новая заявка на перевозку</DialogTitle>
+   469→              <DialogDescription>
+   470→                Заявка будет опубликована на площадке с присвоением сквозного номера Z-XXXX.
+   471→              </DialogDescription>
+   472→            </DialogHeader>
+   473→            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   474→              <div className="space-y-1.5">
+   475→                <Label htmlFor="cr-from">Пункт погрузки</Label>
+   476→                <Input id="cr-from" placeholder="Абинск, АЭМЗ" value={form.fromPoint} onChange={(e) => setForm((f) => ({ ...f, fromPoint: e.target.value }))} />
+   477→              </div>
+   478→              <div className="space-y-1.5">
+   479→                <Label htmlFor="cr-to">Пункт выгрузки</Label>
+   480→                <Input id="cr-to" placeholder="Порт НМТП" value={form.toPoint} onChange={(e) => setForm((f) => ({ ...f, toPoint: e.target.value }))} />
+   481→              </div>
+   482→              <div className="space-y-1.5 sm:col-span-2">
+   483→                <Label htmlFor="cr-cargo">Груз</Label>
+   484→                <Input id="cr-cargo" placeholder="Оборудование" value={form.cargo} onChange={(e) => setForm((f) => ({ ...f, cargo: e.target.value }))} />
+   485→              </div>
+   486→              <div className="space-y-1.5">
+   487→                <Label htmlFor="cr-tonnage">Тоннаж, т</Label>
+   488→                <Input id="cr-tonnage" type="number" min={1} value={form.tonnage} onChange={(e) => setForm((f) => ({ ...f, tonnage: e.target.value }))} />
+   489→              </div>
+   490→              <div className="space-y-1.5">
+   491→                <Label htmlFor="cr-truck">Тип ТС</Label>
+   492→                <Select value={form.truckType} onValueChange={(v) => setForm((f) => ({ ...f, truckType: v }))}>
+   493→                  <SelectTrigger id="cr-truck"><SelectValue /></SelectTrigger>
+   494→                  <SelectContent>
+   495→                    {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+   496→                  </SelectContent>
+   497→                </Select>
+   498→              </div>
+   499→              <div className="space-y-1.5">
+   500→                <Label htmlFor="cr-mode">Режим отбора</Label>
+   501→                <Select value={form.mode} onValueChange={(v) => setForm((f) => ({ ...f, mode: v as RequestMode }))}>
+   502→                  <SelectTrigger id="cr-mode"><SelectValue /></SelectTrigger>
+   503→                  <SelectContent>
+   504→                    <SelectItem value="AUCTION">Торги (аукцион на понижение)</SelectItem>
+   505→                    <SelectItem value="FIXED">Фиксированная ставка</SelectItem>
+   506→                    <SelectItem value="CLOSED">Закрытые ставки</SelectItem>
+   507→                  </SelectContent>
+   508→                </Select>
+   509→              </div>
+   510→              <div className="space-y-1.5">
+   511→                <Label htmlFor="cr-rate">Стартовая ставка, ₽</Label>
+   512→                <Input id="cr-rate" type="number" min={1000} step={500} placeholder="95000" value={form.startRate} onChange={(e) => setForm((f) => ({ ...f, startRate: e.target.value }))} />
+   513→              </div>
+   514→              <div className="space-y-1.5">
+   515→                <Label htmlFor="cr-date">Дата погрузки</Label>
+   516→                <Input id="cr-date" placeholder="25.10.2026" value={form.loadDate} onChange={(e) => setForm((f) => ({ ...f, loadDate: e.target.value }))} />
+   517→              </div>
+   518→              <div className="space-y-1.5">
+   519→                <Label htmlFor="cr-window">Окно погрузки</Label>
+   520→                <Input id="cr-window" placeholder="09:00–13:00" value={form.loadWindow} onChange={(e) => setForm((f) => ({ ...f, loadWindow: e.target.value }))} />
+   521→              </div>
+   522→              {form.mode !== 'FIXED' && (
+   523→                <div className="space-y-1.5">
+   524→                  <Label htmlFor="cr-deadline">Приём ставок ещё</Label>
+   525→                  <Select value={form.deadlineHours} onValueChange={(v) => setForm((f) => ({ ...f, deadlineHours: v }))}>
+   526→                    <SelectTrigger id="cr-deadline"><SelectValue /></SelectTrigger>
+   527→                    <SelectContent>
+   528→                      {[['2', '2 часа'], ['4', '4 часа'], ['8', '8 часов'], ['24', '24 часа']].map(([v, l]) => (
+   529→                        <SelectItem key={v} value={v}>{l}</SelectItem>
+   530→                      ))}
+   531→                    </SelectContent>
+   532→                  </Select>
+   533→                </div>
+   534→              )}
+   535→            </div>
+   536→            <DialogFooter>
+   537→              <Button variant="outline" onClick={() => setCreateOpen(false)}>Отмена</Button>
+   538→              <Button onClick={() => void doCreate()} disabled={creating}>
+   539→                {creating ? 'Публикуем…' : 'Опубликовать заявку'}
+   540→              </Button>
+   541→            </DialogFooter>
+   542→          </DialogContent>
+   543→        </Dialog>
+   544→      )}
+   545→
+   546→      {/* Подтверждение: взять заявку по фиксированной ставке */}
+   547→      <AlertDialog open={takeReq !== null} onOpenChange={(o) => { if (!o) setTakeId(null) }}>
+   548→        <AlertDialogContent>
+   549→          <AlertDialogHeader>
+   550→            <AlertDialogTitle>Взять заявку {takeReq?.number}?</AlertDialogTitle>
+   551→            <AlertDialogDescription>
+   552→              Заявка закрепляется за вами по фиксированной ставке {money(takeReq?.startRate ?? 0)}.
+   553→              Дальше останется указать водителя и ТС и загрузить документы.
+   554→            </AlertDialogDescription>
+   555→          </AlertDialogHeader>
+   556→          <AlertDialogFooter>
+   557→            <AlertDialogCancel>Отмена</AlertDialogCancel>
+   558→            <AlertDialogAction onClick={() => void doTake()} disabled={busyId !== null}>
+   559→              {busyId === takeReq?.id ? 'Закрепляем…' : 'Взять заявку'}
+   560→            </AlertDialogAction>
+   561→          </AlertDialogFooter>
+   562→        </AlertDialogContent>
+   563→      </AlertDialog>
+   564→
+   565→      {/* Диалог ставки (торги / закрытые ставки) */}
+   566→      <Dialog open={bidReq !== null} onOpenChange={(o) => { if (!o) closeBid() }}>
+   567→        <DialogContent className="sm:max-w-md">
+   568→          {bidReq && (
+   569→            <>
+   570→              <DialogHeader>
+   571→                <DialogTitle>
+   572→                  {bidReq.mode === 'CLOSED' ? 'Закрытая ставка' : 'Ставка'} · заявка {bidReq.number}
+   573→                </DialogTitle>
+   574→                <DialogDescription>
+   575→                  {bidReq.fromPoint} → {bidReq.toPoint}, {bidReq.cargo}
+   576→                </DialogDescription>
+   577→              </DialogHeader>
+   578→              <div className="space-y-4">
+   579→                {bidReq.mode === 'AUCTION' && (
+   580→                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+   581→                    Текущая лучшая: <span className="font-semibold text-slate-900">{money(bidReq.bestRate ?? bidReq.startRate)}</span>
+   582→                    {bidReq.bestRate == null && <span className="ml-1 text-muted-foreground">— ставок ещё нет</span>}
+   583→                  </div>
+   584→                )}
+   585→                {bidReq.mode === 'CLOSED' && (
+   586→                  <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+   587→                    <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+   588→                    Участники не видят цены друг друга — защита от сговора. Победителя определит логист по итогам.
+   589→                  </div>
+   590→                )}
+   591→                <div className="space-y-1.5">
+   592→                  <Label htmlFor="bid-amount">Ваша ставка, ₽</Label>
+   593→                  <Input
+   594→                    id="bid-amount"
+   595→                    type="number"
+   596→                    min={1}
+   597→                    step={100}
+   598→                    inputMode="numeric"
+   599→                    placeholder="Например, 85000"
+   600→                    value={bidAmount}
+   601→                    onChange={(e) => setBidAmount(e.target.value)}
+   602→                    onKeyDown={(e) => { if (e.key === 'Enter') void doBid() }}
+   603→                  />
+   604→                  <p className="text-xs text-muted-foreground">
+   605→                    {bidReq.mode === 'CLOSED' ? 'Ставку увидит только логист при подведении итогов' : 'Должна быть ниже лучшей'}
+   606→                  </p>
+   607→                </div>
+   608→              </div>
+   609→              <DialogFooter>
+   610→                <Button variant="outline" onClick={closeBid}>Отмена</Button>
+   611→                <Button onClick={() => void doBid()} disabled={busyId !== null || !bidAmount.trim()}>
+   612→                  {busyId === bidReq.id ? 'Отправляем…' : 'Подтвердить ставку'}
+   613→                </Button>
+   614→              </DialogFooter>
+   615→            </>
+   616→          )}
+   617→        </DialogContent>
+   618→      </Dialog>
+   619→
+   620→      {/* Детали заявки */}
+   621→      <Dialog open={detailReq !== null} onOpenChange={(o) => { if (!o) setDetailId(null) }}>
+   622→        <DialogContent className={`max-h-[90vh] overflow-y-auto sm:max-w-2xl ${THIN_SCROLL}`}>
+   623→          {detailReq && (
+   624→            <>
+   625→              <DialogHeader>
+   626→                <DialogTitle className="flex flex-wrap items-center gap-2">
+   627→                  Заявка <span className="text-blue-700">{detailReq.number}</span>
+   628→                  <StatusBadge status={detailReq.status} />
+   629→                  <ModeBadge mode={detailReq.mode} />
+   630→                </DialogTitle>
+   631→                <DialogDescription className="flex items-center gap-1.5">
+   632→                  {detailReq.fromPoint} <ArrowRight className="h-3.5 w-3.5" aria-hidden /> {detailReq.toPoint}
+   633→                </DialogDescription>
+   634→              </DialogHeader>
+   635→
+   636→              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+   637→                {[
+   638→                  { label: 'Груз', value: `${detailReq.cargo}, ${detailReq.tonnage} т` },
+   639→                  { label: 'Тип ТС', value: detailReq.truckType },
+   640→                  { label: 'Погрузка', value: `${detailReq.loadDate}, ${detailReq.loadWindow}` },
+   641→                  { label: 'Стартовая ставка', value: money(detailReq.startRate) },
+   642→                  { label: 'Текущая лучшая', value: detailReq.bestRate != null ? money(detailReq.bestRate) : '—' },
+   643→                  { label: detailReq.winnerName ? 'Перевозчик' : 'Окончание ставок', value: detailReq.winnerName ?? '—' },
+   644→                ].map((f) => (
+   645→                  <div key={f.label} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+   646→                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{f.label}</div>
+   647→                    <div className="mt-0.5 text-sm font-semibold text-slate-900">{f.value}</div>
+   648→                  </div>
+   649→                ))}
+   650→              </div>
+   651→
+   652→              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+   653→                <div className="flex items-center gap-1.5 text-sm font-semibold text-blue-900">
+   654→                  <ShieldCheck className="h-4 w-4" aria-hidden />
+   655→                  Требования к документам
+   656→                </div>
+   657→                <p className="mt-1 text-sm text-blue-800">
+   658→                  Пропуск в порт: паспорт, ВУ, СТС. Нейросеть сверит фото с данными водителя и автомобиля —
+   659→                  комплект загружается в эту же заявку.
+   660→                </p>
+   661→              </div>
+   662→
+   663→              {detailReq.mode === 'AUCTION' && (
+   664→                <div>
+   665→                  <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+   666→                    <Gavel className="h-4 w-4 text-blue-600" aria-hidden />
+   667→                    Ставки ({detailReq.bids.length})
+   668→                  </h4>
+   669→                  {detailReq.bids.length === 0 ? (
+   670→                    <p className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-sm text-muted-foreground">
+   671→                      Ставок пока нет — будьте первым.
+   672→                    </p>
+   673→                  ) : (
+   674→                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+   675→                      <Table>
+   676→                        <TableHeader>
+   677→                          <TableRow>
+   678→                            <TableHead>Перевозчик</TableHead>
+   679→                            <TableHead>Ставка</TableHead>
+   680→                            <TableHead>Время</TableHead>
+   681→                          </TableRow>
+   682→                        </TableHeader>
+   683→                        <TableBody>
+   684→                          {sortedBids(detailReq.bids).map((b) => {
+   685→                            const isBest = bestBid(detailReq.bids) === b.amount
+   686→                            return (
+   687→                              <TableRow key={b.id} className={isBest ? 'bg-emerald-50' : undefined}>
+   688→                                <TableCell className="font-medium">
+   689→                                  <span className="flex items-center gap-2">
+   690→                                    {b.carrierName}
+   691→                                    {isBest && <Badge className="border-emerald-200 bg-emerald-100 text-[10px] text-emerald-800" variant="outline">лучшая</Badge>}
+   692→                                  </span>
+   693→                                </TableCell>
+   694→                                <TableCell className={isBest ? 'font-semibold text-emerald-700' : 'text-slate-700'}>
+   695→                                  {money(b.amount)}
+   696→                                </TableCell>
+   697→                                <TableCell className="text-muted-foreground">{fmtDateTime(b.createdAt)}</TableCell>
+   698→                              </TableRow>
+   699→                            )
+   700→                          })}
+   701→                        </TableBody>
+   702→                      </Table>
+   703→                    </div>
+   704→                  )}
+   705→                </div>
+   706→              )}
+   707→
+   708→              {detailReq.mode === 'CLOSED' && (
+   709→                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+   710→                  <Lock className="h-4 w-4 shrink-0" aria-hidden />
+   711→                  Ставки скрыты до подведения итогов — участники не видят цены друг друга.
+   712→                </div>
+   713→              )}
+   714→
+   715→              {detailReq.mode === 'FIXED' && (
+   716→                <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+   717→                  Фиксированная ставка: <span className="font-semibold">{money(detailReq.startRate)}</span> — торги не проводятся.
+   718→                </div>
+   719→              )}
+   720→
+   721→              {detailReq.status !== 'PUBLISHED' && detailReq.mode === 'AUCTION' && detailReq.bids.length > 0 && (
+   722→                <p className="text-xs text-muted-foreground">
+   723→                  Торги завершены — победитель согласован логистом.
+   724→                </p>
+   725→              )}
+   726→            </>
+   727→          )}
+   728→        </DialogContent>
+   729→      </Dialog>
+   730→    </section>
+   731→  )
+   732→}
+   733→
