@@ -999,11 +999,11 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="nc-name">Название груза</Label>
-                <Input id="nc-name" placeholder="Трубы стальные" value={cargoForm.name} onChange={(e) => setCargoForm((f) => ({ ...f, name: e.target.value }))} />
+                <Input id="nc-name" placeholder="Перевозка металлолома" value={cargoForm.name} onChange={(e) => setCargoForm((f) => ({ ...f, name: e.target.value }))} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="nc-category">Группа груза</Label>
-                <Input id="nc-category" placeholder="Металлопрокат" value={cargoForm.category} onChange={(e) => setCargoForm((f) => ({ ...f, category: e.target.value }))} />
+                <Input id="nc-category" placeholder="Готовая продукция" value={cargoForm.category} onChange={(e) => setCargoForm((f) => ({ ...f, category: e.target.value }))} />
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">

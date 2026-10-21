@@ -63,8 +63,8 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
     { key: 'contractDate', label: 'Дата договора', placeholder: '01.11.2025' },
   ],
   cargo: [
-    { key: 'name', label: 'Название груза', placeholder: 'Трубы стальные' },
-    { key: 'category', label: 'Группа груза', placeholder: 'Металлопрокат' },
+    { key: 'name', label: 'Название груза', placeholder: 'Перевозка металлолома' },
+    { key: 'category', label: 'Группа груза', placeholder: 'Готовая продукция' },
   ],
   driver: [
     { key: 'fullName', label: 'ФИО', placeholder: 'Смирнов Олег Викторович' },
