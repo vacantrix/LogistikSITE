@@ -75,6 +75,10 @@ export async function POST(req: NextRequest) {
           birthDate: data.birthDate || '—', passport: data.passport || '—',
           license: data.license || '—', licenseTill: data.licenseTill || '—',
           medTill: data.medTill || '—', categories: data.categories || '—',
+          // кадровые поля проформы (Task 29)
+          phone: data.phone || '—', birthPlace: data.birthPlace || '—',
+          citizenship: data.citizenship || '—', position: data.position || '—',
+          passportIssuedBy: data.passportIssuedBy || '—', passportIssuedDate: data.passportIssuedDate || '—',
         }
         const driver = existing
           ? await db.driver.update({ where: { id: existing.id }, data: payload })
@@ -84,7 +88,7 @@ export async function POST(req: NextRequest) {
       case 'truck': {
         if (!data.carrierId || !data.plate) return NextResponse.json({ error: 'Перевозчик и госномер обязательны' }, { status: 400 })
         const existing = (await db.truck.findMany({ where: { carrierId: data.carrierId } })).find((t) => norm(t.plate) === norm(data.plate))
-        const payload = { brand: data.brand || '—', plate: data.plate, vin: data.vin || '—', sts: data.sts || '—', techTill: data.techTill || '—', owner: data.owner || '—' }
+        const payload = { brand: data.brand || '—', plate: data.plate, vin: data.vin || '—', sts: data.sts || '—', techTill: data.techTill || '—', owner: data.owner || '—', color: data.color || '—' }
         const truck = existing
           ? await db.truck.update({ where: { id: existing.id }, data: payload })
           : await db.truck.create({ data: { carrierId: data.carrierId, ...payload } })
@@ -92,8 +96,16 @@ export async function POST(req: NextRequest) {
       }
       case 'trailer': {
         if (!data.carrierId || !data.plate) return NextResponse.json({ error: 'Перевозчик и госномер обязательны' }, { status: 400 })
-        await db.trailer.create({ data: { carrierId: data.carrierId, plate: data.plate, sts: data.sts || '—', type: data.type || '—', techTill: data.techTill || '—' } })
-        break
+        // идемпотентно по госномеру + DTO в ответе (Task 29)
+        const existingTrailer = (await db.trailer.findMany({ where: { carrierId: data.carrierId } })).find((tr) => norm(tr.plate) === norm(data.plate))
+        const trailerPayload = {
+          type: data.type || '—', plate: data.plate, sts: data.sts || '—',
+          techTill: data.techTill || '—', color: data.color || '—', owner: data.owner || '—',
+        }
+        const trailer = existingTrailer
+          ? await db.trailer.update({ where: { id: existingTrailer.id }, data: trailerPayload })
+          : await db.trailer.create({ data: { carrierId: data.carrierId, ...trailerPayload } })
+        return NextResponse.json({ ok: true, trailer: toTrailerDTO(trailer) }, { status: existingTrailer ? 200 : 201 })
       }
       default:
         return NextResponse.json({ error: 'Неизвестный kind' }, { status: 400 })

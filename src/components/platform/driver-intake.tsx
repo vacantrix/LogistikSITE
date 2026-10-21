@@ -1,603 +1,520 @@
 'use client'
 
 /**
- * Мастер «Добавить водителя с нейросетью».
+ * Линия водителя для «Подать документов» (Task 29/30/32/33/35).
  *
- * Интерфейс построен вокруг нейросети: агент загружает фото документов
- * (паспорт, ВУ, опционально СТС и регистрацию) → нейросеть распознаёт их,
- * сама заполняет карточку водителя и тягача и сверяет данные между собой →
- * агент проверяет распознанное и подтверждает → водитель попадает в справочник,
- * а по заявке — сразу назначается, документы прикрепляются и уходят на проверку.
+ * Одна линия = один водитель: проформы [Водитель | Тягач | Прицеп] в одну строку,
+ * ниже — 4 слота фотографий. Кнопка «Проверить» (или «Проверить все» на панели
+ * раздела) запускает нейросеть: она читает фото, заполняет ТОЛЬКО пустые поля,
+ * сверяет данные между документами и сама допускает карточки в базу аккаунта
+ * (идемпотентно, по ФИО+ВУ / госномеру) или отклоняет с причинами.
+ * Ручной путь без фото работает той же кнопкой (нужны ФИО + ВУ).
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  ArrowRight,
-  Car,
-  CheckCircle2,
-  FileText,
-  IdCard,
-  Loader2,
-  MapPin,
-  RotateCcw,
-  ScanLine,
-  Send,
-  ShieldCheck,
-  Sparkles,
-  Truck,
-  Upload,
-  User,
-  XCircle,
+  BadgeCheck, CarFront, CircleAlert, IdCard, ScanLine, Truck, Trash2, X,
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DocStatusBadge } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { fileToCompressedDataUri, DEMO_DOC_SAMPLES, sampleSvg, sleep } from '@/lib/demo-media'
 import { DOC_TYPE_LABEL } from '@/lib/status'
-import type {
-  CarrierDTO, DocStatus, DocType, DriverIntakeSaved, IntakeDocVerdict, IntakeDriverDraft, IntakeResult, IntakeTruckDraft, RequestDTO,
-} from '@/lib/types'
+import { fileToCompressedDataUri } from '@/lib/demo-media'
+import type { DocType, IntakeResult } from '@/lib/types'
 
-const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
+/** Ровно два типа прицепа (утверждено пользователем, Task 32) */
+export const TRAILER_TYPES = ['Полуприцеп-штора', 'Полуприцепы-контейнеровозы'] as const
 
-const SCAN_STAGES = [
-  'Читаем паспорт…',
-  'Читаем водительское удостоверение…',
-  'Сверяем данные между собой…',
-]
+type Upload = { fileName: string; dataUri: string }
+const LINE_DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS']
 
-/** Демо-образцы: { [вид документа]: { fileName, title, lines, accent } } */
-const DEMO: Record<DocType, { fileName: string; title: string; lines: string[]; accent: string }> = Object.fromEntries(
-  DEMO_DOC_SAMPLES.map((s) => [s.type, { fileName: s.fileName, title: s.title, lines: s.lines, accent: s.accent }]),
-) as Record<DocType, { fileName: string; title: string; lines: string[]; accent: string }>
+const EMPTY_UPLOADS: Partial<Record<DocType, Upload>> = {}
+const EMPTY_VERDICTS: Partial<Record<DocType, IntakeResult['documents'][number]>> = {}
 
-interface Upload {
-  fileName: string
-  dataUri: string
+/** Данные линии, подставленные из Excel/демо — поля, уже известные до проверки */
+export interface DriverLineInitial {
+  driver?: Partial<Record<'fullName' | 'birthDate' | 'citizenship' | 'phone' | 'birthPlace' | 'passport' | 'passportIssuedBy' | 'passportIssuedDate' | 'position' | 'license' | 'licenseTill' | 'categories', string>>
+  truck?: Partial<Record<'brand' | 'plate' | 'sts' | 'color' | 'owner', string>>
+  trailer?: Partial<Record<'type' | 'plate' | 'sts' | 'color' | 'owner', string>>
 }
 
-type Uploads = Partial<Record<DocType, Upload>>
-
-interface DriverField {
-  key: keyof Pick<IntakeDriverDraft, 'fullName' | 'birthDate' | 'passport' | 'license' | 'licenseTill' | 'categories'>
-  label: string
-  placeholder: string
-  mono?: boolean
-  wide?: boolean
-}
-
-const DRIVER_FIELDS: DriverField[] = [
-  { key: 'fullName', label: 'ФИО', placeholder: 'Фамилия Имя Отчество', wide: true },
-  { key: 'birthDate', label: 'Дата рождения', placeholder: 'ДД.ММ.ГГГГ', mono: true },
-  { key: 'passport', label: 'Паспорт (серия и номер)', placeholder: '52 07 987654', mono: true },
-  { key: 'license', label: 'Номер ВУ', placeholder: '52 10 555444', mono: true },
-  { key: 'licenseTill', label: 'ВУ действует до', placeholder: 'ДД.ММ.ГГГГ', mono: true },
-  { key: 'categories', label: 'Категории', placeholder: 'C, CE' },
-]
-
-interface TruckField {
-  key: keyof Pick<IntakeTruckDraft, 'brand' | 'plate' | 'vin' | 'sts' | 'owner'>
-  label: string
-  placeholder: string
-  mono?: boolean
-  wide?: boolean
-}
-
-const TRUCK_FIELDS: TruckField[] = [
-  { key: 'brand', label: 'Марка', placeholder: 'MAN TGX' },
-  { key: 'plate', label: 'Госномер', placeholder: 'А321ВС777', mono: true },
-  { key: 'vin', label: 'VIN', placeholder: '17 символов', mono: true, wide: true },
-  { key: 'sts', label: 'Номер СТС', placeholder: '99 00 654321', mono: true },
-  { key: 'owner', label: 'Собственник', placeholder: 'ООО «Перевозчик»', wide: true },
-]
-
-/** Цвет процента уверенности распознавания */
 function confCls(c: number): string {
-  if (c >= 0.95) return 'text-emerald-600'
-  if (c >= 0.6) return 'text-blue-600'
-  return 'text-amber-600'
+  if (c >= 0.8) return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  if (c >= 0.55) return 'bg-amber-50 text-amber-700 border-amber-200'
+  return 'bg-red-50 text-red-700 border-red-200'
 }
 
 function ConfChip({ c }: { c: number }) {
-  if (!c) return <span className="text-[10px] font-semibold text-slate-400">не распознано</span>
-  return <span className={`text-[10px] font-semibold ${confCls(c)}`}>{Math.round(c * 100)}%</span>
+  const pct = Math.round(c * 100)
+  return <span className={`ml-1.5 inline-flex items-center rounded border px-1 py-px text-[10px] font-semibold ${confCls(c)}`}>{pct}%</span>
 }
 
-function FieldInput({ id, label, placeholder, value, conf, mono, wide, onChange }: {
+/** Поле проформы: красная подсветка обязательного пустого (Task 35) */
+function FieldInput({
+  id, label, placeholder, value, conf, mono, invalid, onChange, disabled,
+}: {
   id: string
   label: string
-  placeholder: string
+  placeholder?: string
   value: string
   conf?: number
   mono?: boolean
-  wide?: boolean
+  invalid?: boolean
   onChange: (v: string) => void
+  disabled?: boolean
 }) {
   return (
-    <div className={`space-y-1 ${wide ? 'sm:col-span-2' : ''}`}>
-      <div className="flex items-center justify-between gap-2">
-        <Label htmlFor={id} className="text-xs text-slate-600">{label}</Label>
-        <ConfChip c={conf ?? 0} />
-      </div>
+    <div className="min-w-0">
+      <Label htmlFor={id} className={`text-xs ${invalid ? 'font-semibold text-red-600' : 'text-muted-foreground'}`}>
+        {label}
+        {invalid && <span aria-hidden> — заполните</span>}
+        {conf !== undefined && conf > 0 && <ConfChip c={conf} />}
+      </Label>
       <Input
         id={id}
         value={value}
         placeholder={placeholder}
+        disabled={disabled}
+        aria-invalid={invalid || undefined}
+        className={`mt-1 h-8 text-sm ${mono ? 'font-mono' : ''} ${invalid ? 'border-red-400 bg-red-50/40 focus-visible:ring-red-300' : ''}`}
         onChange={(e) => onChange(e.target.value)}
-        className={mono ? 'font-mono text-sm' : 'text-sm'}
-        aria-label={label}
       />
     </div>
   )
 }
 
-function VerdictRow({ type, verdict, upload }: { type: DocType; verdict: IntakeDocVerdict; upload?: Upload }) {
-  return (
-    <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white p-2.5">
-      {upload && (
-        <img src={upload.dataUri} alt={`Документ «${DOC_TYPE_LABEL[type]}»`} className="h-14 w-20 shrink-0 rounded-md border border-slate-200 object-cover" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs font-semibold text-slate-800">{DOC_TYPE_LABEL[type]}</span>
-          <DocStatusBadge status={verdict.status} />
-          <span className="text-[11px] text-muted-foreground">качество: {verdict.quality} · {verdict.engine}</span>
-        </div>
-        {verdict.message && <p className="mt-0.5 text-[11px] leading-snug text-slate-600">{verdict.message}</p>}
-        {verdict.issues.slice(0, 2).map((is, i) => (
-          <p key={i} className={`text-[11px] leading-snug ${verdict.status === 'REJECTED' ? 'text-red-600' : verdict.status === 'REUPLOAD' ? 'text-amber-600' : 'text-blue-600'}`}>• {is}</p>
-        ))}
-      </div>
-    </div>
-  )
+export interface DriverLineProps {
+  id: string
+  index: number
+  carrierId: string
+  /** данные, подставленные из Excel-строки */
+  initial?: DriverLineInitial
+  /** регистрация функции проверки линии для кнопки «Проверить все» */
+  registerCheck: (id: string, fn: (() => Promise<boolean>) | null) => void
+  /** регистрация готовности линии (есть фото или ФИО+ВУ) для блокировки «Проверить все» */
+  registerReady: (id: string, ready: boolean) => void
+  onRemove: (id: string) => void
+  /** уведомление о допуске карточек в базу — раздел обновит счётчики */
+  onAdmitted: () => void
 }
 
-export interface DriverIntakeDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  carriers: CarrierDTO[]
-  /** перевозчик по умолчанию (активный в шапке) */
-  defaultCarrierId?: string | null
-  /** запретить менять перевозчика (в кабинете агента) */
-  lockCarrier?: boolean
-  /** заявка: включает назначение водителя, прикрепление документов и проверку */
-  request?: RequestDTO | null
-  onSaved: (res: DriverIntakeSaved) => void
-}
-
-export default function DriverIntakeDialog({ open, onOpenChange, carriers, defaultCarrierId, lockCarrier, request, onSaved }: DriverIntakeDialogProps) {
+export default function DriverLine({
+  id, index, carrierId, initial, registerCheck, registerReady, onRemove, onAdmitted,
+}: DriverLineProps) {
   const { toast } = useToast()
-  const [step, setStep] = useState<'docs' | 'scan' | 'review'>('docs')
-  const [carrierId, setCarrierId] = useState('')
-  const [uploads, setUploads] = useState<Uploads>({})
-  const [scanStage, setScanStage] = useState(SCAN_STAGES[0])
-  const [result, setResult] = useState<IntakeResult | null>(null)
-  const [draftDriver, setDraftDriver] = useState<IntakeDriverDraft | null>(null)
-  const [draftTruck, setDraftTruck] = useState<IntakeTruckDraft | null>(null)
-  const [attach, setAttach] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const fileInputs = useRef<Partial<Record<DocType, HTMLInputElement | null>>>({})
 
-  const canRecognize = !!(carrierId && uploads.PASSPORT_PHOTO && uploads.LICENSE)
+  // ——— проформа водителя (12 полей) ———
+  const [d, setD] = useState({
+    fullName: initial?.driver?.fullName ?? '',
+    birthDate: initial?.driver?.birthDate ?? '',
+    citizenship: initial?.driver?.citizenship ?? '',
+    phone: initial?.driver?.phone ?? '',
+    birthPlace: initial?.driver?.birthPlace ?? '', // поле «Адрес регистрации» (Task 33)
+    passport: initial?.driver?.passport ?? '',
+    passportIssuedBy: initial?.driver?.passportIssuedBy ?? '',
+    passportIssuedDate: initial?.driver?.passportIssuedDate ?? '',
+    position: initial?.driver?.position ?? '',
+    license: initial?.driver?.license ?? '',
+    licenseTill: initial?.driver?.licenseTill ?? '',
+    categories: initial?.driver?.categories ?? '',
+  })
+  // ——— проформа тягача (5 полей) ———
+  const [t, setT] = useState({
+    brand: initial?.truck?.brand ?? '',
+    plate: initial?.truck?.plate ?? '',
+    sts: initial?.truck?.sts ?? '',
+    color: initial?.truck?.color ?? '',
+    owner: initial?.truck?.owner ?? '',
+  })
+  // ——— проформа прицепа (5 полей) ———
+  const [tr, setTr] = useState({
+    type: initial?.trailer?.type ?? '',
+    plate: initial?.trailer?.plate ?? '',
+    sts: initial?.trailer?.sts ?? '',
+    color: initial?.trailer?.color ?? '',
+    owner: initial?.trailer?.owner ?? '',
+  })
+  const [trailerTypes, setTrailerTypes] = useState<string[]>(() => {
+    const extra = initial?.trailer?.type && !(TRAILER_TYPES as readonly string[]).includes(initial.trailer.type)
+      ? [initial.trailer.type] : []
+    return [...TRAILER_TYPES, ...extra]
+  })
 
-  // сброс и инициализация при открытии
-  useEffect(() => {
-    if (!open) return
-    setStep('docs')
-    setUploads({})
-    setResult(null)
-    setDraftDriver(null)
-    setDraftTruck(null)
-    setAttach(true)
-    setSaving(false)
-    setCarrierId(defaultCarrierId ?? carriers[0]?.id ?? '')
-  }, [open, defaultCarrierId, carriers])
+  const [uploads, setUploads] = useState<Partial<Record<DocType, Upload>>>(EMPTY_UPLOADS)
+  const [verdicts, setVerdicts] = useState<Partial<Record<DocType, IntakeResult['documents'][number]>>>(EMPTY_VERDICTS)
+  const [crossChecks, setCrossChecks] = useState<IntakeResult['crossChecks']>([])
+  const [conf, setConf] = useState<Record<string, number>>({})
+  const [checking, setChecking] = useState(false)
+  const [admitted, setAdmitted] = useState<null | { driver: string; truck?: string; trailer?: string }>(null)
 
-  // анимация этапов сканирования
-  useEffect(() => {
-    if (step !== 'scan') return
-    let i = 0
-    setScanStage(SCAN_STAGES[0])
-    const iv = setInterval(() => {
-      i = (i + 1) % SCAN_STAGES.length
-      setScanStage(SCAN_STAGES[i])
-    }, 700)
-    return () => clearInterval(iv)
-  }, [step])
+  const setField = useCallback((k: keyof typeof d, v: string) => setD((cur) => ({ ...cur, [k]: v })), [])
+  const setTField = useCallback((k: keyof typeof t, v: string) => setT((cur) => ({ ...cur, [k]: v })), [])
+  const setTrField = useCallback((k: keyof typeof tr, v: string) => setTr((cur) => ({ ...cur, [k]: v })), [])
 
-  const setUpload = useCallback((type: DocType, up: Upload | null) => {
-    setUploads((prev) => {
-      const next = { ...prev }
-      if (up) next[type] = up
-      else delete next[type]
-      return next
-    })
-  }, [])
-
-  const handleFile = async (type: DocType, file: File) => {
+  const setUpload = useCallback(async (type: DocType, file: File) => {
     try {
       const dataUri = await fileToCompressedDataUri(file)
-      setUpload(type, { fileName: file.name, dataUri })
-    } catch (e) {
-      toast({ title: 'Ошибка', description: e instanceof Error ? e.message : 'Не удалось прочитать файл', variant: 'destructive' })
+      setUploads((cur) => ({ ...cur, [type]: { fileName: file.name, dataUri } }))
+      setVerdicts((cur) => { const n = { ...cur }; delete n[type]; return n })
+    } catch {
+      toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' })
     }
-  }
+  }, [toast])
 
-  const fillDemo = () => {
-    // intake — только документы водителя/тягача: паспорт, ВУ, СТС, регистрация
-    const intakeTypes: DocType[] = ['PASSPORT_PHOTO', 'LICENSE', 'STS', 'PASSPORT_REG']
-    setUploads(Object.fromEntries(
-      intakeTypes.map((t) => [t, { fileName: DEMO[t].fileName, dataUri: sampleSvg(DEMO[t].title, DEMO[t].lines, DEMO[t].accent) }]),
-    ))
-    toast({ title: 'Демо-образцы загружены', description: 'Паспорт, ВУ и СТС водителя Петрова П.С. — нажмите «Распознать документы»' })
-  }
+  const hasPhotos = Object.values(uploads).some(Boolean)
+  /** готовность линии: фото есть (путь нейросети) ИЛИ заполнены ФИО+ВУ вручную */
+  const ready = hasPhotos || (d.fullName.trim() !== '' && d.license.trim() !== '')
+  /** обязательные поля, подсвечиваемые красным при неготовности */
+  const invalidFio = !ready && d.fullName.trim() === ''
+  const invalidLicense = !ready && d.license.trim() === ''
 
-  const recognize = async () => {
-    if (!canRecognize) return
-    setStep('scan')
+  // готовность уходит в раздел (Task 35): блокировка «Проверить все»
+  useEffect(() => {
+    registerReady(id, ready)
+    return () => registerReady(id, false)
+  }, [id, ready, registerReady])
+
+  const check = useCallback(async (): Promise<boolean> => {
+    if (admitted || checking || !ready) return false
+    setChecking(true)
     try {
-      const [res] = await Promise.all([
-        api.intakeDriver(Object.fromEntries(Object.entries(uploads).filter(([, v]) => v)) as Partial<Record<string, Upload>>),
-        sleep(2200), // минимальное время «работы» нейросети для наглядности
-      ])
-      setResult(res)
-      setDraftDriver(res.driver)
-      setDraftTruck(res.truck)
-      setStep('review')
-      const bad = res.documents.filter((d) => d.status === 'REUPLOAD' || d.status === 'REJECTED')
-      if (bad.length > 0) {
+      // ——— путь нейросети: есть хотя бы одно фото ———
+      if (hasPhotos) {
+        const res = await api.intakeDriver(
+          Object.fromEntries(Object.entries(uploads).filter(([, v]) => v)) as Partial<Record<string, Upload>>,
+        )
+        setVerdicts(Object.fromEntries(res.documents.map((doc) => [doc.type, doc])))
+        setCrossChecks(res.crossChecks)
+        // заполняем ТОЛЬКО пустые поля — вручную введённое не затирается
+        setD((cur) => ({
+          ...cur,
+          fullName: cur.fullName || res.driver.fullName || '',
+          birthDate: cur.birthDate || res.driver.birthDate || '',
+          passport: cur.passport || res.driver.passport || '',
+          license: cur.license || res.driver.license || '',
+          licenseTill: cur.licenseTill || res.driver.licenseTill || '',
+          categories: cur.categories || res.driver.categories || '',
+          citizenship: cur.citizenship || (res.driver as unknown as { citizenship?: string }).citizenship || '',
+          birthPlace: cur.birthPlace || (res.driver as unknown as { birthPlace?: string }).birthPlace || '',
+        }))
+        setConf(res.driver.confidence ?? {})
+        if (res.truck) {
+          setT((cur) => ({
+            ...cur,
+            brand: cur.brand || res.truck?.brand || '',
+            plate: cur.plate || res.truck?.plate || '',
+            sts: cur.sts || res.truck?.sts || '',
+            owner: cur.owner || res.truck?.owner || '',
+          }))
+        }
+        const bad = res.documents.filter((x) => x.status === 'REUPLOAD' || x.status === 'REJECTED')
+        if (bad.length > 0) {
+          toast({
+            title: 'Часть документов не прошла проверку',
+            description: `${bad.map((x) => DOC_TYPE_LABEL[x.type] ?? x.type).join(', ')} — замените фото или введите данные вручную`,
+            variant: 'destructive',
+          })
+          return false
+        }
+      }
+
+      // ——— допуск: есть ФИО и ВУ, нет отклонённых документов ———
+      const fio = d.fullName.trim() || ''
+      const license = d.license.trim() || ''
+      if (!fio || !license) {
         toast({
-          title: 'Часть документов не прошла проверку',
-          description: `${bad.map((d) => DOC_TYPE_LABEL[d.type]).join(', ')} — замените фото или введите данные вручную`,
+          title: 'Линия не заполнена',
+          description: 'Нужны ФИО и номер ВУ — заполните вручную или загрузите фото документов',
           variant: 'destructive',
         })
-      } else {
-        toast({ title: 'Нейросеть заполнила карточку водителя', description: 'Проверьте распознанные поля и подтвердите' })
+        return false
       }
-    } catch (e) {
-      setStep('docs')
-      toast({ title: 'Ошибка распознавания', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
-    }
-  }
 
-  const save = async () => {
-    if (!draftDriver || !carrierId) return
-    setSaving(true)
-    try {
       const driverRes = await api.createDirectory('driver', {
         carrierId,
-        fullName: draftDriver.fullName,
-        birthDate: draftDriver.birthDate,
-        passport: draftDriver.passport,
-        license: draftDriver.license,
-        licenseTill: draftDriver.licenseTill,
-        categories: draftDriver.categories,
+        fullName: fio,
+        birthDate: d.birthDate,
+        citizenship: d.citizenship,
+        phone: d.phone,
+        birthPlace: d.birthPlace,
+        passport: d.passport,
+        passportIssuedBy: d.passportIssuedBy,
+        passportIssuedDate: d.passportIssuedDate,
+        position: d.position,
+        license,
+        licenseTill: d.licenseTill,
+        categories: d.categories,
       })
-      const driverId = driverRes.driver?.id
-      if (!driverId) throw new Error('Не удалось сохранить водителя')
-
-      let truckId: string | undefined
-      if (draftTruck?.plate) {
+      const admittedInfo: { driver: string; truck?: string; trailer?: string } = {
+        driver: driverRes.driver?.fullName ?? fio,
+      }
+      if (t.plate.trim()) {
         const truckRes = await api.createDirectory('truck', {
           carrierId,
-          brand: draftTruck.brand,
-          plate: draftTruck.plate,
-          vin: draftTruck.vin,
-          sts: draftTruck.sts,
-          owner: draftTruck.owner,
+          brand: t.brand,
+          plate: t.plate.trim(),
+          sts: t.sts,
+          color: t.color,
+          owner: t.owner,
         })
-        truckId = truckRes.truck?.id
+        admittedInfo.truck = truckRes.truck ? `${truckRes.truck.brand} ${truckRes.truck.plate}` : t.plate.trim()
       }
-
-      let savedRequest: RequestDTO | undefined
-      const attachToRequest = !!(request && attach)
-      if (attachToRequest) {
-        const a = await api.action(request!.id, 'assign', { driverId, truckId })
-        savedRequest = a.request
-        for (const [type, up] of Object.entries(uploads)) {
-          if (!up) continue
-          const r = await api.uploadDocument(request!.id, { type, fileName: up.fileName, dataUri: up.dataUri })
-          savedRequest = r.request
-        }
-        const v = await api.verifyDocuments(request!.id)
-        savedRequest = v.request
+      if (tr.plate.trim()) {
+        const trailerRes = await api.createDirectory('trailer', {
+          carrierId,
+          type: tr.type || TRAILER_TYPES[0],
+          plate: tr.plate.trim(),
+          sts: tr.sts,
+          color: tr.color,
+          owner: tr.owner,
+        })
+        admittedInfo.trailer = trailerRes.trailer ? `${trailerRes.trailer.type} ${trailerRes.trailer.plate}` : tr.plate.trim()
       }
-
+      setAdmitted(admittedInfo)
+      onAdmitted()
       toast({
-        title: 'Водитель сохранён в справочнике',
-        description: attachToRequest
-          ? `${request!.number}: карточка заполнена нейросетью, документы прикреплены и отправлены на проверку`
-          : 'Карточка заполнена нейросетью по загруженным документам',
+        title: 'Водитель допущен в базу',
+        description: [admittedInfo.driver, admittedInfo.truck, admittedInfo.trailer].filter(Boolean).join(' · '),
       })
-      onSaved({ driverId, truckId, driverName: draftDriver.fullName, request: savedRequest })
-      onOpenChange(false)
+      return true
     } catch (e) {
-      toast({ title: 'Не удалось сохранить водителя', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
+      toast({
+        title: 'Проверка не удалась',
+        description: e instanceof Error ? e.message : 'Неизвестная ошибка',
+        variant: 'destructive',
+      })
+      return false
     } finally {
-      setSaving(false)
+      setChecking(false)
     }
+  }, [admitted, checking, ready, hasPhotos, uploads, d, t, tr, carrierId, onAdmitted, toast])
+
+  // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
+  const checkRef = useRef(check)
+  useEffect(() => {
+    checkRef.current = check
+  })
+  useEffect(() => {
+    registerCheck(id, () => checkRef.current())
+    return () => registerCheck(id, null)
+  }, [id, registerCheck])
+
+  const removeUpload = (type: DocType) => {
+    setUploads((cur) => { const n = { ...cur }; delete n[type]; return n })
   }
 
-  const badDocs: IntakeDocVerdict[] = result?.documents.filter((d) => d.status === 'REUPLOAD' || d.status === 'REJECTED') ?? []
-  const canSave = !!(draftDriver?.fullName && draftDriver?.license && carrierId) && !saving
+  const lock = admitted !== null || checking
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ScanLine className="h-5 w-5 text-blue-700" aria-hidden />
-            Новый водитель — по документам, с нейросетью
-          </DialogTitle>
-          <DialogDescription>
-            {request
-              ? `Заявка ${request.number}: загрузите документы — нейросеть прочитает их, сама заполнит карточку водителя и тягача и сверит данные. Останется подтвердить.`
-              : 'Загрузите документы — нейросеть прочитает паспорт, ВУ и СТС, сама заполнит карточку водителя и тягача и проверит данные на противоречия.'}
-          </DialogDescription>
-        </DialogHeader>
+    <section
+      className="rounded-xl border border-slate-200 bg-white p-4"
+      aria-label={`Линия водителя ${index + 1}`}
+    >
+      {/* ——— шапка линии ——— */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-slate-900 text-xs font-bold text-white" aria-hidden>
+          {index + 1}
+        </span>
+        <span className="text-sm font-semibold text-slate-900">{d.fullName.trim() || 'Новый водитель'}</span>
+        {initial?.driver || initial?.truck || initial?.trailer ? (
+          <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-px text-[10px] font-semibold text-sky-700">
+            Строка {index + 1} · Excel
+          </span>
+        ) : null}
+        {admitted && (
+          <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-700">
+            <BadgeCheck className="h-3 w-3" aria-hidden />
+            допущен в базу
+          </span>
+        )}
+        <span className="flex-1" />
+        {!admitted && (
+          <Button
+            size="sm"
+            onClick={() => void check()}
+            disabled={!ready || checking}
+            title={ready ? undefined : 'Заполните ФИО и ВУ или добавьте фото документов'}
+            className="gap-1.5"
+          >
+            <ScanLine className="h-4 w-4" aria-hidden />
+            {checking ? 'Проверяем…' : 'Проверить'}
+          </Button>
+        )}
+        <Button size="icon" variant="ghost" onClick={() => onRemove(id)} aria-label={`Удалить линию ${index + 1}`} className="h-8 w-8 text-slate-400 hover:text-red-600">
+          <X className="h-4 w-4" aria-hidden />
+        </Button>
+      </div>
 
-        {/* индикатор шагов */}
-        <ol className="flex flex-wrap items-center gap-1.5 text-xs font-medium" aria-label="Шаги добавления водителя">
-          {[
-            { n: 1, label: 'Документы', active: step === 'docs' },
-            { n: 2, label: 'Нейросеть', active: step === 'scan' },
-            { n: 3, label: 'Подтверждение', active: step === 'review' },
-          ].map((s, i) => (
-            <li key={s.n} className="flex items-center gap-1.5">
-              {i > 0 && <ArrowRight className="h-3 w-3 text-slate-300" aria-hidden />}
-              <span className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${s.active ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${s.active ? 'bg-blue-700 text-white' : 'bg-slate-300 text-white'}`} aria-hidden>{s.n}</span>
-                {s.label}
-              </span>
-            </li>
-          ))}
-        </ol>
+      {/* ——— плашка допуска ——— */}
+      {admitted && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <BadgeCheck className="h-4 w-4 shrink-0" aria-hidden />
+          <span className="font-semibold">Водитель допущен в базу</span>
+          {admitted.truck && <span>· тягач {admitted.truck}</span>}
+          {admitted.trailer && <span>· прицеп {admitted.trailer}</span>}
+          <span className="flex-1" />
+          <Button size="sm" variant="outline" className="h-7 gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-100" onClick={() => onRemove(id)}>
+            <Trash2 className="h-3.5 w-3.5" aria-hidden />
+            Убрать линию
+          </Button>
+        </div>
+      )}
 
-        {/* ——— Шаг 1: документы ——— */}
-        {step === 'docs' && (
-          <div className="space-y-4">
-            {!lockCarrier && (
-              <div className="space-y-1.5">
-                <Label htmlFor="intake-carrier">Перевозчик</Label>
-                <Select value={carrierId} onValueChange={setCarrierId}>
-                  <SelectTrigger id="intake-carrier" aria-label="Выбор перевозчика">
-                    <SelectValue placeholder="Выберите перевозчика" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {carriers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+      {/* ——— проформы: [Водитель | Тягач | Прицеп] в одну строку ——— */}
+      <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[1.45fr_1fr_1fr] lg:items-stretch">
+        {/* Водитель */}
+        <div className={`rounded-lg border p-3 ${admitted ? 'border-slate-200 bg-slate-50/60' : 'border-blue-200 bg-blue-50/30'}`}>
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-800">
+            <IdCard className="h-3.5 w-3.5" aria-hidden />
+            Новый водитель
+          </div>
+          <div className={admitted ? 'pointer-events-none opacity-70' : ''}>
+            <div className="grid grid-cols-1 gap-2">
+              <FieldInput id={`${id}-fio`} label="ФИО" placeholder="Петров Пётр Сергеевич" value={d.fullName} conf={conf.fullName} invalid={invalidFio} disabled={lock} onChange={(v) => setField('fullName', v)} />
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="space-y-2">
+                <FieldInput id={`${id}-bd`} label="Дата рождения" placeholder="14.02.1995" value={d.birthDate} conf={conf.birthDate} disabled={lock} onChange={(v) => setField('birthDate', v)} />
+                <FieldInput id={`${id}-cit`} label="Гражданство" placeholder="РФ" value={d.citizenship} disabled={lock} onChange={(v) => setField('citizenship', v)} />
+                <FieldInput id={`${id}-tel`} label="Телефон" placeholder="+7 900 000-00-00" value={d.phone} mono disabled={lock} onChange={(v) => setField('phone', v)} />
               </div>
-            )}
+              <div className="space-y-2">
+                <FieldInput id={`${id}-adr`} label="Адрес регистрации" placeholder="г. Краснодар, ул. Красная, д. 5" value={d.birthPlace} disabled={lock} onChange={(v) => setField('birthPlace', v)} />
+                <FieldInput id={`${id}-pass`} label="Паспорт" placeholder="52 10 884610" value={d.passport} conf={conf.passport} mono disabled={lock} onChange={(v) => setField('passport', v)} />
+                <FieldInput id={`${id}-pby`} label="Кем выдан" placeholder="ОВМ УМВД…" value={d.passportIssuedBy} disabled={lock} onChange={(v) => setField('passportIssuedBy', v)} />
+              </div>
+              <div className="space-y-2">
+                <FieldInput id={`${id}-pdate`} label="Дата выдачи" placeholder="10.06.2015" value={d.passportIssuedDate} disabled={lock} onChange={(v) => setField('passportIssuedDate', v)} />
+                <FieldInput id={`${id}-pos`} label="Должность" placeholder="Водитель-экспедитор" value={d.position} disabled={lock} onChange={(v) => setField('position', v)} />
+                <FieldInput id={`${id}-lic`} label="ВУ номер" placeholder="52 16 121212" value={d.license} conf={conf.license} mono invalid={invalidLicense} disabled={lock} onChange={(v) => setField('license', v)} />
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <FieldInput id={`${id}-ltill`} label="ВУ действует до" placeholder="10.06.2035" value={d.licenseTill} conf={conf.licenseTill} disabled={lock} onChange={(v) => setField('licenseTill', v)} />
+              <FieldInput id={`${id}-cat`} label="Категории" placeholder="C, CE" value={d.categories} conf={conf.categories} mono disabled={lock} onChange={(v) => setField('categories', v)} />
+            </div>
+          </div>
+        </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {([
-                { type: 'PASSPORT_PHOTO' as DocType, required: true, icon: IdCard, hint: 'Страница с фото' },
-                { type: 'LICENSE' as DocType, required: true, icon: Car, hint: 'Лицевая сторона' },
-                { type: 'STS' as DocType, required: false, icon: Truck, hint: 'Необязательно — добавим и тягач' },
-                { type: 'PASSPORT_REG' as DocType, required: false, icon: MapPin, hint: 'Необязательно — для комплекта заявки' },
-              ]).map(({ type, required, icon: Icon, hint }) => {
-                const up = uploads[type]
-                const key = `intake:${type}`
-                return (
-                  <div key={type} className={`flex flex-col rounded-xl border p-3 ${up ? 'border-slate-200 bg-white' : 'border-dashed border-slate-300 bg-slate-50/60'}`}>
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <span className="flex items-center gap-2">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700" aria-hidden>
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <span className="text-xs font-semibold leading-tight text-slate-800">
-                          {DOC_TYPE_LABEL[type]}
-                          {!required && <span className="block text-[10px] font-normal text-slate-500">{hint}</span>}
-                        </span>
-                      </span>
-                      {required && <Badge variant="outline" className="border-blue-200 bg-blue-50 text-[10px] text-blue-700">Обязательно</Badge>}
+        {/* Тягач */}
+        <div className={`rounded-lg border p-3 ${admitted ? 'border-slate-200 bg-slate-50/60' : 'border-slate-200 bg-white'}`}>
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-700">
+            <Truck className="h-3.5 w-3.5" aria-hidden />
+            Новый тягач
+          </div>
+          <div className={`space-y-2 ${admitted ? 'pointer-events-none opacity-70' : ''}`}>
+            <FieldInput id={`${id}-tb`} label="Марка, модель" placeholder="КАМАЗ 54901-CA" value={t.brand} disabled={lock} onChange={(v) => setTField('brand', v)} />
+            <FieldInput id={`${id}-tp`} label="Госномер" placeholder="У783АХ152" value={t.plate} mono disabled={lock} onChange={(v) => setTField('plate', v)} />
+            <FieldInput id={`${id}-ts`} label="СТС" placeholder="99 17 454545" value={t.sts} mono disabled={lock} onChange={(v) => setTField('sts', v)} />
+            <FieldInput id={`${id}-tc`} label="Цвет" placeholder="зелёный" value={t.color} disabled={lock} onChange={(v) => setTField('color', v)} />
+            <FieldInput id={`${id}-to`} label="Собственник" placeholder="ООО «Перевозчик Б»" value={t.owner} disabled={lock} onChange={(v) => setTField('owner', v)} />
+          </div>
+        </div>
+
+        {/* Прицеп */}
+        <div className={`rounded-lg border p-3 ${admitted ? 'border-slate-200 bg-slate-50/60' : 'border-slate-200 bg-white'}`}>
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-700">
+            <CarFront className="h-3.5 w-3.5" aria-hidden />
+            Новый прицеп
+          </div>
+          <div className={`space-y-2 ${admitted ? 'pointer-events-none opacity-70' : ''}`}>
+            <div className="min-w-0">
+              <Label htmlFor={`${id}-trt`} className="text-xs text-muted-foreground">Тип</Label>
+              <Select value={tr.type} onValueChange={(v) => setTrField('type', v)} disabled={lock}>
+                <SelectTrigger id={`${id}-trt`} aria-label="Тип прицепа" className="mt-1 h-8 text-sm">
+                  <SelectValue placeholder="Выберите тип" />
+                </SelectTrigger>
+                <SelectContent>
+                  {trailerTypes.map((tt) => (
+                    <SelectItem key={tt} value={tt}>{tt}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <FieldInput id={`${id}-trp`} label="Госномер" placeholder="АТ5546152" value={tr.plate} mono disabled={lock} onChange={(v) => setTrField('plate', v)} />
+            <FieldInput id={`${id}-trs`} label="СТС" placeholder="52 19 777777" value={tr.sts} mono disabled={lock} onChange={(v) => setTrField('sts', v)} />
+            <FieldInput id={`${id}-trc`} label="Цвет" placeholder="серый" value={tr.color} disabled={lock} onChange={(v) => setTrField('color', v)} />
+            <FieldInput id={`${id}-tro`} label="Собственник прицепа" placeholder="ООО «Перевозчик Б»" value={tr.owner} disabled={lock} onChange={(v) => setTrField('owner', v)} />
+          </div>
+        </div>
+      </div>
+
+      {/* ——— фотографии документов ——— */}
+      <div className="mt-3">
+        <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Фотографии документов</div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {LINE_DOC_TYPES.map((type) => {
+            const up = uploads[type]
+            const v = verdicts[type]
+            return (
+              <div key={type} className={`rounded-lg border p-2 ${v ? (v.status === 'PASSED' ? 'border-emerald-200 bg-emerald-50/40' : 'border-red-200 bg-red-50/40') : 'border-dashed border-slate-300 bg-slate-50/40'}`}>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="truncate text-[11px] font-semibold text-slate-700">{DOC_TYPE_LABEL[type]}</span>
+                  {v && <DocStatusBadge status={v.status} />}
+                </div>
+                {up ? (
+                  <>
+                    <img src={up.dataUri} alt={`Фото: ${DOC_TYPE_LABEL[type]}`} className="mt-1.5 h-16 w-full rounded border border-slate-200 bg-white object-contain" />
+                    <div className="mt-1 flex items-center justify-between gap-1">
+                      <span className="truncate text-[10px] text-muted-foreground" title={up.fileName}>{up.fileName}</span>
+                      {!admitted && (
+                        <>
+                          <label className="cursor-pointer text-[10px] font-medium text-blue-700 hover:underline">
+                            Заменить
+                            <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) void setUpload(type, f) }} />
+                          </label>
+                          <button type="button" className="text-[10px] text-slate-400 hover:text-red-600" aria-label={`Убрать ${DOC_TYPE_LABEL[type]}`} onClick={() => removeUpload(type)}>
+                            <X className="h-3 w-3" aria-hidden />
+                          </button>
+                        </>
+                      )}
                     </div>
-                    {up && (
-                      <img src={up.dataUri} alt={`Загруженный документ «${DOC_TYPE_LABEL[type]}»`} className="mb-2 h-20 w-full rounded-md border border-slate-200 object-cover" />
+                    {v && (
+                      <div className="mt-1 space-y-0.5">
+                        {v.quality != null && (
+                          <div className={`text-[10px] font-medium ${v.quality >= 0.5 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            Качество изображения {Math.round(v.quality * 100)}%
+                          </div>
+                        )}
+                        {v.issues.map((issue) => (
+                          <div key={issue} className="flex items-start gap-1 text-[10px] leading-snug text-red-700">
+                            <CircleAlert className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
+                            {issue}
+                          </div>
+                        ))}
+                      </div>
                     )}
-                    <input
-                      ref={(el) => { fileInputs.current[type] = el }}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      aria-label={`Загрузить ${DOC_TYPE_LABEL[type]}`}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0]
-                        e.target.value = ''
-                        if (f) void handleFile(type, f)
-                      }}
-                    />
-                    <Button
-                      size="sm"
-                      variant={up ? 'outline' : 'default'}
-                      className="mt-auto w-full gap-1.5"
-                      onClick={() => fileInputs.current[type]?.click()}
-                      aria-label={up ? `Заменить ${DOC_TYPE_LABEL[type]}` : `Загрузить ${DOC_TYPE_LABEL[type]}`}
-                    >
-                      <Upload className="h-4 w-4" aria-hidden />
-                      {up ? 'Заменить фото' : 'Загрузить фото'}
-                    </Button>
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
-              <span className="text-xs text-slate-600">
-                Минимум — паспорт и ВУ. Нейросеть распознает поля и сама заполнит карточку: вводить руками не нужно.
-              </span>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={fillDemo}>
-                <Sparkles className="h-4 w-4" aria-hidden />
-                Заполнить демо-образцами
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* ——— Шаг 2: нейросеть работает ——— */}
-        {step === 'scan' && (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-6 py-12 text-center" role="status">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-700" aria-hidden />
-            <div className="text-sm font-semibold text-blue-900">Нейросеть распознаёт документы</div>
-            <div className="text-sm text-blue-700">{scanStage}</div>
-            <p className="max-w-sm text-xs text-muted-foreground">
-              Качество фото, тип документа, поля и уверенность по каждому — как при проверке документов по заявке
-            </p>
-          </div>
-        )}
-
-        {/* ——— Шаг 3: подтверждение распознанного ——— */}
-        {step === 'review' && result && draftDriver && (
-          <div className="space-y-4">
-            {/* карточка водителя */}
-            <div className="rounded-xl border border-slate-200 p-4">
-              <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <User className="h-4 w-4 text-blue-600" aria-hidden />
-                Карточка водителя — заполнена нейросетью
-                <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-[10px] font-normal text-emerald-700">можно исправить</Badge>
-              </h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {DRIVER_FIELDS.map((f) => (
-                  <FieldInput
-                    key={f.key}
-                    id={`intake-driver-${f.key}`}
-                    label={f.label}
-                    placeholder={f.placeholder}
-                    value={draftDriver[f.key] ?? ''}
-                    conf={draftDriver.confidence[f.key]}
-                    mono={f.mono}
-                    wide={f.wide}
-                    onChange={(v) => setDraftDriver((prev) => (prev ? { ...prev, [f.key]: v } : prev))}
-                  />
-                ))}
+                  </>
+                ) : (
+                  <label className="mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed border-slate-300 bg-white/60 text-center hover:border-blue-400">
+                    <span className="text-[10px] font-medium text-blue-700">Загрузить фото</span>
+                    <span className="px-1 text-[9px] leading-tight text-muted-foreground">JPG/PNG — нейросеть прочитает</span>
+                    <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) void setUpload(type, f) }} />
+                  </label>
+                )}
               </div>
-            </div>
+            )
+          })}
+        </div>
+      </div>
 
-            {/* карточка тягача */}
-            {draftTruck && (
-              <div className="rounded-xl border border-slate-200 p-4">
-                <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Truck className="h-4 w-4 text-blue-600" aria-hidden />
-                  Тягач — распознан из СТС
-                </h4>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {TRUCK_FIELDS.map((f) => (
-                    <FieldInput
-                      key={f.key}
-                      id={`intake-truck-${f.key}`}
-                      label={f.label}
-                      placeholder={f.placeholder}
-                      value={draftTruck[f.key] ?? ''}
-                      conf={draftTruck.confidence[f.key]}
-                      mono={f.mono}
-                      wide={f.wide}
-                      onChange={(v) => setDraftTruck((prev) => (prev ? { ...prev, [f.key]: v } : prev))}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* перекрёстные сверки */}
-            {result.crossChecks.length > 0 && (
-              <div className="rounded-xl border border-slate-200 p-4">
-                <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <ShieldCheck className="h-4 w-4 text-blue-600" aria-hidden />
-                  Перекрёстные сверки нейросети
-                </h4>
-                <ul className="space-y-1.5">
-                  {result.crossChecks.map((cc) => (
-                    <li key={cc.label} className="flex items-start gap-2 text-sm">
-                      {cc.ok
-                        ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
-                        : <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden />}
-                      <span className="text-slate-800">{cc.label}: <span className={cc.ok ? 'text-emerald-700' : 'text-red-700'}>{cc.detail}</span></span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* вердикты по документам */}
-            <div className="space-y-2">
-              <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <FileText className="h-4 w-4 text-blue-600" aria-hidden />
-                Вердикты по документам
-              </h4>
-              {result.documents.map((v) => (
-                <VerdictRow key={v.type} type={v.type} verdict={v} upload={uploads[v.type]} />
-              ))}
-              {badDocs.length > 0 && (
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                  Документы со статусом «Перезагрузить» лучше заменить: вернитесь к шагу «Документы» и загрузите фото заново.
-                </p>
-              )}
-            </div>
-
-            {/* присоединить к заявке */}
-            {request && (
-              <div className="flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50/70 p-4">
-                <Checkbox
-                  id="intake-attach"
-                  checked={attach}
-                  onCheckedChange={(v) => setAttach(v === true)}
-                  aria-label="Прикрепить документы к заявке и отправить на проверку"
-                />
-                <div>
-                  <Label htmlFor="intake-attach" className="text-sm font-medium text-slate-900">
-                    Назначить на заявку {request.number} и отправить на проверку
-                  </Label>
-                  <p className="mt-0.5 text-xs text-slate-600">
-                    Водитель и тягач сразу встанут в заявку, документы прикрепятся к ней — нейросеть проверит комплект без повторной загрузки
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        <DialogFooter className="flex-wrap gap-2">
-          {step === 'docs' && (
-            <>
-              <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>
-              <Button disabled={!canRecognize} onClick={() => void recognize()} className="gap-1.5" aria-label="Распознать документы нейросетью">
-                <ScanLine className="h-4 w-4" aria-hidden />
-                Распознать документы
-              </Button>
-            </>
-          )}
-          {step === 'scan' && (
-            <Button disabled aria-label="Нейросеть работает">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Нейросеть работает…
-            </Button>
-          )}
-          {step === 'review' && (
-            <>
-              <Button variant="outline" className="gap-1.5" onClick={() => setStep('docs')} disabled={saving}>
-                <RotateCcw className="h-4 w-4" aria-hidden />
-                К документам
-              </Button>
-              <Button className="gap-1.5" disabled={!canSave} onClick={() => void save()} aria-label={saving ? 'Сохраняем' : request && attach ? 'Сохранить и отправить на проверку' : 'Сохранить водителя'}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : request && attach ? <Send className="h-4 w-4" aria-hidden /> : <CheckCircle2 className="h-4 w-4" aria-hidden />}
-                {saving ? 'Сохраняем…' : request && attach ? 'Сохранить и отправить на проверку' : 'Сохранить водителя'}
-              </Button>
-            </>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* ——— перекрёстные сверки ——— */}
+      {crossChecks.length > 0 && !admitted && (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Перекрёстные сверки</div>
+          <ul className="space-y-0.5">
+            {crossChecks.map((c) => (
+              <li key={c.label} className={`flex items-start gap-1.5 text-xs ${c.ok ? 'text-emerald-700' : 'text-red-700'}`}>
+                {c.ok ? <BadgeCheck className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden /> : <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />}
+                <span><span className="font-semibold">{c.label}</span> — {c.detail}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   )
 }
-
