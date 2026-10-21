@@ -1,5 +1,6 @@
 /** Статусы, режимы, цвета, форматтеры — общий слой UI */
 
+import { EyeOff, TrendingDown, type LucideIcon } from 'lucide-react'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
 export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: string; badge: string; dot: string }> = {
@@ -11,20 +12,32 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: 
   CLOSED: { label: 'Рейс закрыт', short: 'Закрыт', badge: 'bg-slate-200 text-slate-700 border-slate-300', dot: 'bg-slate-500' },
 }
 
-/** Метки статусов глазами агента-перевозчика (вкладка «Назначение экипажей»):
- *  что происходит с рейсом, на который он откликнулся и который выиграл */
+/** Метки статусов глазами агента-перевозчика — реальная линия рейса без служебных
+ *  процессов АЭМЗ: выбор рейса → согласование ставки → подтверждено → документы →
+ *  подготовка к рейсу → готово. Экраны логиста продолжают показывать REQUEST_STATUS_META. */
 export const AGENT_STATUS_LABEL: Record<string, string> = {
-  PUBLISHED: 'Ожидает торгов',
-  AWARDED: 'Нужно назначить экипаж',
-  DOCS_REVIEW: 'Документы на проверке',
-  AT_LOGIST: 'Передана логисту',
-  CONFIRMED: 'Подтверждена в 1С',
-  CLOSED: 'Рейс закрыт',
+  PUBLISHED: 'Согласование ставки',
+  AWARDED: 'Подтверждено',
+  DOCS_REVIEW: 'Документы',
+  AT_LOGIST: 'Подготовка к рейсу',
+  CONFIRMED: 'Готово',
+  CLOSED: 'Готово',
 }
 
-export const MODE_META: Record<RequestMode, { label: string; badge: string; icon: string }> = {
-  AUCTION: { label: 'Торги на понижение', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: '📉' },
-  CLOSED: { label: 'Закрытые ставки', badge: 'bg-slate-100 text-slate-700 border-slate-200', icon: '🙈' },
+/** Режим приёма ставок: плоский локап (плитка-иконка + uppercase-название + пояснение) */
+export const MODE_META: Record<RequestMode, { label: string; sub: string; tile: string; Icon: LucideIcon }> = {
+  AUCTION: {
+    label: 'Торги на понижение',
+    sub: 'каждая ставка ниже лучшей',
+    tile: 'border-amber-200 bg-amber-50 text-amber-700',
+    Icon: TrendingDown,
+  },
+  CLOSED: {
+    label: 'Закрытые ставки',
+    sub: 'ставки скрыты до итогов',
+    tile: 'border-slate-200 bg-slate-100 text-slate-700',
+    Icon: EyeOff,
+  },
 }
 
 export const DOC_STATUS_META: Record<DocStatus, { label: string; badge: string }> = {

@@ -68,7 +68,7 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
       <header className="sticky top-0 z-40 bg-[#0E1B2C] text-white shadow-lg shadow-slate-900/10">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+        <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600">
               <ShieldCheck className="h-5 w-5" aria-hidden />
@@ -112,7 +112,7 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
           </div>
         </div>
         <nav aria-label="Разделы платформы" className="border-t border-white/10">
-          <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {nav.map((item) => (
               <button
                 key={item.key}
@@ -131,7 +131,7 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
         </nav>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">{children}</main>
+      <main className="w-full flex-1 px-4 py-6 sm:px-6">{children}</main>
 
       <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs">

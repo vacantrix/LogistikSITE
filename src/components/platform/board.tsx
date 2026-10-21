@@ -4,7 +4,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import {
-  ArrowRight,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
@@ -20,7 +20,6 @@ import {
   ScanSearch,
   Search,
   Send,
-  ShieldCheck,
   Timer,
   TrendingDown,
   TrendingUp,
@@ -48,6 +47,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
+  AgentStatusBadge,
   EmptyState,
   ErrorBlock,
   LoadingBlock,
@@ -57,8 +57,10 @@ import {
   DocStatusBadge,
   type TabProps,
 } from '@/components/platform/common'
+import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
+import { pointInfo } from '@/lib/points'
 import { DOC_TYPE_LABEL, fmtDateTime, num, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
 import type { BidDTO, CargoTypeDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
@@ -151,7 +153,7 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
       {/* шапка: маршрут и обратный отсчёт */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="text-sm text-slate-600">
-          {request.fromPoint} → {request.toPoint} · {request.cargo}, {num(request.tonnage)} т
+          {pointInfo(request.fromPoint).short} → {pointInfo(request.toPoint).short} · {request.cargo}, {num(request.tonnage)} т
         </div>
         <div className="text-right">
           <div className="text-xs text-muted-foreground">До окончания торгов</div>
@@ -280,6 +282,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const [detailId, setDetailId] = useState<string | null>(null)
   const [bidId, setBidId] = useState<string | null>(null)
   const [bidAmount, setBidAmount] = useState('')
+  // трёхшаговый диалог ставки (Task 19): форма → подтверждение → успех
+  const [bidStep, setBidStep] = useState<'form' | 'confirm' | 'success'>('form')
+  const [bidFinal, setBidFinal] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
   // создание заявки — только логист
@@ -375,7 +380,12 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
         if (!myBidOf(r)) return false
       } else if (mode !== 'ALL' && r.mode !== mode) return false
       if (!needle) return true
-      return [r.number, r.cargo, r.fromPoint, r.toPoint].some((v) => v.toLowerCase().includes(needle))
+      // поиск и по полным адресам точек (Task 22): «промышленная» найдёт АЭМЗ, «портовая» — порт
+      const a = pointInfo(r.fromPoint)
+      const b = pointInfo(r.toPoint)
+      return [r.number, r.cargo, r.fromPoint, r.toPoint,
+        a.name, a.address, b.name, b.address,
+      ].some((v) => v.toLowerCase().includes(needle))
     })
   }, [requests, q, mode, myBidOf])
 
@@ -424,28 +434,42 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const closeBid = () => {
     setBidId(null)
     setBidAmount('')
+    setBidStep('form')
+    setBidFinal(null)
   }
 
-  const doBid = async () => {
-    if (!bidReq || !activeCarrierId) return
+  /** валидация ставки; возвращает число или null (с тостом о причине) */
+  const validateBidAmount = (): number | null => {
+    if (!bidReq) return null
     const amount = Math.round(Number(bidAmount.replace(/\s/g, '').replace(',', '.')))
     if (!amount || amount <= 0) {
       toast({ title: 'Ошибка', description: 'Укажите ставку за тонну', variant: 'destructive' })
-      return
+      return null
     }
     if (bidReq.mode === 'AUCTION') {
       const floor = bidReq.bestRate ?? bidReq.startRate
       if (amount >= floor) {
         toast({ title: 'Ошибка', description: `Ставка должна быть ниже текущей лучшей (${rate(floor)})`, variant: 'destructive' })
-        return
+        return null
       }
     }
+    return amount
+  }
+
+  const confirmBid = () => {
+    const amount = validateBidAmount()
+    if (amount === null) return
+    setBidFinal(amount)
+    setBidStep('confirm')
+  }
+
+  const doBid = async () => {
+    if (!bidReq || !activeCarrierId || bidFinal === null) return
     setBusyId(bidReq.id)
     try {
-      const { request } = await api.action(bidReq.id, 'bid', { carrierId: activeCarrierId, amount })
+      const { request } = await api.action(bidReq.id, 'bid', { carrierId: activeCarrierId, amount: bidFinal })
       applyRequest(request)
-      toast({ title: 'Ставка принята', description: `${request.number} — ${rate(amount)}${request.mode === 'CLOSED' ? ' · закрытая ставка' : ''}` })
-      closeBid()
+      setBidStep('success')
     } catch (e) {
       toast({ title: 'Ошибка', description: e instanceof Error ? e.message : 'Не удалось подать ставку', variant: 'destructive' })
     } finally {
@@ -757,11 +781,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                               </div>
                             </td>
                           <td className="border-b border-slate-100 py-3 pr-3">
-                            <span className="flex items-center gap-1.5 font-medium text-slate-800">
-                              {r.fromPoint}
-                              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                              {r.toPoint}
-                            </span>
+                            <div className="flex items-start gap-2">
+                              <RoutePointsInline from={r.fromPoint} to={r.toPoint} className="min-w-0" />
+                              <RouteButton from={r.fromPoint} to={r.toPoint} number={r.number} variant="ghost" className="shrink-0 px-2" />
+                            </div>
                           </td>
                           <td className="border-b border-slate-100 py-3 pr-3 text-slate-700">
                             {r.cargo}
@@ -792,7 +815,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                                   {expandedId === r.id ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
                                 </Button>
                               ) : (
-                                <StatusBadge status={r.status} />
+                                // агент видит статус по своей линии (Task 21): «Подготовка к рейсу» вместо «У логиста» и т.д.
+                                isLogist ? <StatusBadge status={r.status} /> : <AgentStatusBadge status={r.status} />
                               )
                             ) : (
                               <>
@@ -818,7 +842,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                                     Подать закрытую ставку
                                   </Button>
                                 )}
-                                {r.status !== 'PUBLISHED' && <StatusBadge status={r.status} />}
+                                {r.status !== 'PUBLISHED' && (isLogist ? <StatusBadge status={r.status} /> : <AgentStatusBadge status={r.status} />)}
                               </>
                             )}
                           </td>
@@ -1042,52 +1066,120 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
         <DialogContent className="sm:max-w-md">
           {bidReq && (
             <>
-              <DialogHeader>
-                <DialogTitle>
-                  {bidReq.mode === 'CLOSED' ? 'Закрытая ставка' : 'Ставка'} · заявка {bidReq.number}
-                </DialogTitle>
-                <DialogDescription>
-                  {bidReq.fromPoint} → {bidReq.toPoint}, {bidReq.cargo}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4">
-                {bidReq.mode === 'AUCTION' && (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                    Текущая лучшая: <span className="font-semibold text-slate-900">{rate(bidReq.bestRate ?? bidReq.startRate)}</span>
-                    {bidReq.bestRate == null && <span className="ml-1 text-muted-foreground">— ставок ещё нет</span>}
+              {bidStep !== 'success' && (
+                <DialogHeader>
+                  <DialogTitle>
+                    {bidStep === 'confirm' ? 'Подтверждение ставки' : bidReq.mode === 'CLOSED' ? 'Закрытая ставка' : 'Ставка'} · заявка {bidReq.number}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {pointInfo(bidReq.fromPoint).short} → {pointInfo(bidReq.toPoint).short}, {bidReq.cargo}
+                  </DialogDescription>
+                </DialogHeader>
+              )}
+              {bidStep === 'form' && (
+                <div className="space-y-4">
+                  {bidReq.mode === 'AUCTION' && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      Текущая лучшая: <span className="font-semibold text-slate-900">{rate(bidReq.bestRate ?? bidReq.startRate)}</span>
+                      {bidReq.bestRate == null && <span className="ml-1 text-muted-foreground">— ставок ещё нет</span>}
+                    </div>
+                  )}
+                  {bidReq.mode === 'CLOSED' && (
+                    <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                      Участники не видят цены друг друга — защита от сговора. Победителя определит логист по итогам.
+                    </div>
+                  )}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="bid-amount">Ваша ставка, ₽/т</Label>
+                    <Input
+                      id="bid-amount"
+                      type="number"
+                      min={2500}
+                      max={12000}
+                      step={50}
+                      inputMode="numeric"
+                      placeholder="Например, 8200"
+                      value={bidAmount}
+                      onChange={(e) => setBidAmount(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') confirmBid() }}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {bidReq.mode === 'CLOSED' ? 'Ставку увидит только логист при подведении итогов' : 'Должна быть ниже лучшей'}
+                    </p>
                   </div>
-                )}
-                {bidReq.mode === 'CLOSED' && (
-                  <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                    <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-                    Участники не видят цены друг друга — защита от сговора. Победителя определит логист по итогам.
-                  </div>
-                )}
-                <div className="space-y-1.5">
-                  <Label htmlFor="bid-amount">Ваша ставка, ₽/т</Label>
-                  <Input
-                    id="bid-amount"
-                    type="number"
-                    min={2500}
-                    max={12000}
-                    step={50}
-                    inputMode="numeric"
-                    placeholder="Например, 8200"
-                    value={bidAmount}
-                    onChange={(e) => setBidAmount(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void doBid() }}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {bidReq.mode === 'CLOSED' ? 'Ставку увидит только логист при подведении итогов' : 'Должна быть ниже лучшей'}
-                  </p>
                 </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={closeBid}>Отмена</Button>
-                <Button onClick={() => void doBid()} disabled={busyId !== null || !bidAmount.trim()}>
-                  {busyId === bidReq.id ? 'Отправляем…' : 'Подтвердить ставку'}
-                </Button>
-              </DialogFooter>
+              )}
+              {bidStep === 'confirm' && bidFinal !== null && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Заявка</div>
+                      <div className="font-semibold text-slate-900">{bidReq.number}</div>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Погрузка</div>
+                      <div className="font-semibold text-slate-900">{bidReq.loadDate}, {bidReq.loadWindow}</div>
+                    </div>
+                    <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Маршрут и груз</div>
+                      <div className="font-semibold text-slate-900">
+                        {pointInfo(bidReq.fromPoint).short} → {pointInfo(bidReq.toPoint).short} · {bidReq.cargo}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-center">
+                    <div className="text-[11px] uppercase tracking-wide text-blue-700">Ваша ставка</div>
+                    <div className="text-2xl font-bold tabular-nums text-blue-900">{rate(bidFinal)}</div>
+                    {bidReq.mode === 'AUCTION' && (
+                      <div className="mt-0.5 text-xs text-blue-800">
+                        текущая лучшая {rate(bidReq.bestRate ?? bidReq.startRate)}
+                        {bidReq.bestRate != null && bidReq.startRate > bidFinal && (
+                          <> · экономия для АЭМЗ {rate(bidReq.startRate - bidFinal)}</>
+                        )}
+                      </div>
+                    )}
+                    {bidReq.mode === 'CLOSED' && (
+                      <div className="mt-0.5 text-xs text-blue-800">цену увидит только логист</div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {bidStep === 'success' && (
+                <div className="space-y-4 py-2 text-center">
+                  <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700" aria-hidden>
+                    <CheckCircle2 className="h-6 w-6" />
+                  </span>
+                  <div>
+                    <div className="text-lg font-semibold text-slate-900">Ставка принята</div>
+                    {bidFinal !== null && <div className="mt-0.5 text-sm text-slate-600">Новая ставка: <span className="font-semibold text-slate-900">{rate(bidFinal)}</span></div>}
+                    <p className="mx-auto mt-2 max-w-xs text-sm text-muted-foreground">
+                      Можете посмотреть заявку в разделе «Мои заявки» — она уже отображается там со статусом вашей ставки.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {bidStep !== 'success' ? (
+                <DialogFooter>
+                  {bidStep === 'confirm' && (
+                    <Button variant="outline" onClick={() => setBidStep('form')} disabled={busyId !== null}>Назад</Button>
+                  )}
+                  {bidStep === 'form' && <Button variant="outline" onClick={closeBid}>Отмена</Button>}
+                  {bidStep === 'form' && (
+                    <Button onClick={confirmBid} disabled={!bidAmount.trim()}>Подтвердить ставку</Button>
+                  )}
+                  {bidStep === 'confirm' && (
+                    <Button onClick={() => void doBid()} disabled={busyId !== null}>
+                      {busyId === bidReq.id ? 'Отправляем…' : 'Подтверждаю ставку'}
+                    </Button>
+                  )}
+                </DialogFooter>
+              ) : (
+                <DialogFooter className="sm:justify-center">
+                  <Button variant="outline" onClick={closeBid}>Закрыть</Button>
+                  <Button onClick={() => { closeBid(); onNavigate('my') }}>Открыть «Мои заявки»</Button>
+                </DialogFooter>
+              )}
             </>
           )}
         </DialogContent>
@@ -1101,11 +1193,23 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
                   Заявка <span className="text-blue-700">{detailReq.number}</span>
-                  <StatusBadge status={detailReq.status} />
+                  {/* пузырь «На площадке» в деталях не нужен (Task 34): режим и так виден рядом */}
+                  {detailReq.status !== 'PUBLISHED' && (isLogist
+                    ? <StatusBadge status={detailReq.status} />
+                    : <AgentStatusBadge status={detailReq.status} />)}
                   <ModeBadge mode={detailReq.mode} />
                 </DialogTitle>
-                <DialogDescription className="flex items-center gap-1.5">
-                  {detailReq.fromPoint} <ArrowRight className="h-3.5 w-3.5" aria-hidden /> {detailReq.toPoint}
+                <DialogDescription asChild>
+                  <div className="pt-1">
+                    <RoutePointsInline from={detailReq.fromPoint} to={detailReq.toPoint} />
+                    <RouteButton
+                      from={detailReq.fromPoint}
+                      to={detailReq.toPoint}
+                      number={detailReq.number}
+                      label="Построить маршрут"
+                      className="mt-2"
+                    />
+                  </div>
                 </DialogDescription>
               </DialogHeader>
 
@@ -1123,17 +1227,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                     <div className="mt-0.5 text-sm font-semibold text-slate-900">{f.value}</div>
                   </div>
                 ))}
-              </div>
-
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-                <div className="flex items-center gap-1.5 text-sm font-semibold text-blue-900">
-                  <ShieldCheck className="h-4 w-4" aria-hidden />
-                  Требования к документам
-                </div>
-                <p className="mt-1 text-sm text-blue-800">
-                  Пропуск в порт: паспорт, ВУ, СТС. Нейросеть сверит фото с данными водителя и автомобиля —
-                  комплект загружается в эту же заявку.
-                </p>
               </div>
 
               {/* логист: видит состояние комплекта документов прямо в деталях заявки */}
@@ -1231,7 +1324,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
               <div>
                 {awardBid && (
                   <>
-                    Заявка №{awardBid.request.number} · {awardBid.request.fromPoint} → {awardBid.request.toPoint}.
+                    Заявка №{awardBid.request.number} · {pointInfo(awardBid.request.fromPoint).short} → {pointInfo(awardBid.request.toPoint).short}.
                     Перевозчик <span className="font-semibold text-slate-900">{awardBid.bid.carrierName}</span> — ставка{' '}
                     <span className="font-semibold text-emerald-700">{rate(awardBid.bid.amount)}</span>
                     {awardBid.request.startRate > awardBid.bid.amount && (
@@ -1262,7 +1355,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
             <DialogTitle>Предложить заявку напрямую</DialogTitle>
             <DialogDescription>
               {offerReq && (
-                <>№{offerReq.number} · {offerReq.fromPoint} → {offerReq.toPoint} · ставка {rate(offerReq.bestRate ?? offerReq.startRate)}</>
+                <>№{offerReq.number} · {pointInfo(offerReq.fromPoint).short} → {pointInfo(offerReq.toPoint).short} · ставка {rate(offerReq.bestRate ?? offerReq.startRate)}</>
               )}
             </DialogDescription>
           </DialogHeader>
