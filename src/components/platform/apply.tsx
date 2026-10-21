@@ -12,7 +12,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import * as XLSX from 'xlsx'
 import {
-  CheckCircle2, FileSpreadsheet, Plus, ScanLine, Upload,
+  ArrowRight, CheckCircle2, FileSpreadsheet, Plus, ScanLine, Upload,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -107,7 +107,7 @@ export function parseLineRows(rows: unknown[][]): DriverLineInitial[] {
   return out
 }
 
-export default function ApplyTab({ activeCarrierId, role }: TabProps) {
+export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps) {
   const { toast } = useToast()
   const isCarrier = role === 'carrier'
 
@@ -219,6 +219,17 @@ export default function ApplyTab({ activeCarrierId, role }: TabProps) {
   return (
     <section aria-labelledby="apply-title" className="space-y-4">
       <SectionHeader title="Подать документы" />
+
+      {/* база кадров и техники теперь живёт в Справочниках — чтобы повторно не создавать */}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <p className="max-w-xl text-xs leading-snug text-slate-600">
+          <b className="text-slate-800">База кадров и техники</b> — в разделе «Справочники»: допущенные карточки, ручное добавление и сроки документов.
+        </p>
+        <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => onNavigate('directory')}>
+          Открыть Справочники
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+        </Button>
+      </div>
 
       {/* панель «Проверить все» — сама появляется при 2+ линиях (Task 33) */}
       <AnimatePresence>

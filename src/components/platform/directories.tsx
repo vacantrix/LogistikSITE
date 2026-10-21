@@ -2,13 +2,16 @@
 
 /**
  * «Справочники» — кадры и техника: логисту — весь парк перевозчиков,
- * перевозчику — только свой. Три табличных раздела на весь экран
- * (водители, тягачи, прицепы) + сводка «Кадры и техника» (кто и когда добавлен)
- * и панель сроков документов. Справочник грузов — внутренняя сущность платформы
- * (в интерфейсе не показывается, доступен только через API).
+ * перевозчику — только свой. Ровно три раздела (водители, тягачи, прицепы),
+ * каждый открывается на весь экран с табличным списком и фильтрами.
+ * На главной странице раздела — сводка «Кадры и техника»: кто и когда добавлен,
+ * что истекает. Справочник грузов — внутренняя сущность платформы: в интерфейсе
+ * не показывается, доступен только через API (для заявок). Отдельного раздела
+ * «Перевозчики» больше нет — парк фильтруется по перевозчику внутри раздела.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  ArrowLeft,
   ArrowRight,
   CalendarClock,
   CheckCircle2,
@@ -18,7 +21,6 @@ import {
   Search,
   Truck,
   User,
-  Users,
   Wrench,
 } from 'lucide-react'
 import {
@@ -38,17 +40,16 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { expiryInfo, rowTint, worseState, type ExpiryState } from '@/lib/expiry'
-import type { CargoTypeDTO, CarrierDTO, DriverDTO, TrailerDTO, TruckDTO } from '@/lib/types'
+import type { CarrierDTO, DriverDTO, TrailerDTO, TruckDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-type Kind = 'carrier' | 'driver' | 'truck' | 'trailer'
+type Kind = 'driver' | 'truck' | 'trailer'
 
-type TabKind = 'carriers' | 'drivers' | 'trucks' | 'trailers'
+type SectionKind = 'drivers' | 'trucks' | 'trailers'
 
 interface FieldDef {
   key: string
@@ -57,12 +58,6 @@ interface FieldDef {
 }
 
 const FORM_FIELDS: Record<Kind, FieldDef[]> = {
-  carrier: [
-    { key: 'name', label: 'Название', placeholder: 'ООО «Перевозчик Д»' },
-    { key: 'inn', label: 'ИНН', placeholder: '2310045675' },
-    { key: 'contractNo', label: 'Договор №', placeholder: '24-Д' },
-    { key: 'contractDate', label: 'Дата договора', placeholder: '01.11.2025' },
-  ],
   driver: [
     { key: 'fullName', label: 'ФИО', placeholder: 'Смирнов Олег Викторович' },
     { key: 'birthDate', label: 'Дата рождения', placeholder: '11.03.1993' },
@@ -89,16 +84,22 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
 }
 
 const KIND_TITLES: Record<Kind, string> = {
-  carrier: 'Перевозчики',
   driver: 'Водители',
   truck: 'Тягачи (ТС)',
   trailer: 'Прицепы',
 }
 
+/** Плитки разделов на странице «Справочники» */
+const SECTIONS: { key: SectionKind; kind: Kind; icon: typeof User; hint: string }[] = [
+  { key: 'drivers', kind: 'driver', icon: User, hint: 'ФИО, паспорта, ВУ, медсправки' },
+  { key: 'trucks', kind: 'truck', icon: Truck, hint: 'Марки, госномера, VIN, СТС, техосмотр' },
+  { key: 'trailers', kind: 'trailer', icon: Wrench, hint: 'Типы, госномера, СТС, техосмотр' },
+]
+
 /** Запись в блоке «Требуют внимания» */
 interface ExpiryItem {
   key: string
-  tab: Exclude<TabKind, 'carriers'>
+  tab: SectionKind
   icon: typeof User
   title: string
   docLabel: string
@@ -109,7 +110,7 @@ interface ExpiryItem {
 /** Запись в сводке «Последние добавления» */
 interface RecentAddition {
   key: string
-  tab: Exclude<TabKind, 'carriers'>
+  tab: SectionKind
   icon: typeof User
   title: string
   kindLabel: string
@@ -117,22 +118,10 @@ interface RecentAddition {
   createdAt: string
 }
 
-function AccessBadge({ access }: { access: boolean }) {
-  return access ? (
-    <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
-      Доступ открыт
-    </Badge>
-  ) : (
-    <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
-      Закрыт
-    </Badge>
-  )
-}
-
 const fmtCreated = (iso: string): string =>
   new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
-/** Панель фильтров справочника: текстовый поиск + (для парка) срок документов + доп. фильтры вкладки */
+/** Панель фильтров справочника: текстовый поиск + срок документов + доп. фильтры раздела */
 function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count, children, extraActive, onReset }: {
   query: string
   onQuery: (v: string) => void
@@ -140,7 +129,7 @@ function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count, chi
   onExpiry: (v: 'all' | 'soon' | 'expired') => void
   withExpiry: boolean
   count?: string
-  /** дополнительные фильтры вкладки (категория груза, доступ перевозчика) */
+  /** дополнительные фильтры раздела (перевозчик) */
   children?: ReactNode
   extraActive?: boolean
   onReset?: () => void
@@ -188,16 +177,17 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   const { toast } = useToast()
   const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<TabKind>('carriers')
+  // открытый на весь экран раздел; null — сводка «Справочников»
+  const [open, setOpen] = useState<SectionKind | null>(null)
   const [addKind, setAddKind] = useState<Kind | null>(null)
   const [editing, setEditing] = useState<{ kind: Kind; id: string } | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const isLogist = role === 'logist'
-  // ——— фильтры справочника: текстовый поиск + срок документов + фильтры вкладок ———
+  // ——— фильтры справочника: текстовый поиск + срок документов + перевозчик (логисту) ———
   const [dirQuery, setDirQuery] = useState('')
   const [dirExpiry, setDirExpiry] = useState<'all' | 'soon' | 'expired'>('all')
-  const [dirAccess, setDirAccess] = useState<'all' | 'open' | 'closed'>('all')
+  const [dirCarrier, setDirCarrier] = useState('all')
 
   // перевозчику доступен только его собственный парк — данные конкурентов скрыты
   const visibleCarriers = useMemo(
@@ -217,6 +207,27 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
 
   useEffect(() => { void load() }, [load])
 
+  // фильтры справочника — на весь экран: при закрытии раздела сбрасываем
+  const closeSection = useCallback(() => {
+    setOpen(null)
+    setDirQuery('')
+    setDirExpiry('all')
+    setDirCarrier('all')
+  }, [])
+
+  // на весь экран: блокируем прокрутку фона и закрываем по Escape
+  useEffect(() => {
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeSection() }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, closeSection])
+
   // —— фильтрация справочника ——
   const dirQ = dirQuery.trim().toLowerCase()
   const dirByQuery = useCallback(
@@ -232,44 +243,42 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
     },
     [dirExpiry],
   )
-
-  const carriersFiltered = useMemo(
-    () => (carriers ?? [])
-      .filter((c) => dirByQuery(c.name, c.inn, c.contractNo))
-      .filter((c) => dirAccess === 'all' || (dirAccess === 'open' ? c.access : !c.access)),
-    [carriers, dirByQuery, dirAccess],
+  const dirByCarrier = useCallback(
+    (carrierId: string) => !isLogist || dirCarrier === 'all' || carrierId === dirCarrier,
+    [isLogist, dirCarrier],
   )
+
   // —— полный (нефильтрованный) парк видимой области: сводка и счётчики ——
   const allDrivers = useMemo(
-    () => visibleCarriers.flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name }))),
+    () => visibleCarriers.flatMap((c) => c.drivers.map((d) => ({ d, carrierId: c.id, carrierName: c.name }))),
     [visibleCarriers],
   )
   const allTrucks = useMemo(
-    () => visibleCarriers.flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name }))),
+    () => visibleCarriers.flatMap((c) => c.trucks.map((t) => ({ t, carrierId: c.id, carrierName: c.name }))),
     [visibleCarriers],
   )
   const allTrailers = useMemo(
-    () => visibleCarriers.flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name }))),
+    () => visibleCarriers.flatMap((c) => c.trailers.map((z) => ({ z, carrierId: c.id, carrierName: c.name }))),
     [visibleCarriers],
   )
 
   // —— отфильтрованные выборки для таблиц ——
   const driversFlat = useMemo(
     () => allDrivers
-      .filter(({ d }) => dirByQuery(d.fullName, d.passport, d.license, d.phone) && dirByExpiry([d.licenseTill, d.medTill])),
-    [allDrivers, dirByQuery, dirByExpiry],
+      .filter(({ d, carrierId }) => dirByCarrier(carrierId) && dirByQuery(d.fullName, d.passport, d.license, d.phone) && dirByExpiry([d.licenseTill, d.medTill])),
+    [allDrivers, dirByQuery, dirByExpiry, dirByCarrier],
   )
   const driversTotal = allDrivers.length
   const trucksFlat = useMemo(
     () => allTrucks
-      .filter(({ t }) => dirByQuery(t.brand, t.plate, t.vin, t.owner) && dirByExpiry([t.techTill])),
-    [allTrucks, dirByQuery, dirByExpiry],
+      .filter(({ t, carrierId }) => dirByCarrier(carrierId) && dirByQuery(t.brand, t.plate, t.vin, t.owner) && dirByExpiry([t.techTill])),
+    [allTrucks, dirByQuery, dirByExpiry, dirByCarrier],
   )
   const trucksTotal = allTrucks.length
   const trailersFlat = useMemo(
     () => allTrailers
-      .filter(({ z }) => dirByQuery(z.plate, z.type, z.owner) && dirByExpiry([z.techTill])),
-    [allTrailers, dirByQuery, dirByExpiry],
+      .filter(({ z, carrierId }) => dirByCarrier(carrierId) && dirByQuery(z.plate, z.type, z.owner) && dirByExpiry([z.techTill])),
+    [allTrailers, dirByQuery, dirByExpiry, dirByCarrier],
   )
   const trailersTotal = allTrailers.length
 
@@ -374,8 +383,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
 
   const dialogKind = addKind ?? editing?.kind ?? null
   const addLabel = addKind ? KIND_TITLES[addKind] : editing ? KIND_TITLES[editing.kind] : ''
-  // у перевозчика вкладка «Перевозчики» недоступна — ведём на «Водителей»
-  const activeTab: TabKind = !isLogist && tab === 'carriers' ? 'drivers' : tab
+  const counts: Record<SectionKind, number> = { drivers: driversTotal, trucks: trucksTotal, trailers: trailersTotal }
 
   return (
     <div>
@@ -383,7 +391,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
         title="Справочники"
       />
 
-      {/* Кадры и техника: сводка добавленного агентом (перенесено из «Подать документов») */}
+      {/* Кадры и техника: сводка добавленного агентом */}
       <Card className="mb-4 shadow-sm">
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -392,58 +400,37 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
               Кадры и техника
             </div>
             <span className="text-[11px] text-slate-500">
-              {isLogist ? 'добавлено перевозчиками — агентами АЭМЗ' : 'добавлено агентом через «Подать документы» и вручную'}
+              {isLogist ? 'добавлено перевозчиками — агентами АЭМЗ' : 'добавлено через «Подать документы» и вручную'}
             </span>
           </div>
-          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
-            {/* счётчики — клик открывает раздел */}
-            <dl className="grid grid-cols-3 gap-2">
-              {([
-                { label: 'Водители', value: driversTotal, tab: 'drivers' as TabKind, icon: User },
-                { label: 'Тягачи', value: trucksTotal, tab: 'trucks' as TabKind, icon: Truck },
-                { label: 'Прицепы', value: trailersTotal, tab: 'trailers' as TabKind, icon: Wrench },
-              ]).map((x) => (
-                <button
-                  key={x.label}
-                  type="button"
-                  onClick={() => setTab(x.tab)}
-                  className="rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-2 text-center transition hover:border-blue-300 hover:bg-blue-50/50"
-                >
-                  <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{x.label}</dt>
-                  <dd className="text-lg font-bold tabular-nums text-slate-900">{x.value}</dd>
-                </button>
-              ))}
-            </dl>
-            {/* краткая сводка: кто и когда добавлен */}
-            <div className="min-w-0">
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Последние добавления</div>
-              {recentAdditions.length === 0 ? (
-                <p className="text-xs text-slate-500">
-                  Пока ничего: персонал и техника появятся здесь после добавления во вкладке «Подать документы» или кнопкой «Добавить вручную».
-                </p>
-              ) : (
-                <ul className="flex flex-wrap gap-1.5">
-                  {recentAdditions.map((r) => {
-                    const Icon = r.icon
-                    return (
-                      <li key={r.key}>
-                        <button
-                          type="button"
-                          onClick={() => setTab(r.tab)}
-                          title={`${r.kindLabel} — добавлен ${fmtCreated(r.createdAt)}${isLogist ? ` · ${r.carrierName}` : ''}`}
-                          className="flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 transition hover:border-blue-300 hover:bg-blue-50/60"
-                        >
-                          <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                          <span className="max-w-[200px] truncate font-medium">{r.title}</span>
-                          {isLogist && <span className="hidden max-w-[140px] truncate text-slate-400 sm:inline">· {r.carrierName}</span>}
-                          <span className="shrink-0 text-slate-400">· {fmtCreated(r.createdAt)}</span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
+          <div className="mt-3">
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Последние добавления</div>
+            {recentAdditions.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Пока ничего: персонал и техника появятся здесь после допуска в «Подать документы» или кнопкой «Добавить вручную» в разделах ниже.
+              </p>
+            ) : (
+              <ul className="flex flex-wrap gap-1.5">
+                {recentAdditions.map((r) => {
+                  const Icon = r.icon
+                  return (
+                    <li key={r.key}>
+                      <button
+                        type="button"
+                        onClick={() => setOpen(r.tab)}
+                        title={`${r.kindLabel} — добавлен ${fmtCreated(r.createdAt)}${isLogist ? ` · ${r.carrierName}` : ''}`}
+                        className="flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 transition hover:border-blue-300 hover:bg-blue-50/60"
+                      >
+                        <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                        <span className="max-w-[200px] truncate font-medium">{r.title}</span>
+                        {isLogist && <span className="hidden max-w-[140px] truncate text-slate-400 sm:inline">· {r.carrierName}</span>}
+                        <span className="shrink-0 text-slate-400">· {fmtCreated(r.createdAt)}</span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -483,7 +470,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                     <span className="text-xs text-slate-500">{item.docLabel}</span>
                     <ExpiryBadge date={item.info.date} className="ml-auto" />
                     <button
-                      onClick={() => setTab(item.tab)}
+                      onClick={() => setOpen(item.tab)}
                       className="rounded-md px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
                     >
                       Открыть
@@ -496,253 +483,195 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
         </CardContent>
       </Card>
 
-      <Tabs value={activeTab} onValueChange={(v) => setTab(v as TabKind)} className="gap-4">
-        <TabsList className="flex-wrap">
-          {isLogist && (
-            <TabsTrigger value="carriers">
-              <Users className="h-4 w-4" aria-hidden />
-              Перевозчики
-            </TabsTrigger>
-          )}
-          <TabsTrigger value="drivers">
-            <User className="h-4 w-4" aria-hidden />
-            Водители
-          </TabsTrigger>
-          <TabsTrigger value="trucks">
-            <Truck className="h-4 w-4" aria-hidden />
-            Тягачи (ТС)
-          </TabsTrigger>
-          <TabsTrigger value="trailers">
-            <Wrench className="h-4 w-4" aria-hidden />
-            Прицепы
-          </TabsTrigger>
-        </TabsList>
+      {/* три раздела справочника — каждый открывается на весь экран */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {SECTIONS.map((s) => {
+          const Icon = s.icon
+          const expiring = expiryItems.filter((i) => i.tab === s.key).length
+          return (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => setOpen(s.key)}
+              className="group rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              aria-label={`Открыть раздел «${KIND_TITLES[s.kind]}» на весь экран`}
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 transition group-hover:bg-blue-50 group-hover:text-blue-700">
+                  <Icon className="h-4.5 w-4.5" aria-hidden />
+                </span>
+                <span className="text-sm font-bold text-slate-900">{KIND_TITLES[s.kind]}</span>
+                {expiring > 0 && (
+                  <Badge variant="outline" className="ml-auto border-amber-300 bg-amber-50 text-amber-700">
+                    истекает: {expiring}
+                  </Badge>
+                )}
+              </div>
+              <div className="mt-3 flex items-end justify-between gap-2">
+                <div className="text-2xl font-bold tabular-nums text-slate-900">{counts[s.key]}</div>
+                <span className="flex items-center gap-1 text-xs font-medium text-blue-700">
+                  Открыть раздел
+                  <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" aria-hidden />
+                </span>
+              </div>
+              <div className="mt-1 text-[11px] text-slate-400">{s.hint}</div>
+            </button>
+          )
+        })}
+      </div>
 
-        {/* -------- Перевозчики (только логист) -------- */}
-        {isLogist && (
-        <TabsContent value="carriers">
-          <div className="space-y-3">
-              <DirFilterBar
-                query={dirQuery} onQuery={setDirQuery}
-                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry={false}
-                count={`Показано: ${carriersFiltered.length} из ${(carriers ?? []).length}`}
-                extraActive={dirAccess !== 'all'}
-                onReset={() => { setDirQuery(''); setDirExpiry('all'); setDirAccess('all') }}
-              >
-                <Select value={dirAccess} onValueChange={(v) => setDirAccess(v as 'all' | 'open' | 'closed')}>
-                  <SelectTrigger className="h-9 w-[190px]" aria-label="Фильтр по доступу перевозчика">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Любой доступ</SelectItem>
-                    <SelectItem value="open">Доступ открыт</SelectItem>
-                    <SelectItem value="closed">Доступ закрыт</SelectItem>
-                  </SelectContent>
-                </Select>
-              </DirFilterBar>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Записей: {(carriers ?? []).length}</div>
-                <Button size="sm" onClick={() => openAdd('carrier')}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  Добавить перевозчика
+      {/* ——— раздел на весь экран ——— */}
+      {open !== null && (() => {
+        const section = SECTIONS.find((s) => s.key === open)!
+        const Icon = section.icon
+        const flat = open === 'drivers' ? driversFlat : open === 'trucks' ? trucksFlat : trailersFlat
+        const total = counts[open]
+        return (
+          <div className="fixed inset-0 z-50 flex flex-col bg-background" role="dialog" aria-modal="true" aria-label={`${KIND_TITLES[section.kind]} — на весь экран`}>
+            {/* шапка раздела */}
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
+              <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-2">
+                <Button variant="ghost" size="sm" className="h-9 gap-1.5" onClick={closeSection}>
+                  <ArrowLeft className="h-4 w-4" aria-hidden />
+                  Справочники
                 </Button>
-              </div>
-              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead>Название</TableHead>
-                      <TableHead>ИНН</TableHead>
-                      <TableHead>Договор</TableHead>
-                      <TableHead>Доступ</TableHead>
-                      <TableHead>Взято заявок</TableHead>
-                      <TableHead>Ставок</TableHead>
-                      <TableHead>Водители/ТС</TableHead>
-                      <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {carriersFiltered.map((c) => (
-                      <TableRow key={c.id} className="hover:bg-slate-50/70">
-                        <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
-                        <TableCell className="font-mono text-xs text-slate-600">{c.inn}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600">№{c.contractNo} от {c.contractDate}</TableCell>
-                        <TableCell><AccessBadge access={c.access} /></TableCell>
-                        <TableCell className="font-semibold text-slate-800">{c.takenCount}</TableCell>
-                        <TableCell className="text-slate-600">{c.bidsCount}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600">
-                          {c.drivers.length} / {c.trucks.length}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            aria-label={`Изменить ${c.name}`}
-                            onClick={() => openEdit('carrier', c.id, { name: c.name, inn: c.inn, contractNo: c.contractNo, contractDate: c.contractDate, access: String(c.access) })}
-                          >
-                            <Pencil className="h-3.5 w-3.5" aria-hidden />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {(carriers ?? []).length === 0 && (
-                      <TableRow><TableCell colSpan={8} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-          </div>
-        </TabsContent>
-        )}
-
-        <TabsContent value="drivers">
-          <div className="space-y-3">
-              {!isLogist && (
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 p-3">
-                  <p className="max-w-xl text-xs leading-snug text-slate-600">
-                    <b className="text-slate-800">Новый водитель?</b> Добавляйте по документам во вкладке «Подать документы» — нейросеть сама прочитает паспорт, ВУ и СТС и заполнит карточку.
-                  </p>
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onNavigate('apply')}>
-                    Подать документы
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                  <Icon className="h-4 w-4" aria-hidden />
+                </span>
+                <h2 className="text-base font-bold text-slate-900">{KIND_TITLES[section.kind]}</h2>
+                <Badge variant="outline" className="border-slate-300 bg-slate-50 text-slate-600">{total}</Badge>
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  {!isLogist && open === 'drivers' && (
+                    <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => onNavigate('apply')}>
+                      Подать документы
+                      <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                  )}
+                  <Button size="sm" className="h-9 gap-1.5" onClick={() => openAdd(section.kind)}>
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Добавить вручную
                   </Button>
                 </div>
-              )}
-              <DirFilterBar
-                query={dirQuery} onQuery={setDirQuery}
-                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
-                count={`Показано: ${driversFlat.length} из ${driversTotal}`}
-              />
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Записей: {driversTotal}</div>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('driver')}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  Добавить вручную
-                </Button>
               </div>
-              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead>ФИО</TableHead>
-                      {isLogist && <TableHead>Перевозчик</TableHead>}
-                      <TableHead>Дата рождения</TableHead>
-                      <TableHead>Паспорт</TableHead>
-                      <TableHead>ВУ (номер)</TableHead>
-                      <TableHead>ВУ действует до</TableHead>
-                      <TableHead>Медсправка до</TableHead>
-                      <TableHead>Категории</TableHead>
-                      <TableHead>Добавлен</TableHead>
-                      {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {driversFlat.map(({ d, carrierName }) => (
-                      <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('driver', d.id, {
-                        fullName: d.fullName, birthDate: d.birthDate, passport: d.passport, license: d.license,
-                        licenseTill: d.licenseTill === '—' ? '' : d.licenseTill, medTill: d.medTill === '—' ? '' : d.medTill,
-                        categories: d.categories,
-                      })} />
-                    ))}
-                    {driversFlat.length === 0 && (
-                      <TableRow><TableCell colSpan={9} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-          </div>
-        </TabsContent>
+            </div>
 
-        {/* -------- Тягачи -------- */}
-        <TabsContent value="trucks">
-          <div className="space-y-3">
-              <DirFilterBar
-                query={dirQuery} onQuery={setDirQuery}
-                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
-                count={`Показано: ${trucksFlat.length} из ${trucksTotal}`}
-              />
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Записей: {trucksTotal}</div>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('truck')}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  Добавить тягач
-                </Button>
-              </div>
-              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead>Марка</TableHead>
-                      {isLogist && <TableHead>Перевозчик</TableHead>}
-                      <TableHead>Госномер</TableHead>
-                      <TableHead>VIN</TableHead>
-                      <TableHead>СТС</TableHead>
-                      <TableHead>Техосмотр до</TableHead>
-                      <TableHead>Собственник</TableHead>
-                      <TableHead>Добавлен</TableHead>
-                      {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {trucksFlat.map(({ t, carrierName }) => (
-                      <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('truck', t.id, {
-                        brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
-                        techTill: t.techTill === '—' ? '' : t.techTill, owner: t.owner,
-                      })} />
-                    ))}
-                    {trucksFlat.length === 0 && (
-                      <TableRow><TableCell colSpan={8} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-          </div>
-        </TabsContent>
+            {/* таблица раздела */}
+            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+              <div className="mx-auto max-w-7xl">
+                <DirFilterBar
+                  query={dirQuery} onQuery={setDirQuery}
+                  expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
+                  count={`Показано: ${flat.length} из ${total}`}
+                  extraActive={dirCarrier !== 'all'}
+                  onReset={() => { setDirQuery(''); setDirExpiry('all'); setDirCarrier('all') }}
+                >
+                  {isLogist && (
+                    <Select value={dirCarrier} onValueChange={setDirCarrier}>
+                      <SelectTrigger className="h-9 w-[230px]" aria-label="Фильтр по перевозчику">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все перевозчики</SelectItem>
+                        {(carriers ?? []).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </DirFilterBar>
 
-        {/* -------- Прицепы -------- */}
-        <TabsContent value="trailers">
-          <div className="space-y-3">
-              <DirFilterBar
-                query={dirQuery} onQuery={setDirQuery}
-                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
-                count={`Показано: ${trailersFlat.length} из ${trailersTotal}`}
-              />
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Записей: {trailersTotal}</div>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('trailer')}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  Добавить прицеп
-                </Button>
-              </div>
-              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead>Госномер</TableHead>
-                      {isLogist && <TableHead>Перевозчик</TableHead>}
-                      <TableHead>Тип</TableHead>
-                      <TableHead>СТС</TableHead>
-                      <TableHead>Техосмотр до</TableHead>
-                      <TableHead>Добавлен</TableHead>
-                      {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {trailersFlat.map(({ z, carrierName }) => (
-                      <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('trailer', z.id, {
-                        plate: z.plate, type: z.type, sts: z.sts, techTill: z.techTill === '—' ? '' : z.techTill,
-                      })} />
-                    ))}
-                    {trailersFlat.length === 0 && (
-                      <TableRow><TableCell colSpan={6} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <Table>
+                    {open === 'drivers' && (
+                      <>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50">
+                            <TableHead>ФИО</TableHead>
+                            {isLogist && <TableHead>Перевозчик</TableHead>}
+                            <TableHead>Дата рождения</TableHead>
+                            <TableHead>Паспорт</TableHead>
+                            <TableHead>ВУ (номер)</TableHead>
+                            <TableHead>ВУ действует до</TableHead>
+                            <TableHead>Медсправка до</TableHead>
+                            <TableHead>Категории</TableHead>
+                            <TableHead>Добавлен</TableHead>
+                            {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {driversFlat.map(({ d, carrierName }) => (
+                            <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('driver', d.id, {
+                              fullName: d.fullName, birthDate: d.birthDate, passport: d.passport, license: d.license,
+                              licenseTill: d.licenseTill === '—' ? '' : d.licenseTill, medTill: d.medTill === '—' ? '' : d.medTill,
+                              categories: d.categories,
+                            })} />
+                          ))}
+                          {driversFlat.length === 0 && (
+                            <TableRow><TableCell colSpan={isLogist ? 10 : 9} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                          )}
+                        </TableBody>
+                      </>
                     )}
-                  </TableBody>
-                </Table>
+                    {open === 'trucks' && (
+                      <>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50">
+                            <TableHead>Марка</TableHead>
+                            {isLogist && <TableHead>Перевозчик</TableHead>}
+                            <TableHead>Госномер</TableHead>
+                            <TableHead>VIN</TableHead>
+                            <TableHead>СТС</TableHead>
+                            <TableHead>Техосмотр до</TableHead>
+                            <TableHead>Собственник</TableHead>
+                            <TableHead>Добавлен</TableHead>
+                            {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {trucksFlat.map(({ t, carrierName }) => (
+                            <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('truck', t.id, {
+                              brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
+                              techTill: t.techTill === '—' ? '' : t.techTill, owner: t.owner,
+                            })} />
+                          ))}
+                          {trucksFlat.length === 0 && (
+                            <TableRow><TableCell colSpan={isLogist ? 9 : 8} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                          )}
+                        </TableBody>
+                      </>
+                    )}
+                    {open === 'trailers' && (
+                      <>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50">
+                            <TableHead>Госномер</TableHead>
+                            {isLogist && <TableHead>Перевозчик</TableHead>}
+                            <TableHead>Тип</TableHead>
+                            <TableHead>СТС</TableHead>
+                            <TableHead>Техосмотр до</TableHead>
+                            <TableHead>Добавлен</TableHead>
+                            {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {trailersFlat.map(({ z, carrierName }) => (
+                            <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('trailer', z.id, {
+                              plate: z.plate, type: z.type, sts: z.sts, techTill: z.techTill === '—' ? '' : z.techTill,
+                            })} />
+                          ))}
+                          {trailersFlat.length === 0 && (
+                            <TableRow><TableCell colSpan={isLogist ? 7 : 6} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                          )}
+                        </TableBody>
+                      </>
+                    )}
+                  </Table>
+                </div>
               </div>
+            </div>
           </div>
-        </TabsContent>
-      </Tabs>
+        )
+      })()}
 
       {/* диалог добавления / изменения записи */}
       <Dialog open={!!dialogKind} onOpenChange={(o) => { if (!o) closeDialog() }}>
@@ -757,7 +686,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
           </DialogHeader>
 
           <div className="space-y-3">
-            {addKind === 'driver' || addKind === 'truck' || addKind === 'trailer' ? (
+            {/* перевозчик записи: логист выбирает, перевозчику запись принадлежит его аккаунту */}
+            {isLogist && dialogKind && (
               <div className="space-y-1.5">
                 <Label>Перевозчик</Label>
                 <Select value={form.carrierId ?? ''} onValueChange={(v) => setForm((f) => ({ ...f, carrierId: v }))} disabled={!!editing}>
@@ -771,7 +701,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                   </SelectContent>
                 </Select>
               </div>
-            ) : null}
+            )}
 
             {dialogKind && FORM_FIELDS[dialogKind].map((field) => (
               <div key={field.key} className="space-y-1.5">
@@ -784,49 +714,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 />
               </div>
             ))}
-
-            {dialogKind === 'cargo' && (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="add-truckType">Рекомендуемое ТС</Label>
-                  <Select value={form.truckType ?? 'Тент'} onValueChange={(v) => setForm((f) => ({ ...f, truckType: v }))}>
-                    <SelectTrigger id="add-truckType" aria-label="Рекомендуемое ТС">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="add-dangerous">Опасный груз</Label>
-                  <Select value={form.dangerous ?? 'false'} onValueChange={(v) => setForm((f) => ({ ...f, dangerous: v }))}>
-                    <SelectTrigger id="add-dangerous" aria-label="Опасный груз">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="false">Нет — обычный груз</SelectItem>
-                      <SelectItem value="true">Да — опасный (ADR)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
-
-            {editing?.kind === 'carrier' && (
-              <div className="space-y-1.5">
-                <Label htmlFor="add-access">Доступ к площадке</Label>
-                <Select value={form.access ?? 'true'} onValueChange={(v) => setForm((f) => ({ ...f, access: v }))}>
-                  <SelectTrigger id="add-access" aria-label="Доступ к площадке">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="true">Доступ открыт</SelectItem>
-                    <SelectItem value="false">Закрыт</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
           </div>
 
           <DialogFooter>
@@ -850,6 +737,7 @@ function DriverRow({ d, carrierName, showCarrier, onEdit }: { d: DriverDTO; carr
   return (
     <TableRow className={tint}>
       <TableCell className="font-medium text-slate-800">{d.fullName}</TableCell>
+      {showCarrier && <TableCell className="whitespace-nowrap text-slate-600">{carrierName}</TableCell>}
       <TableCell className="whitespace-nowrap text-slate-600">{d.birthDate}</TableCell>
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{d.passport}</TableCell>
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{d.license}</TableCell>
@@ -863,7 +751,6 @@ function DriverRow({ d, carrierName, showCarrier, onEdit }: { d: DriverDTO; carr
         </div>
       </TableCell>
       <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(d.createdAt)}</TableCell>
-      {showCarrier && <TableCell className="text-slate-600">{carrierName}</TableCell>}
       {!showCarrier && (
         <TableCell>
           <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${d.fullName}`} onClick={onEdit}>
@@ -880,13 +767,13 @@ function TruckRow({ t, carrierName, showCarrier, onEdit }: { t: TruckDTO; carrie
   return (
     <TableRow className={rowTint([tech.state])}>
       <TableCell className="font-medium text-slate-800">{t.brand}</TableCell>
+      {showCarrier && <TableCell className="whitespace-nowrap text-slate-600">{carrierName}</TableCell>}
       <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-800">{t.plate}</TableCell>
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-500">{t.vin}</TableCell>
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{t.sts}</TableCell>
       <TableCell><ExpiryBadge date={t.techTill} /></TableCell>
       <TableCell className="text-slate-600">{t.owner}</TableCell>
       <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(t.createdAt)}</TableCell>
-      {showCarrier && <TableCell className="text-slate-600">{carrierName}</TableCell>}
       {!showCarrier && (
         <TableCell>
           <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${t.plate}`} onClick={onEdit}>
@@ -903,11 +790,11 @@ function TrailerRow({ z, carrierName, showCarrier, onEdit }: { z: TrailerDTO; ca
   return (
     <TableRow className={rowTint([tech.state])}>
       <TableCell className="whitespace-nowrap font-mono text-sm font-semibold text-slate-800">{z.plate}</TableCell>
+      {showCarrier && <TableCell className="whitespace-nowrap text-slate-600">{carrierName}</TableCell>}
       <TableCell className="text-slate-600">{z.type}</TableCell>
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{z.sts}</TableCell>
       <TableCell><ExpiryBadge date={z.techTill} /></TableCell>
       <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(z.createdAt)}</TableCell>
-      {showCarrier && <TableCell className="text-slate-600">{carrierName}</TableCell>}
       {!showCarrier && (
         <TableCell>
           <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${z.plate}`} onClick={onEdit}>
