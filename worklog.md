@@ -438,3 +438,24 @@ Work Log:
 Stage Summary:
 - Справочник грузов теперь точь-в-точь эталон пользователя: { Автоуслуги для собственных подразделений; Перевозка готовой продукции - проволока/арматура/катанка/моток/пруток; Перевозка металлолом(а) } — единая таблица для обеих ролей, UI Task 35 не тронут.
 - Все 14 демо-заявок ссылаются на записи нового справочника, денормализованное Request.cargo синхронизировано; API directory и редактирование имени груза (route.ts:138) продолжают поддерживать консистентность.
+
+---
+Task ID: 39
+Agent: Z.ai Code (main)
+Task: «Переноси все целиком» — восстановление файлов прошлой сессии из /tmp/my-project + подключение GitHub
+
+Work Log:
+- Археология: crew.tsx найден в /tmp/my-project (копия проекта прошлой сессии, 12 доп. файлов); все общие файлы деревьев идентичны; worklog идентичен.
+- Перенос: crew/login-screen/route-dialog/status-pipeline.tsx, lib/{auth,onec,points,ocr-service}.ts, api/{auth/*,integration/1c/*,ocr/status,directory/bulk}, mini-services/ocr-service.
+- Схема дописана (прерванная работа): model User (login unique, scrypt passwordHash, role, carrierId→Carrier.users) + Driver.{phone,birthPlace,citizenship,passportIssuedBy,passportIssuedDate,position}, Truck.color, Trailer.{color,owner} — все @default("—"); db:push ок.
+- Дописаны отсутствующие куски: кейс approve-crew в api/requests/[id]/action (событие CREW_APPROVED, валидация принадлежности перевозчику-победителю), AgentStatusBadge в common.tsx, AGENT_STATUS_LABEL в status.ts, расширены DriverDTO/TruckDTO/TrailerDTO + serialize.
+- Навигация перевозчика: 5 вкладок в утверждённом порядке (Площадка заявок → Мои заявки → Подать документы → Назначение экипажей → Справочники); переименованы упоминания «Подать заявку»→«Подать документы» (apply/board/directories); page.tsx рендерит CrewTab.
+- Демо-доступы: 6 пользователей (logist1/logist2, carrier-a/b/v/g, пароль aemz2024) в живой БД + блок в seed.ts (upsert).
+- ocr-service: bun install + запуск на :3020 (health: paddle не сконфигурён → GLM-4.6V активен как запасной).
+- Инцидент перезапуска: старый dev-процесс (чужой dev.pid) держал порт и старый PrismaClient без User → 500 на /api/auth/login; перезапуск через setsid nohup (plain nohup-процесс умирал вместе с shell-сессией).
+- Верификация: tsc 0 ошибок в src/, lint чист; браузер — у перевозчика 5 вкладок в нужном порядке, «Подать документы» заголовок, crew-вкладка: Требуют экипажа 2 (Z-1047/1048), полный золотой путь по Z-1047 (выбор Сидоров+Volvo+прицеп → assign → кнопка «Утвердить» → approve-crew → уход из раздела), события DRIVER_ASSIGNED+CREW_APPROVED в БД; auth API: login/me/logout + 401 на неверный пароль; справочники перевозчика не сломаны.
+- GitHub: gh 2.62.0 установлен в ~/.local/bin (apt недоступен, не root); remote и токена нет — жду от пользователя PAT + имя репозитория.
+
+Stage Summary:
+- Интерфейс прошлой сессии восстановлен целиком и доделан до рабочего состояния: 5-я вкладка «Назначение экипажей» живая (assign/approve-crew, Excel-массовое назначение, «Передано логисту»), auth-бэкенд готов (вход в UI сознательно не включён — как было), 1С-слой и OCR-сервис на месте.
+- Локальный коммит a11260e (36 файлов, +2703) — готов к пушу, как только подключим remote.
