@@ -234,7 +234,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
 
   return (
     <section aria-labelledby="apply-title" className="space-y-4">
-      <SectionHeader title="Подать документы" desc="База вашего аккаунта: одна линия — один водитель" />
+      <SectionHeader title="Подать документы" />
 
       {/* панель «Проверить все» — сама появляется при 2+ линиях (Task 33) */}
       <AnimatePresence>
@@ -334,7 +334,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
             <CardContent className="p-4">
               <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                 <Database className="h-4 w-4 text-blue-700" aria-hidden />
-                База аккаунта
+                Кадры и техника
               </div>
               <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
                 {[

@@ -6,7 +6,7 @@
  * сроков документов: что истекло и что истекает — видно сразу.
  * Нейро-функционал (добавление по документам) перенесён во вкладку «Подать документы».
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
   ArrowRight,
@@ -126,46 +126,54 @@ function AccessBadge({ access }: { access: boolean }) {
 const fmtCreated = (iso: string): string =>
   new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
-/** Панель фильтров справочника: текстовый поиск + (для парка) срок документов */
-function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count }: {
+/** Панель фильтров справочника: текстовый поиск + (для парка) срок документов + доп. фильтры вкладки */
+function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count, children, extraActive, onReset }: {
   query: string
   onQuery: (v: string) => void
   expiry: 'all' | 'soon' | 'expired'
   onExpiry: (v: 'all' | 'soon' | 'expired') => void
   withExpiry: boolean
   count?: string
+  /** дополнительные фильтры вкладки (категория груза, доступ перевозчика) */
+  children?: ReactNode
+  extraActive?: boolean
+  onReset?: () => void
 }) {
-  const active = query.trim() !== '' || expiry !== 'all'
+  const active = query.trim() !== '' || expiry !== 'all' || !!extraActive
+  const reset = onReset ?? (() => { onQuery(''); onExpiry('all') })
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
-      <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
-        <Input
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          placeholder="Поиск по справочнику…"
-          className="h-9 pl-8"
-          aria-label="Поиск по справочнику"
-        />
+    <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+          <Input
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            placeholder="Поиск по справочнику…"
+            className="h-9 pl-8"
+            aria-label="Поиск по справочнику"
+          />
+        </div>
+        {withExpiry && (
+          <Select value={expiry} onValueChange={(v) => onExpiry(v as 'all' | 'soon' | 'expired')}>
+            <SelectTrigger className="h-9 w-[200px]" aria-label="Фильтр по сроку документов">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все сроки документов</SelectItem>
+              <SelectItem value="soon">Истекает (90 дней)</SelectItem>
+              <SelectItem value="expired">Истёкшие документы</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+        {children}
+        {active && (
+          <Button size="sm" variant="ghost" className="h-9" onClick={reset}>
+            Сбросить
+          </Button>
+        )}
+        {count && <div className="ml-auto text-xs text-slate-500">{count}</div>}
       </div>
-      {withExpiry && (
-        <Select value={expiry} onValueChange={(v) => onExpiry(v as 'all' | 'soon' | 'expired')}>
-          <SelectTrigger className="h-9 w-[200px]" aria-label="Фильтр по сроку документов">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все сроки документов</SelectItem>
-            <SelectItem value="soon">Истекает (90 дней)</SelectItem>
-            <SelectItem value="expired">Истёкшие документы</SelectItem>
-          </SelectContent>
-        </Select>
-      )}
-      {active && (
-        <Button size="sm" variant="ghost" className="h-9" onClick={() => { onQuery(''); onExpiry('all') }}>
-          Сбросить
-        </Button>
-      )}
-      {count && <div className="ml-auto text-xs text-slate-500">{count}</div>}
     </div>
   )
 }
@@ -181,9 +189,11 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const isLogist = role === 'logist'
-  // ——— фильтры справочника: текстовый поиск + срок документов ———
+  // ——— фильтры справочника: текстовый поиск + срок документов + фильтры вкладок ———
   const [dirQuery, setDirQuery] = useState('')
   const [dirExpiry, setDirExpiry] = useState<'all' | 'soon' | 'expired'>('all')
+  const [dirAccess, setDirAccess] = useState<'all' | 'open' | 'closed'>('all')
+  const [dirCargo, setDirCargo] = useState('all')
 
   // перевозчику доступен только его собственный парк — данные конкурентов скрыты
   const visibleCarriers = useMemo(
@@ -221,8 +231,10 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   )
 
   const carriersFiltered = useMemo(
-    () => (carriers ?? []).filter((c) => dirByQuery(c.name, c.inn, c.contractNo)),
-    [carriers, dirByQuery],
+    () => (carriers ?? [])
+      .filter((c) => dirByQuery(c.name, c.inn, c.contractNo))
+      .filter((c) => dirAccess === 'all' || (dirAccess === 'open' ? c.access : !c.access)),
+    [carriers, dirByQuery, dirAccess],
   )
   const driversFlat = useMemo(
     () => visibleCarriers
@@ -245,9 +257,13 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
     [visibleCarriers, dirByQuery, dirByExpiry],
   )
   const trailersTotal = useMemo(() => visibleCarriers.reduce((n, c) => n + c.trailers.length, 0), [visibleCarriers])
+  const cargoCategories = useMemo(
+    () => Array.from(new Set(cargoTypes.map((c) => c.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
+    [cargoTypes],
+  )
   const cargoTypesFiltered = useMemo(
-    () => cargoTypes.filter((c) => dirByQuery(c.name, c.category)),
-    [cargoTypes, dirByQuery],
+    () => cargoTypes.filter((c) => dirByQuery(c.name, c.category) && (dirCargo === 'all' || c.category === dirCargo)),
+    [cargoTypes, dirByQuery, dirCargo],
   )
 
   /** Что и когда истекает: все документы с плохими/близкими сроками */
@@ -351,7 +367,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   return (
     <div>
       <SectionHeader
-        title={isLogist ? 'Справочники' : 'База вашего аккаунта'}
+        title="Справочники"
       />
 
       {/* Сроки документов: что и когда истекает */}
@@ -445,7 +461,20 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 query={dirQuery} onQuery={setDirQuery}
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry={false}
                 count={`Показано: ${carriersFiltered.length} из ${(carriers ?? []).length}`}
-              />
+                extraActive={dirAccess !== 'all'}
+                onReset={() => { setDirQuery(''); setDirExpiry('all'); setDirAccess('all') }}
+              >
+                <Select value={dirAccess} onValueChange={(v) => setDirAccess(v as 'all' | 'open' | 'closed')}>
+                  <SelectTrigger className="h-9 w-[190px]" aria-label="Фильтр по доступу перевозчика">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Любой доступ</SelectItem>
+                    <SelectItem value="open">Доступ открыт</SelectItem>
+                    <SelectItem value="closed">Доступ закрыт</SelectItem>
+                  </SelectContent>
+                </Select>
+              </DirFilterBar>
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="text-sm text-slate-500">Записей: {(carriers ?? []).length}</div>
                 <Button size="sm" onClick={() => openAdd('carrier')}>
@@ -528,7 +557,21 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 query={dirQuery} onQuery={setDirQuery}
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry={false}
                 count={`Показано: ${cargoTypesFiltered.length} из ${cargoTypes.length}`}
-              />
+                extraActive={dirCargo !== 'all'}
+                onReset={() => { setDirQuery(''); setDirExpiry('all'); setDirCargo('all') }}
+              >
+                <Select value={dirCargo} onValueChange={setDirCargo}>
+                  <SelectTrigger className="h-9 w-[210px]" aria-label="Фильтр по категории груза">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все категории</SelectItem>
+                    {cargoCategories.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </DirFilterBar>
               <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
                 <Table>
                   <TableHeader>

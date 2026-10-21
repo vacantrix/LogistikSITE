@@ -74,8 +74,8 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
               <ShieldCheck className="h-5 w-5" aria-hidden />
             </div>
             <div>
-              <div className="text-sm font-bold leading-tight sm:text-base">Платформа привлечённого транспорта</div>
-              <div className="text-[11px] uppercase tracking-widest text-blue-300">АЭМЗ · отдел логистики</div>
+              <div className="text-sm font-bold leading-tight sm:text-base">АЭМЗ Логистика</div>
+              <div className="text-[11px] uppercase tracking-widest text-slate-300">Отдел логистики</div>
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">

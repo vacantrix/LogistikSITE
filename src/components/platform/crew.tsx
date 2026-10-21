@@ -446,7 +446,7 @@ export default function CrewTab({ activeCarrierId, role }: TabProps) {
     <div>
       <SectionHeader
         title="Назначение экипажей"
-        desc="По каждой выигранной заявке выберите водителя, тягач и прицеп из своей базы и утвердите состав — заявка уйдёт из раздела в «Мои заявки»."
+        desc="По каждой выигранной заявке выберите водителя, тягач и прицеп и утвердите состав — заявка уйдёт из раздела в «Мои заявки»."
       />
 
       {!activeCarrierId && (
@@ -531,7 +531,7 @@ export default function CrewTab({ activeCarrierId, role }: TabProps) {
                                 onValueChange={(v) => setSelFor(r.id, { driverId: v })}
                               >
                                 <SelectTrigger aria-label={`Выбор водителя по заявке ${r.number}`}>
-                                  <SelectValue placeholder={drivers.length ? 'Из базы аккаунта' : 'База пуста'} />
+                                  <SelectValue placeholder="Выберите водителя" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {drivers.map((d) => (
@@ -546,7 +546,7 @@ export default function CrewTab({ activeCarrierId, role }: TabProps) {
                                 onValueChange={(v) => setSelFor(r.id, { truckId: v })}
                               >
                                 <SelectTrigger aria-label={`Выбор тягача по заявке ${r.number}`}>
-                                  <SelectValue placeholder={trucks.length ? 'Из базы аккаунта' : 'База пуста'} />
+                                  <SelectValue placeholder="Выберите тягача" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {trucks.map((t) => (
@@ -561,7 +561,7 @@ export default function CrewTab({ activeCarrierId, role }: TabProps) {
                                 onValueChange={(v) => setSelFor(r.id, { trailerId: v })}
                               >
                                 <SelectTrigger aria-label={`Выбор прицепа по заявке ${r.number}`}>
-                                  <SelectValue placeholder={trailers.length ? 'Из базы аккаунта' : 'База пуста'} />
+                                  <SelectValue placeholder="Выберите прицепа" />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {/* «Без прицепа» — всегда доступный вариант, независимо от базы */}
@@ -575,13 +575,13 @@ export default function CrewTab({ activeCarrierId, role }: TabProps) {
                           </tr>
                           <tr className="bg-slate-50/50">
                             <td className="px-3 py-2 align-top">
-                              {driver ? <DriverCell d={driver} /> : <span className="text-[11px] text-slate-400">Выберите водителя из базы</span>}
+                              {driver ? <DriverCell d={driver} /> : <span className="text-[11px] text-slate-300">—</span>}
                             </td>
                             <td className="px-3 py-2 align-top">
-                              {truck ? <TruckCell t={truck} /> : <span className="text-[11px] text-slate-400">Выберите тягач из базы</span>}
+                              {truck ? <TruckCell t={truck} /> : <span className="text-[11px] text-slate-300">—</span>}
                             </td>
                             <td className="px-3 py-2 align-top">
-                              {trailer ? <TrailerCell z={trailer} /> : s.trailerId === 'none' ? <span className="text-[11px] font-medium text-slate-600">Едет без прицепа — выбран вариант «Без прицепа»</span> : <span className="text-[11px] text-slate-400">Выберите прицеп из базы или вариант «Без прицепа»</span>}
+                              {trailer ? <TrailerCell z={trailer} /> : s.trailerId === 'none' ? <span className="text-[11px] font-medium text-slate-600">Едет без прицепа</span> : <span className="text-[11px] text-slate-300">—</span>}
                             </td>
                           </tr>
                         </tbody>
