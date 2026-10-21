@@ -8,18 +8,17 @@
  * ничего не записывая в базу. Кнопка «Проверить все» последовательно прогоняет
  * нейросеть по линиям и сама допускает карточки в базу (или отклоняет с причинами).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import * as XLSX from 'xlsx'
 import {
-  CheckCircle2, Database, FileSpreadsheet, FolderOpen, IdCard, Plus, ScanLine, Upload,
+  CheckCircle2, FileSpreadsheet, Plus, ScanLine, Upload,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { SectionHeader, type TabProps } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
-import { api } from '@/lib/api'
 import DriverLine, { TRAILER_TYPES, type DriverLineInitial } from '@/components/platform/driver-intake'
 
 type LineState = { id: string; initial?: DriverLineInitial; fromExcel: boolean }
@@ -108,12 +107,11 @@ export function parseLineRows(rows: unknown[][]): DriverLineInitial[] {
   return out
 }
 
-export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps) {
+export default function ApplyTab({ activeCarrierId, role }: TabProps) {
   const { toast } = useToast()
   const isCarrier = role === 'carrier'
 
   const [lines, setLines] = useState<LineState[]>([{ id: newLineId(), fromExcel: false }])
-  const [counts, setCounts] = useState({ drivers: 0, trucks: 0, trailers: 0 })
   const [checkingAll, setCheckingAll] = useState(false)
   const [excelName, setExcelName] = useState<string | null>(null)
 
@@ -128,19 +126,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const registerReady = useCallback((id: string, ready: boolean) => {
     readyRef.current.set(id, ready)
   }, [])
-
-  const refreshCounts = useCallback(async () => {
-    if (!activeCarrierId) return
-    try {
-      const dir = await api.directory()
-      const me = dir.carriers.find((c) => c.id === activeCarrierId)
-      setCounts({ drivers: me?.drivers.length ?? 0, trucks: me?.trucks.length ?? 0, trailers: me?.trailers.length ?? 0 })
-    } catch { /* счётчики не критичны */ }
-  }, [activeCarrierId])
-
-  useEffect(() => {
-    void refreshCounts()
-  }, [refreshCounts])
 
   const addLine = () => setLines((cur) => [...cur, { id: newLineId(), fromExcel: false }])
   const removeLine = (id: string) => {
@@ -172,7 +157,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
           title: `Проверка завершена: ${ok} из ${ran}`,
           description: ok === ran ? 'Все линии допущены в базу' : 'Часть линий требует внимания — смотрите вердикты',
         })
-        void refreshCounts()
       }
     } finally {
       setCheckingAll(false)
@@ -279,7 +263,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               registerCheck={registerCheck}
               registerReady={registerReady}
               onRemove={removeLine}
-              onAdmitted={() => void refreshCounts()}
             />
           ))}
           <button
@@ -292,7 +275,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
           </button>
         </div>
 
-        {/* ——— правая колонка: Excel + база аккаунта ——— */}
+        {/* ——— правая колонка: Excel ——— */}
         <div className="min-w-0 space-y-3">
           <Card>
             <CardContent className="p-4">
@@ -327,31 +310,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                   </div>
                 )}
               </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                <Database className="h-4 w-4 text-blue-700" aria-hidden />
-                Кадры и техника
-              </div>
-              <dl className="mt-2 grid grid-cols-3 gap-2 text-center">
-                {[
-                  { label: 'Водители', value: counts.drivers, icon: IdCard },
-                  { label: 'Тягачи', value: counts.trucks, icon: Database },
-                  { label: 'Прицепы', value: counts.trailers, icon: FolderOpen },
-                ].map((x) => (
-                  <div key={x.label} className="rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-2">
-                    <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{x.label}</dt>
-                    <dd className="text-lg font-bold tabular-nums text-slate-900">{x.value}</dd>
-                  </div>
-                ))}
-              </dl>
-              <Button variant="ghost" className="mt-2 w-full gap-1.5 text-slate-600" onClick={() => onNavigate('directory')}>
-                <FolderOpen className="h-4 w-4" aria-hidden />
-                Открыть справочники
-              </Button>
             </CardContent>
           </Card>
         </div>

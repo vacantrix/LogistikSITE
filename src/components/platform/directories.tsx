@@ -1,18 +1,18 @@
 'use client'
 
 /**
- * «Справочники» — база аккаунта: логисту — весь парк перевозчиков,
- * перевозчику — только свой. Все данные агента в одном месте с подсветкой
- * сроков документов: что истекло и что истекает — видно сразу.
- * Нейро-функционал (добавление по документам) перенесён во вкладку «Подать документы».
+ * «Справочники» — кадры и техника: логисту — весь парк перевозчиков,
+ * перевозчику — только свой. Три табличных раздела на весь экран
+ * (водители, тягачи, прицепы) + сводка «Кадры и техника» (кто и когда добавлен)
+ * и панель сроков документов. Справочник грузов — внутренняя сущность платформы
+ * (в интерфейсе не показывается, доступен только через API).
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle,
   ArrowRight,
-  Boxes,
   CalendarClock,
   CheckCircle2,
+  Database,
   Pencil,
   Plus,
   Search,
@@ -46,9 +46,9 @@ import type { CargoTypeDTO, CarrierDTO, DriverDTO, TrailerDTO, TruckDTO } from '
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-type Kind = 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo'
+type Kind = 'carrier' | 'driver' | 'truck' | 'trailer'
 
-type TabKind = 'carriers' | 'cargos' | 'drivers' | 'trucks' | 'trailers'
+type TabKind = 'carriers' | 'drivers' | 'trucks' | 'trailers'
 
 interface FieldDef {
   key: string
@@ -62,10 +62,6 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
     { key: 'inn', label: 'ИНН', placeholder: '2310045675' },
     { key: 'contractNo', label: 'Договор №', placeholder: '24-Д' },
     { key: 'contractDate', label: 'Дата договора', placeholder: '01.11.2025' },
-  ],
-  cargo: [
-    { key: 'name', label: 'Название груза', placeholder: 'Перевозка металлолома' },
-    { key: 'category', label: 'Группа груза', placeholder: 'Готовая продукция' },
   ],
   driver: [
     { key: 'fullName', label: 'ФИО', placeholder: 'Смирнов Олег Викторович' },
@@ -94,7 +90,6 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
 
 const KIND_TITLES: Record<Kind, string> = {
   carrier: 'Перевозчики',
-  cargo: 'Грузы',
   driver: 'Водители',
   truck: 'Тягачи (ТС)',
   trailer: 'Прицепы',
@@ -109,6 +104,17 @@ interface ExpiryItem {
   docLabel: string
   info: ReturnType<typeof expiryInfo>
   carrierName: string
+}
+
+/** Запись в сводке «Последние добавления» */
+interface RecentAddition {
+  key: string
+  tab: Exclude<TabKind, 'carriers'>
+  icon: typeof User
+  title: string
+  kindLabel: string
+  carrierName: string
+  createdAt: string
 }
 
 function AccessBadge({ access }: { access: boolean }) {
@@ -181,7 +187,6 @@ function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count, chi
 export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: TabProps) {
   const { toast } = useToast()
   const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
-  const [cargoTypes, setCargoTypes] = useState<CargoTypeDTO[]>([])
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<TabKind>('carriers')
   const [addKind, setAddKind] = useState<Kind | null>(null)
@@ -193,7 +198,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   const [dirQuery, setDirQuery] = useState('')
   const [dirExpiry, setDirExpiry] = useState<'all' | 'soon' | 'expired'>('all')
   const [dirAccess, setDirAccess] = useState<'all' | 'open' | 'closed'>('all')
-  const [dirCargo, setDirCargo] = useState('all')
 
   // перевозчику доступен только его собственный парк — данные конкурентов скрыты
   const visibleCarriers = useMemo(
@@ -205,7 +209,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
     try {
       const dir = await api.directory()
       setCarriers(dir.carriers)
-      setCargoTypes(dir.cargoTypes)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
@@ -236,35 +239,49 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
       .filter((c) => dirAccess === 'all' || (dirAccess === 'open' ? c.access : !c.access)),
     [carriers, dirByQuery, dirAccess],
   )
+  // —— полный (нефильтрованный) парк видимой области: сводка и счётчики ——
+  const allDrivers = useMemo(
+    () => visibleCarriers.flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name }))),
+    [visibleCarriers],
+  )
+  const allTrucks = useMemo(
+    () => visibleCarriers.flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name }))),
+    [visibleCarriers],
+  )
+  const allTrailers = useMemo(
+    () => visibleCarriers.flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name }))),
+    [visibleCarriers],
+  )
+
+  // —— отфильтрованные выборки для таблиц ——
   const driversFlat = useMemo(
-    () => visibleCarriers
-      .flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name })))
+    () => allDrivers
       .filter(({ d }) => dirByQuery(d.fullName, d.passport, d.license, d.phone) && dirByExpiry([d.licenseTill, d.medTill])),
-    [visibleCarriers, dirByQuery, dirByExpiry],
+    [allDrivers, dirByQuery, dirByExpiry],
   )
-  const driversTotal = useMemo(() => visibleCarriers.reduce((n, c) => n + c.drivers.length, 0), [visibleCarriers])
+  const driversTotal = allDrivers.length
   const trucksFlat = useMemo(
-    () => visibleCarriers
-      .flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name })))
+    () => allTrucks
       .filter(({ t }) => dirByQuery(t.brand, t.plate, t.vin, t.owner) && dirByExpiry([t.techTill])),
-    [visibleCarriers, dirByQuery, dirByExpiry],
+    [allTrucks, dirByQuery, dirByExpiry],
   )
-  const trucksTotal = useMemo(() => visibleCarriers.reduce((n, c) => n + c.trucks.length, 0), [visibleCarriers])
+  const trucksTotal = allTrucks.length
   const trailersFlat = useMemo(
-    () => visibleCarriers
-      .flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name })))
+    () => allTrailers
       .filter(({ z }) => dirByQuery(z.plate, z.type, z.owner) && dirByExpiry([z.techTill])),
-    [visibleCarriers, dirByQuery, dirByExpiry],
+    [allTrailers, dirByQuery, dirByExpiry],
   )
-  const trailersTotal = useMemo(() => visibleCarriers.reduce((n, c) => n + c.trailers.length, 0), [visibleCarriers])
-  const cargoCategories = useMemo(
-    () => Array.from(new Set(cargoTypes.map((c) => c.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru')),
-    [cargoTypes],
-  )
-  const cargoTypesFiltered = useMemo(
-    () => cargoTypes.filter((c) => dirByQuery(c.name, c.category) && (dirCargo === 'all' || c.category === dirCargo)),
-    [cargoTypes, dirByQuery, dirCargo],
-  )
+  const trailersTotal = allTrailers.length
+
+  /** Краткая сводка: кто и когда добавлен агентом — последние записи по времени */
+  const recentAdditions = useMemo<RecentAddition[]>(() => {
+    const items: RecentAddition[] = [
+      ...allDrivers.map(({ d, carrierName }) => ({ key: `d-${d.id}`, tab: 'drivers' as const, icon: User, title: d.fullName, kindLabel: 'Водитель', carrierName, createdAt: d.createdAt })),
+      ...allTrucks.map(({ t, carrierName }) => ({ key: `t-${t.id}`, tab: 'trucks' as const, icon: Truck, title: `${t.brand} · ${t.plate}`, kindLabel: 'Тягач', carrierName, createdAt: t.createdAt })),
+      ...allTrailers.map(({ z, carrierName }) => ({ key: `z-${z.id}`, tab: 'trailers' as const, icon: Wrench, title: `${z.plate} · ${z.type}`, kindLabel: 'Прицеп', carrierName, createdAt: z.createdAt })),
+    ]
+    return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 6)
+  }, [allDrivers, allTrucks, allTrailers])
 
   /** Что и когда истекает: все документы с плохими/близкими сроками */
   const expiryItems = useMemo<ExpiryItem[]>(() => {
@@ -292,11 +309,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   const expiredCount = expiryItems.filter((i) => i.info.state === 'expired').length
 
   const openAdd = (kind: Kind) => {
-    setForm(
-      kind === 'cargo'
-        ? { truckType: 'Тент', dangerous: 'false' }
-        : { carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? '') },
-    )
+    setForm({ carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? '') })
     setEditing(null)
     setAddKind(kind)
   }
@@ -318,8 +331,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
     try {
       await api.createDirectory(addKind, form)
       toast({
-        title: 'Запись добавлена в базу',
-        description: `${KIND_TITLES[addKind]}: запись создана и доступна при подаче заявки`,
+        title: 'Запись добавлена в справочник',
+        description: `${KIND_TITLES[addKind]}: запись создана и доступна при назначении экипажа`,
       })
       closeDialog()
       await load()
@@ -356,7 +369,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
     }
   }
 
-  if (carriers === null && !error) return <LoadingBlock label="Загрузка базы аккаунта…" />
+  if (carriers === null && !error) return <LoadingBlock label="Загрузка кадров и техники…" />
   if (error) return <ErrorBlock message={error} onRetry={() => { setError(null); void load() }} />
 
   const dialogKind = addKind ?? editing?.kind ?? null
@@ -369,6 +382,71 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
       <SectionHeader
         title="Справочники"
       />
+
+      {/* Кадры и техника: сводка добавленного агентом (перенесено из «Подать документов») */}
+      <Card className="mb-4 shadow-sm">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Database className="h-4 w-4 text-blue-700" aria-hidden />
+              Кадры и техника
+            </div>
+            <span className="text-[11px] text-slate-500">
+              {isLogist ? 'добавлено перевозчиками — агентами АЭМЗ' : 'добавлено агентом через «Подать документы» и вручную'}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
+            {/* счётчики — клик открывает раздел */}
+            <dl className="grid grid-cols-3 gap-2">
+              {([
+                { label: 'Водители', value: driversTotal, tab: 'drivers' as TabKind, icon: User },
+                { label: 'Тягачи', value: trucksTotal, tab: 'trucks' as TabKind, icon: Truck },
+                { label: 'Прицепы', value: trailersTotal, tab: 'trailers' as TabKind, icon: Wrench },
+              ]).map((x) => (
+                <button
+                  key={x.label}
+                  type="button"
+                  onClick={() => setTab(x.tab)}
+                  className="rounded-lg border border-slate-200 bg-slate-50/60 px-2 py-2 text-center transition hover:border-blue-300 hover:bg-blue-50/50"
+                >
+                  <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{x.label}</dt>
+                  <dd className="text-lg font-bold tabular-nums text-slate-900">{x.value}</dd>
+                </button>
+              ))}
+            </dl>
+            {/* краткая сводка: кто и когда добавлен */}
+            <div className="min-w-0">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Последние добавления</div>
+              {recentAdditions.length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  Пока ничего: персонал и техника появятся здесь после добавления во вкладке «Подать документы» или кнопкой «Добавить вручную».
+                </p>
+              ) : (
+                <ul className="flex flex-wrap gap-1.5">
+                  {recentAdditions.map((r) => {
+                    const Icon = r.icon
+                    return (
+                      <li key={r.key}>
+                        <button
+                          type="button"
+                          onClick={() => setTab(r.tab)}
+                          title={`${r.kindLabel} — добавлен ${fmtCreated(r.createdAt)}${isLogist ? ` · ${r.carrierName}` : ''}`}
+                          className="flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 transition hover:border-blue-300 hover:bg-blue-50/60"
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                          <span className="max-w-[200px] truncate font-medium">{r.title}</span>
+                          {isLogist && <span className="hidden max-w-[140px] truncate text-slate-400 sm:inline">· {r.carrierName}</span>}
+                          <span className="shrink-0 text-slate-400">· {fmtCreated(r.createdAt)}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Сроки документов: что и когда истекает */}
       <Card className={`mb-4 shadow-sm ${expiredCount > 0 ? 'border-red-200 bg-red-50/40' : expiryItems.length > 0 ? 'border-amber-200 bg-amber-50/40' : 'border-emerald-200 bg-emerald-50/40'}`}>
@@ -426,12 +504,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
               Перевозчики
             </TabsTrigger>
           )}
-          {isLogist && (
-            <TabsTrigger value="cargos">
-              <Boxes className="h-4 w-4" aria-hidden />
-              Грузы
-            </TabsTrigger>
-          )}
           <TabsTrigger value="drivers">
             <User className="h-4 w-4" aria-hidden />
             Водители
@@ -444,19 +516,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
             <Wrench className="h-4 w-4" aria-hidden />
             Прицепы
           </TabsTrigger>
-          {!isLogist && (
-            <TabsTrigger value="cargos">
-              <Boxes className="h-4 w-4" aria-hidden />
-              Грузы
-            </TabsTrigger>
-          )}
         </TabsList>
 
         {/* -------- Перевозчики (только логист) -------- */}
         {isLogist && (
         <TabsContent value="carriers">
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-4 sm:p-6">
+          <div className="space-y-3">
               <DirFilterBar
                 query={dirQuery} onQuery={setDirQuery}
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry={false}
@@ -482,7 +547,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                   Добавить перевозчика
                 </Button>
               </div>
-              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50">
@@ -498,7 +563,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                   </TableHeader>
                   <TableBody>
                     {carriersFiltered.map((c) => (
-                      <TableRow key={c.id}>
+                      <TableRow key={c.id} className="hover:bg-slate-50/70">
                         <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
                         <TableCell className="font-mono text-xs text-slate-600">{c.inn}</TableCell>
                         <TableCell className="whitespace-nowrap text-slate-600">№{c.contractNo} от {c.contractDate}</TableCell>
@@ -527,107 +592,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                   </TableBody>
                 </Table>
               </div>
-            </CardContent>
-          </Card>
+          </div>
         </TabsContent>
         )}
 
-        {/* -------- Грузы (единый справочник: логист ведёт, перевозчик видит те же записи) -------- */}
-        <TabsContent value="cargos">
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-4 sm:p-6">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="max-w-xl text-sm text-slate-500">
-                  {isLogist
-                    ? 'Единый справочник грузов: заявка ссылается на запись отсюда, поэтому один и тот же груз всегда называется одинаково — в площадке, сверке и отчётах.'
-                    : 'Единый справочник грузов платформы — тот же, что у логиста АЭМЗ: груз называется одинаково на площадке, в заявках и отчётах.'}
-                </div>
-                {isLogist ? (
-                  <Button size="sm" onClick={() => openAdd('cargo')}>
-                    <Plus className="h-4 w-4" aria-hidden />
-                    Добавить груз
-                  </Button>
-                ) : (
-                  <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
-                    Только просмотр · ведёт логист АЭМЗ
-                  </Badge>
-                )}
-              </div>
-              <DirFilterBar
-                query={dirQuery} onQuery={setDirQuery}
-                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry={false}
-                count={`Показано: ${cargoTypesFiltered.length} из ${cargoTypes.length}`}
-                extraActive={dirCargo !== 'all'}
-                onReset={() => { setDirQuery(''); setDirExpiry('all'); setDirCargo('all') }}
-              >
-                <Select value={dirCargo} onValueChange={setDirCargo}>
-                  <SelectTrigger className="h-9 w-[210px]" aria-label="Фильтр по категории груза">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Все категории</SelectItem>
-                    {cargoCategories.map((cat) => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </DirFilterBar>
-              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead>Груз</TableHead>
-                      <TableHead>Группа</TableHead>
-                      <TableHead>Рекомендуемое ТС</TableHead>
-                      <TableHead>ADR</TableHead>
-                      <TableHead>В заявках</TableHead>
-                      <TableHead>Добавлен</TableHead>
-                      {isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {cargoTypesFiltered.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
-                        <TableCell className="text-slate-600">{c.category}</TableCell>
-                        <TableCell className="text-slate-600">{c.truckType}</TableCell>
-                        <TableCell>
-                          {c.dangerous
-                            ? <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-50 text-red-700">Опасный (ADR)</Badge>
-                            : <span className="text-slate-400">—</span>}
-                        </TableCell>
-                        <TableCell className="font-semibold text-slate-800">{c.usageCount}</TableCell>
-                        <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(c.createdAt)}</TableCell>
-                        {isLogist && (
-                          <TableCell>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8"
-                              aria-label={`Изменить ${c.name}`}
-                              onClick={() => openEdit('cargo', c.id, {
-                                name: c.name, category: c.category, truckType: c.truckType,
-                                dangerous: String(c.dangerous), cargoName: c.name,
-                              })}
-                            >
-                              <Pencil className="h-3.5 w-3.5" aria-hidden />
-                            </Button>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
-                    {cargoTypes.length === 0 && (
-                      <TableRow><TableCell colSpan={isLogist ? 7 : 6} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
         <TabsContent value="drivers">
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-4 sm:p-6">
+          <div className="space-y-3">
               {!isLogist && (
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 p-3">
                   <p className="max-w-xl text-xs leading-snug text-slate-600">
@@ -644,17 +614,19 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
                 count={`Показано: ${driversFlat.length} из ${driversTotal}`}
               />
-              <div className="mb-3 flex items-center justify-end gap-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">Записей: {driversTotal}</div>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('driver')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить вручную
                 </Button>
               </div>
-              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50">
                       <TableHead>ФИО</TableHead>
+                      {isLogist && <TableHead>Перевозчик</TableHead>}
                       <TableHead>Дата рождения</TableHead>
                       <TableHead>Паспорт</TableHead>
                       <TableHead>ВУ (номер)</TableHead>
@@ -674,35 +646,35 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                       })} />
                     ))}
                     {driversFlat.length === 0 && (
-                      <TableRow><TableCell colSpan={isLogist ? 8 : 9} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={9} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>
               </div>
-            </CardContent>
-          </Card>
+          </div>
         </TabsContent>
 
         {/* -------- Тягачи -------- */}
         <TabsContent value="trucks">
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-4 sm:p-6">
+          <div className="space-y-3">
               <DirFilterBar
                 query={dirQuery} onQuery={setDirQuery}
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
                 count={`Показано: ${trucksFlat.length} из ${trucksTotal}`}
               />
-              <div className="mb-3 flex items-center justify-end gap-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">Записей: {trucksTotal}</div>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('truck')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить тягач
                 </Button>
               </div>
-              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50">
                       <TableHead>Марка</TableHead>
+                      {isLogist && <TableHead>Перевозчик</TableHead>}
                       <TableHead>Госномер</TableHead>
                       <TableHead>VIN</TableHead>
                       <TableHead>СТС</TableHead>
@@ -720,35 +692,35 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                       })} />
                     ))}
                     {trucksFlat.length === 0 && (
-                      <TableRow><TableCell colSpan={isLogist ? 7 : 8} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={8} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>
               </div>
-            </CardContent>
-          </Card>
+          </div>
         </TabsContent>
 
         {/* -------- Прицепы -------- */}
         <TabsContent value="trailers">
-          <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-4 sm:p-6">
+          <div className="space-y-3">
               <DirFilterBar
                 query={dirQuery} onQuery={setDirQuery}
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
                 count={`Показано: ${trailersFlat.length} из ${trailersTotal}`}
               />
-              <div className="mb-3 flex items-center justify-end gap-3">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-slate-500">Записей: {trailersTotal}</div>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('trailer')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить прицеп
                 </Button>
               </div>
-              <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-slate-50">
                       <TableHead>Госномер</TableHead>
+                      {isLogist && <TableHead>Перевозчик</TableHead>}
                       <TableHead>Тип</TableHead>
                       <TableHead>СТС</TableHead>
                       <TableHead>Техосмотр до</TableHead>
@@ -763,13 +735,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                       })} />
                     ))}
                     {trailersFlat.length === 0 && (
-                      <TableRow><TableCell colSpan={isLogist ? 5 : 6} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={6} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>
               </div>
-            </CardContent>
-          </Card>
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -779,13 +750,9 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
           <DialogHeader>
             <DialogTitle>{addKind ? 'Добавить запись' : 'Изменить запись'} — {addLabel}</DialogTitle>
             <DialogDescription>
-              {addKind === 'cargo' || editing?.kind === 'cargo'
-                ? addKind
-                  ? 'Груз появится в справочнике и будет доступен для выбора во всех новых заявках — один и тот же груз всегда называется одинаково.'
-                  : 'Название груза едино для всех заявок: при переименовании оно обновится и в уже созданных заявках.'
-                : addKind
-                  ? 'Запись появится в базе аккаунта и станет доступна при подаче заявки.'
-                  : 'Обновите данные и сроки действия документов — подсветка сроков пересчитается автоматически.'}
+              {addKind
+                ? 'Запись появится в справочнике и станет доступна при назначении экипажа.'
+                : 'Обновите данные и сроки действия документов — подсветка сроков пересчитается автоматически.'}
             </DialogDescription>
           </DialogHeader>
 

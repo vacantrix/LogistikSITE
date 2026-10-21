@@ -97,8 +97,8 @@ export interface DriverLineProps {
   /** регистрация готовности линии (есть фото или ФИО+ВУ) для блокировки «Проверить все» */
   registerReady: (id: string, ready: boolean) => void
   onRemove: (id: string) => void
-  /** уведомление о допуске карточек в базу — раздел обновит счётчики */
-  onAdmitted: () => void
+  /** уведомление о допуске карточек в базу (если подписчику нужно реагировать) */
+  onAdmitted?: () => void
 }
 
 export default function DriverLine({
@@ -274,7 +274,7 @@ export default function DriverLine({
         admittedInfo.trailer = trailerRes.trailer ? `${trailerRes.trailer.type} ${trailerRes.trailer.plate}` : tr.plate.trim()
       }
       setAdmitted(admittedInfo)
-      onAdmitted()
+      onAdmitted?.()
       toast({
         title: 'Водитель допущен в базу',
         description: [admittedInfo.driver, admittedInfo.truck, admittedInfo.trailer].filter(Boolean).join(' · '),
