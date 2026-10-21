@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { toRequestDTO } from '@/lib/serialize'
+import { notifyLive } from '@/lib/notify'
 import { verifyDocument, expectedFor } from '@/lib/verify'
 import type { DocType } from '@/lib/verify'
 
@@ -103,5 +104,6 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     where: { id },
     include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
   })
+  notifyLive({ type: 'DOCS_VERIFIED', message: `Нейросеть проверила документы по заявке ${fresh!.number}`, requestId: id })
   return NextResponse.json({ request: toRequestDTO(fresh!) })
 }

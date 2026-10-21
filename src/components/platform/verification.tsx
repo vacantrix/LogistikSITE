@@ -123,7 +123,7 @@ function IssueIcon({ docStatus }: { docStatus: DocumentDTO['status'] }) {
   return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />
 }
 
-export default function VerificationTab({ activeCarrierId: _activeCarrierId, onNavigate }: TabProps) {
+export default function VerificationTab({ activeCarrierId: _activeCarrierId, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [carriersLoaded, setCarriersLoaded] = useState(false)
@@ -157,6 +157,11 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // real-time (Task 49): событие из шины WS мгновенно догружает очередь сверки
+  useEffect(() => {
+    if (liveTick > 0) void load()
+  }, [liveTick, load])
 
   const queue = useMemo(() => (requests ?? []).filter((r) => r.status === 'AT_LOGIST'), [requests])
   const needFix = useMemo(() => (requests ?? []).filter((r) => r.status === 'DOCS_REVIEW'), [requests])

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { toDocumentDTO, toRequestDTO } from '@/lib/serialize'
+import { notifyLive } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   await db.event.create({
     data: { requestId: id, type: 'DOC_UPLOADED', message: `Загружен документ: ${fileName} — отправлен на проверку нейросети` },
   })
+  notifyLive({ type: 'DOC_UPLOADED', message: `Загружен документ «${fileName}» по заявке ${request.number}`, requestId: id })
   if (request.status === 'AWARDED') {
     await db.request.update({ where: { id }, data: { status: 'DOCS_REVIEW' } })
   }

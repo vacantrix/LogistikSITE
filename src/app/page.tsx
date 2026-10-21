@@ -6,6 +6,7 @@
  * кабинет перевозчика. Разделы переключаются табами в рамках доступных роли.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { io, type Socket } from 'socket.io-client'
 import { Shell, firstTabFor, navFor, type RoleSelection } from '@/components/platform/shell'
 import { RoleNotice, type TabKey } from '@/components/platform/common'
 import { api } from '@/lib/api'
@@ -37,9 +38,33 @@ export default function Page() {
   const [tab, setTab] = useState<TabKey>('board')
   const [carriers, setCarriers] = useState<CarrierDTO[]>([])
   const [role, setRole] = useState<RoleSelection>({ kind: 'logist', logistName: 'Логист 1' })
+  // real-time (Task 49): счётчик изменений с сервера + признак живого подключения
+  const [liveTick, setLiveTick] = useState(0)
+  const [liveOn, setLiveOn] = useState(false)
   // роль восстанавливается из хранилища сразу после монтирования;
   // до этого момента ничего не сохраняем — чтобы не затереть выбранную ранее роль
   const restoredRef = useRef(false)
+
+  // подключение к real-time шине ws-service через шлюз (Task 49).
+  // Правила гейта: только относительный путь и порт в query XTransformPort.
+  useEffect(() => {
+    const socket: Socket = io('/?XTransformPort=3003', {
+      transports: ['websocket', 'polling'],
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      timeout: 10000,
+    })
+    socket.on('connect', () => setLiveOn(true))
+    socket.on('disconnect', () => setLiveOn(false))
+    socket.on('connect_error', () => setLiveOn(false))
+    socket.on('platform:update', () => setLiveTick((t) => t + 1))
+    return () => {
+      socket.disconnect()
+      setLiveOn(false)
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -80,7 +105,7 @@ export default function Page() {
 
   const activeCarrierId = role.kind === 'carrier' ? role.carrierId ?? null : null
 
-  const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab }
+  const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab, liveTick }
   // защита: раздел недоступен текущей роли — показываем пояснение вместо содержимого
   const allowed = navFor(role.kind).some((n) => n.key === tab)
 
@@ -91,6 +116,7 @@ export default function Page() {
       carriers={carriers.map((c) => ({ id: c.id, name: c.name }))}
       role={role}
       onRoleChange={changeRole}
+      live={liveOn}
     >
       {!allowed ? (
         <RoleNotice role={role.kind} />

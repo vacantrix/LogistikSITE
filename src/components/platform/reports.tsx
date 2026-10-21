@@ -24,7 +24,7 @@ function plural(n: number, one: string, few: string, many: string): string {
   return many
 }
 
-export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate }: TabProps) {
+export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const [report, setReport] = useState<ReportSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -44,6 +44,11 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // real-time (Task 49): событие из шины WS мгновенно догружает отчёты
+  useEffect(() => {
+    if (liveTick > 0) void load()
+  }, [liveTick, load])
 
   const refresh = () => {
     setRefreshing(true)

@@ -158,7 +158,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   )
 }
 
-export default function CrewTab({ activeCarrierId, role }: TabProps) {
+export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [carrier, setCarrier] = useState<CarrierDTO | null>(null)
@@ -185,6 +185,11 @@ export default function CrewTab({ activeCarrierId, role }: TabProps) {
   }, [activeCarrierId])
 
   useEffect(() => { void load() }, [load])
+
+  // real-time (Task 49): событие из шины WS мгновенно догружает заявки и справочники
+  useEffect(() => {
+    if (liveTick > 0) void load()
+  }, [liveTick, load])
 
   const applyRequest = useCallback((updated: RequestDTO) => {
     setRequests((prev) => {

@@ -21,6 +21,9 @@ export interface TabProps {
   role: RoleKind
   /** переход на другой раздел (например «Перейти к торгам») */
   onNavigate: (tab: TabKey) => void
+  /** счётчик real-time обновлений (Task 49): растёт при каждом изменении на сервере —
+   *  разделы догружают данные без кнопки «Обновить» и без ожидания автообновления */
+  liveTick: number
 }
 
 /** Раздел, доступный только определённой роли (защитная заглушка) */
@@ -46,23 +49,18 @@ export function AgentStatusBadge({ status }: { status: string }) {
   return <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-700">{label}</Badge>
 }
 
-/** Плоский локап режима: квадратная плитка-иконка + uppercase-название + короткое пояснение.
- *  Заменяет прежний «пузырь» с эмодзи — так режим торгов читается в таблице без лишнего шума. */
-export function ModeBadge({ mode, withSub = true }: { mode: RequestMode; withSub?: boolean }) {
+/** Режим приёма ставок без пузыря (Task 49): только иконка с цветом режима и
+ *  подсказкой при наведении — ↘ торги на понижение, ⊘ закрытые ставки. */
+export function ModeBadge({ mode }: { mode: RequestMode }) {
   const meta = MODE_META[mode]
   const Icon = meta.Icon
   return (
     <span
-      className={`inline-flex items-center gap-2 whitespace-nowrap rounded-lg border px-2 py-1 ${meta.tile}`}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md"
       title={`${meta.label} — ${meta.sub}`}
+      aria-label={`${meta.label}: ${meta.sub}`}
     >
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/70 ring-1 ring-inset ring-black/5" aria-hidden>
-        <Icon className="h-3.5 w-3.5" />
-      </span>
-      <span className="flex flex-col items-start leading-tight">
-        <span className="text-[11px] font-bold uppercase tracking-wide">{meta.label}</span>
-        {withSub && <span className="text-[10px] font-medium opacity-70">{meta.sub}</span>}
-      </span>
+      <Icon className={`h-5 w-5 ${meta.iconCls}`} aria-hidden />
     </span>
   )
 }

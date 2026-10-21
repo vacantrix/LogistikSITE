@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { toRequestDTO } from '@/lib/serialize'
+import { notifyLive } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const request = await db.request.findUnique({ where: { id }, include })
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
 
-  const ev = (type: string, message: string) => db.event.create({ data: { requestId: id, type, message } })
+  const ev = (type: string, message: string) => {
+    // real-time: событие мгновенно расходится по открытым сессиям (Task 49)
+    notifyLive({ type, message, requestId: id })
+    return db.event.create({ data: { requestId: id, type, message } })
+  }
 
   try {
     switch (action) {

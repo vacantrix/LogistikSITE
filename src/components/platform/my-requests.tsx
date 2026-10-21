@@ -159,7 +159,7 @@ function CrewChips({ r, carrier }: { r: RequestDTO; carrier: CarrierDTO | null }
   )
 }
 
-export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps) {
+export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [carriers, setCarriers] = useState<CarrierDTO[]>([])
@@ -203,6 +203,11 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
   useEffect(() => {
     void load()
   }, [load])
+
+  // real-time (Task 49): событие из шины WS мгновенно догружает список заявок
+  useEffect(() => {
+    if (liveTick > 0) void load()
+  }, [liveTick, load])
 
   const applyRequest = useCallback((updated: RequestDTO) => {
     setRequests((prev) => {

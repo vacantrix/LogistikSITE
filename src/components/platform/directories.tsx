@@ -173,7 +173,7 @@ function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count, chi
   )
 }
 
-export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: TabProps) {
+export default function DirectoriesTab({ activeCarrierId, role, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -206,6 +206,11 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // real-time (Task 49): событие из шины WS мгновенно догружает справочники
+  useEffect(() => {
+    if (liveTick > 0) void load()
+  }, [liveTick, load])
 
   // фильтры справочника — на весь экран: при закрытии раздела сбрасываем
   const closeSection = useCallback(() => {

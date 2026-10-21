@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ChevronsUpDown,
   Clock,
   ClockPlus,
   EyeOff,
@@ -137,6 +138,68 @@ function Metric({ label, value, tone = 'default' }: { label: string; value: stri
       <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
       <div className={`mt-0.5 text-sm font-bold ${tone === 'green' ? 'text-emerald-600' : 'text-slate-900'}`}>{value}</div>
     </div>
+  )
+}
+
+// ——— сортировка таблицы заявок (Task 49): клик по заголовку asc → desc → как было ———
+
+type SortKey = 'km' | 'cargo' | 'load' | 'truck' | 'status' | 'rate' | 'deadline'
+type SortState = { key: SortKey; dir: 'asc' | 'desc' } | null
+
+/** Порядок статуса в конвейере: от «на площадке» до «закрыт» */
+const STATUS_ORDER: Record<string, number> = {
+  PUBLISHED: 0, AWARDED: 1, DOCS_REVIEW: 2, AT_LOGIST: 3, CONFIRMED: 4, CLOSED: 5,
+}
+
+/** Дата «DD.MM.YYYY» → timestamp; «—»/пустое → Infinity (пустые всегда в конце списка) */
+function loadDateTs(s: string): number {
+  const m = s.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/)
+  if (!m) return Number.POSITIVE_INFINITY
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime()
+}
+
+/** Значение колонки для сортировки: число или строка; «нет данных» = Infinity */
+function sortValue(r: RequestDTO, key: SortKey): string | number {
+  switch (key) {
+    case 'km': return routeDistanceKm(r.fromPoint, r.toPoint) ?? Number.POSITIVE_INFINITY
+    case 'cargo': return r.cargo.toLowerCase()
+    case 'load': return loadDateTs(r.loadDate)
+    case 'truck': return r.truckType.toLowerCase()
+    case 'status': return STATUS_ORDER[r.status] ?? 99
+    case 'rate': return r.bestRate ?? r.startRate
+    case 'deadline': return r.deadline ? new Date(r.deadline).getTime() : Number.POSITIVE_INFINITY
+  }
+}
+
+/** Заголовок с сортировкой: стрелки, aria-sort, третий клик сбрасывает */
+function SortableTh({ k, label, sort, onSort, title }: {
+  k: SortKey
+  label: string
+  sort: SortState
+  onSort: (k: SortKey) => void
+  title?: string
+}) {
+  const active = sort?.key === k
+  const dir = active ? sort!.dir : null
+  return (
+    <th
+      scope="col"
+      aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      title={title}
+      className="border-b border-slate-200 pb-2.5 pr-3 font-semibold"
+    >
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-slate-800 ${active ? 'text-blue-700' : ''}`}
+        aria-label={`Сортировать по «${label}»${active ? (dir === 'asc' ? ', сейчас: по возрастанию' : ', сейчас: по убыванию') : ''}`}
+      >
+        {label}
+        {active && dir === 'asc' && <ChevronUp className="h-3.5 w-3.5" aria-hidden />}
+        {active && dir === 'desc' && <ChevronDown className="h-3.5 w-3.5" aria-hidden />}
+        {!active && <ChevronsUpDown className="h-3.5 w-3.5 text-slate-300" aria-hidden />}
+      </button>
+    </th>
   )
 }
 
@@ -344,7 +407,7 @@ function buildMapPoints(list: RequestDTO[]): MapPoint[] {
     )
 }
 
-export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps) {
+export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -353,7 +416,14 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const [q, setQ] = useState('')
   const [mode, setMode] = useState<ModeFilter>('ALL')
   const [now, setNow] = useState<number | null>(null)
+  // сортировка таблицы (Task 49): null — как пришло с сервера (новые сверху)
+  const [sort, setSort] = useState<SortState>(null)
   const isLogist = role === 'logist'
+
+  /** клик по заголовку: asc → desc → сброс */
+  const toggleSort = useCallback((k: SortKey) => {
+    setSort((cur) => (!cur || cur.key !== k ? { key: k, dir: 'asc' } : cur.dir === 'asc' ? { key: k, dir: 'desc' } : null))
+  }, [])
 
   /** Пункты фильтра статуса: у перевозчика добавляется «Мои отклики» */
   const statusFilters = useMemo(
@@ -428,6 +498,11 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     return () => clearInterval(t)
   }, [load])
 
+  // real-time (Task 49): событие из шины WS мгновенно догружает заявки и журнал
+  useEffect(() => {
+    if (liveTick > 0) void load(true)
+  }, [liveTick, load])
+
   // таймер для обратного отсчёта — только после монтирования
   useEffect(() => {
     setNow(Date.now())
@@ -480,8 +555,26 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     })
   }, [requests, q, mode, myBidOf])
 
-  /** Точки для карты доставки — по текущей выборке заявок */
-  const mapPoints = useMemo(() => buildMapPoints(filtered), [filtered])
+  /** выборка после сортировки (Task 49): пустые значения всегда в конце, вне зависимости от направления */
+  const sorted = useMemo(() => {
+    if (!sort) return filtered
+    const dir = sort.dir === 'asc' ? 1 : -1
+    const key = sort.key
+    return [...filtered].sort((a, b) => {
+      const va = sortValue(a, key)
+      const vb = sortValue(b, key)
+      if (typeof va === 'number' && typeof vb === 'number') {
+        const infA = !Number.isFinite(va)
+        const infB = !Number.isFinite(vb)
+        if (infA || infB) return infA && infB ? 0 : infA ? 1 : -1
+        return (va - vb) * dir
+      }
+      return String(va).localeCompare(String(vb), 'ru') * dir
+    })
+  }, [filtered, sort])
+
+  /** Точки для карты доставки — по текущей (отфильтрованной и отсортированной) выборке заявок */
+  const mapPoints = useMemo(() => buildMapPoints(sorted), [sorted])
   const deliveryCount = mapPoints.filter((p) => p.kind === 'delivery').length
 
   /** Выгрузка текущей выборки в Excel: то, что видно в таблице с учётом фильтров и поиска */
@@ -492,7 +585,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
       'Ставка, ₽/т', 'Стартовая, ₽/т', 'Погрузка', 'Окно', 'Приём ставок до',
       ...(withMine ? ['Мой отклик'] : []),
     ]
-    const rows = filtered.map((r) => {
+    const rows = sorted.map((r) => {
       const my = myBidOf(r)
       const statusLabel = r.status === 'PUBLISHED'
         ? (r.mode === 'AUCTION' ? 'Торги' : 'Закрытые ставки')
@@ -873,24 +966,18 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">№ заявки</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Маршрут</th>
-                        <th
-                          scope="col"
-                          className="border-b border-slate-200 pb-2.5 pr-3 font-semibold"
-                          title="Расстояние от погрузки до назначения, по прямой"
-                        >
-                          КМ
-                        </th>
-                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Груз</th>
-                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Погрузка</th>
-                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Тип ТС</th>
-                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Статус</th>
-                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Ставка</th>
-                        <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">До окончания</th>
+                        <SortableTh k="km" label="КМ" sort={sort} onSort={toggleSort} title="Расстояние от погрузки до назначения, по прямой" />
+                        <SortableTh k="cargo" label="Груз" sort={sort} onSort={toggleSort} />
+                        <SortableTh k="load" label="Погрузка" sort={sort} onSort={toggleSort} />
+                        <SortableTh k="truck" label="Тип ТС" sort={sort} onSort={toggleSort} />
+                        <SortableTh k="status" label="Статус" sort={sort} onSort={toggleSort} title="Порядок конвейера: на площадке → выбран → проверка → у логиста → в 1С → закрыт" />
+                        <SortableTh k="rate" label="Ставка" sort={sort} onSort={toggleSort} title="Лучшая ставка, иначе стартовая; у закрытых — стартовая" />
+                        <SortableTh k="deadline" label="До окончания" sort={sort} onSort={toggleSort} title="Срок приёма ставок; без срока — в конце списка" />
                         <th scope="col" className="border-b border-slate-200 pb-2.5 font-semibold">Действие</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((r) => {
+                      {sorted.map((r) => {
                         const my = myBidOf(r)
                         const km = routeDistanceKm(r.fromPoint, r.toPoint)
                         const expanded = isLogist && expandedId === r.id && r.status === 'PUBLISHED'

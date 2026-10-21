@@ -24,18 +24,21 @@ export const AGENT_STATUS_LABEL: Record<string, string> = {
   CLOSED: 'Готово',
 }
 
-/** Режим приёма ставок: плоский локап (плитка-иконка + uppercase-название + пояснение) */
-export const MODE_META: Record<RequestMode, { label: string; sub: string; tile: string; Icon: LucideIcon }> = {
+/** Режим приёма ставок: плоский локап (плитка-иконка + uppercase-название + пояснение).
+ *  iconCls — цвет иконки в таблице, где бейдж показывается без пузыря (Task 49) */
+export const MODE_META: Record<RequestMode, { label: string; sub: string; tile: string; iconCls: string; Icon: LucideIcon }> = {
   AUCTION: {
     label: 'Торги на понижение',
     sub: 'каждая ставка ниже лучшей',
     tile: 'border-amber-200 bg-amber-50 text-amber-700',
+    iconCls: 'text-amber-600',
     Icon: TrendingDown,
   },
   CLOSED: {
     label: 'Закрытые ставки',
     sub: 'ставки скрыты до итогов',
     tile: 'border-slate-200 bg-slate-100 text-slate-700',
+    iconCls: 'text-slate-500',
     Icon: EyeOff,
   },
 }

@@ -80,7 +80,7 @@ function DocBadges({ r }: { r: RequestDTO }) {
   )
 }
 
-export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate }: TabProps) {
+export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [drivers, setDrivers] = useState<Map<string, DriverDTO>>(new Map())
@@ -113,6 +113,11 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // real-time (Task 49): событие из шины WS мгновенно догружает реестр рейсов
+  useEffect(() => {
+    if (liveTick > 0) void load()
+  }, [liveTick, load])
 
   const rows = useMemo(
     () => (requests ?? [])

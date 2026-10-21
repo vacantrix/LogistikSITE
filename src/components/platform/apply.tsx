@@ -1,11 +1,12 @@
 'use client'
 
 /**
- * «Подать документы» (Task 29/30/32/33/35/48) — единственное место пополнения базы
+ * «Подать документы» (Task 29/30/32/33/35/48/49) — единственное место пополнения базы
  * аккаунта. Три вида карточек (Task 48): линия водителя (проформы водитель|тягач|
  * прицеп в одну строку, фотографии ниже линии), одиночное ТС и одиночный прицеп —
- * когда нужно добавить не всё сразу, а лишь часть. Внизу — три кнопки добавления:
- * «Добавить водителя», «Добавить ТС», «Добавить прицеп».
+ * когда нужно добавить не всё сразу, а лишь часть. Раздел стартует ПУСТЫМ (Task 49):
+ * никаких линий по умолчанию — пользователь сам добавляет только то, что нужно,
+ * кнопками «Добавить водителя», «Добавить ТС», «Добавить прицеп».
  * Excel из одной таблицы создаёт линии водителей с подставленными данными,
  * ничего не записывая в базу. Кнопка «Проверить все» последовательно прогоняет
  * ВСЕ карточки: сначала проверяет обязательные поля (незаполненное подсвечивается
@@ -119,7 +120,8 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const { toast } = useToast()
   const isCarrier = role === 'carrier'
 
-  const [lines, setLines] = useState<LineState[]>([{ id: newLineId(), fromExcel: false }])
+  // старт — пустой: только 3 кнопки, пользователь добавляет лишь то, что нужно (Task 49)
+  const [lines, setLines] = useState<LineState[]>([])
   const [trucks, setTrucks] = useState<SoloState[]>([])
   const [trailers, setTrailers] = useState<SoloState[]>([])
   const [checkingAll, setCheckingAll] = useState(false)
@@ -134,9 +136,10 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   }, [])
 
   const addLine = () => setLines((cur) => [...cur, { id: newLineId(), fromExcel: false }])
+  // пустой раздел — допустимое состояние: последнюю линию тоже можно убрать (Task 49)
   const removeLine = (id: string) => {
     checksRef.current.delete(id)
-    setLines((cur) => (cur.length > 1 ? cur.filter((l) => l.id !== id) : cur))
+    setLines((cur) => cur.filter((l) => l.id !== id))
   }
 
   // ——— одиночные карточки «Добавить ТС» / «Добавить прицеп» (Task 48) ———
@@ -278,6 +281,12 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         {/* ——— левая колонка: карточки (линии водителей + одиночные ТС/прицепы) ——— */}
         <div className="min-w-0 space-y-3">
+          {totalCards === 0 && (
+            <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-500" role="status">
+              <b className="text-slate-700">Пока ничего не добавлено.</b>{' '}
+              Выберите ниже, что пополнить: водителя (по документам с нейропроверкой), ТС или прицеп — добавляется только выбранная часть.
+            </div>
+          )}
           {lines.map((line, i) => (
             <DriverLine
               key={line.id}

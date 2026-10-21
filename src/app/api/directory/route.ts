@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { toCargoTypeDTO, toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } from '@/lib/serialize'
+import { notifyLive } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
         const driver = existing
           ? await db.driver.update({ where: { id: existing.id }, data: payload })
           : await db.driver.create({ data: { carrierId: data.carrierId, ...payload } })
+        notifyLive({ type: 'DIRECTORY_UPDATED', message: `Справочник: водитель ${driver.fullName} ${existing ? 'обновлён' : 'допущен в базу'}` })
         return NextResponse.json({ ok: true, driver: toDriverDTO(driver) }, { status: existing ? 200 : 201 })
       }
       case 'truck': {
@@ -92,6 +94,7 @@ export async function POST(req: NextRequest) {
         const truck = existing
           ? await db.truck.update({ where: { id: existing.id }, data: payload })
           : await db.truck.create({ data: { carrierId: data.carrierId, ...payload } })
+        notifyLive({ type: 'DIRECTORY_UPDATED', message: `Справочник: ТС ${truck.brand} ${truck.plate} ${existing ? 'обновлено' : 'допущено в базу'}` })
         return NextResponse.json({ ok: true, truck: toTruckDTO(truck) }, { status: existing ? 200 : 201 })
       }
       case 'trailer': {
@@ -105,6 +108,7 @@ export async function POST(req: NextRequest) {
         const trailer = existingTrailer
           ? await db.trailer.update({ where: { id: existingTrailer.id }, data: trailerPayload })
           : await db.trailer.create({ data: { carrierId: data.carrierId, ...trailerPayload } })
+        notifyLive({ type: 'DIRECTORY_UPDATED', message: `Справочник: прицеп ${trailer.type} ${trailer.plate} ${existingTrailer ? 'обновлён' : 'допущен в базу'}` })
         return NextResponse.json({ ok: true, trailer: toTrailerDTO(trailer) }, { status: existingTrailer ? 200 : 201 })
       }
       default:

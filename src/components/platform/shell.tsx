@@ -44,12 +44,14 @@ export interface RoleSelection {
   carrierId?: string | null
 }
 
-export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children }: {
+export function Shell({ tab, onNavigate, carriers, role, onRoleChange, live, children }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
   carriers: { id: string; name: string }[]
   role: RoleSelection
   onRoleChange: (r: RoleSelection) => void
+  /** real-time шина подключена (Task 49) — зелёный пульсирующий индикатор в шапке */
+  live?: boolean
   children: ReactNode
 }) {
   const isLogist = role.kind === 'logist'
@@ -79,6 +81,17 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {/* real-time индикатор: зелёный пульс — изменения приходят мгновенно (Task 49) */}
+            <span
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                live ? 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200' : 'border-slate-500/30 bg-slate-500/15 text-slate-400'
+              }`}
+              role="status"
+              title={live ? 'Real-time подключён — изменения видны всем мгновенно' : 'Real-time недоступен — данные обновляются автоматически каждые 15 секунд'}
+            >
+              <span className={`h-2 w-2 rounded-full ${live ? 'animate-pulse bg-emerald-400' : 'bg-slate-500'}`} aria-hidden />
+              {live ? 'Live' : 'Офлайн'}
+            </span>
             {/* бейдж вида платформы */}
             <span
               className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${

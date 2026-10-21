@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { toRequestDTO } from '@/lib/serialize'
+import { notifyLive } from '@/lib/notify'
 import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -65,6 +66,11 @@ export async function POST(req: NextRequest) {
       events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована логистом: стартовая ставка ${Number(startRate).toLocaleString('ru-RU')} ₽/т` } },
     },
     include: { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true },
+  })
+  notifyLive({
+    type: 'REQUEST_PUBLISHED',
+    message: `Опубликована заявка ${request.number}: ${request.fromPoint} → ${request.toPoint}`,
+    requestId: request.id,
   })
   return NextResponse.json({ request: toRequestDTO(request) }, { status: 201 })
 }
