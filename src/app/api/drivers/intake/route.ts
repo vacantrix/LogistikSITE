@@ -9,18 +9,19 @@ export const maxDuration = 120
 
 /**
  * POST /api/drivers/intake — добавление водителя сразу с нейросетью.
- * Принимает загруженные документы (паспорт, ВУ, опционально СТС и регистрацию),
- * распознаёт их и возвращает черновик карточки водителя и тягача:
+ * Принимает загруженные документы (паспорт, опционально регистрацию и СТС),
+ * распознаёт их и возвращает черновик карточки водителя:
  * поля, уверенность по каждому полю, перекрёстные сверки и вердикты по документам.
+ * Task 53: фото ВУ больше не требуется — данные ВУ агент заполняет вручную.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
   const docs = (body?.docs ?? {}) as Partial<Record<DocType, { fileName?: string; dataUri?: string }>>
   const provided = (Object.keys(docs) as DocType[]).filter((t) => docs[t]?.dataUri)
 
-  if (!provided.includes('PASSPORT_PHOTO') || !provided.includes('LICENSE')) {
+  if (!provided.includes('PASSPORT_PHOTO')) {
     return NextResponse.json(
-      { error: 'Для распознавания нужны минимум два документа: паспорт (стр. с фото) и водительское удостоверение' },
+      { error: 'Для распознавания нужен паспорт (страница с фото)' },
       { status: 400 },
     )
   }

@@ -32,6 +32,10 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
@@ -172,6 +176,8 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   const [importRows, setImportRows] = useState<ImportRow[] | null>(null)
   const [importing, setImporting] = useState(false)
   const excelInput = useRef<HTMLInputElement | null>(null)
+  // поп-ап подтверждения перед «Утвердить» (Task 53): действие уходит только после подтверждения
+  const [approveReq, setApproveReq] = useState<RequestDTO | null>(null)
 
   const isAgent = role === 'carrier'
 
@@ -690,7 +696,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                     <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
                       <Button
                         disabled={!canAssign}
-                        onClick={() => void (assigned ? approve(r) : assign(r))}
+                        onClick={() => (assigned ? setApproveReq(r) : void assign(r))}
                         aria-label={assigned ? `Утвердить экипаж по заявке ${r.number}` : `Передать экипаж по заявке ${r.number} логисту`}
                       >
                         {busy === r.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : assigned ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
@@ -865,6 +871,61 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ——— Подтверждение утверждения экипажа (Task 53): состав уходит логисту
+          только после того, как агент подтвердит выбор в поп-апе ——— */}
+      <AlertDialog open={!!approveReq} onOpenChange={(o) => { if (!o) setApproveReq(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Утвердить экипаж по заявке {approveReq?.number}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2.5">
+                <p>
+                  После утверждения состав закрепится за рейсом, заявка уйдёт в работу и появится во вкладке «Мои заявки». Действие отправится только после вашего подтверждения.
+                </p>
+                {approveReq && (() => {
+                  const s = selOf(approveReq)
+                  const d = driverById(s.driverId)
+                  const t = truckById(s.truckId)
+                  const z = s.trailerId && s.trailerId !== 'none' ? trailerById(s.trailerId) : undefined
+                  return (
+                    <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800">
+                      <div className="flex gap-2">
+                        <span className="w-20 shrink-0 text-muted-foreground">Водитель:</span>
+                        <span className="font-semibold text-slate-900">{d?.fullName ?? '—'}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="w-20 shrink-0 text-muted-foreground">Тягач:</span>
+                        <span className="font-semibold text-slate-900">{t ? `${t.brand} · ${t.plate}` : '—'}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <span className="w-20 shrink-0 text-muted-foreground">Прицеп:</span>
+                        <span className="font-semibold text-slate-900">{z ? `${z.plate} · ${z.type}` : 'Без прицепа'}</span>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy !== null}>Назад</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy !== null}
+              onClick={(e) => {
+                e.preventDefault()
+                const r = approveReq
+                setApproveReq(null)
+                if (r) void approve(r)
+              }}
+            >
+              Да, утвердить
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {isAgent && carrier === null && requests !== null && (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center" role="status">

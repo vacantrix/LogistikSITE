@@ -1003,12 +1003,15 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                               <div className="flex flex-col items-start gap-1">
                                 <span className="font-semibold text-blue-700">{r.number}</span>
                                 {my && (
+                                  /* «Ваша ставка» — иконка + стоимость перевозки; цена обновляется
+                                     динамически (анимация стрелки при смене значения, Task 53) */
                                   <span
-                                    className="inline-flex items-center text-sky-700"
+                                    className="inline-flex items-center gap-1 whitespace-nowrap text-sky-700"
                                     title={`Ваша ставка: ${rate(my.amount)}`}
                                     aria-label={`Ваша ставка: ${rate(my.amount)}`}
                                   >
-                                    <HandCoins className="h-3.5 w-3.5" aria-hidden />
+                                    <HandCoins className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                    <AnimatedRate value={my.amount} format={rate} className="text-xs font-semibold tabular-nums" />
                                   </span>
                                 )}
                               </div>

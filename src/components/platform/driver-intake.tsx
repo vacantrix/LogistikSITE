@@ -1,13 +1,15 @@
 'use client'
 
 /**
- * Карточки пополнения базы для «Подать документов» (Task 29/30/32/33/35/48/51).
+ * Карточки пополнения базы для «Подать документов» (Task 29/30/32/33/35/48/51/53).
  *
  * DriverLine (по умолчанию) — карточка водителя: ТОЛЬКО данные водителя (Task 51,
  * по просьбе пользователя: при «Добавить водителя» открывается плашка именно с
- * данными водителя, без техники) — 12 полей + 3 фото (паспорт, регистрация, ВУ).
+ * данными водителя, без техники) — 12 полей + 2 фото (паспорт и регистрация;
+ * Task 53 — фото ВУ убрано по просьбе пользователя).
  * TruckLine / TrailerLine — одиночные карточки «Добавить ТС» / «Добавить прицеп»
- * (Task 48): когда нужно пополнить базу только техникой — 5 полей вручную, без фото;
+ * (Task 48): когда нужно пополнить базу только техникой — 5 полей + 2 фото
+ * (сама техника и СТС; Task 53 — фото добавляются файлом или вставкой Ctrl+V);
  * принимают данные из Excel-строки (Task 51).
  *
  * При старте ничего не горит красным, кнопка «Проверить» чёрная и всегда активна;
@@ -15,7 +17,7 @@
  * и слоты фото. Когда всё заполнено, кнопка карточки водителя запускает нейросеть:
  * она читает фото, заполняет ТОЛЬКО пустые поля, сверяет данные между документами
  * и сама допускает карточку в базу аккаунта (идемпотентно, по ФИО+ВУ)
- * или отклоняет. Одиночные карточки допускаются сразу после валидации полей.
+ * или отклоняет. Одиночные карточки допускаются сразу после валидации полей и фото.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
@@ -54,8 +56,10 @@ export type TruckDraft = { brand: string; plate: string; sts: string; color: str
 export type TrailerDraft = { type: string; plate: string; sts: string; color: string; owner: string }
 
 type Upload = { fileName: string; dataUri: string }
-/** Фото только водительских документов: СТС относится к технике и живёт в карточках ТС/прицепа (Task 51) */
-const DRIVER_DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE']
+/** Фото только водительских документов: паспорт и регистрация.
+ * Task 53 — фото водительского удостоверения убрано из карточки по просьбе пользователя,
+ * данные ВУ (номер, срок, категории) заполняются вручную */
+const DRIVER_DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG']
 
 const EMPTY_UPLOADS: Partial<Record<DocType, Upload>> = {}
 const EMPTY_VERDICTS: Partial<Record<DocType, IntakeResult['documents'][number]>> = {}
@@ -435,10 +439,10 @@ export default function DriverLine({
         </div>
       </div>
 
-      {/* ——— фотографии водительских документов: паспорт, регистрация, ВУ (Task 51) ——— */}
+      {/* ——— фотографии водительских документов: паспорт и регистрация (Task 51/53) ——— */}
       <div className="mt-3">
         <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Фотографии документов</div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {DRIVER_DOC_TYPES.map((type) => {
             const up = uploads[type]
             const v = verdicts[type]
@@ -602,11 +606,146 @@ function SoloAdmitted({ title, label, kind, onRemove }: { title: string; label: 
   )
 }
 
+// ——— Фотографии одиночных карточек «ТС»/«Прицеп» (Task 53): загрузка файлом
+// или вставка из буфера обмена (Ctrl+V). Слоты обязательны и подсвечиваются
+// только после «Проверить» — ровно как поля. ———
+
+const SOLO_PHOTO_KEYS = ['vehicle', 'sts'] as const
+type SoloPhotoKey = (typeof SOLO_PHOTO_KEYS)[number]
+type SoloPhoto = { fileName: string; dataUri: string }
+type SoloPhotoState = Record<SoloPhotoKey, SoloPhoto | null>
+const EMPTY_SOLO_PHOTOS: SoloPhotoState = { vehicle: null, sts: null }
+
+const TRUCK_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото тягача', sts: 'Фото СТС тягача' }
+const TRAILER_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото прицепа', sts: 'Фото СТС прицепа' }
+
+/** Состояние фото одиночной карточки + вставка скриншота из буфера обмена (общее для ТС и прицепа) */
+function useSoloPhotos(
+  labels: Record<SoloPhotoKey, string>,
+  admitted: boolean,
+  toast: ReturnType<typeof useToast>['toast'],
+) {
+  const [photos, setPhotos] = useState<SoloPhotoState>(EMPTY_SOLO_PHOTOS)
+  const photosRef = useRef(photos)
+  useEffect(() => {
+    photosRef.current = photos
+  })
+
+  /** выбор файла в слоте (клик по плашке или «Заменить») */
+  const pick = useCallback(async (k: SoloPhotoKey, file: File) => {
+    try {
+      const dataUri = await fileToCompressedDataUri(file)
+      setPhotos((cur) => ({ ...cur, [k]: { fileName: file.name, dataUri } }))
+    } catch {
+      toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' })
+    }
+  }, [toast])
+
+  const remove = useCallback((k: SoloPhotoKey) => {
+    setPhotos((cur) => ({ ...cur, [k]: null }))
+  }, [])
+
+  // вставка изображения из буфера обмена (Ctrl+V): картинка занимает первый свободный слот
+  useEffect(() => {
+    if (admitted) return
+    const onPaste = (e: ClipboardEvent) => {
+      const imgs = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+      if (imgs.length === 0) return
+      e.preventDefault()
+      void (async () => {
+        for (const file of imgs) {
+          const key = SOLO_PHOTO_KEYS.find((k) => !photosRef.current[k])
+          if (!key) {
+            toast({ title: 'Все слоты фото уже заняты', description: 'Замените или уберите фото, чтобы вставить новое' })
+            return
+          }
+          try {
+            const dataUri = await fileToCompressedDataUri(file)
+            if (photosRef.current[key]) continue // слот заняли, пока изображение сжималось
+            const up = { fileName: file.name || 'Вставленное фото', dataUri }
+            photosRef.current = { ...photosRef.current, [key]: up }
+            setPhotos(photosRef.current)
+            toast({ title: 'Фото вставлено из буфера', description: labels[key] })
+          } catch {
+            toast({ title: 'Ошибка', description: 'Не удалось прочитать изображение из буфера обмена', variant: 'destructive' })
+          }
+        }
+      })()
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [admitted, labels, toast])
+
+  return { photos, pick, remove }
+}
+
+/** Слоты фото одиночной карточки: до загрузки — пунктирная плашка, после — превью */
+function SoloPhotos({
+  photos, labels, showMiss, lock, onPick, onRemove,
+}: {
+  photos: SoloPhotoState
+  labels: Record<SoloPhotoKey, string>
+  /** подсветка незаполненного — включается только после «Проверить» */
+  showMiss: boolean
+  lock: boolean
+  onPick: (k: SoloPhotoKey, file: File) => void
+  onRemove: (k: SoloPhotoKey) => void
+}) {
+  return (
+    <div className="mt-3">
+      <div className="mb-1.5 text-xs font-semibold text-muted-foreground">
+        Фотографии — загрузите файлом или вставьте скриншот (Ctrl+V)
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {SOLO_PHOTO_KEYS.map((k) => {
+          const up = photos[k]
+          const photoMiss = showMiss && !up
+          return (
+            <div key={k} className={`rounded-lg border p-2 ${up ? 'border-slate-200 bg-slate-50/40' : photoMiss ? 'border-dashed border-red-400 bg-red-50/40' : 'border-dashed border-slate-300 bg-slate-50/40'}`}>
+              <div className="flex items-center justify-between gap-1">
+                <span className={`truncate text-[11px] font-semibold ${photoMiss ? 'text-red-600' : 'text-slate-700'}`}>
+                  {labels[k]}
+                  {photoMiss && <span aria-hidden> — добавьте фото</span>}
+                </span>
+              </div>
+              {up ? (
+                <>
+                  <img src={up.dataUri} alt={`Фото: ${labels[k]}`} className="mt-1.5 h-16 w-full rounded border border-slate-200 bg-white object-contain" />
+                  <div className="mt-1 flex items-center justify-between gap-1">
+                    <span className="truncate text-[10px] text-muted-foreground" title={up.fileName}>{up.fileName}</span>
+                    {!lock && (
+                      <>
+                        <label className="cursor-pointer text-[10px] font-medium text-blue-700 hover:underline">
+                          Заменить
+                          <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(k, f) }} />
+                        </label>
+                        <button type="button" className="text-[10px] text-slate-400 hover:text-red-600" aria-label={`Убрать ${labels[k]}`} onClick={() => onRemove(k)}>
+                          <X className="h-3 w-3" aria-hidden />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <label className={`mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/60 text-center ${photoMiss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-blue-400'}`}>
+                  <span className={`text-[10px] font-medium ${photoMiss ? 'text-red-600' : 'text-blue-700'}`}>Загрузить фото</span>
+                  <span className="px-1 text-[9px] leading-tight text-muted-foreground">JPG/PNG или вставить Ctrl+V</span>
+                  <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(k, f) }} />
+                </label>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /**
  * Одиночная карточка «Добавить ТС» — пополняет базу одним тягачом, без водителя
- * и прицепа. Все 5 полей обязательны: подсветка незаполненного появляется только
- * после «Проверить» и гаснет при заполнении. Фотографии не требуются — данные
- * вводятся вручную, допуск сразу после валидации (идемпотентно по госномеру).
+ * и прицепа. Все 5 полей и 2 фото (Task 53 — загрузка файлом или вставка Ctrl+V)
+ * обязательны: подсветка незаполненного появляется только после «Проверить»
+ * и гаснет при заполнении. Допуск после валидации (идемпотентно по госномеру).
  * Может принимать данные из Excel-строки (initial, Task 51).
  */
 export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemove }: Omit<SoloLineProps, 'initial'> & { initial?: Partial<TruckDraft> }) {
@@ -622,6 +761,8 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   const [showErrors, setShowErrors] = useState(false)
   const [checking, setChecking] = useState(false)
   const [admitted, setAdmitted] = useState<string | null>(null)
+  // фото ТС (Task 53): файл или Ctrl+V — оба слота обязательны
+  const { photos, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRUCK_PHOTO_LABELS, admitted !== null, toast)
 
   const setField = useCallback((k: keyof TruckDraft, v: string) => setT((cur) => ({ ...cur, [k]: v })), [])
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
@@ -632,16 +773,17 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     if (admitted) return true
     if (checking) return false
 
-    // ——— валидация «все поля обязательны»: подсветка появляется только здесь ———
+    // ——— валидация «все поля и фото обязательны»: подсветка появляется только здесь ———
     setShowErrors(true)
     const missing = (Object.keys(TRUCK_LABELS) as (keyof TruckDraft)[]).filter((k) => t[k].trim() === '')
-    if (missing.length > 0) {
+    const missingPhotos = SOLO_PHOTO_KEYS.filter((k) => !photos[k])
+    if (missing.length > 0 || missingPhotos.length > 0) {
       if (!quiet) {
-        toast({
-          title: 'Не все поля заполнены',
-          description: `Поля: ${missing.map((k) => TRUCK_LABELS[k]).join(', ')}`,
-          variant: 'destructive',
-        })
+        const parts = [
+          missing.length > 0 ? `Поля: ${missing.map((k) => TRUCK_LABELS[k]).join(', ')}` : null,
+          missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRUCK_PHOTO_LABELS[k]).join(', ')}` : null,
+        ].filter(Boolean)
+        toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
       }
       return false
     }
@@ -670,7 +812,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     } finally {
       setChecking(false)
     }
-  }, [admitted, checking, t, carrierId, toast])
+  }, [admitted, checking, t, photos, carrierId, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -710,6 +852,15 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
             onChange={setField}
             className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5"
           />
+          {/* фото ТС и СТС — загрузка файлом или вставка Ctrl+V (Task 53) */}
+          <SoloPhotos
+            photos={photos}
+            labels={TRUCK_PHOTO_LABELS}
+            showMiss={showErrors}
+            lock={lock}
+            onPick={(k, f) => void pickPhoto(k, f)}
+            onRemove={removePhoto}
+          />
         </div>
       )}
     </section>
@@ -718,9 +869,9 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
 
 /**
  * Одиночная карточка «Добавить прицеп» — пополняет базу одним прицепом, без
- * водителя и тягача. Все 5 полей (тип — Select) обязательны: подсветка только
- * после «Проверить». Фотографии не требуются, допуск сразу после валидации.
- * Может принимать данные из Excel-строки (initial, Task 51).
+ * водителя и тягача. Все 5 полей (тип — Select) и 2 фото (Task 53 — загрузка
+ * файлом или вставка Ctrl+V) обязательны: подсветка только после «Проверить».
+ * Допуск после валидации. Может принимать данные из Excel-строки (initial, Task 51).
  */
 export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRemove }: Omit<SoloLineProps, 'initial'> & { initial?: Partial<TrailerDraft> }) {
   const { toast } = useToast()
@@ -735,6 +886,8 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
   const [showErrors, setShowErrors] = useState(false)
   const [checking, setChecking] = useState(false)
   const [admitted, setAdmitted] = useState<string | null>(null)
+  // фото прицепа (Task 53): файл или Ctrl+V — оба слота обязательны
+  const { photos, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRAILER_PHOTO_LABELS, admitted !== null, toast)
 
   const setField = useCallback((k: keyof TrailerDraft, v: string) => setTr((cur) => ({ ...cur, [k]: v })), [])
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
@@ -745,16 +898,17 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     if (admitted) return true
     if (checking) return false
 
-    // ——— валидация «все поля обязательны»: подсветка появляется только здесь ———
+    // ——— валидация «все поля и фото обязательны»: подсветка появляется только здесь ———
     setShowErrors(true)
     const missing = (Object.keys(TRAILER_LABELS) as (keyof TrailerDraft)[]).filter((k) => tr[k].trim() === '')
-    if (missing.length > 0) {
+    const missingPhotos = SOLO_PHOTO_KEYS.filter((k) => !photos[k])
+    if (missing.length > 0 || missingPhotos.length > 0) {
       if (!quiet) {
-        toast({
-          title: 'Не все поля заполнены',
-          description: `Поля: ${missing.map((k) => TRAILER_LABELS[k]).join(', ')}`,
-          variant: 'destructive',
-        })
+        const parts = [
+          missing.length > 0 ? `Поля: ${missing.map((k) => TRAILER_LABELS[k]).join(', ')}` : null,
+          missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRAILER_PHOTO_LABELS[k]).join(', ')}` : null,
+        ].filter(Boolean)
+        toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
       }
       return false
     }
@@ -783,7 +937,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     } finally {
       setChecking(false)
     }
-  }, [admitted, checking, tr, carrierId, toast])
+  }, [admitted, checking, tr, photos, carrierId, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -823,6 +977,15 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
             lock={lock}
             onChange={setField}
             className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5"
+          />
+          {/* фото прицепа и СТС — загрузка файлом или вставка Ctrl+V (Task 53) */}
+          <SoloPhotos
+            photos={photos}
+            labels={TRAILER_PHOTO_LABELS}
+            showMiss={showErrors}
+            lock={lock}
+            onPick={(k, f) => void pickPhoto(k, f)}
+            onRemove={removePhoto}
           />
         </div>
       )}

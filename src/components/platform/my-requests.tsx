@@ -125,13 +125,6 @@ function agentLine(r: RequestDTO, myBid: BidDTO | null): { text: string; cls: st
   }
 }
 
-/** Цвет процента уверенности распознавания */
-function confClass(c: number): string {
-  if (c >= 0.95) return 'text-emerald-600'
-  if (c >= 0.6) return 'text-blue-600'
-  return 'text-amber-600'
-}
-
 /** Цвет списка замечаний по статусу документа */
 function issueClass(status: DocStatus): string {
   if (status === 'REJECTED') return 'text-red-600'
@@ -382,7 +375,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
     try {
       const { request } = await api.verifyDocuments(r.id)
       applyRequest(request)
-      toast({ title: 'Проверка завершена', description: 'Итоги — в блоке «Результаты проверки нейросети»' })
+      toast({ title: 'Проверка завершена', description: 'Статусы и замечания — у каждого документа в комплекте' })
     } catch (e) {
       toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
     } finally {
@@ -937,11 +930,18 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         </div>
                       </div>
                       {r.deadline && (
-                        <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
-                          <Clock className="h-4 w-4 text-sky-700" aria-hidden />
-                          <span>Приём ставок до {fmtDateTime(r.deadline)}</span>
+                        /* «Приём ставок до» — заметная плашка (Task 53): фон, крупный шрифт,
+                           срочный вариант красным, когда время заканчивается */
+                        <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border px-3 py-2.5 ${tl?.urgent ? 'border-red-300 bg-red-100/80' : 'border-sky-300 bg-sky-100'}`}>
+                          <Clock className={`h-5 w-5 shrink-0 ${tl?.urgent ? 'text-red-600' : 'text-sky-700'}`} aria-hidden />
+                          <span className={`text-sm font-bold ${tl?.urgent ? 'text-red-800' : 'text-sky-900'}`}>
+                            Приём ставок до
+                          </span>
+                          <span className={`text-base font-extrabold tabular-nums ${tl?.urgent ? 'text-red-900' : 'text-slate-900'}`}>
+                            {fmtDateTime(r.deadline)}
+                          </span>
                           {tl && (
-                            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold tabular-nums ${tl.urgent ? 'border-red-200 bg-red-50 text-red-700' : 'border-sky-200 bg-white text-sky-800'}`}>
+                            <span className={`ml-auto rounded-full border bg-white px-2.5 py-0.5 text-xs font-bold tabular-nums ${tl.urgent ? 'border-red-300 text-red-700' : 'border-sky-300 text-sky-800'}`}>
                               {tl.text}
                             </span>
                           )}
@@ -1103,73 +1103,6 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
                       {/* c) Демо-кнопки */}
                       {demoButtons}
-                    </div>
-                  )}
-
-                  {/* ——— Результаты проверки нейросети ——— */}
-                  {r.documents.length > 0 && (
-                    <div className="rounded-xl border border-slate-200 p-4">
-                      <h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <Sparkles className="h-4 w-4 text-blue-600" aria-hidden />
-                        Результаты проверки нейросети
-                      </h4>
-                      <div className="space-y-3">
-                        {r.documents.map((doc) => (
-                          <div key={doc.id} className="rounded-lg border border-slate-200 bg-white p-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-semibold text-slate-900">{DOC_TYPE_LABEL[doc.type]}</span>
-                              <DocStatusBadge status={doc.status} />
-                              {doc.engine && (
-                                <Badge variant="outline" className="border-slate-200 text-[11px] font-normal text-slate-500">
-                                  движок: {doc.engine}
-                                </Badge>
-                              )}
-                              {doc.quality != null && (
-                                <span className="text-xs text-muted-foreground">качество фото: {doc.quality}</span>
-                              )}
-                            </div>
-                            {doc.message && <p className="mt-1 text-xs text-slate-600">{doc.message}</p>}
-                            {doc.fields && Object.keys(doc.fields).length > 0 && (
-                              <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow>
-                                      <TableHead className="h-8 text-xs">Поле</TableHead>
-                                      <TableHead className="h-8 text-xs">С документа</TableHead>
-                                      <TableHead className="h-8 text-xs">Уверенность</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {Object.entries(doc.fields).map(([k, v]) => {
-                                      const c = doc.confidence?.[k]
-                                      return (
-                                        <TableRow key={k}>
-                                          <TableCell className="py-1.5 text-xs text-slate-600">{k}</TableCell>
-                                          <TableCell className="py-1.5 text-xs font-medium text-slate-900">{v || '—'}</TableCell>
-                                          <TableCell className="py-1.5">
-                                            {c != null ? (
-                                              <span className={`text-xs font-semibold ${confClass(c)}`}>{Math.round(c * 100)}%</span>
-                                            ) : (
-                                              <span className="text-xs text-muted-foreground">—</span>
-                                            )}
-                                          </TableCell>
-                                        </TableRow>
-                                      )
-                                    })}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                            )}
-                            {doc.issues.length > 0 && (
-                              <ul className="mt-2 space-y-0.5">
-                                {doc.issues.map((is, i) => (
-                                  <li key={i} className={`text-xs ${issueClass(doc.status)}`}>• {is}</li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   )}
 
