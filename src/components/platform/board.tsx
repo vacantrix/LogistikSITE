@@ -14,6 +14,7 @@ import {
   EyeOff,
   FileSpreadsheet,
   Gavel,
+  HandCoins,
   Handshake,
   History,
   Lock,
@@ -275,10 +276,10 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
             <TableBody>
               {sortedBids.map((b) => {
                 const isBest = minAmount != null && b.amount === minAmount
-                // свежая ставка (пришла по WebSocket меньше 20 сек назад) вспыхивает при появлении
+                // свежая ставка (пришла по WebSocket меньше 20 сек назад) помечается бейджем
                 const fresh = now !== null && Date.now() - new Date(b.createdAt).getTime() < 20_000
                 return (
-                  <TableRow key={b.id} className={`${isBest ? 'bg-emerald-50/60' : ''} ${fresh ? 'bid-row-in' : ''}`}>
+                  <TableRow key={b.id} className={isBest ? 'bg-emerald-50/60' : ''}>
                     <TableCell className="font-medium text-slate-800">
                       <span className="flex items-center gap-2">
                         {b.carrierName}
@@ -1000,9 +1001,13 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                               <div className="flex flex-col items-start gap-1">
                                 <span className="font-semibold text-blue-700">{r.number}</span>
                                 {my && (
-                                  <Badge variant="outline" className="whitespace-nowrap border-sky-200 bg-sky-100 text-[10px] text-sky-800">
-                                    Ваша ставка: {rate(my.amount)}
-                                  </Badge>
+                                  <span
+                                    className="inline-flex items-center text-sky-700"
+                                    title={`Ваша ставка: ${rate(my.amount)}`}
+                                    aria-label={`Ваша ставка: ${rate(my.amount)}`}
+                                  >
+                                    <HandCoins className="h-3.5 w-3.5" aria-hidden />
+                                  </span>
                                 )}
                               </div>
                             </td>

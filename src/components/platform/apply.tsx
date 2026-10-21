@@ -1,18 +1,19 @@
 'use client'
 
 /**
- * «Подать документы» (Task 29/30/32/33/35/48/49) — единственное место пополнения базы
- * аккаунта. Три вида карточек (Task 48): линия водителя (проформы водитель|тягач|
- * прицеп в одну строку, фотографии ниже линии), одиночное ТС и одиночный прицеп —
- * когда нужно добавить не всё сразу, а лишь часть. Раздел стартует ПУСТЫМ (Task 49):
- * никаких линий по умолчанию — пользователь сам добавляет только то, что нужно,
- * кнопками «Добавить водителя», «Добавить ТС», «Добавить прицеп».
- * Excel из одной таблицы создаёт линии водителей с подставленными данными,
- * ничего не записывая в базу. Кнопка «Проверить все» последовательно прогоняет
- * ВСЕ карточки: сначала проверяет обязательные поля (незаполненное подсвечивается
- * красным), затем для линий водителей нейросеть читает фото, заполняет пустые
- * поля и сама допускает карточки в базу (или отклоняет с причинами); одиночные
- * ТС/прицепы допускаются сразу после валидации полей.
+ * «Подать документы» (Task 29/30/32/33/35/48/49/51) — единственное место пополнения базы
+ * аккаунта. Три вида карточек (Task 48; Task 51 — водительская карточка содержит ТОЛЬКО
+ * данные водителя): линия водителя (12 полей + 3 фото, нейропроверка), одиночное ТС и
+ * одиночный прицеп — когда нужно добавить не всё сразу, а лишь часть. Раздел стартует
+ * ПУСТЫМ (Task 49): никаких карточек по умолчанию — пользователь сам добавляет только
+ * то, что нужно, кнопками «Добавить водителя», «Добавить ТС», «Добавить прицеп».
+ * Excel из одной таблицы создаёт раздельные карточки (Task 51): строки с ФИО — карточки
+ * водителей; тягачи/прицепы из тех же строк — отдельные карточки ТС/прицепов, ничего
+ * не записывая в базу. Кнопка «Проверить все» последовательно прогоняет ВСЕ карточки:
+ * сначала проверяет обязательные поля (незаполненное подсвечивается красным), затем
+ * для водителей нейросеть читает фото, заполняет пустые поля и сама допускает карточку
+ * в базу (или отклоняет с причинами); одиночные ТС/прицепы допускаются сразу после
+ * валидации полей.
  */
 import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -26,11 +27,12 @@ import { Card, CardContent } from '@/components/ui/card'
 import { SectionHeader, type TabProps } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import DriverLine, {
-  TrailerLine, TruckLine, TRAILER_TYPES, type DriverLineInitial,
+  TrailerLine, TruckLine, TRAILER_TYPES, type DriverLineInitial, type TrailerDraft, type TruckDraft,
 } from '@/components/platform/driver-intake'
 
 type LineState = { id: string; initial?: DriverLineInitial; fromExcel: boolean }
-type SoloState = { id: string }
+type TruckSoloState = { id: string; initial?: Partial<TruckDraft> }
+type TrailerSoloState = { id: string; initial?: Partial<TrailerDraft> }
 
 let lineSeq = 0
 const newLineId = () => {
@@ -122,8 +124,8 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
 
   // старт — пустой: только 3 кнопки, пользователь добавляет лишь то, что нужно (Task 49)
   const [lines, setLines] = useState<LineState[]>([])
-  const [trucks, setTrucks] = useState<SoloState[]>([])
-  const [trailers, setTrailers] = useState<SoloState[]>([])
+  const [trucks, setTrucks] = useState<TruckSoloState[]>([])
+  const [trailers, setTrailers] = useState<TrailerSoloState[]>([])
   const [checkingAll, setCheckingAll] = useState(false)
   const [excelName, setExcelName] = useState<string | null>(null)
 
@@ -195,7 +197,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
     XLSX.writeFile(wb, 'shablon-profekt.xlsx')
   }
 
-  /** Excel → линии: данные подставляются, в базу ничего не пишется */
+  /** Excel → карточки: строки с ФИО — водители; техника из строки — отдельные карточки ТС/прицепов (Task 51) */
   const handleExcel = async (file: File) => {
     try {
       const wb = XLSX.read(await file.arrayBuffer())
@@ -211,10 +213,24 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
         const created = parsed.map((initial) => ({ id: newLineId(), initial, fromExcel: true }))
         return [...kept, ...created]
       })
+      // техника из тех же строк — отдельными карточками (Task 51)
+      const newTrucks: TruckSoloState[] = parsed
+        .filter((p) => p.truck)
+        .map((p) => ({ id: newLineId(), initial: p.truck }))
+      const newTrailers: TrailerSoloState[] = parsed
+        .filter((p) => p.trailer)
+        .map((p) => ({ id: newLineId(), initial: p.trailer }))
+      if (newTrucks.length > 0) setTrucks((cur) => [...cur, ...newTrucks])
+      if (newTrailers.length > 0) setTrailers((cur) => [...cur, ...newTrailers])
       setExcelName(file.name)
+      const parts = [
+        `водители: ${parsed.length}`,
+        newTrucks.length > 0 ? `ТС: ${newTrucks.length}` : null,
+        newTrailers.length > 0 ? `прицепы: ${newTrailers.length}` : null,
+      ].filter(Boolean)
       toast({
-        title: `Создано линий проформ: ${parsed.length}`,
-        description: 'Данные подставлены, в базу ничего не записано. Осталось выбрать фотографии и нажать «Проверить»',
+        title: `Создано карточек: ${parsed.length + newTrucks.length + newTrailers.length}`,
+        description: `${parts.join(' · ')}. Данные подставлены, в базу ничего не записано — проверьте и допустите карточки`,
       })
     } catch {
       toast({ title: 'Не удалось прочитать Excel', description: 'Скачайте шаблон и заполните его по образцу', variant: 'destructive' })
@@ -304,6 +320,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               id={truck.id}
               index={i}
               carrierId={activeCarrierId ?? ''}
+              initial={truck.initial}
               registerCheck={registerCheck}
               onRemove={removeTruck}
             />
@@ -314,11 +331,12 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               id={trailer.id}
               index={i}
               carrierId={activeCarrierId ?? ''}
+              initial={trailer.initial}
               registerCheck={registerCheck}
               onRemove={removeTrailer}
             />
           ))}
-          {/* три кнопки добавления: водитель целиком (с фото и нейросетью)
+          {/* три кнопки добавления: водитель — только его данные (Task 51);
               либо только техника — без водителя (Task 48) */}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <button
@@ -357,7 +375,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                 Загрузить из Excel
               </div>
               <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                Одна таблица — водитель, тягач и прицеп. Строки станут линиями с подставленными данными.
+                Одна таблица — водитель, тягач и прицеп. Из строк создаются отдельные карточки: водители, ТС и прицепы (Task 51).
               </p>
               <div className="mt-3 space-y-2">
                 <Button variant="outline" className="w-full gap-1.5" onClick={downloadTemplate}>

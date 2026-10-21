@@ -719,7 +719,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       <span className="mt-1 flex items-center justify-between gap-2 text-xs">
                         <span className="truncate text-slate-500">{m.cargo}, {m.tonnage} т</span>
                         <span className="shrink-0 font-semibold text-slate-900">
-                          {m.status === 'PUBLISHED' ? rate(myBidOf(m)?.amount ?? m.bestRate) : rate(m.bestRate)}
+                          <AnimatedRate value={m.status === 'PUBLISHED' ? (myBidOf(m)?.amount ?? m.bestRate) : m.bestRate} format={rate} />
                         </span>
                       </span>
                       <span className="mt-1 block truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
@@ -752,7 +752,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     <div className="flex flex-col items-end gap-2">
                       <div className="text-right">
                         <div className="text-xs text-muted-foreground">{bidding ? 'Ваша ставка' : lost ? 'Ставка победителя' : 'Итоговая ставка'}</div>
-                        <div className="text-lg font-bold text-slate-900">{bidding ? rate(myBid?.amount) : rate(r.bestRate)}</div>
+                        <div className="text-lg font-bold text-slate-900">
+                          <AnimatedRate value={bidding ? (myBid?.amount ?? null) : r.bestRate} format={rate} />
+                        </div>
                         {lost && myBid && (
                           <div className="whitespace-nowrap text-xs text-slate-500">ваша ставка: {rate(myBid.amount)}</div>
                         )}
@@ -776,7 +778,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div className="rounded-lg border border-sky-200 bg-white px-3 py-2">
                           <div className="text-xs text-muted-foreground">Моя ставка</div>
-                          <div className="text-base font-bold tabular-nums text-sky-800">{rate(myBid?.amount)}</div>
+                          <div className="text-base font-bold tabular-nums text-sky-800">
+                            <AnimatedRate value={myBid?.amount ?? null} format={rate} />
+                          </div>
                         </div>
                         <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <div className="text-xs text-muted-foreground">{r.mode === 'CLOSED' ? 'Ставки конкурентов' : 'Лучшая сейчас'}</div>
