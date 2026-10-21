@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Pencil,
   Plus,
+  Search,
   Truck,
   User,
   Users,
@@ -40,7 +41,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { expiryInfo, rowTint, type ExpiryState } from '@/lib/expiry'
+import { expiryInfo, rowTint, worseState, type ExpiryState } from '@/lib/expiry'
 import type { CargoTypeDTO, CarrierDTO, DriverDTO, TrailerDTO, TruckDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
@@ -125,6 +126,50 @@ function AccessBadge({ access }: { access: boolean }) {
 const fmtCreated = (iso: string): string =>
   new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 
+/** Панель фильтров справочника: текстовый поиск + (для парка) срок документов */
+function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count }: {
+  query: string
+  onQuery: (v: string) => void
+  expiry: 'all' | 'soon' | 'expired'
+  onExpiry: (v: 'all' | 'soon' | 'expired') => void
+  withExpiry: boolean
+  count?: string
+}) {
+  const active = query.trim() !== '' || expiry !== 'all'
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+        <Input
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder="Поиск по справочнику…"
+          className="h-9 pl-8"
+          aria-label="Поиск по справочнику"
+        />
+      </div>
+      {withExpiry && (
+        <Select value={expiry} onValueChange={(v) => onExpiry(v as 'all' | 'soon' | 'expired')}>
+          <SelectTrigger className="h-9 w-[200px]" aria-label="Фильтр по сроку документов">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все сроки документов</SelectItem>
+            <SelectItem value="soon">Истекает (90 дней)</SelectItem>
+            <SelectItem value="expired">Истёкшие документы</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+      {active && (
+        <Button size="sm" variant="ghost" className="h-9" onClick={() => { onQuery(''); onExpiry('all') }}>
+          Сбросить
+        </Button>
+      )}
+      {count && <div className="ml-auto text-xs text-slate-500">{count}</div>}
+    </div>
+  )
+}
+
 export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: TabProps) {
   const { toast } = useToast()
   const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
@@ -136,6 +181,9 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const isLogist = role === 'logist'
+  // ——— фильтры справочника: текстовый поиск + срок документов ———
+  const [dirQuery, setDirQuery] = useState('')
+  const [dirExpiry, setDirExpiry] = useState<'all' | 'soon' | 'expired'>('all')
 
   // перевозчику доступен только его собственный парк — данные конкурентов скрыты
   const visibleCarriers = useMemo(
@@ -156,17 +204,50 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
 
   useEffect(() => { void load() }, [load])
 
+  // —— фильтрация справочника ——
+  const dirQ = dirQuery.trim().toLowerCase()
+  const dirByQuery = useCallback(
+    (...fields: (string | null | undefined)[]) =>
+      !dirQ || fields.some((f) => (f ?? '').toLowerCase().includes(dirQ)),
+    [dirQ],
+  )
+  const dirByExpiry = useCallback(
+    (dates: (string | null | undefined)[]) => {
+      if (dirExpiry === 'all') return true
+      const worst = dates.reduce<ExpiryState>((acc, d) => worseState(acc, expiryInfo(d).state), 'none')
+      return dirExpiry === 'expired' ? worst === 'expired' : worst === 'soon' || worst === 'warn'
+    },
+    [dirExpiry],
+  )
+
+  const carriersFiltered = useMemo(
+    () => (carriers ?? []).filter((c) => dirByQuery(c.name, c.inn, c.contractNo)),
+    [carriers, dirByQuery],
+  )
   const driversFlat = useMemo(
-    () => visibleCarriers.flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name }))),
-    [visibleCarriers],
+    () => visibleCarriers
+      .flatMap((c) => c.drivers.map((d) => ({ d, carrierName: c.name })))
+      .filter(({ d }) => dirByQuery(d.fullName, d.passport, d.license, d.phone) && dirByExpiry([d.licenseTill, d.medTill])),
+    [visibleCarriers, dirByQuery, dirByExpiry],
   )
+  const driversTotal = useMemo(() => visibleCarriers.reduce((n, c) => n + c.drivers.length, 0), [visibleCarriers])
   const trucksFlat = useMemo(
-    () => visibleCarriers.flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name }))),
-    [visibleCarriers],
+    () => visibleCarriers
+      .flatMap((c) => c.trucks.map((t) => ({ t, carrierName: c.name })))
+      .filter(({ t }) => dirByQuery(t.brand, t.plate, t.vin, t.owner) && dirByExpiry([t.techTill])),
+    [visibleCarriers, dirByQuery, dirByExpiry],
   )
+  const trucksTotal = useMemo(() => visibleCarriers.reduce((n, c) => n + c.trucks.length, 0), [visibleCarriers])
   const trailersFlat = useMemo(
-    () => visibleCarriers.flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name }))),
-    [visibleCarriers],
+    () => visibleCarriers
+      .flatMap((c) => c.trailers.map((z) => ({ z, carrierName: c.name })))
+      .filter(({ z }) => dirByQuery(z.plate, z.type, z.owner) && dirByExpiry([z.techTill])),
+    [visibleCarriers, dirByQuery, dirByExpiry],
+  )
+  const trailersTotal = useMemo(() => visibleCarriers.reduce((n, c) => n + c.trailers.length, 0), [visibleCarriers])
+  const cargoTypesFiltered = useMemo(
+    () => cargoTypes.filter((c) => dirByQuery(c.name, c.category)),
+    [cargoTypes, dirByQuery],
   )
 
   /** Что и когда истекает: все документы с плохими/близкими сроками */
@@ -360,6 +441,11 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
         <TabsContent value="carriers">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
+              <DirFilterBar
+                query={dirQuery} onQuery={setDirQuery}
+                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry={false}
+                count={`Показано: ${carriersFiltered.length} из ${(carriers ?? []).length}`}
+              />
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="text-sm text-slate-500">Записей: {(carriers ?? []).length}</div>
                 <Button size="sm" onClick={() => openAdd('carrier')}>
@@ -382,7 +468,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(carriers ?? []).map((c) => (
+                    {carriersFiltered.map((c) => (
                       <TableRow key={c.id}>
                         <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
                         <TableCell className="font-mono text-xs text-slate-600">{c.inn}</TableCell>
@@ -438,6 +524,11 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                   </Badge>
                 )}
               </div>
+              <DirFilterBar
+                query={dirQuery} onQuery={setDirQuery}
+                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry={false}
+                count={`Показано: ${cargoTypesFiltered.length} из ${cargoTypes.length}`}
+              />
               <div className={`max-h-96 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
                 <Table>
                   <TableHeader>
@@ -452,7 +543,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {cargoTypes.map((c) => (
+                    {cargoTypesFiltered.map((c) => (
                       <TableRow key={c.id}>
                         <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
                         <TableCell className="text-slate-600">{c.category}</TableCell>
@@ -505,8 +596,13 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                   </Button>
                 </div>
               )}
+              <DirFilterBar
+                query={dirQuery} onQuery={setDirQuery}
+                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
+                count={`Показано: ${driversFlat.length} из ${driversTotal}`}
+              />
               <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Записей: {driversFlat.length}</div>
+                <div className="text-sm text-slate-500">Показано: {driversFlat.length} из {driversTotal}</div>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('driver')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить вручную
@@ -549,8 +645,13 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
         <TabsContent value="trucks">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
+              <DirFilterBar
+                query={dirQuery} onQuery={setDirQuery}
+                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
+                count={`Показано: ${trucksFlat.length} из ${trucksTotal}`}
+              />
               <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Записей: {trucksFlat.length}</div>
+                <div className="text-sm text-slate-500">Показано: {trucksFlat.length} из {trucksTotal}</div>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('truck')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить тягач
@@ -591,8 +692,13 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
         <TabsContent value="trailers">
           <Card className="border-slate-200 shadow-sm">
             <CardContent className="p-4 sm:p-6">
+              <DirFilterBar
+                query={dirQuery} onQuery={setDirQuery}
+                expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
+                count={`Показано: ${trailersFlat.length} из ${trailersTotal}`}
+              />
               <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Записей: {trailersFlat.length}</div>
+                <div className="text-sm text-slate-500">Показано: {trailersFlat.length} из {trailersTotal}</div>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('trailer')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить прицеп
