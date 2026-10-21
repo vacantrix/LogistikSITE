@@ -2,10 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* config options here */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // сборка падает на ошибках типов (раньше они игнорировались — ignoreBuildErrors)
   reactStrictMode: false,
 };
 

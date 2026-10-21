@@ -1,11 +1,16 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { requireUser } from '@/lib/auth'
 import type { ReportSummary } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
 /** GET /api/reports — сводка: KPI, ставки по направлениям, экономия, история перевозчиков */
 export async function GET() {
+  // раздел в доработке (п. 23) — логика расчёта не менялась, добавлена только проверка входа
+  const auth = await requireUser('logist')
+  if (auth instanceof NextResponse) return auth
+
   const requests = await db.request.findMany({
     include: { bids: true, documents: true, winner: true },
     orderBy: { createdAt: 'desc' },

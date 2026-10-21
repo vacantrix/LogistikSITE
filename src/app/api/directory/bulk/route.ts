@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { requireUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,18 +8,22 @@ const norm = (s: string) => s.replace(/\s/g, '').toUpperCase()
 
 /**
  * POST /api/directory/bulk — массовое пополнение базы аккаунта (импорт из Excel).
- * Тело: { carrierId, drivers?: [...], trucks?: [...], trailers?: [...] }
+ * Тело: { carrierId?, drivers?: [...], trucks?: [...], trailers?: [...] }
+ * Перевозчик пополняет только свою базу (carrierId берётся из сессии), логист указывает carrierId.
  * Идемпотентно: водитель сопоставляется по номеру ВУ, ТС и прицеп — по госномеру
  * (повторный импорт обновляет существующие карточки, дублей не создаёт).
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+
   const body = await req.json().catch(() => null)
-  const { carrierId, drivers, trucks, trailers } = (body ?? {}) as {
-    carrierId?: string
+  const { drivers, trucks, trailers } = (body ?? {}) as {
     drivers?: Record<string, string>[]
     trucks?: Record<string, string>[]
     trailers?: Record<string, string>[]
   }
+  const carrierId = auth.role === 'carrier' ? auth.carrierId! : (typeof body?.carrierId === 'string' ? body.carrierId : '')
   if (!carrierId) return NextResponse.json({ error: 'Нужен carrierId' }, { status: 400 })
 
   const carrier = await db.carrier.findUnique({ where: { id: carrierId } })

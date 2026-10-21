@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { requireUser } from '@/lib/auth'
+import { notifyLive } from '@/lib/notify'
+import { applyCrew, inTx, validateCrew } from '@/lib/requests'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,98 +21,73 @@ export interface BulkAssignResult {
 }
 
 /**
- * POST /api/requests/bulk-assign — массовая подача заявок из Excel.
- * Принимает список строк { requestId, driverId, truckId, trailerId? } и вешает
- * водителя/ТС на каждый выигранный перевозчиком рейс (без документов — фото
- * прикрепляются к каждой заявке отдельно, по одному на документ).
+ * POST /api/requests/bulk-assign — массовое назначение экипажей из Excel.
+ * Принимает { rows: [{ requestId, driverId, truckId, trailerId }] } и вешает экипаж на каждый
+ * выигранный рейс. Перевозчик — только свой (из сессии); проверки те же, что при назначении
+ * по одной заявке: прицеп обязателен, сроки ВУ и техосмотра, занятость — в том числе
+ * внутри самой загрузки (один водитель не пройдёт в двух строках).
  */
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => null)
-  const carrierId = typeof body?.carrierId === 'string' ? body.carrierId : ''
-  const rows = Array.isArray(body?.rows) ? (body.rows as BulkAssignRow[]) : []
+  const auth = await requireUser('carrier')
+  if (auth instanceof NextResponse) return auth
+  const carrierId = auth.carrierId!
 
-  if (!carrierId) return NextResponse.json({ error: 'Нужен carrierId' }, { status: 400 })
+  const body = await req.json().catch(() => null)
+  const rows = Array.isArray(body?.rows) ? (body.rows as Partial<BulkAssignRow>[]) : []
   if (rows.length === 0) return NextResponse.json({ error: 'Список заявок пуст' }, { status: 400 })
   if (rows.length > 50) return NextResponse.json({ error: 'Не больше 50 заявок за одну загрузку' }, { status: 400 })
 
-  const carrier = await db.carrier.findUnique({ where: { id: carrierId } })
-  if (!carrier) return NextResponse.json({ error: 'Перевозчик не найден' }, { status: 404 })
-
-  const driverIds = new Set((await db.driver.findMany({ where: { carrierId } })).map((d) => d.id))
-  const truckIds = new Set((await db.truck.findMany({ where: { carrierId } })).map((t) => t.id))
-  const trailerIds = new Set((await db.trailer.findMany({ where: { carrierId } })).map((t) => t.id))
-
+  const taken = { drivers: new Map<string, string>(), trucks: new Map<string, string>(), trailers: new Map<string, string>() }
+  const seenRequests = new Set<string>()
   const results: BulkAssignResult[] = []
+
   for (const row of rows) {
-    if (!row?.requestId || !row?.driverId || !row?.truckId) {
-      results.push({ requestId: row?.requestId ?? '—', number: '—', ok: false, error: 'Некорректная строка' })
+    const requestId = typeof row?.requestId === 'string' ? row.requestId : ''
+    if (!requestId) {
+      results.push({ requestId: '—', number: '—', ok: false, error: 'Некорректная строка' })
       continue
     }
-    const request = await db.request.findUnique({ where: { id: row.requestId } })
-    if (!request) {
-      results.push({ requestId: row.requestId, number: '—', ok: false, error: 'Заявка не найдена' })
+    const request = await db.request.findUnique({ where: { id: requestId } })
+    if (!request || request.winnerId !== carrierId) {
+      results.push({ requestId, number: request?.number ?? '—', ok: false, error: request ? 'Рейс не закреплён за вашей компанией' : 'Заявка не найдена' })
       continue
     }
-    if (request.winnerId !== carrierId) {
-      results.push({ requestId: row.requestId, number: request.number, ok: false, error: 'Рейс не закреплён за вашей компанией' })
+    if (seenRequests.has(requestId)) {
+      results.push({ requestId, number: request.number, ok: false, error: 'Заявка встречается в загрузке повторно' })
       continue
     }
+    seenRequests.add(requestId)
     if (request.status !== 'AWARDED' && request.status !== 'DOCS_REVIEW') {
-      results.push({ requestId: row.requestId, number: request.number, ok: false, error: 'Заявка уже подана — повторная подача недоступна' })
-      continue
-    }
-    if (!driverIds.has(row.driverId)) {
-      results.push({ requestId: row.requestId, number: request.number, ok: false, error: 'Водитель не из базы аккаунта' })
-      continue
-    }
-    if (!truckIds.has(row.truckId)) {
-      results.push({ requestId: row.requestId, number: request.number, ok: false, error: 'Тягач не из базы аккаунта' })
-      continue
-    }
-    if (row.trailerId && !trailerIds.has(row.trailerId)) {
-      results.push({ requestId: row.requestId, number: request.number, ok: false, error: 'Прицеп не из базы аккаунта' })
+      results.push({ requestId, number: request.number, ok: false, error: 'Заявка уже подана — повторная подача недоступна' })
       continue
     }
 
-    // Правило занятости (Task 50): ресурс «в рейсе» назначить нельзя
-    const active = await db.request.findMany({
-      where: {
-        status: { in: ['AT_LOGIST', 'CONFIRMED'] },
-        id: { not: request.id },
-        OR: [
-          { driverId: row.driverId },
-          { truckId: row.truckId },
-          ...(row.trailerId ? [{ trailerId: row.trailerId }] : []),
-        ],
-      },
-      select: { number: true, status: true, driverId: true, truckId: true, trailerId: true },
-    })
-    const hit = active[0]
-    if (hit) {
-      const place = `— уже ${hit.status === 'CONFIRMED' ? 'в рейсе' : 'готовится к рейсу'} по заявке ${hit.number}`
-      const who = hit.driverId === row.driverId
-        ? 'Водитель'
-        : hit.truckId === row.truckId ? 'ТС' : 'Прицеп'
-      results.push({ requestId: row.requestId, number: request.number, ok: false, error: `${who} занят ${place}` })
-      continue
+    try {
+      const outcome = await inTx(async (tx) => {
+        const crew = await validateCrew(tx, request, row, taken)
+        if (typeof crew === 'string') return crew
+        await applyCrew(tx, request, crew)
+        await tx.event.create({
+          data: {
+            requestId, carrierId, type: 'DRIVER_ASSIGNED',
+            message: `Массовая подача из Excel: ${crew.driver.fullName}, ${crew.truck.brand} (${crew.truck.plate}) + ${crew.trailer.plate}`,
+          },
+        })
+        return crew
+      })
+      if (typeof outcome === 'string') {
+        results.push({ requestId, number: request.number, ok: false, error: outcome })
+        continue
+      }
+      taken.drivers.set(outcome.driver.id, request.number)
+      taken.trucks.set(outcome.truck.id, request.number)
+      taken.trailers.set(outcome.trailer.id, request.number)
+      results.push({ requestId, number: request.number, ok: true })
+      notifyLive({ type: 'DRIVER_ASSIGNED', requestId })
+    } catch (e) {
+      console.error('bulk-assign error', requestId, e)
+      results.push({ requestId, number: request.number, ok: false, error: 'Не удалось назначить — повторите' })
     }
-
-    const driver = await db.driver.findUnique({ where: { id: row.driverId } })
-    const truck = await db.truck.findUnique({ where: { id: row.truckId } })
-    const trailer = row.trailerId ? await db.trailer.findUnique({ where: { id: row.trailerId } }) : null
-
-    await db.request.update({
-      where: { id: request.id },
-      data: { driverId: row.driverId, truckId: row.truckId, trailerId: row.trailerId || null },
-    })
-    await db.event.create({
-      data: {
-        requestId: request.id,
-        type: 'DRIVER_ASSIGNED',
-        message: `Массовая подача из Excel: ${driver?.fullName ?? 'водитель'}, ${truck?.brand ?? ''} (${truck?.plate ?? ''})${trailer ? ` + ${trailer.plate}` : ''}`,
-      },
-    })
-    results.push({ requestId: row.requestId, number: request.number, ok: true })
   }
 
   const assigned = results.filter((r) => r.ok).length

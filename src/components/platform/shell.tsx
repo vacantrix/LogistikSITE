@@ -1,14 +1,13 @@
 'use client'
 
 /**
- * Оболочка платформы: тёмно-синяя шапка, селектор «Роль» и два вида платформы:
+ * Оболочка платформы: тёмно-синяя шапка с вошедшим пользователем и два вида платформы:
  *  — внутренний контур АЭМЗ (Логист 1 / Логист 2): площадка со встроенными торгами,
  *    сверка, реестр, справочники, отчёты;
  *  — кабинет перевозчика: участие в отборе рейсов, свои заявки и документы.
  */
 import type { ReactNode } from 'react'
-import { Building2, ShieldCheck, Truck, UserCog } from 'lucide-react'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Building2, LogOut, ShieldCheck, Truck, UserCog } from 'lucide-react'
 import type { RoleKind, TabKey } from '@/components/platform/common'
 
 /** Полный список разделов с пометкой ролей: L — логист, C — перевозчик.
@@ -44,26 +43,17 @@ export interface RoleSelection {
   carrierId?: string | null
 }
 
-export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children }: {
+export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
-  carriers: { id: string; name: string }[]
   role: RoleSelection
-  onRoleChange: (r: RoleSelection) => void
+  /** имя вошедшего пользователя (логист или перевозчик) */
+  userName: string
+  onLogout: () => void
   children: ReactNode
 }) {
   const isLogist = role.kind === 'logist'
   const nav = navFor(role.kind)
-  const roleValue = isLogist ? `logist:${role.logistName ?? 'Логист 1'}` : `carrier:${role.carrierId ?? ''}`
-
-  const changeRole = (v: string) => {
-    if (v.startsWith('logist:')) {
-      onRoleChange({ kind: 'logist', logistName: v.slice('logist:'.length) })
-    } else {
-      const id = v.slice('carrier:'.length)
-      onRoleChange({ kind: 'carrier', carrierId: id || carriers[0]?.id || null })
-    }
-  }
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
@@ -91,25 +81,19 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
               {isLogist ? 'Внутренний контур АЭМЗ' : 'Кабинет перевозчика'}
             </span>
             <Truck className="hidden h-4 w-4 text-blue-300 sm:block" aria-hidden />
-            <span className="hidden text-xs text-blue-200 sm:block">Роль:</span>
-            <Select value={roleValue} onValueChange={changeRole}>
-              <SelectTrigger className="h-9 w-[210px] border-white/20 bg-white/10 text-white [&>svg]:text-blue-200 sm:w-[250px]" aria-label="Выбор роли">
-                <SelectValue placeholder="Выберите роль" />
-              </SelectTrigger>
-              <SelectContent>
-                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400" aria-hidden>
-                  Внутренний контур АЭМЗ
-                </div>
-                <SelectItem value="logist:Логист 1">Логист 1</SelectItem>
-                <SelectItem value="logist:Логист 2">Логист 2</SelectItem>
-                <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400" aria-hidden>
-                  Перевозчики
-                </div>
-                {carriers.map((c) => (
-                  <SelectItem key={c.id} value={`carrier:${c.id}`}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* роль задаётся учётной записью: переключателя ролей больше нет */}
+            <span className="max-w-[220px] truncate text-sm font-medium text-white sm:max-w-[280px]" title={userName}>
+              {userName}
+            </span>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex h-9 items-center gap-1.5 rounded-md border border-white/20 bg-white/10 px-3 text-xs font-semibold text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
+              aria-label="Выйти из платформы"
+            >
+              <LogOut className="h-4 w-4" aria-hidden />
+              Выйти
+            </button>
           </div>
         </div>
         <nav aria-label="Разделы платформы" className="border-t border-white/10">
@@ -138,7 +122,7 @@ export function Shell({ tab, onNavigate, carriers, role, onRoleChange, children 
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs">
           <div>АЭМЗ · Отдел логистики</div>
           <div className="text-blue-300">
-            {isLogist ? role.logistName ?? 'Логист' : 'Кабинет перевозчика'}
+            {isLogist ? userName : 'Кабинет перевозчика'}
           </div>
         </div>
       </footer>

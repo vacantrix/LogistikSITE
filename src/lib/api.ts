@@ -1,21 +1,28 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TrailerDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
 } from '@/lib/types'
+
+/** Событие окна: сервер ответил 401 — сессия истекла, страница показывает экран входа */
+export const UNAUTHORIZED_EVENT = 'aemz:unauthorized'
 
 async function json<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}))
+  if (res.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
   if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка запроса (${res.status})`)
   return data as T
 }
 
 export const api = {
+  me: () => fetch('/api/auth/me', { cache: 'no-store' }).then(json<{ user: SessionUserDTO }>),
+  logout: () => fetch('/api/auth/logout', { method: 'POST' }).then(json<{ ok: boolean }>),
+
   listRequests: (params?: { status?: string; mode?: string; q?: string }) => {
     const qs = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][])
     return fetch(`/api/requests${qs.toString() ? `?${qs}` : ''}`, { cache: 'no-store' }).then(json<{ requests: RequestDTO[] }>)
   },
   getRequest: (id: string) => fetch(`/api/requests/${id}`, { cache: 'no-store' }).then(json<{ request: RequestDTO }>),
-  createRequest: (body: Partial<RequestDTO>) =>
+  createRequest: (body: Partial<RequestDTO> & { deadlineHours?: number }) =>
     fetch('/api/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ request: RequestDTO }>),
   action: (id: string, action: string, payload: Record<string, unknown> = {}) =>
     fetch(`/api/requests/${id}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...payload }) }).then(json<{ request: RequestDTO }>),
@@ -33,7 +40,7 @@ export const api = {
     fetch('/api/documents/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ verdict: IntakeDocVerdict }>),
 
   /** Массовая подача заявок из Excel: назначение водителя/ТС на список выигранных рейсов */
-  bulkAssign: (body: { carrierId: string; rows: { requestId: string; driverId: string; truckId: string; trailerId?: string }[] }) =>
+  bulkAssign: (body: { rows: { requestId: string; driverId: string; truckId: string; trailerId?: string }[] }) =>
     fetch('/api/requests/bulk-assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ assigned: number; total: number; results: { requestId: string; number: string; ok: boolean; error?: string }[] }>),
 
   directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[]; cargoTypes: CargoTypeDTO[] }>),

@@ -1,42 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { requireUser } from '@/lib/auth'
 import { analyzeIntakeDoc, buildIntakeDraft } from '@/lib/verify'
 import type { DocType, VerifyVerdict } from '@/lib/verify'
 import type { IntakeDocVerdict, IntakeResult } from '@/lib/types'
+import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
 
+const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+
 /**
- * POST /api/drivers/intake — добавление водителя сразу с нейросетью.
+ * POST /api/drivers/intake — добавление водителя с распознаванием документов.
  * Принимает загруженные документы (паспорт, опционально регистрацию и СТС),
  * распознаёт их и возвращает черновик карточки водителя:
  * поля, уверенность по каждому полю, перекрёстные сверки и вердикты по документам.
  * Task 53: фото ВУ больше не требуется — данные ВУ агент заполняет вручную.
  */
 export async function POST(req: NextRequest) {
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+
   const body = await req.json().catch(() => null)
   const docs = (body?.docs ?? {}) as Partial<Record<DocType, { fileName?: string; dataUri?: string }>>
-  const provided = (Object.keys(docs) as DocType[]).filter((t) => docs[t]?.dataUri)
+  const provided = (Object.keys(docs) as DocType[]).filter((t) => DOC_TYPES.includes(t) && docs[t]?.dataUri)
 
   if (!provided.includes('PASSPORT_PHOTO')) {
-    return NextResponse.json(
-      { error: 'Для распознавания нужен паспорт (страница с фото)' },
-      { status: 400 },
-    )
+    return NextResponse.json({ error: 'Для распознавания нужен паспорт (страница с фото)' }, { status: 400 })
+  }
+  for (const t of provided) {
+    const err = imageDataUriError(docs[t]!.dataUri)
+    if (err) return NextResponse.json({ error: err }, { status: 400 })
   }
 
-  const settingsRow = await db.setting.findUnique({ where: { id: 'main' } })
-  const settings = {
-    confReupload: settingsRow?.confReupload ?? 0.6,
-    confAuto: settingsRow?.confAuto ?? 0.95,
-    minQuality: settingsRow?.minQuality ?? 60,
-  }
-
+  const settings = await loadVerifySettings()
   const pairs = await Promise.all(
     provided.map(async (t) => {
       const doc = docs[t]!
-      const verdict = await analyzeIntakeDoc(doc.fileName ?? '', t, doc.dataUri!, settings)
+      const verdict = await analyzeIntakeDoc(String(doc.fileName ?? '').slice(0, 200), t, doc.dataUri!, settings)
       return [t, verdict] as const
     }),
   )

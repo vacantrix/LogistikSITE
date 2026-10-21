@@ -1,15 +1,27 @@
+# Шлюз платформы. Наружу проброшены только:
+#  — WebSocket real-time шины: /?XTransformPort=3003 (ws-service);
+#  — всё остальное — Next.js на :3000.
+# Раньше любой ?XTransformPort=<порт> проксировался на localhost:<порт>, и снаружи
+# были доступны внутренние сервисы (рассылка /notify на 3004, OCR на 3020).
 :81 {
-	@transform_port_query {
+	@ws_bus {
+		query XTransformPort=3003
+	}
+	@other_port {
 		query XTransformPort=*
 	}
 
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
+	handle @ws_bus {
+		reverse_proxy localhost:3003 {
 			header_up Host {host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
 			header_up X-Real-IP {remote_host}
 		}
+	}
+
+	handle @other_port {
+		respond "Not found" 404
 	}
 
 	handle {

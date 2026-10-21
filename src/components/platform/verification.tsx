@@ -387,7 +387,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                       {/* фото документа */}
                       <div className="self-start rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <img
-                          src={activeDoc.dataUri}
+                          src={activeDoc.url}
                           alt={`${DOC_TYPE_LABEL[activeDoc.type]} — ${activeDoc.fileName}`}
                           className="mx-auto max-h-72 w-auto rounded-lg border border-slate-200 bg-slate-100 object-contain p-2"
                         />

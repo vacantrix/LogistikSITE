@@ -4,21 +4,28 @@
  * Развёрнут на нашем сервере как отдельный сервис: платформа вызывает его
  * по HTTP до того, как обратиться к резервным движкам. Цепочка движков:
  *
- *   1. PaddleOCR (self-hosted Python) — если задан PADDLE_OCR_URL
- *      (контракт: POST { image, docType, fields[] } → { quality, fields, confidences })
- *   2. GLM-4.6V (облачная VLM, вызывается отсюда — с нашего сервера)
+ *   1. PaddleOCR (self-hosted Python, mini-services/paddle-ocr) — PADDLE_OCR_URL,
+ *      по умолчанию http://127.0.0.1:3031/ocr
+ *      (контракт: POST { image, docType, fields[] } → { quality, fields, confidences, docType, confirmations })
+ *   2. GLM-4.6V (облачная VLM) — ТОЛЬКО при OCR_CLOUD_FALLBACK=1: фото паспортов уходят во внешний сервис.
+ *      По умолчанию выключено; если PaddleOCR не ответил — 503, платформа отправит документ на ручную проверку.
+ *
+ * Сервис слушает только 127.0.0.1 — снаружи он недоступен.
  *
  * Контракт ответа зеркалит OcrOutput из src/lib/verify.ts платформы:
  *   { engine, quality, fields, confidences, detectedType? }
  *
  * Эндпоинты:
  *   GET  /health — статус сервиса и цепочки движков
- *   POST /ocr    — { type, dataUri, expected?, intake? } → { ok, ocr, chain }
+ *   POST /ocr    — { type, dataUri, intake? } → { ok, ocr, chain }
  */
 
 import ZAI from 'z-ai-web-dev-sdk'
 
-const PORT = 3020
+const PORT = Number(process.env.OCR_PORT ?? 3020)
+const PADDLE_URL = process.env.PADDLE_OCR_URL ?? 'http://127.0.0.1:3031/ocr'
+const CLOUD_FALLBACK = process.env.OCR_CLOUD_FALLBACK === '1'
+const TOKEN = process.env.OCR_SERVICE_TOKEN ?? ''
 const VERSION = '1.0.0'
 const STARTED_AT = Date.now()
 
@@ -51,27 +58,22 @@ interface OcrOutput {
   fields: Record<string, string>
   confidences: Record<string, number>
   detectedType?: DocType | 'UNKNOWN'
+  confirmations?: Record<string, string[]>
 }
 
 interface OcrRequestBody {
   type?: string
   dataUri?: string
-  expected?: Record<string, string> | null
   intake?: boolean
 }
 
 // ---------------- утилиты ----------------
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-}
-
+// сервис вызывается только сервером платформы — CORS для браузеров не нужен
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders },
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
   })
 
 function extractJson(text: string): Record<string, unknown> | null {
@@ -98,14 +100,15 @@ const DOC_TYPE_VALUES = DOC_TYPES
  * Контракт: POST { image (dataUri), docType, fields[] } → { quality, fields, confidences, docType? }
  */
 async function paddleOcr(dataUri: string, type: DocType): Promise<OcrOutput | null> {
-  const url = process.env.PADDLE_OCR_URL
+  const url = PADDLE_URL
   if (!url) return null
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: dataUri, docType: type, fields: DOC_FIELDS[type] }),
-      signal: AbortSignal.timeout(30_000),
+      // первый вызов загружает модели — даём запас
+      signal: AbortSignal.timeout(80_000),
     })
     if (!res.ok) return null
     const j = (await res.json()) as {
@@ -113,6 +116,7 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<OcrOutput | nu
       fields?: Record<string, string>
       confidences?: Record<string, number>
       docType?: string
+      confirmations?: Record<string, string[]>
     }
     if (typeof j.quality !== 'number' || !j.fields) return null
     const rawType = typeof j.docType === 'string' ? j.docType.trim().toUpperCase() : ''
@@ -125,6 +129,7 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<OcrOutput | nu
       fields: j.fields,
       confidences: j.confidences ?? {},
       ...(detectedType ? { detectedType } : {}),
+      ...(j.confirmations ? { confirmations: j.confirmations } : {}),
     }
   } catch {
     return null
@@ -133,12 +138,8 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<OcrOutput | nu
 
 // ---------------- движок 2: GLM-4.6V (резерв, вызывается с нашего сервера) ----------------
 
-async function glmOcr(
-  dataUri: string,
-  type: DocType,
-  expected: Record<string, string> | null,
-  intake: boolean,
-): Promise<OcrOutput | null> {
+/** Облачная VLM. Ожидаемые данные заявки в модель не передаются — она только читает фото. */
+async function glmOcr(dataUri: string, type: DocType): Promise<OcrOutput | null> {
   const fieldList = DOC_FIELDS[type].map((f) => `«${f}»`).join(', ')
   const prompt = [
     `Ты — OCR-модуль проверки транспортных документов (аналог PaddleOCR). Тип документа: ${DOC_TYPE_LABEL[type]}.`,
@@ -146,18 +147,8 @@ async function glmOcr(
     `{"quality": <0..100, качество фото: резкость, свет, документ целиком в кадре>,`,
     `"fields": {${fieldList}: <прочитанное значение, "" если не найдено>},`,
     `"confidences": {<поле>: <0..1 уверенность в прочитанном>},`,
-    ...(intake
-      ? [`"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | REQUEST_DOC | POA | UNKNOWN>}`]
-      : [`"docOk": <true, если это действительно ${DOC_TYPE_LABEL[type]}>}`]),
-    ...(expected && Object.keys(expected).length
-      ? [`Для справки, ожидаемые значения: ${JSON.stringify(expected)}. Не подставляй их автоматически — читай только с фото.`]
-      : [`Значений для сверки нет — это первичный ввод водителя: заполняй ТОЛЬКО реально прочитанные с изображения значения, ничего не выдумывай.`]),
-    ...(intake
-      ? [`Определи, какой документ реально изображён: страница паспорта с фото, страница регистрации паспорта, водительское удостоверение, СТС, заявка на перевозку или доверенность.`]
-      : []),
-    ...(intake
-      ? [`Если изображение не является документом заявленного типа — укажи фактический docType.`]
-      : [`Если изображение не является документом этого типа — поставь quality < 25 и docOk=false.`]),
+    `"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | REQUEST_DOC | POA | UNKNOWN>}`,
+    `Заполняй ТОЛЬКО реально прочитанные с изображения значения, ничего не выдумывай и не дополняй.`,
   ].join('\n')
 
   try {
@@ -191,13 +182,12 @@ async function glmOcr(
     const detectedType = DOC_TYPE_VALUES.includes(rawType as DocType)
       ? (rawType as DocType)
       : rawType === 'UNKNOWN' ? 'UNKNOWN' as const : undefined
-    if (!intake && !j.docOk && (j.quality as number) >= 25) return null
     return {
-      engine: 'GLM-4.6V · OCR-сервис',
+      engine: 'GLM-4.6V (облако)',
       quality: Math.round(j.quality as number),
       fields,
       confidences,
-      ...(intake ? { detectedType: detectedType ?? 'UNKNOWN' as const } : detectedType ? { detectedType } : {}),
+      detectedType: detectedType ?? 'UNKNOWN',
     }
   } catch {
     return null
@@ -211,11 +201,11 @@ let processed = 0
 
 Bun.serve({
   port: PORT,
+  hostname: '127.0.0.1',
   idleTimeout: 120,
   async fetch(req) {
     const url = new URL(req.url)
-
-    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
+    if (TOKEN && req.headers.get('x-ocr-token') !== TOKEN) return json({ ok: false, error: 'forbidden' }, 403)
 
     // ——— статус сервиса ———
     if (url.pathname === '/health' && req.method === 'GET') {
@@ -225,8 +215,8 @@ Bun.serve({
         description: 'Self-hosted OCR-микросервис проверки документов АЭМЗ Логистика',
         version: VERSION,
         engines: {
-          paddle: { configured: Boolean(process.env.PADDLE_OCR_URL), engine: 'PaddleOCR (self-hosted)' },
-          glm: { configured: true, engine: 'GLM-4.6V · OCR-сервис' },
+          paddle: { configured: Boolean(PADDLE_URL), engine: 'PaddleOCR (self-hosted)' },
+          glm: { configured: CLOUD_FALLBACK, engine: 'GLM-4.6V (облако, только OCR_CLOUD_FALLBACK=1)' },
         },
         activeEngine: lastEngine,
         processed,
@@ -258,17 +248,17 @@ Bun.serve({
         processed += 1
         return json({ ok: true, ocr: paddle, chain })
       }
-      if (process.env.PADDLE_OCR_URL) chain.push('paddleocr:fail')
+      chain.push('paddleocr:fail')
 
-      // 2. GLM-4.6V (резервный VLM-движок с нашего сервера)
-      const glm = await glmOcr(dataUri, type, body?.expected ?? null, Boolean(body?.intake))
+      // 2. GLM-4.6V — только если облачный резерв явно включён
+      const glm = CLOUD_FALLBACK ? await glmOcr(dataUri, type) : null
       if (glm) {
         chain.push('glm-4.6v')
         lastEngine = glm.engine
         processed += 1
         return json({ ok: true, ocr: glm, chain })
       }
-      chain.push('glm-4.6v:fail')
+      chain.push(CLOUD_FALLBACK ? 'glm-4.6v:fail' : 'glm-4.6v:off')
 
       return json({ ok: false, error: 'Все движки распознавания недоступны', chain }, 503)
     }
@@ -277,4 +267,4 @@ Bun.serve({
   },
 })
 
-console.log(`[aemz-ocr-service] запущен на http://127.0.0.1:${PORT} — движки: PaddleOCR(${process.env.PADDLE_OCR_URL ? 'подключён' : 'не подключён'}) → GLM-4.6V`)
+console.log(`[aemz-ocr-service] запущен на http://127.0.0.1:${PORT} — движки: PaddleOCR(${PADDLE_URL}) → облако(${CLOUD_FALLBACK ? 'включено' : 'выключено'})`)

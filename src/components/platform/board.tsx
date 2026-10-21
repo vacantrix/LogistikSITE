@@ -206,12 +206,14 @@ function SortableTh({ k, label, sort, onSort, title }: {
 /**
  * Торговый стенд логиста — раскрывается прямо в строке площадки:
  * обратный отсчёт, метрики, ставки и решения по заявке.
+ * Победителя логист не выбирает: по окончании приёма ставок заявка автоматически
+ * уходит минимальной ставке (при равных — более ранней). Логист может продлить срок,
+ * поднять стартовую ставку или предложить заявку напрямую.
  */
-function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }: {
+function AuctionDesk({ request, now, busy, onExtend, onOffer, onRaise }: {
   request: RequestDTO
   now: number | null
   busy: boolean
-  onAward: (bid: BidDTO) => void
   onExtend: () => void
   onOffer: () => void
   onRaise: () => void
@@ -257,7 +259,7 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
       {request.mode === 'CLOSED' ? (
         <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
           <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-          Закрытые ставки: цены участников скрыты до подведения итогов. Согласуйте победителя — сумма раскроется в подтверждении.
+          Закрытые ставки: цены участников скрыты от перевозчиков до подведения итогов. Победитель — минимальная ставка, определится автоматически по окончании приёма ставок.
         </div>
       ) : sortedBids.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
@@ -271,7 +273,6 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
                 <TableHead>Перевозчик</TableHead>
                 <TableHead>Ставка</TableHead>
                 <TableHead>Время ставки</TableHead>
-                <TableHead />
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -298,17 +299,6 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
                         </Badge>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => onAward(b)}
-                        aria-label={`Выбрать ставку ${b.carrierName} на ${rate(b.amount)}`}
-                      >
-                        Выбрать
-                      </Button>
-                    </TableCell>
                   </TableRow>
                 )
               })}
@@ -320,10 +310,10 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
       {/* действия над торгом */}
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
         {minBid ? (
-          <Button size="sm" disabled={busy} onClick={() => onAward(minBid)}>
-            <Trophy className="h-4 w-4" aria-hidden />
-            Согласовать победителя
-          </Button>
+          <span className="flex items-center gap-1.5 text-xs text-slate-600">
+            <Trophy className="h-4 w-4 text-emerald-600" aria-hidden />
+            Победитель определится автоматически: минимальная ставка на момент окончания приёма
+          </span>
         ) : (
           <Button size="sm" disabled={busy} onClick={onRaise}>
             <TrendingUp className="h-4 w-4" aria-hidden />
@@ -479,7 +469,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   // торговый стенд и решения логиста (вместо отдельной вкладки «Торги»)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [events, setEvents] = useState<EventFeedItem[]>([])
-  const [awardBid, setAwardBid] = useState<{ request: RequestDTO; bid: BidDTO } | null>(null)
   const [offerReq, setOfferReq] = useState<RequestDTO | null>(null)
   const [offerCarriers, setOfferCarriers] = useState<CarrierDTO[]>([])
   const [offerCarrierId, setOfferCarrierId] = useState('')
@@ -678,7 +667,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     if (!bidReq || !activeCarrierId || bidFinal === null) return
     setBusyId(bidReq.id)
     try {
-      const { request } = await api.action(bidReq.id, 'bid', { carrierId: activeCarrierId, amount: bidFinal })
+      const { request } = await api.action(bidReq.id, 'bid', { amount: bidFinal })
       applyRequest(request)
       setBidStep('success')
     } catch (e) {
@@ -687,6 +676,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       setBusyId(null)
     }
   }
+
+  /** Приём ставок закончился (или срок не задан): кнопку ставки не показываем */
+  const biddingClosed = (r: RequestDTO): boolean =>
+    !r.deadline || (now ?? Date.now()) >= new Date(r.deadline).getTime()
 
   const sortedBids = (bids: BidDTO[]) => [...bids].filter((b) => !b.withdrawn).sort((a, b) => a.amount - b.amount)
   const bestBid = (bids: BidDTO[]) => (bids.length > 0 ? Math.min(...bids.map((b) => b.amount)) : null)
@@ -720,17 +713,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     } else {
       setDetailId(r.id)
     }
-  }
-
-  const confirmAward = async () => {
-    if (!awardBid) return
-    const { request, bid } = awardBid
-    const ok = await runAction(
-      request.id, 'award', { bidId: bid.id },
-      'Победитель согласован',
-      `№${request.number}: ${bid.carrierName} — ${rate(bid.amount)}. Заявка ждёт документы от агента`,
-    )
-    if (ok) { setAwardBid(null); setExpandedId(null) }
   }
 
   const openOffer = async (r: RequestDTO) => {
@@ -796,7 +778,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         startRate: Number(form.startRate.replace(/\s/g, '')),
         loadDate: form.loadDate.trim() || '—',
         loadWindow: form.loadWindow.trim() || '08:00–12:00',
-        deadline: new Date(Date.now() + Number(form.deadlineHours || 4) * 3600_000).toISOString(),
+        deadlineHours: Number(form.deadlineHours || 4),
       })
       setRequests((prev) => [request, ...(prev ?? [])])
       setCreateOpen(false)
@@ -1073,7 +1055,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                               )
                             ) : (
                               <>
-                                {r.status === 'PUBLISHED' && r.mode === 'AUCTION' && (
+                                {r.status === 'PUBLISHED' && biddingClosed(r) && (
+                                  <span className="text-xs font-medium text-slate-500">Приём ставок завершён</span>
+                                )}
+                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'AUCTION' && (
                                   <Button
                                     size="sm"
                                     disabled={!activeCarrierId || busyId !== null}
@@ -1084,7 +1069,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                     Сделать ставку
                                   </Button>
                                 )}
-                                {r.status === 'PUBLISHED' && r.mode === 'CLOSED' && (
+                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'CLOSED' && (
                                   <Button
                                     size="sm"
                                     disabled={!activeCarrierId || busyId !== null}
@@ -1107,7 +1092,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 request={r}
                                 now={now}
                                 busy={busyId === r.id}
-                                onAward={(bid) => setAwardBid({ request: r, bid })}
                                 onExtend={() => void runAction(r.id, 'extend', {}, 'Торги продлены', `№${r.number}: срок увеличен на 2 часа`)}
                                 onOffer={() => void openOffer(r)}
                                 onRaise={() => openRaise(r)}
@@ -1570,39 +1554,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
           )}
         </DialogContent>
       </Dialog>
-
-      {/* подтверждение согласования победителя (торги влиты в площадку) */}
-      <AlertDialog open={!!awardBid} onOpenChange={(o) => { if (!o) setAwardBid(null) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Согласовать победителя торгов?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                {awardBid && (
-                  <>
-                    Заявка №{awardBid.request.number} · {pointInfo(awardBid.request.fromPoint).short} → {pointInfo(awardBid.request.toPoint).short}.
-                    Перевозчик <span className="font-semibold text-slate-900">{awardBid.bid.carrierName}</span> — ставка{' '}
-                    <span className="font-semibold text-emerald-700">{rate(awardBid.bid.amount)}</span>
-                    {awardBid.request.startRate > awardBid.bid.amount && (
-                      <> · экономия {rate(awardBid.request.startRate - awardBid.bid.amount)}</>
-                    )}
-                    . После согласования агент получит заявку для загрузки документов.
-                  </>
-                )}
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Отмена</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={busyId !== null}
-              onClick={(e) => { e.preventDefault(); void confirmAward() }}
-            >
-              Согласовать
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* прямое предложение перевозчику */}
       <Dialog open={!!offerReq} onOpenChange={(o) => { if (!o) setOfferReq(null) }}>

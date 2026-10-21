@@ -68,12 +68,11 @@ async function main() {
       name: 'ООО «Перевозчик А»', inn: '2310045671', contractNo: '12-А', contractDate: '14.03.2025',
       drivers: {
         create: [
-          // сроки медсправки покрывают все состояния подсветки: истёк / истекает / ок
-          { fullName: 'Иванов Иван Иванович', birthDate: '15.05.1990', passport: '99 12 345678', license: '99 12 345678', licenseTill: '12.03.2030', medTill: dateInDays(-12), categories: 'C, CE', createdAt: hoursAgo(24 * 40) },
-          { fullName: 'Петров Пётр Сергеевич', birthDate: '22.08.1988', passport: '03 13 992210', license: '23 11 770145', licenseTill: '01.06.2029', medTill: dateInDays(24), categories: 'C', createdAt: hoursAgo(24 * 12) },
-          { fullName: 'Ковалёв Андрей Викторович', birthDate: '12.03.1986', passport: '23 14 220018', license: '23 14 220018', licenseTill: '05.05.2030', medTill: dateInDays(95), categories: 'C, CE', createdAt: hoursAgo(24 * 31) },
-          { fullName: 'Егоров Максим Андреевич', birthDate: '07.09.1993', passport: '23 15 771064', license: '23 15 771064', licenseTill: '19.07.2029', medTill: dateInDays(45), categories: 'C', createdAt: hoursAgo(24 * 18) },
-          { fullName: 'Тарасов Олег Дмитриевич', birthDate: '25.12.1984', passport: '52 08 330592', license: '52 08 330592', licenseTill: '11.11.2028', medTill: dateInDays(160), categories: 'C, CE', createdAt: hoursAgo(24 * 6) },
+          { fullName: 'Иванов Иван Иванович', birthDate: '15.05.1990', passport: '99 12 345678', license: '99 12 345678', licenseTill: '12.03.2030', categories: 'C, CE', createdAt: hoursAgo(24 * 40) },
+          { fullName: 'Петров Пётр Сергеевич', birthDate: '22.08.1988', passport: '03 13 992210', license: '23 11 770145', licenseTill: '01.06.2029', categories: 'C', createdAt: hoursAgo(24 * 12) },
+          { fullName: 'Ковалёв Андрей Викторович', birthDate: '12.03.1986', passport: '23 14 220018', license: '23 14 220018', licenseTill: '05.05.2030', categories: 'C, CE', createdAt: hoursAgo(24 * 31) },
+          { fullName: 'Егоров Максим Андреевич', birthDate: '07.09.1993', passport: '23 15 771064', license: '23 15 771064', licenseTill: '19.07.2029', categories: 'C', createdAt: hoursAgo(24 * 18) },
+          { fullName: 'Тарасов Олег Дмитриевич', birthDate: '25.12.1984', passport: '52 08 330592', license: '52 08 330592', licenseTill: '11.11.2028', categories: 'C, CE', createdAt: hoursAgo(24 * 6) },
         ],
       },
       trucks: {
@@ -96,11 +95,11 @@ async function main() {
       name: 'ООО «Перевозчик Б»', inn: '2310045672', contractNo: '15-Б', contractDate: '02.06.2025',
       drivers: {
         create: [
-          { fullName: 'Сидоров Алексей Владимирович', birthDate: '03.02.1992', passport: '52 04 118872', license: '52 04 118872', licenseTill: '18.09.2028', medTill: dateInDays(210), categories: 'C, CE', createdAt: hoursAgo(24 * 33) },
-          { fullName: 'Кузнецов Дмитрий Олегович', birthDate: '17.11.1985', passport: '52 05 442301', license: '52 05 442301', licenseTill: dateInDays(18), medTill: dateInDays(150), categories: 'C', createdAt: hoursAgo(24 * 9) },
-          { fullName: 'Фомин Сергей Петрович', birthDate: '30.06.1989', passport: '52 09 661427', license: '52 09 661427', licenseTill: '23.02.2031', medTill: dateInDays(280), categories: 'C, CE', createdAt: hoursAgo(24 * 27) },
-          { fullName: 'Гусев Павел Романович', birthDate: '14.02.1995', passport: '52 10 884610', license: '52 10 884610', licenseTill: '08.10.2029', medTill: dateInDays(120), categories: 'C', createdAt: hoursAgo(24 * 11) },
-          { fullName: 'Лебедев Артём Игоревич', birthDate: '19.04.1983', passport: '61 11 553876', license: '61 11 553876', licenseTill: '16.08.2028', medTill: dateInDays(-3), categories: 'C, CE', createdAt: hoursAgo(24 * 4) },
+          { fullName: 'Сидоров Алексей Владимирович', birthDate: '03.02.1992', passport: '52 04 118872', license: '52 04 118872', licenseTill: '18.09.2028', categories: 'C, CE', createdAt: hoursAgo(24 * 33) },
+          { fullName: 'Кузнецов Дмитрий Олегович', birthDate: '17.11.1985', passport: '52 05 442301', license: '52 05 442301', licenseTill: dateInDays(18), categories: 'C', createdAt: hoursAgo(24 * 9) },
+          { fullName: 'Фомин Сергей Петрович', birthDate: '30.06.1989', passport: '52 09 661427', license: '52 09 661427', licenseTill: '23.02.2031', categories: 'C, CE', createdAt: hoursAgo(24 * 27) },
+          { fullName: 'Гусев Павел Романович', birthDate: '14.02.1995', passport: '52 10 884610', license: '52 10 884610', licenseTill: '08.10.2029', categories: 'C', createdAt: hoursAgo(24 * 11) },
+          { fullName: 'Лебедев Артём Игоревич', birthDate: '19.04.1983', passport: '61 11 553876', license: '61 11 553876', licenseTill: '16.08.2028', categories: 'C, CE', createdAt: hoursAgo(24 * 4) },
         ],
       },
       trucks: {
@@ -117,9 +116,9 @@ async function main() {
       name: 'ООО «Перевозчик В»', inn: '2310045673', contractNo: '18-В', contractDate: '21.08.2025',
       drivers: {
         create: [
-          { fullName: 'Морозов Игорь Павлович', birthDate: '09.07.1987', passport: '77 02 551209', license: '77 02 551209', licenseTill: '30.11.2029', medTill: '—', categories: 'C, CE', createdAt: hoursAgo(24 * 21) },
-          { fullName: 'Сазонов Виктор Юрьевич', birthDate: '02.10.1988', passport: '77 12 994523', license: '77 12 994523', licenseTill: '27.03.2030', medTill: dateInDays(200), categories: 'C, CE', createdAt: hoursAgo(24 * 16) },
-          { fullName: 'Носов Роман Алексеевич', birthDate: '08.06.1991', passport: '77 13 441205', license: '77 13 441205', licenseTill: '30.09.2028', medTill: dateInDays(60), categories: 'C', createdAt: hoursAgo(24 * 8) },
+          { fullName: 'Морозов Игорь Павлович', birthDate: '09.07.1987', passport: '77 02 551209', license: '77 02 551209', licenseTill: '30.11.2029', categories: 'C, CE', createdAt: hoursAgo(24 * 21) },
+          { fullName: 'Сазонов Виктор Юрьевич', birthDate: '02.10.1988', passport: '77 12 994523', license: '77 12 994523', licenseTill: '27.03.2030', categories: 'C, CE', createdAt: hoursAgo(24 * 16) },
+          { fullName: 'Носов Роман Алексеевич', birthDate: '08.06.1991', passport: '77 13 441205', license: '77 13 441205', licenseTill: '30.09.2028', categories: 'C', createdAt: hoursAgo(24 * 8) },
         ],
       },
       trucks: {
@@ -134,9 +133,9 @@ async function main() {
       name: 'ООО «Перевозчик Г»', inn: '2310045674', contractNo: '21-Г', contractDate: '05.09.2025',
       drivers: {
         create: [
-          { fullName: 'Волков Сергей Николаевич', birthDate: '28.01.1991', passport: '61 06 773410', license: '61 06 773410', licenseTill: '14.02.2031', medTill: dateInDays(320), categories: 'C, CE', createdAt: hoursAgo(24 * 7) },
-          { fullName: 'Захаров Денис Львович', birthDate: '21.11.1987', passport: '61 14 330917', license: '61 14 330917', licenseTill: '13.01.2030', medTill: dateInDays(150), categories: 'C, CE', createdAt: hoursAgo(24 * 10) },
-          { fullName: 'Куликов Игорь Валерьевич', birthDate: '05.03.1994', passport: '23 16 225840', license: '23 16 225840', licenseTill: '02.12.2029', medTill: dateInDays(90), categories: 'C', createdAt: hoursAgo(24 * 3) },
+          { fullName: 'Волков Сергей Николаевич', birthDate: '28.01.1991', passport: '61 06 773410', license: '61 06 773410', licenseTill: '14.02.2031', categories: 'C, CE', createdAt: hoursAgo(24 * 7) },
+          { fullName: 'Захаров Денис Львович', birthDate: '21.11.1987', passport: '61 14 330917', license: '61 14 330917', licenseTill: '13.01.2030', categories: 'C, CE', createdAt: hoursAgo(24 * 10) },
+          { fullName: 'Куликов Игорь Валерьевич', birthDate: '05.03.1994', passport: '23 16 225840', license: '23 16 225840', licenseTill: '02.12.2029', categories: 'C', createdAt: hoursAgo(24 * 3) },
         ],
       },
       trucks: {
@@ -147,8 +146,8 @@ async function main() {
   })
 
   // ---------- Пользователи платформы (вход по логину, /api/auth/*) ----------
-  // Демо-контур: пароль один (aemz2024), логины разные. Учётки перевозчиков
-  // связаны со своими компаниями — кабинет открывается сразу нужным.
+  // Демо-контур: пароль один, логины разные. Пароль — из SEED_PASSWORD, иначе случайный
+  // (печатается один раз в консоль). Учётки перевозчиков связаны со своими компаниями.
   const hashPassword = (password: string): string => {
     const salt = randomBytes(16).toString('hex')
     return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
@@ -161,11 +160,13 @@ async function main() {
     { login: 'carrier-v', name: 'ООО «Перевозчик В»', role: 'carrier', carrierId: carrierV.id },
     { login: 'carrier-g', name: 'ООО «Перевозчик Г»', role: 'carrier', carrierId: carrierG.id },
   ]
+  const seedPassword = process.env.SEED_PASSWORD || randomBytes(9).toString('base64url')
+  if (!process.env.SEED_PASSWORD) console.log(`Пароль демо-пользователей (сохраните): ${seedPassword}`)
   for (const u of userAccounts) {
     await db.user.upsert({
       where: { login: u.login },
-      update: { name: u.name, role: u.role, carrierId: u.carrierId, passwordHash: hashPassword('aemz2024') },
-      create: { ...u, passwordHash: hashPassword('aemz2024') },
+      update: { name: u.name, role: u.role, carrierId: u.carrierId, passwordHash: hashPassword(seedPassword) },
+      create: { ...u, passwordHash: hashPassword(seedPassword) },
     })
   }
 
@@ -302,7 +303,7 @@ async function main() {
     },
   })
 
-  const passFields = { 'Фамилия': 'ИВАНОВ', 'Имя': 'ИВАН', 'Отчество': 'ИВАНОВИЧ', 'Дата рождения': '15.05.1990', 'Серия и номер': '99 12 345678', 'Дата выдачи': '10.04.2024', 'Код подразделения': '230-027' }
+  const passFields = { 'Фамилия': 'ИВАНОВ', 'Имя': 'ИВАН', 'Отчество': 'ИВАНОВИЧ', 'Дата рождения': '15.05.1990', 'Серия и номер': '99 12 345678', 'Дата выдачи': '01.02.2020', 'Код подразделения': '770-001' }
   const passConf = { 'Фамилия': 0.989, 'Имя': 0.996, 'Отчество': 0.984, 'Дата рождения': 0.999, 'Серия и номер': 0.998, 'Дата выдачи': 0.998, 'Код подразделения': 0.999 }
   await db.document.create({
     data: {
@@ -317,9 +318,9 @@ async function main() {
   await db.document.create({
     data: {
       requestId: z1039.id, type: 'PASSPORT_REG', fileName: 'passport_reg.jpg',
-      dataUri: docSvg('ПАСПОРТ РФ · регистрация', ['ЗАРЕГИСТРИРАН', 'КРАСНОДАРСКИЙ КРАЙ', 'Г. АБИНСК УЛ.', 'ИНТЕРНАЦИОНАЛЬНАЯ Д. 110', '13.03.2024  230-027'], '#0f3b66'),
+      dataUri: docSvg('ПАСПОРТ РФ · регистрация', ['ЗАРЕГИСТРИРОВАН', 'Г. МОСКВА', 'УЛ. ПРИМЕРНАЯ', 'Д. 1', '01.02.2020  770-001'], '#0f3b66'),
       status: 'MANUAL', quality: 91, engine: 'PaddleOCR-демо',
-      fields: JSON.stringify({ 'Дата регистрации': '13.03.2024', 'Код подразделения': '230-027', 'Адрес регистрации': 'г. АБИНСК, ул. ИНТЕРНАЦИОНАЛЬНАЯ д. 110' }),
+      fields: JSON.stringify({ 'Дата регистрации': '01.02.2020', 'Код подразделения': '770-001', 'Адрес регистрации': 'г. МОСКВА, ул. ПРИМЕРНАЯ д. 1' }),
       confidence: JSON.stringify({ 'Дата регистрации': 1.0, 'Код подразделения': 0.95, 'Адрес регистрации': 0.49 }),
       issues: JSON.stringify(['Адрес на штампе прочитан с ошибками (оценка 0,49) — смотрит оператор']),
       createdAt: hoursAgo(30), updatedAt: hoursAgo(29.5),

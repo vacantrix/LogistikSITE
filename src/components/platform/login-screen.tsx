@@ -2,8 +2,8 @@
 
 /**
  * Экран входа на платформу: логин + пароль из созданного справочника
- * пользователей. Ниже — демо-доступы, чтобы ссылку можно было открыть
- * и потестировать без выдачи паролей лично.
+ * пользователей. Демо-доступы показываются только на демо-стенде —
+ * когда задан NEXT_PUBLIC_DEMO_PASSWORD (тот же, что SEED_PASSWORD при заполнении базы).
  */
 import { useState } from 'react'
 import { Building2, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
@@ -17,7 +17,7 @@ export const DEMO_ACCOUNTS: { login: string; name: string; role: 'logist' | 'car
   { login: 'carrier-v', name: 'ООО «Перевозчик В»', role: 'carrier' },
   { login: 'carrier-g', name: 'ООО «Перевозчик Г»', role: 'carrier' },
 ]
-export const DEMO_PASSWORD = 'aemz2024'
+export const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? ''
 
 export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [login, setLogin] = useState('')
@@ -114,6 +114,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               </button>
             </form>
 
+            {DEMO_PASSWORD && (
             <button
               type="button"
               onClick={() => setShowDemo((v) => !v)}
@@ -123,7 +124,8 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               <KeyRound className="h-3.5 w-3.5" aria-hidden />
               {showDemo ? 'Скрыть демо-доступы' : 'Демо-доступы для тестирования'}
             </button>
-            {showDemo && (
+            )}
+            {DEMO_PASSWORD && showDemo && (
               <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3" role="note">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                   Пароль для всех: <span className="font-mono text-slate-900">{DEMO_PASSWORD}</span>

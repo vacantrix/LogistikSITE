@@ -53,7 +53,7 @@ export interface DemoDocSample {
 
 /** Образцы водителя Петрова П.С.: текст реально читается «OCR» на сервере */
 export const DEMO_DOC_SAMPLES: DemoDocSample[] = [
-  { type: 'PASSPORT_PHOTO', fileName: 'passport_demo.jpg', title: 'ПАСПОРТ РФ · СТР. С ФОТО', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 07 987654', '10.04.2024', '230-014'], accent: '#0f3b66' },
+  { type: 'PASSPORT_PHOTO', fileName: 'passport_demo.jpg', title: 'ПАСПОРТ РФ · СТР. С ФОТО', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 07 987654', '01.02.2020', '770-003'], accent: '#0f3b66' },
   { type: 'PASSPORT_REG', fileName: 'passport_reg_demo.jpg', title: 'ПАСПОРТ РФ · РЕГИСТРАЦИЯ', lines: ['11.11.2023  230-014', 'Г. КРАСНОДАР, УЛ. СЕВЕРНАЯ', 'Д. 45, КВ. 12'], accent: '#0f3b66' },
   { type: 'LICENSE', fileName: 'license_demo.jpg', title: 'ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 10 555444', 'C, CE', '14.02.2022', '14.02.2032'], accent: '#5b3413' },
   { type: 'STS', fileName: 'sts_demo.jpg', title: 'СТС ТЯГАЧА', lines: ['Е456КХ123', 'Z942AB76HKB220001', '99 00 654321', 'SCANIA R450', 'ООО «Перевозчик Б»'], accent: '#14532d' },
