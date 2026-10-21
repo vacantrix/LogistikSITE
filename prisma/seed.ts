@@ -374,6 +374,7 @@ async function main() {
   const regRows = [
     { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 11200, best: 10400, load: '14.10.2026', cargo: 'Перевозка готовой продукции - катанка', cargoId: cargoWireRod.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
     { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 5400, best: 5150, load: '08.10.2026', cargo: 'Перевозка металлолома', cargoId: cargoScrap.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
+    { number: 'Z-1041', status: 'CLOSED', carrier: carrierB, start: 4600, best: 4350, load: '12.10.2026', cargo: 'Перевозка готовой продукции - пруток', cargoId: cargoBar.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 150 },
     { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 11800, best: 11250, load: '05.10.2026', cargo: 'Перевозка готовой продукции - пруток', cargoId: cargoBar.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
     { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 2600, best: 2600, load: '02.10.2026', cargo: 'Автоуслуги для собственных подразделений', cargoId: cargoAuto.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
     { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 7600, best: 7300, load: '29.09.2026', cargo: 'Перевозка готовой продукции - катанка', cargoId: cargoWireRod.id, route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },

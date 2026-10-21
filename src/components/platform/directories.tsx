@@ -601,8 +601,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
                 count={`Показано: ${driversFlat.length} из ${driversTotal}`}
               />
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Показано: {driversFlat.length} из {driversTotal}</div>
+              <div className="mb-3 flex items-center justify-end gap-3">
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('driver')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить вручную
@@ -650,8 +649,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
                 count={`Показано: ${trucksFlat.length} из ${trucksTotal}`}
               />
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Показано: {trucksFlat.length} из {trucksTotal}</div>
+              <div className="mb-3 flex items-center justify-end gap-3">
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('truck')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить тягач
@@ -697,8 +695,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
                 expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
                 count={`Показано: ${trailersFlat.length} из ${trailersTotal}`}
               />
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="text-sm text-slate-500">Показано: {trailersFlat.length} из {trailersTotal}</div>
+              <div className="mb-3 flex items-center justify-end gap-3">
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={() => openAdd('trailer')}>
                   <Plus className="h-4 w-4" aria-hidden />
                   Добавить прицеп

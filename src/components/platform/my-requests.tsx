@@ -3,7 +3,7 @@
 /** Раздел «Мои заявки» — кабинет агента: полная история заявок, экипаж, документы, проверка нейросетью */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Archive,
+  FolderOpen,
   ArrowRight,
   Car,
   CheckCircle2,
@@ -419,7 +419,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
     ]
     return hay.some((v) => v.toLowerCase().includes(q))
   })
-  const stageOptions = [...new Set(mine.map(stageOf))].sort((a, b) => a - b)
+  // статусы фильтра фиксированы — все 7 этапов линии видны всегда (в т.ч. «Завершено»),
+  // а не только те, что случайно есть среди заявок
+  const stageOptions = PIPELINE_STAGES.map((_, i) => i)
   const resetFilters = () => {
     setQuery('')
     setStatusFilter('ALL')
@@ -480,6 +482,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
         const tl = bidding && now !== null && r.deadline ? timeLeft(r.deadline) : null
         const inControl = !lost && (r.status === 'AWARDED' || r.status === 'DOCS_REVIEW')
         const hasPending = r.documents.some((d) => d.status === 'PENDING')
+        /** пропущенные документы: обязательные типы, по которым нет загрузки — подсвечиваем */
+        const missingDocs = DOC_ORDER.filter((t) => !r.documents.some((d) => d.type === t))
         const compact = r.status === 'CONFIRMED' || r.status === 'CLOSED'
 
         return (
@@ -728,6 +732,11 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                             <FileText className="h-4 w-4 text-blue-600" aria-hidden />
                             Документы (6 файлов к заявке)
                           </h4>
+                          {missingDocs.length > 0 && (
+                            <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[11px] font-semibold text-amber-800" aria-label={`Пропущено документов: ${missingDocs.length} из ${DOC_ORDER.length}`}>
+                              Пропущено: {missingDocs.length} из {DOC_ORDER.length}
+                            </Badge>
+                          )}
                           {hasPending && (
                             <Button
                               size="sm"
@@ -750,7 +759,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                             return (
                               <div
                                 key={type}
-                                className={`flex flex-col rounded-xl border p-3 ${doc ? 'border-slate-200 bg-white' : 'border-dashed border-slate-300 bg-white/70'}`}
+                                className={`flex flex-col rounded-xl border p-3 ${doc ? 'border-slate-200 bg-white' : 'border-dashed border-amber-300 bg-amber-50/70'}`}
                               >
                                 <div className="mb-2 flex items-start justify-between gap-2">
                                   <span className="flex items-center gap-2">
@@ -762,7 +771,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                                   {doc ? (
                                     <DocStatusBadge status={doc.status} />
                                   ) : (
-                                    <Badge variant="outline" className="border-slate-200 bg-slate-100 text-[10px] text-slate-500">Не загружен</Badge>
+                                    <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[10px] font-semibold text-amber-800">Не загружен</Badge>
                                   )}
                                 </div>
 
@@ -973,11 +982,11 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
         )
       })()}
 
-      {/* ——— Отработанные: заявки, утверждённые логистом и закрытые после выполнения ——— */}
+      {/* ——— Завершённая папка: закрытые рейсы — отдельным блоком с папкой ——— */}
       {!loading && !error && requests && activeCarrierId && done.length > 0 && (() => {
         const closedCarrier = carriers.find((c) => c.id === activeCarrierId) ?? null
         return (
-          <section aria-label="Отработанные заявки" className="mt-8">
+          <section aria-label="Завершённые заявки" className="mt-8">
             <div className="mb-3 flex flex-wrap items-center gap-2 px-1">
               <button
                 type="button"
@@ -985,8 +994,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate }: TabProps)
                 aria-expanded={doneOpen}
                 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-700"
               >
-                <Archive className="h-4 w-4 text-slate-400" aria-hidden />
-                Отработанные · {done.length}
+                <FolderOpen className="h-4 w-4 text-slate-400" aria-hidden />
+                Завершённые рейсы · {done.length}
                 <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${doneOpen ? 'rotate-180' : ''}`} aria-hidden />
               </button>
             </div>
