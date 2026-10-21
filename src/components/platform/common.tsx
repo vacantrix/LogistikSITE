@@ -5,11 +5,11 @@ import type { ReactNode } from 'react'
 import { AlertTriangle, Clock } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } from '@/lib/status'
+import { AGENT_STATUS_LABEL, DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } from '@/lib/status'
 import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
-export type TabKey = 'board' | 'apply' | 'my' | 'verify' | 'registry' | 'directory' | 'reports'
+export type TabKey = 'board' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'directory' | 'reports'
 
 /** Роль пользователя: сотрудник АЭМЗ (логист) или перевозчик */
 export type RoleKind = 'logist' | 'carrier'
@@ -38,6 +38,12 @@ export function RoleNotice({ role }: { role: RoleKind }) {
 export function StatusBadge({ status }: { status: RequestStatus }) {
   const meta = REQUEST_STATUS_META[status] ?? { label: status, badge: 'bg-slate-100 text-slate-700 border-slate-200' }
   return <Badge variant="outline" className={`${meta.badge} whitespace-nowrap`}>{meta.label}</Badge>
+}
+
+/** Статус заявки глазами агента-перевозчика: что происходит с его рейсом прямо сейчас */
+export function AgentStatusBadge({ status }: { status: string }) {
+  const label = AGENT_STATUS_LABEL[status] ?? REQUEST_STATUS_META[status as RequestStatus]?.label ?? status
+  return <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-700">{label}</Badge>
 }
 
 export function ModeBadge({ mode }: { mode: RequestMode }) {

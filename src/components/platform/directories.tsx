@@ -4,7 +4,7 @@
  * «Справочники» — база аккаунта: логисту — весь парк перевозчиков,
  * перевозчику — только свой. Все данные агента в одном месте с подсветкой
  * сроков документов: что истекло и что истекает — видно сразу.
- * Нейро-функционал (добавление по документам) перенесён во вкладку «Подать заявку».
+ * Нейро-функционал (добавление по документам) перенесён во вкладку «Подать документы».
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
@@ -497,10 +497,10 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate }: Ta
               {!isLogist && (
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 p-3">
                   <p className="max-w-xl text-xs leading-snug text-slate-600">
-                    <b className="text-slate-800">Новый водитель?</b> Добавляйте по документам во вкладке «Подать заявку» — нейросеть сама прочитает паспорт, ВУ и СТС и заполнит карточку.
+                    <b className="text-slate-800">Новый водитель?</b> Добавляйте по документам во вкладке «Подать документы» — нейросеть сама прочитает паспорт, ВУ и СТС и заполнит карточку.
                   </p>
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onNavigate('apply')}>
-                    Подать заявку
+                    Подать документы
                     <ArrowRight className="h-3.5 w-3.5" aria-hidden />
                   </Button>
                 </div>

@@ -2,6 +2,7 @@
  * Seed: демо-данные платформы «Привлечённый транспорт» (АЭМЗ)
  * Запуск: bun prisma/seed.ts  (или bun run db:seed)
  */
+import { scryptSync, randomBytes } from 'crypto'
 import { PrismaClient } from '@prisma/client'
 
 const db = new PrismaClient()
@@ -144,6 +145,29 @@ async function main() {
       trailers: { create: [{ plate: 'ГА901161', sts: '61 02 778899', type: 'Полуприцеп тент', techTill: dateInDays(310), createdAt: hoursAgo(24 * 5) }] },
     },
   })
+
+  // ---------- Пользователи платформы (вход по логину, /api/auth/*) ----------
+  // Демо-контур: пароль один (aemz2024), логины разные. Учётки перевозчиков
+  // связаны со своими компаниями — кабинет открывается сразу нужным.
+  const hashPassword = (password: string): string => {
+    const salt = randomBytes(16).toString('hex')
+    return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
+  }
+  const userAccounts = [
+    { login: 'logist1', name: 'Логист 1', role: 'logist', carrierId: null as string | null },
+    { login: 'logist2', name: 'Логист 2', role: 'logist', carrierId: null as string | null },
+    { login: 'carrier-a', name: 'ООО «Перевозчик А»', role: 'carrier', carrierId: carrierA.id },
+    { login: 'carrier-b', name: 'ООО «Перевозчик Б»', role: 'carrier', carrierId: carrierB.id },
+    { login: 'carrier-v', name: 'ООО «Перевозчик В»', role: 'carrier', carrierId: carrierV.id },
+    { login: 'carrier-g', name: 'ООО «Перевозчик Г»', role: 'carrier', carrierId: carrierG.id },
+  ]
+  for (const u of userAccounts) {
+    await db.user.upsert({
+      where: { login: u.login },
+      update: { name: u.name, role: u.role, carrierId: u.carrierId, passwordHash: hashPassword('aemz2024') },
+      create: { ...u, passwordHash: hashPassword('aemz2024') },
+    })
+  }
 
   // ---------- Справочник грузов: единые имена, группы, рекомендуемый ТС ----------
   // Эталонный пул задан номенклатурой АЭМЗ (список пользователя):

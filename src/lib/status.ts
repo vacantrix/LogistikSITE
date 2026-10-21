@@ -11,6 +11,17 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: 
   CLOSED: { label: 'Рейс закрыт', short: 'Закрыт', badge: 'bg-slate-200 text-slate-700 border-slate-300', dot: 'bg-slate-500' },
 }
 
+/** Метки статусов глазами агента-перевозчика (вкладка «Назначение экипажей»):
+ *  что происходит с рейсом, на который он откликнулся и который выиграл */
+export const AGENT_STATUS_LABEL: Record<string, string> = {
+  PUBLISHED: 'Ожидает торгов',
+  AWARDED: 'Нужно назначить экипаж',
+  DOCS_REVIEW: 'Документы на проверке',
+  AT_LOGIST: 'Передана логисту',
+  CONFIRMED: 'Подтверждена в 1С',
+  CLOSED: 'Рейс закрыт',
+}
+
 export const MODE_META: Record<RequestMode, { label: string; badge: string; icon: string }> = {
   AUCTION: { label: 'Торги на понижение', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: '📉' },
   CLOSED: { label: 'Закрытые ставки', badge: 'bg-slate-100 text-slate-700 border-slate-200', icon: '🙈' },

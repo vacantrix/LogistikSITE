@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * «Подать заявку» — линия агента с заранее включённой нейросетью.
+ * «Подать документы» — линия агента с заранее включённой нейросетью.
  *
  * Ключевое отличие от «Моих заявок»: нейросеть проверяет КАЖДЫЙ документ
  * сразу при загрузке, ещё до отправки заявки. Если агент по ошибке загрузил
@@ -725,7 +725,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   // ---------- форма подачи ----------
   return (
     <div>
-      <SectionHeader title="Подать заявку" />
+      <SectionHeader title="Подать документы" />
       <StatusPipeline activeIdx={selected ? STAGE_OF_STATUS[selected.status] : -1} request={selected} />
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">

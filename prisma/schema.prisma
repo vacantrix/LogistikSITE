@@ -22,6 +22,25 @@ model Carrier {
   trailers     Trailer[]
   bids         Bid[]
   wonRequests  Request[] @relation("winner")
+  users        User[]    @relation("carrierUser")
+}
+
+// ============ Auth: пользователи платформы (логин + пароль) ============
+
+/**
+ * Пользователи для входа на платформу (экран входа + /api/auth/*).
+ * Роль повторяет переключатель демо-контура: 'logist' | 'carrier'.
+ * У перевозчика carrierId связывает учётку с его кабинетом.
+ */
+model User {
+  id           String   @id @default(cuid())
+  login        String   @unique
+  name         String
+  passwordHash String // scrypt: "salt:hash"
+  role         String // 'logist' | 'carrier'
+  carrierId    String?
+  carrier      Carrier? @relation("carrierUser", fields: [carrierId], references: [id])
+  createdAt    DateTime @default(now())
 }
 
 model Driver {
@@ -35,6 +54,12 @@ model Driver {
   licenseTill String
   medTill     String   @default("—") // медсправка действует до (ДД.ММ.ГГГГ или «—»)
   categories  String
+  phone       String   @default("—") // телефон водителя
+  birthPlace  String   @default("—") // место рождения (для 1С)
+  citizenship String   @default("—") // гражданство (для 1С)
+  passportIssuedBy   String @default("—") // кем выдан паспорт (для 1С)
+  passportIssuedDate String @default("—") // дата выдачи паспорта (для 1С)
+  position    String   @default("—") // должность (для 1С)
   createdAt   DateTime @default(now())
 }
 
@@ -48,6 +73,7 @@ model Truck {
   sts       String
   techTill  String   @default("—") // техосмотр (диагностическая карта) до
   owner     String
+  color     String   @default("—") // цвет кабины/тягача
   createdAt DateTime @default(now())
 }
 
@@ -59,6 +85,8 @@ model Trailer {
   sts       String
   type      String
   techTill  String   @default("—") // техосмотр до
+  color     String   @default("—") // цвет прицепа
+  owner     String   @default("—") // собственник прицепа
   createdAt DateTime @default(now())
 }
 

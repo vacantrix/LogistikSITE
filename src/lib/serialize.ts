@@ -86,19 +86,21 @@ export function toDriverDTO(d: Driver): DriverDTO {
   return {
     id: d.id, carrierId: d.carrierId, fullName: d.fullName, birthDate: d.birthDate, passport: d.passport,
     license: d.license, licenseTill: d.licenseTill, medTill: d.medTill, categories: d.categories,
+    phone: d.phone, birthPlace: d.birthPlace, citizenship: d.citizenship,
+    passportIssuedBy: d.passportIssuedBy, passportIssuedDate: d.passportIssuedDate, position: d.position,
     createdAt: d.createdAt.toISOString(),
   }
 }
 export function toTruckDTO(t: Truck): TruckDTO {
   return {
     id: t.id, carrierId: t.carrierId, brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
-    techTill: t.techTill, owner: t.owner, createdAt: t.createdAt.toISOString(),
+    techTill: t.techTill, owner: t.owner, color: t.color, createdAt: t.createdAt.toISOString(),
   }
 }
 export function toTrailerDTO(t: Trailer): TrailerDTO {
   return {
     id: t.id, carrierId: t.carrierId, plate: t.plate, sts: t.sts, type: t.type,
-    techTill: t.techTill, createdAt: t.createdAt.toISOString(),
+    techTill: t.techTill, color: t.color, owner: t.owner, createdAt: t.createdAt.toISOString(),
   }
 }
 export function toCarrierDTO(

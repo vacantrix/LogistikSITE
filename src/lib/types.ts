@@ -15,6 +15,12 @@ export interface DriverDTO {
   licenseTill: string
   medTill: string
   categories: string
+  phone: string
+  birthPlace: string
+  citizenship: string
+  passportIssuedBy: string
+  passportIssuedDate: string
+  position: string
   createdAt: string
 }
 
@@ -27,6 +33,7 @@ export interface TruckDTO {
   sts: string
   techTill: string
   owner: string
+  color: string
   createdAt: string
 }
 
@@ -37,6 +44,8 @@ export interface TrailerDTO {
   sts: string
   type: string
   techTill: string
+  color: string
+  owner: string
   createdAt: string
 }
 

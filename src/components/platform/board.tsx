@@ -1142,7 +1142,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                   <h4 className="mb-2 text-sm font-semibold text-slate-900">Комплект документов ({detailReq.documents.length})</h4>
                   {detailReq.documents.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-slate-300 px-3 py-3 text-center text-sm text-muted-foreground">
-                      Документы пока не загружены — агент подаст их через «Подать заявку».
+                      Документы пока не загружены — агент подаст их через «Подать документы».
                     </p>
                   ) : (
                     <div className="flex flex-wrap gap-2">

@@ -102,6 +102,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         break
       }
 
+      // ------- агент: утвердить экипаж (вкладка «Назначение экипажей») -------
+      case 'approve-crew': {
+        const { driverId, truckId, trailerId } = body as { driverId: string; truckId: string; trailerId?: string }
+        const driver = await db.driver.findUnique({ where: { id: driverId } })
+        const truck = await db.truck.findUnique({ where: { id: truckId } })
+        if (!driver || !truck) return NextResponse.json({ error: 'Выберите водителя и автомобиль из справочника' }, { status: 400 })
+        if (driver.carrierId !== request.winnerId || truck.carrierId !== request.winnerId) {
+          return NextResponse.json({ error: 'Водитель и ТС должны принадлежать перевозчику-победителю' }, { status: 400 })
+        }
+        await db.request.update({ where: { id }, data: { driverId, truckId, trailerId: trailerId || null } })
+        const trailer = trailerId ? await db.trailer.findUnique({ where: { id: trailerId } }) : null
+        await ev('CREW_APPROVED', `Экипаж утверждён агентом: ${driver.fullName}, ${truck.brand} (${truck.plate})${trailer ? ` + ${trailer.plate}` : ''} — состав передан логисту`)
+        break
+      }
+
       // ------- логист: сверка -------
       case 'confirm': {
         if (request.status !== 'AT_LOGIST') return NextResponse.json({ error: 'Подтвердить можно заявку в статусе «У логиста»' }, { status: 400 })

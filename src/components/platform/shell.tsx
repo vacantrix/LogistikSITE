@@ -13,11 +13,14 @@ import type { RoleKind, TabKey } from '@/components/platform/common'
 
 /** Полный список разделов с пометкой ролей: L — логист, C — перевозчик.
  *  Сводка удалена (полоса «Требует внимания» на площадке), торги влиты в площадку,
- *  настройки — будущий административный контур (экран settings.tsx остаётся в коде). */
+ *  настройки — будущий административный контур (экран settings.tsx остаётся в коде).
+ *  Порядок вкладок перевозчика фиксирован (замечание пользователя): всё происходит
+ *  по очереди — площадка → мои заявки → документы → экипаж → справочники. */
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier'] },
-  { key: 'apply', label: 'Подать заявку', roles: ['carrier'] },
   { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
+  { key: 'apply', label: 'Подать документы', roles: ['carrier'] },
+  { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'] },
   { key: 'verify', label: 'Сверка документов', roles: ['logist'] },
   { key: 'registry', label: 'Реестр рейсов', roles: ['logist'] },
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier'] },
