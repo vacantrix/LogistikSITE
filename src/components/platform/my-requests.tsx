@@ -3,6 +3,7 @@
 /** Раздел «Мои заявки» — кабинет агента: полная история заявок, экипаж, документы, проверка нейросетью */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  CircleAlert,
   FolderOpen,
   ArrowRight,
   Car,
@@ -23,6 +24,7 @@ import {
   SearchX,
   Send,
   Sparkles,
+  Trash2,
   TrendingDown,
   Trophy,
   Truck,
@@ -32,6 +34,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -393,22 +396,88 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
   const carrier = carriers.find((c) => c.id === activeCarrierId) ?? null
   const carrierName = carrier?.name ?? 'перевозчик'
 
-  /** Лучшая (минимальная) ставка активного перевозчика по заявке */
+  /** Лучшая (минимальная) активная ставка активного перевозчика по заявке.
+   *  Отозванные ставки (агент снялся, Task 52) не учитываются */
   const myBidOf = useCallback(
     (r: RequestDTO): BidDTO | null => {
       if (!activeCarrierId) return null
-      const mine = r.bids.filter((b) => b.carrierId === activeCarrierId)
+      const mine = r.bids.filter((b) => b.carrierId === activeCarrierId && !b.withdrawn)
       if (mine.length === 0) return null
       return mine.reduce((best, b) => (b.amount < best.amount ? b : best))
     },
     [activeCarrierId],
   )
 
+  // ——— состояние карточки агента (Task 52, сводная таблица пользователя) ———
+  // normal: лидирует в тендере / выиграл — стандартная карточка (+ иконка отмены на торгах)
+  // outbid: ставка перебита, торги ещё идут — красная карточка с индикатором
+  // withdrawn: агент сам снялся — серая карточка с кнопкой «Удалить»
+  // lost: тендер завершён, агент окончательно проиграл — серая карточка с кнопкой «Удалить»
+  type CardState = 'normal' | 'outbid' | 'withdrawn' | 'lost'
+  const cardStateOf = useCallback(
+    (r: RequestDTO, nowTs: number | null): CardState => {
+      const myBid = myBidOf(r)
+      const hasWithdrawn = r.bids.some((b) => b.carrierId === activeCarrierId && b.withdrawn)
+      if (r.status !== 'PUBLISHED') return r.winnerId === activeCarrierId ? 'normal' : 'lost'
+      if (!myBid) return hasWithdrawn ? 'withdrawn' : 'lost'
+      const deadlinePassed = r.deadline != null && nowTs != null && new Date(r.deadline).getTime() <= nowTs
+      const outbid = r.bestRate != null && myBid.amount > r.bestRate
+      if (outbid) return deadlinePassed ? 'lost' : 'outbid'
+      return 'normal'
+    },
+    [activeCarrierId, myBidOf],
+  )
+
+  // ——— добровольный выход из заявки (Task 52) ———
+  const [withdrawReq, setWithdrawReq] = useState<RequestDTO | null>(null)
+  const doWithdraw = async () => {
+    if (!withdrawReq || !activeCarrierId) return
+    setBusy(withdrawReq.id)
+    try {
+      const { request } = await api.action(withdrawReq.id, 'withdraw', { carrierId: activeCarrierId })
+      applyRequest(request)
+      toast({ title: 'Вы снялись с заявки', description: `${request.number} — ставка отозвана, торги продолжаются без вас` })
+    } catch (e) {
+      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+    } finally {
+      setBusy(null)
+      setWithdrawReq(null)
+    }
+  }
+
+  // ——— «Удалить» на серых карточках: скрыть только из кабинета этого агента (Task 52) ———
+  const HIDDEN_KEY = 'aemz-hidden-requests'
+  const loadHidden = useCallback((carrierId: string | null): Set<string> => {
+    try {
+      const raw = localStorage.getItem(HIDDEN_KEY)
+      const obj = raw ? (JSON.parse(raw) as Record<string, string[]>) : {}
+      return new Set((carrierId && obj[carrierId]) ?? [])
+    } catch { return new Set() }
+  }, [])
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setHiddenIds(loadHidden(activeCarrierId))
+  }, [activeCarrierId, loadHidden])
+  const hideRequest = (id: string) => {
+    if (!activeCarrierId) return
+    try {
+      const raw = localStorage.getItem(HIDDEN_KEY)
+      const obj = raw ? (JSON.parse(raw) as Record<string, string[]>) : {}
+      const arr = new Set(obj[activeCarrierId] ?? [])
+      arr.add(id)
+      localStorage.setItem(HIDDEN_KEY, JSON.stringify({ ...obj, [activeCarrierId]: [...arr] }))
+    } catch { /* ignore */ }
+    setHiddenIds((cur) => new Set([...cur, id]))
+    toast({ title: 'Карточка удалена из вашего кабинета', description: 'Данные на площадке не затронуты — это скрытие только для вашего аккаунта' })
+  }
+
   // Полная история: каждая заявка, где участвовал агент — ставки (в т.ч. перебитые)
   // и выигранные рейсы. Закрытые (отработанные) показываются отдельной подкатегорией ниже.
+  // Скрытые кнопкой «Удалить» (Task 52) не показываются — скрытие только для этого кабинета.
   const mine = (requests ?? [])
     .filter((r) => r.winnerId === activeCarrierId || r.bids.some((b) => b.carrierId === activeCarrierId))
     .filter((r) => !(r.status === 'CLOSED' && r.winnerId === activeCarrierId))
+    .filter((r) => !hiddenIds.has(r.id))
     .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.updatedAt < b.updatedAt ? 1 : -1))
 
   /** Отработанные: заявки, которые логист утвердил и закрыл после выполнения */
@@ -485,18 +554,35 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
         const r = active
         const myBid = myBidOf(r)
         const bidding = r.status === 'PUBLISHED'
-        const lost = !bidding && r.winnerId !== activeCarrierId
-        const line = lost
-          ? { text: `Рейс забрал другой перевозчик${r.winnerName ? ` (${r.winnerName})` : ''} — заявка остаётся в полной истории`, cls: 'border-slate-300 bg-slate-100 text-slate-600' }
-          : agentLine(r, myBid)
+        // сводная таблица состояний карточки (Task 52)
+        const cardState = cardStateOf(r, now)
+        const lost = cardState === 'lost'
+        const grey = cardState === 'withdrawn' || cardState === 'lost'
+        const line =
+          cardState === 'withdrawn'
+            ? { text: 'Вы снялись с заявки — ставка отозвана, торги идут без вас', cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+            : lost && r.status === 'PUBLISHED'
+              ? { text: 'Торги завершены: ваша цена не победила — заявка остаётся в полной истории', cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+              : lost
+                ? { text: `Рейс забрал другой перевозчик${r.winnerName ? ` (${r.winnerName})` : ''} — заявка остаётся в полной истории`, cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+                : cardState === 'outbid'
+                  ? { text: 'Ставка перебита — подайте новую, пониженную, пока тендер не закрыт', cls: 'border-red-300 bg-red-100 text-red-800' }
+                  : agentLine(r, myBid)
         const tl = bidding && now !== null && r.deadline ? timeLeft(r.deadline) : null
-        const awarded = !lost && r.status === 'AWARDED'
-        const inControl = !lost && r.status === 'DOCS_REVIEW'
+        const awarded = !grey && r.status === 'AWARDED'
+        const inControl = !grey && r.status === 'DOCS_REVIEW'
         const hasPending = r.documents.some((d) => d.status === 'PENDING')
         /** пропущенные документы: обязательные типы, по которым нет загрузки — подсвечиваем */
         const missingDocs = DOC_ORDER.filter((t) => !r.documents.some((d) => d.type === t))
         const compact = r.status === 'CONFIRMED' || r.status === 'CLOSED'
         const docsOpen = docsOpenId === r.id
+        /** цвет большой карточки по состоянию (Task 52): красная — перебита, серая — выход/проигрыш */
+        const cardCls =
+          cardState === 'outbid'
+            ? 'border-red-300 bg-red-50/50 shadow-sm'
+            : grey
+              ? 'border-slate-200 bg-slate-100/80 shadow-sm'
+              : 'border-slate-200 shadow-sm'
 
         /** Секция документов: единый вид для «Подтверждено» (свёрнуто) и «Документы» (раскрыто) */
         const docsSection = (
@@ -699,17 +785,31 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                 {visible.map((m) => {
                   const selected = m.id === r.id
                   const st = PIPELINE_STAGES[stageOf(m)]
+                  // цветовые состояния мини-карточки (Task 52): красная — перебита, серые — выход/проигрыш
+                  const state = cardStateOf(m, now)
+                  const red = state === 'outbid'
+                  const greyMini = state === 'withdrawn' || state === 'lost'
+                  const miniCls = red
+                    ? `border-red-300 bg-red-50 hover:border-red-400 ${selected ? 'shadow-sm ring-1 ring-red-400' : ''}`
+                    : greyMini
+                      ? 'border-slate-200 bg-slate-100 hover:border-slate-300'
+                      : selected
+                        ? 'border-blue-500 bg-blue-50/70 shadow-sm'
+                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                  const dotCls = red ? 'bg-red-500' : greyMini ? 'bg-slate-400' : st.circle
+                  const miniLabel = red ? 'Ставка перебита' : state === 'withdrawn' ? 'Вы снялись с заявки' : state === 'lost' ? 'Торги проиграны' : st.label
+                  const labelCls = red ? 'text-red-600' : greyMini ? 'text-slate-500' : 'text-slate-400'
                   return (
                     <button
                       key={m.id}
                       type="button"
                       onClick={() => setActiveId(m.id)}
                       aria-current={selected ? 'true' : undefined}
-                      className={`w-full rounded-xl border p-3 text-left transition-colors ${selected ? 'border-blue-500 bg-blue-50/70 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
+                      className={`w-full rounded-xl border p-3 text-left transition-colors ${miniCls}`}
                     >
                       <span className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-sm font-bold text-blue-700">{m.number}</span>
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${st.circle}`} aria-hidden title={`Этап: ${st.label}`} />
+                        <span className={`font-mono text-sm font-bold ${red ? 'text-red-700' : greyMini ? 'text-slate-500' : 'text-blue-700'}`}>{m.number}</span>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotCls}`} aria-hidden title={red ? 'Ставка перебита' : `Этап: ${st.label}`} />
                       </span>
                       <span className="mt-1 flex items-center gap-1 text-xs text-slate-700">
                         {pointInfo(m.fromPoint).short}
@@ -722,8 +822,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           <AnimatedRate value={m.status === 'PUBLISHED' ? (myBidOf(m)?.amount ?? m.bestRate) : m.bestRate} format={rate} />
                         </span>
                       </span>
-                      <span className="mt-1 block truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                        {st.label}
+                      <span className={`mt-1 block truncate text-[10px] font-semibold uppercase tracking-wide ${labelCls}`}>
+                        {miniLabel}
                       </span>
                     </button>
                   )
@@ -733,17 +833,38 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
             <div className="space-y-4">
               <StatusPipeline activeIdx={stageOf(r)} request={r} />
-            <Card className="border-slate-200 shadow-sm">
+            <Card className={cardCls}>
               <CardContent className="space-y-4 p-4 sm:p-6">
                   {/* Шапка карточки */}
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-lg font-bold text-slate-900">Заявка {r.number}</h3>
-                        {lost && (
+                        {lost && r.status !== 'PUBLISHED' && (
                           <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
                             Забрал другой перевозчик
                           </Badge>
+                        )}
+                        {/* красный индикатор «Ставка перебита» (Task 52) */}
+                        {cardState === 'outbid' && (
+                          <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-100 text-red-800">
+                            <CircleAlert className="mr-1 h-3 w-3" aria-hidden />
+                            Ставка перебита
+                          </Badge>
+                        )}
+                        {/* иконка отмены — добровольный выход из идущих торгов (Task 52) */}
+                        {bidding && myBid && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-slate-400 hover:text-red-600"
+                            title="Отменить участие — выйти из заявки"
+                            aria-label={`Отменить участие в заявке ${r.number}`}
+                            disabled={busy !== null}
+                            onClick={() => setWithdrawReq(r)}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </Button>
                         )}
                       </div>
                       <RoutePointsInline from={r.fromPoint} to={r.toPoint} className="mt-1 max-w-xl" />
@@ -752,14 +873,28 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     <div className="flex flex-col items-end gap-2">
                       <div className="text-right">
                         <div className="text-xs text-muted-foreground">{bidding ? 'Ваша ставка' : lost ? 'Ставка победителя' : 'Итоговая ставка'}</div>
-                        <div className="text-lg font-bold text-slate-900">
+                        <div className={`text-lg font-bold ${grey ? 'text-slate-500' : 'text-slate-900'}`}>
                           <AnimatedRate value={bidding ? (myBid?.amount ?? null) : r.bestRate} format={rate} />
                         </div>
                         {lost && myBid && (
                           <div className="whitespace-nowrap text-xs text-slate-500">ваша ставка: {rate(myBid.amount)}</div>
                         )}
                       </div>
-                      <RouteButton from={r.fromPoint} to={r.toPoint} number={r.number} />
+                      {grey ? (
+                        /* серые карточки (выход/проигрыш): кнопка «Удалить» — скрыть только из кабинета (Task 52) */
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5 border-slate-300 bg-white text-slate-600 hover:bg-slate-200"
+                          onClick={() => hideRequest(r.id)}
+                          aria-label={`Удалить карточку заявки ${r.number} из кабинета`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          Удалить
+                        </Button>
+                      ) : (
+                        <RouteButton from={r.fromPoint} to={r.toPoint} number={r.number} />
+                      )}
                     </div>
                   </div>
 
@@ -768,8 +903,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     {line.text}
                   </div>
 
-                  {/* ——— Участие в торгах: ставка подана, рейс ещё на площадке ——— */}
-                  {bidding && (
+                  {/* ——— Участие в торгах: ставка подана, рейс ещё на площадке.
+                      Для серых карточек (выход/проигрыш) блок скрыт (Task 52) ——— */}
+                  {bidding && !grey && (
                     <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
                       <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                         <TrendingDown className="h-4 w-4 text-sky-700" aria-hidden />
@@ -1282,6 +1418,36 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
           )}
         </DialogContent>
       </Dialog>
+
+      {/* подтверждение добровольного выхода из заявки (Task 52) */}
+      <AlertDialog open={!!withdrawReq} onOpenChange={(o) => { if (!o) setWithdrawReq(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Вы точно хотите выйти из заявки?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                {withdrawReq && (
+                  <>
+                    Заявка <b>{withdrawReq.number}</b> ({pointInfo(withdrawReq.fromPoint).short} → {pointInfo(withdrawReq.toPoint).short}).
+                    Ваша ставка <b>{rate(myBidOf(withdrawReq)?.amount ?? null)}</b> будет отозвана, торги продолжатся без вас.
+                    Вернуться можно новой ставкой на площадке, пока тендер не закрыт.
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy !== null}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 text-white hover:bg-red-700"
+              disabled={busy !== null}
+              onClick={(e) => { e.preventDefault(); void doWithdraw() }}
+            >
+              {busy === withdrawReq?.id ? 'Отменяем…' : 'Да, выйти'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }

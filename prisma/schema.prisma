@@ -150,6 +150,8 @@ model Bid {
   carrier   Carrier  @relation(fields: [carrierId], references: [id])
   amount    Float
   isWinner  Boolean  @default(false)
+  /** ставка отозвана — агент добровольно снялся с заявки (Task 52) */
+  withdrawn Boolean  @default(false)
   createdAt DateTime @default(now())
 }
 

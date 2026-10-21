@@ -51,7 +51,7 @@ async function busyConflict(
 
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.
- * action: bid | award | extend | direct-offer | raise-rate |
+ * action: bid | withdraw | award | extend | direct-offer | raise-rate |
  *         assign | confirm | return | close
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -91,6 +91,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         await ev('BID_PLACED', request.mode === 'CLOSED'
           ? `${carrier.name}: подана закрытая ставка`
           : `${carrier.name}: ставка ${money(amt)}`)
+        break
+      }
+
+      // ------- агент: добровольный выход из заявки (Task 52) -------
+      case 'withdraw': {
+        // Выйти можно только из идущих торгов — согласованную заявку у победителя
+        // не забираем (правило платформы, Task 50)
+        if (request.status !== 'PUBLISHED') {
+          return NextResponse.json({ error: 'Выйти из заявки можно только пока идёт тендер — победитель уже согласован' }, { status: 400 })
+        }
+        const { carrierId } = body as { carrierId: string }
+        const carrier = await db.carrier.findUnique({ where: { id: carrierId } })
+        if (!carrier) return NextResponse.json({ error: 'Перевозчик не найден' }, { status: 404 })
+        const activeBid = await db.bid.findFirst({ where: { requestId: id, carrierId, withdrawn: false } })
+        if (!activeBid) return NextResponse.json({ error: 'Активной ставки на эту заявку нет — выходить не из чего' }, { status: 400 })
+        // отзываем все ставки агента по заявке
+        await db.bid.updateMany({ where: { requestId: id, carrierId }, data: { withdrawn: true } })
+        // лучшая ставка пересчитывается только по активным ставкам
+        const best = await db.bid.aggregate({ where: { requestId: id, withdrawn: false }, _min: { amount: true } })
+        await db.request.update({ where: { id }, data: { bestRate: best._min.amount } })
+        await ev('BID_WITHDRAWN', `${carrier.name}: отозвал ставку и снялся с заявки`)
         break
       }
 

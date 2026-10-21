@@ -80,6 +80,8 @@ export interface BidDTO {
   carrierName: string
   amount: number
   isWinner: boolean
+  /** ставка отозвана — агент добровольно снялся с заявки (Task 52) */
+  withdrawn: boolean
   createdAt: string
 }
 

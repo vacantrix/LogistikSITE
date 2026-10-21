@@ -216,7 +216,9 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
   onOffer: () => void
   onRaise: () => void
 }) {
-  const sortedBids = [...request.bids].sort((a, b) => a.amount - b.amount || a.createdAt.localeCompare(b.createdAt))
+  // withdrawn-ставки (агент снялся с заявки, Task 52) нигде не участвуют:
+  // ни в списке, ни в счётчике, ни в лучшей цене
+  const sortedBids = request.bids.filter((b) => !b.withdrawn).sort((a, b) => a.amount - b.amount || a.createdAt.localeCompare(b.createdAt))
   const minBid = sortedBids[0] ?? null
   const minAmount = minBid?.amount ?? null
   const savings = request.bestRate != null && request.bestRate < request.startRate ? request.startRate - request.bestRate : null
@@ -248,7 +250,7 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
             : 'Ставок нет'}
         />
         <Metric label="Экономия" value={savings != null ? rate(savings) : '—'} tone={savings != null ? 'green' : 'default'} />
-        <Metric label="Ставок" value={String(request.bids.length)} />
+        <Metric label="Ставок" value={String(sortedBids.length)} />
       </div>
 
       {/* ставки: для AUCTION — таблица, для CLOSED — пояснение */}
@@ -543,7 +545,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   const myBidOf = useCallback(
     (r: RequestDTO): BidDTO | null => {
       if (!activeCarrierId) return null
-      const mine = r.bids.filter((b) => b.carrierId === activeCarrierId)
+      const mine = r.bids.filter((b) => b.carrierId === activeCarrierId && !b.withdrawn)
       if (mine.length === 0) return null
       return mine.reduce((best, b) => (b.amount < best.amount ? b : best))
     },
@@ -676,7 +678,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     }
   }
 
-  const sortedBids = (bids: BidDTO[]) => [...bids].sort((a, b) => a.amount - b.amount)
+  const sortedBids = (bids: BidDTO[]) => [...bids].filter((b) => !b.withdrawn).sort((a, b) => a.amount - b.amount)
   const bestBid = (bids: BidDTO[]) => (bids.length > 0 ? Math.min(...bids.map((b) => b.amount)) : null)
 
   // ——— действия логиста по торгам (влиты в площадку вместо вкладки «Торги») ———
@@ -836,7 +838,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         onClick: () => setExpandedId(closingSoon[0].id),
       })
     }
-    const noBids = published.filter((r) => r.bids.length === 0)
+    const noBids = published.filter((r) => r.bids.every((b) => b.withdrawn))
     if (noBids.length > 0) {
       items.push({
         key: 'nobids', icon: TrendingUp,
@@ -1491,13 +1493,15 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 </div>
               )}
 
-              {detailReq.mode === 'AUCTION' && (
+              {detailReq.mode === 'AUCTION' && (() => {
+                const activeBids = sortedBids(detailReq.bids)
+                return (
                 <div>
                   <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                     <Gavel className="h-4 w-4 text-blue-600" aria-hidden />
-                    Ставки ({detailReq.bids.length})
+                    Ставки ({activeBids.length})
                   </h4>
-                  {detailReq.bids.length === 0 ? (
+                  {activeBids.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-sm text-muted-foreground">
                       Ставок пока нет — будьте первым.
                     </p>
@@ -1512,8 +1516,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {sortedBids(detailReq.bids).map((b) => {
-                            const isBest = bestBid(detailReq.bids) === b.amount
+                          {activeBids.map((b) => {
+                            const isBest = bestBid(activeBids) === b.amount
                             return (
                               <TableRow key={b.id} className={isBest ? 'bg-emerald-50' : undefined}>
                                 <TableCell className="font-medium">
@@ -1534,7 +1538,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                     </div>
                   )}
                 </div>
-              )}
+                )
+              })()}
 
               {detailReq.mode === 'CLOSED' && (
                 <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -1543,7 +1548,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 </div>
               )}
 
-              {detailReq.status !== 'PUBLISHED' && detailReq.mode === 'AUCTION' && detailReq.bids.length > 0 && (
+              {detailReq.status !== 'PUBLISHED' && detailReq.mode === 'AUCTION' && sortedBids(detailReq.bids).length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   Торги завершены — победитель согласован логистом.
                 </p>

@@ -53,7 +53,7 @@ export function toRequestDTO(r: RequestFull): RequestDTO {
     bids: r.bids
       .slice()
       .sort((a, b) => a.amount - b.amount)
-      .map((b) => ({ id: b.id, carrierId: b.carrierId, carrierName: b.carrier.name, amount: b.amount, isWinner: b.isWinner, createdAt: b.createdAt.toISOString() })),
+      .map((b) => ({ id: b.id, carrierId: b.carrierId, carrierName: b.carrier.name, amount: b.amount, isWinner: b.isWinner, withdrawn: b.withdrawn, createdAt: b.createdAt.toISOString() })),
     documents: r.documents
       .slice()
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
