@@ -7,6 +7,48 @@ export const dynamic = 'force-dynamic'
 
 const money = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽/т`
 
+/** Статусы, в которых экипаж считается «в рейсе» — занят под другую заявку (Task 50) */
+const BUSY_STATUSES = ['AT_LOGIST', 'CONFIRMED']
+
+/**
+ * Правило занятости (Task 50): если водитель, ТС или прицеп уже закреплены за
+ * рейсом «в работе» (у логиста на сверке или данные в 1С — водитель в рейсе),
+ * назначить их на новую заявку нельзя. Возвращает текст ошибки
+ * «<Кто> занят — уже в рейсе по заявке Z-XXXX» или null, если всё свободно.
+ */
+async function busyConflict(
+  requestId: string,
+  driverId: string,
+  truckId: string,
+  trailerId?: string,
+): Promise<string | null> {
+  const active = await db.request.findMany({
+    where: {
+      status: { in: BUSY_STATUSES },
+      id: { not: requestId },
+      OR: [
+        { driverId },
+        { truckId },
+        ...(trailerId ? [{ trailerId }] : []),
+      ],
+    },
+    select: { id: true, number: true, status: true, driverId: true, truckId: true, trailerId: true },
+  })
+  if (active.length === 0) return null
+  const hit = active[0]
+  const place = `— уже ${hit.status === 'CONFIRMED' ? 'в рейсе' : 'готовится к рейсу'} по заявке ${hit.number}`
+  if (hit.driverId === driverId) {
+    const d = await db.driver.findUnique({ where: { id: driverId }, select: { fullName: true } })
+    return `Водитель ${d?.fullName ?? ''} занят ${place}`
+  }
+  if (hit.truckId === truckId) {
+    const t = await db.truck.findUnique({ where: { id: truckId }, select: { brand: true, plate: true } })
+    return `ТС ${t ? `${t.brand} (${t.plate})` : ''} занято ${place}`
+  }
+  const z = trailerId ? await db.trailer.findUnique({ where: { id: trailerId }, select: { plate: true } }) : null
+  return `Прицеп ${z?.plate ?? ''} занят ${place}`
+}
+
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.
  * action: bid | award | extend | direct-offer | raise-rate |
@@ -54,6 +96,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       // ------- логист: торги -------
       case 'award': {
+        // Правило платформы (Task 50): заявку нельзя забрать у победителя —
+        // согласовать можно только пока торги открыты
+        if (request.status !== 'PUBLISHED') {
+          return NextResponse.json({ error: 'Победитель уже согласован — заявку нельзя забрать у победителя' }, { status: 400 })
+        }
         const { bidId } = body as { bidId: string }
         const bid = await db.bid.findUnique({ where: { id: bidId }, include: { carrier: true } })
         if (!bid || bid.requestId !== id) return NextResponse.json({ error: 'Ставка не найдена' }, { status: 404 })
@@ -74,6 +121,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       }
 
       case 'direct-offer': {
+        // Правило платформы (Task 50): заявку нельзя забрать у победителя —
+        // прямое предложение возможно только пока торги открыты
+        if (request.status !== 'PUBLISHED') {
+          return NextResponse.json({ error: 'Победитель уже согласован — заявку нельзя забрать у победителя' }, { status: 400 })
+        }
         const { carrierId } = body as { carrierId: string }
         const carrier = await db.carrier.findUnique({ where: { id: carrierId } })
         if (!carrier) return NextResponse.json({ error: 'Перевозчик не найден' }, { status: 404 })
@@ -101,6 +153,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (driver.carrierId !== request.winnerId || truck.carrierId !== request.winnerId) {
           return NextResponse.json({ error: 'Водитель и ТС должны принадлежать перевозчику-победителю' }, { status: 400 })
         }
+        const busy = await busyConflict(id, driverId, truckId, trailerId)
+        if (busy) return NextResponse.json({ error: busy }, { status: 400 })
         await db.request.update({ where: { id }, data: { driverId, truckId, trailerId: trailerId || null } })
         const trailer = trailerId ? await db.trailer.findUnique({ where: { id: trailerId } }) : null
         await ev('DRIVER_ASSIGNED', `Указаны водитель и ТС: ${driver.fullName}, ${truck.brand} (${truck.plate})${trailer ? ` + ${trailer.plate}` : ''}`)
@@ -116,6 +170,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         if (driver.carrierId !== request.winnerId || truck.carrierId !== request.winnerId) {
           return NextResponse.json({ error: 'Водитель и ТС должны принадлежать перевозчику-победителю' }, { status: 400 })
         }
+        const busy = await busyConflict(id, driverId, truckId, trailerId)
+        if (busy) return NextResponse.json({ error: busy }, { status: 400 })
         await db.request.update({ where: { id }, data: { driverId, truckId, trailerId: trailerId || null } })
         const trailer = trailerId ? await db.trailer.findUnique({ where: { id: trailerId } }) : null
         await ev('CREW_APPROVED', `Экипаж утверждён агентом: ${driver.fullName}, ${truck.brand} (${truck.plate})${trailer ? ` + ${trailer.plate}` : ''} — состав передан логисту`)

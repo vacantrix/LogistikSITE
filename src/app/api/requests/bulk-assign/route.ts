@@ -71,6 +71,29 @@ export async function POST(req: NextRequest) {
       continue
     }
 
+    // Правило занятости (Task 50): ресурс «в рейсе» назначить нельзя
+    const active = await db.request.findMany({
+      where: {
+        status: { in: ['AT_LOGIST', 'CONFIRMED'] },
+        id: { not: request.id },
+        OR: [
+          { driverId: row.driverId },
+          { truckId: row.truckId },
+          ...(row.trailerId ? [{ trailerId: row.trailerId }] : []),
+        ],
+      },
+      select: { number: true, status: true, driverId: true, truckId: true, trailerId: true },
+    })
+    const hit = active[0]
+    if (hit) {
+      const place = `— уже ${hit.status === 'CONFIRMED' ? 'в рейсе' : 'готовится к рейсу'} по заявке ${hit.number}`
+      const who = hit.driverId === row.driverId
+        ? 'Водитель'
+        : hit.truckId === row.truckId ? 'ТС' : 'Прицеп'
+      results.push({ requestId: row.requestId, number: request.number, ok: false, error: `${who} занят ${place}` })
+      continue
+    }
+
     const driver = await db.driver.findUnique({ where: { id: row.driverId } })
     const truck = await db.truck.findUnique({ where: { id: row.truckId } })
     const trailer = row.trailerId ? await db.trailer.findUnique({ where: { id: row.trailerId } }) : null

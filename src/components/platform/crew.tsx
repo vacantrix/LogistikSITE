@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Download,
   FileSpreadsheet,
+  Info,
   Loader2,
   Send,
   Upload,
@@ -38,6 +39,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
+import { busyMaps, busyReason } from '@/lib/busy'
 import { expiryInfo, type ExpiryInfo } from '@/lib/expiry'
 import { pointInfo } from '@/lib/points'
 import { AGENT_STATUS_LABEL, MODE_META, rate, REQUEST_STATUS_META } from '@/lib/status'
@@ -205,6 +207,58 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   const drivers = carrier?.drivers ?? []
   const trucks = carrier?.trucks ?? []
   const trailers = carrier?.trailers ?? []
+
+  // ——— Правило занятости (Task 50): кто уже «в рейсе» (комплект у логиста или данные в 1С) ———
+  const busyCrew = useMemo(
+    () => busyMaps(requests ?? []),
+    [requests],
+  )
+
+  /** Выбор водителя: занятого — не применяем, вместо этого показываем сообщение «занят» */
+  const pickDriver = (reqId: string, driverId: string) => {
+    const b = busyCrew.drivers.get(driverId)
+    if (b) {
+      const d = drivers.find((x) => x.id === driverId)
+      toast({
+        title: 'Водитель — занят',
+        description: `${d?.fullName ?? 'Водитель'} ${busyReason(b.status)} по заявке ${b.number}. Выберите другого водителя.`,
+      })
+      return
+    }
+    setSelFor(reqId, { driverId })
+  }
+
+  /** Выбор тягача: занятое — не применяем, вместо этого показываем сообщение «занято» */
+  const pickTruck = (reqId: string, truckId: string) => {
+    const b = busyCrew.trucks.get(truckId)
+    if (b) {
+      const t = trucks.find((x) => x.id === truckId)
+      toast({
+        title: 'ТС — занято',
+        description: `${t ? `${t.brand} (${t.plate})` : 'ТС'} ${busyReason(b.status)} по заявке ${b.number}. Выберите другое ТС.`,
+      })
+      return
+    }
+    setSelFor(reqId, { truckId })
+  }
+
+  /** Выбор прицепа: занятый — не применяем, вместо этого показываем сообщение «занят» */
+  const pickTrailer = (reqId: string, trailerId: string) => {
+    if (trailerId === 'none') {
+      setSelFor(reqId, { trailerId })
+      return
+    }
+    const b = busyCrew.trailers.get(trailerId)
+    if (b) {
+      const z = trailers.find((x) => x.id === trailerId)
+      toast({
+        title: 'Прицеп — занят',
+        description: `${z?.plate ?? 'Прицеп'} ${busyReason(b.status)} по заявке ${b.number}. Выберите другой прицеп.`,
+      })
+      return
+    }
+    setSelFor(reqId, { trailerId })
+  }
 
   const driverById = useCallback((id: string | null | undefined) => drivers.find((d) => d.id === id), [drivers])
   const truckById = useCallback((id: string | null | undefined) => trucks.find((t) => t.id === id), [trucks])
@@ -388,6 +442,17 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
           }
           trl = found.id
         }
+        // Правило занятости (Task 50): водитель/ТС/прицеп «в рейсе» назначить нельзя
+        const busyHit = busyCrew.drivers.get(drv.id) ?? busyCrew.trucks.get(trk.id) ?? (trl ? busyCrew.trailers.get(trl) : undefined)
+        if (busyHit) {
+          const who = busyCrew.drivers.has(drv.id)
+            ? `Водитель ${drv.fullName}`
+            : busyCrew.trucks.has(trk.id)
+              ? `ТС ${trk.brand} (${trk.plate})`
+              : `Прицеп ${trailerPlate}`
+          row.message = `${who} занят — ${busyReason(busyHit.status)} по заявке ${busyHit.number}`
+          return row
+        }
         seen.add(byNo.id)
         Object.assign(row, { requestId: byNo.id, driverId: drv.id, truckId: trk.id, trailerId: trl, ok: true, message: trl ? 'готова к передаче' : 'без прицепа — готова к передаче' })
         return row
@@ -533,37 +598,47 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                             <td className="px-3 py-2 align-top">
                               <Select
                                 value={s.driverId ?? ''}
-                                onValueChange={(v) => setSelFor(r.id, { driverId: v })}
+                                onValueChange={(v) => pickDriver(r.id, v)}
                               >
                                 <SelectTrigger aria-label={`Выбор водителя по заявке ${r.number}`}>
                                   <SelectValue placeholder="Выберите водителя" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {drivers.map((d) => (
-                                    <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>
-                                  ))}
+                                  {drivers.map((d) => {
+                                    const b = busyCrew.drivers.get(d.id)
+                                    return (
+                                      <SelectItem key={d.id} value={d.id} className={b ? 'text-slate-400' : undefined}>
+                                        {d.fullName}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
+                                      </SelectItem>
+                                    )
+                                  })}
                                 </SelectContent>
                               </Select>
                             </td>
                             <td className="px-3 py-2 align-top">
                               <Select
                                 value={s.truckId ?? ''}
-                                onValueChange={(v) => setSelFor(r.id, { truckId: v })}
+                                onValueChange={(v) => pickTruck(r.id, v)}
                               >
                                 <SelectTrigger aria-label={`Выбор тягача по заявке ${r.number}`}>
                                   <SelectValue placeholder="Выберите тягача" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {trucks.map((t) => (
-                                    <SelectItem key={t.id} value={t.id}>{t.brand} · {t.plate}</SelectItem>
-                                  ))}
+                                  {trucks.map((t) => {
+                                    const b = busyCrew.trucks.get(t.id)
+                                    return (
+                                      <SelectItem key={t.id} value={t.id} className={b ? 'text-slate-400' : undefined}>
+                                        {t.brand} · {t.plate}{b ? ` · занято (${busyReason(b.status)}, ${b.number})` : ''}
+                                      </SelectItem>
+                                    )
+                                  })}
                                 </SelectContent>
                               </Select>
                             </td>
                             <td className="px-3 py-2 align-top">
                               <Select
                                 value={s.trailerId ?? ''}
-                                onValueChange={(v) => setSelFor(r.id, { trailerId: v })}
+                                onValueChange={(v) => pickTrailer(r.id, v)}
                               >
                                 <SelectTrigger aria-label={`Выбор прицепа по заявке ${r.number}`}>
                                   <SelectValue placeholder="Выберите прицепа" />
@@ -571,9 +646,14 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                                 <SelectContent>
                                   {/* «Без прицепа» — всегда доступный вариант, независимо от базы */}
                                   <SelectItem value="none">Без прицепа</SelectItem>
-                                  {trailers.map((z) => (
-                                    <SelectItem key={z.id} value={z.id}>{z.plate} · {z.type}</SelectItem>
-                                  ))}
+                                  {trailers.map((z) => {
+                                    const b = busyCrew.trailers.get(z.id)
+                                    return (
+                                      <SelectItem key={z.id} value={z.id} className={b ? 'text-slate-400' : undefined}>
+                                        {z.plate} · {z.type}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
+                                      </SelectItem>
+                                    )
+                                  })}
                                 </SelectContent>
                               </Select>
                             </td>
@@ -598,6 +678,14 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                         В базе нет водителей — пополните её во вкладке «Подать документы».
                       </p>
                     )}
+
+                    {/* Лёгкая подсказка о правиле занятости (Task 50) */}
+                    <p className="flex items-start gap-1.5 text-[11px] leading-snug text-slate-500">
+                      <Info className="mt-0.5 h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                      <span>
+                        Водители, ТС и прицепы, которые уже в рейсе, помечены как занятые. Попытка выбрать занятого не применит выбор — появится сообщение «водитель / ТС / прицеп — занят».
+                      </span>
+                    </p>
 
                     <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
                       <Button

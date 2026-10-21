@@ -62,12 +62,13 @@ import {
   type TabProps,
 } from '@/components/platform/common'
 import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
+import { AnimatedRate } from '@/components/platform/animated-rate'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
 import { formatKm, haversineKm, pointCoords, routeDistanceKm } from '@/lib/geo'
 import type { MapPoint } from '@/components/platform/delivery-map'
-import { DOC_TYPE_LABEL, fmtDateTime, num, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
+import { DOC_TYPE_LABEL, fmtDateTime, MODE_META, num, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
 import type { BidDTO, CargoTypeDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
@@ -81,7 +82,7 @@ const DeliveryMap = dynamic(() => import('@/components/platform/delivery-map'), 
 type ModeFilter = 'ALL' | RequestMode | 'MY_BIDS'
 
 const MODE_FILTERS: { value: ModeFilter; label: string }[] = [
-  { value: 'ALL', label: 'Все статусы' },
+  { value: 'ALL', label: 'Все виды' },
   { value: 'AUCTION', label: 'Торги' },
   { value: 'CLOSED', label: 'Закрытые ставки' },
 ]
@@ -112,7 +113,7 @@ function RateCell({ request }: { request: RequestDTO }) {
   }
   return (
     <div>
-      <div className="font-semibold text-slate-900">{rate(request.bestRate)}</div>
+      <AnimatedRate value={request.bestRate} format={rate} className="font-semibold text-slate-900" />
       <div className="text-xs text-muted-foreground">старт {rate(request.startRate)}</div>
     </div>
   )
@@ -132,7 +133,7 @@ function DeadlineCell({ request, now }: { request: RequestDTO; now: number | nul
 }
 
 /** Компактная метрика торгового стенда */
-function Metric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'green' }) {
+function Metric({ label, value, tone = 'default' }: { label: string; value: React.ReactNode; tone?: 'default' | 'green' }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
       <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
@@ -143,13 +144,11 @@ function Metric({ label, value, tone = 'default' }: { label: string; value: stri
 
 // ——— сортировка таблицы заявок (Task 49): клик по заголовку asc → desc → как было ———
 
-type SortKey = 'km' | 'cargo' | 'load' | 'truck' | 'status' | 'rate' | 'deadline'
+type SortKey = 'km' | 'cargo' | 'load' | 'truck' | 'mode' | 'rate' | 'deadline'
 type SortState = { key: SortKey; dir: 'asc' | 'desc' } | null
 
-/** Порядок статуса в конвейере: от «на площадке» до «закрыт» */
-const STATUS_ORDER: Record<string, number> = {
-  PUBLISHED: 0, AWARDED: 1, DOCS_REVIEW: 2, AT_LOGIST: 3, CONFIRMED: 4, CLOSED: 5,
-}
+/** Порядок вида тендера: торги → закрытые ставки */
+const MODE_ORDER: Record<string, number> = { AUCTION: 0, CLOSED: 1 }
 
 /** Дата «DD.MM.YYYY» → timestamp; «—»/пустое → Infinity (пустые всегда в конце списка) */
 function loadDateTs(s: string): number {
@@ -165,7 +164,7 @@ function sortValue(r: RequestDTO, key: SortKey): string | number {
     case 'cargo': return r.cargo.toLowerCase()
     case 'load': return loadDateTs(r.loadDate)
     case 'truck': return r.truckType.toLowerCase()
-    case 'status': return STATUS_ORDER[r.status] ?? 99
+    case 'mode': return MODE_ORDER[r.mode] ?? 99
     case 'rate': return r.bestRate ?? r.startRate
     case 'deadline': return r.deadline ? new Date(r.deadline).getTime() : Number.POSITIVE_INFINITY
   }
@@ -241,7 +240,12 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
       {/* метрики */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Стартовая ставка" value={rate(request.startRate)} />
-        <Metric label="Лучшая ставка" value={request.bestRate != null ? rate(request.bestRate) : 'Ставок нет'} />
+        <Metric
+          label="Лучшая ставка"
+          value={request.bestRate != null
+            ? <AnimatedRate value={request.bestRate} format={rate} />
+            : 'Ставок нет'}
+        />
         <Metric label="Экономия" value={savings != null ? rate(savings) : '—'} tone={savings != null ? 'green' : 'default'} />
         <Metric label="Ставок" value={String(request.bids.length)} />
       </div>
@@ -271,9 +275,16 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
             <TableBody>
               {sortedBids.map((b) => {
                 const isBest = minAmount != null && b.amount === minAmount
+                // свежая ставка (пришла по WebSocket меньше 20 сек назад) вспыхивает при появлении
+                const fresh = now !== null && Date.now() - new Date(b.createdAt).getTime() < 20_000
                 return (
-                  <TableRow key={b.id} className={isBest ? 'bg-emerald-50/60' : undefined}>
-                    <TableCell className="font-medium text-slate-800">{b.carrierName}</TableCell>
+                  <TableRow key={b.id} className={`${isBest ? 'bg-emerald-50/60' : ''} ${fresh ? 'bid-row-in' : ''}`}>
+                    <TableCell className="font-medium text-slate-800">
+                      <span className="flex items-center gap-2">
+                        {b.carrierName}
+                        {fresh && <Badge variant="outline" className="whitespace-nowrap border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700">новая</Badge>}
+                      </span>
+                    </TableCell>
                     <TableCell className="whitespace-nowrap font-semibold text-slate-900">{rate(b.amount)}</TableCell>
                     <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(b.createdAt)}</TableCell>
                     <TableCell>
@@ -581,15 +592,13 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   const exportExcel = () => {
     const withMine = !isLogist
     const header = [
-      'Заявка', 'Маршрут', 'КМ', 'Груз', 'Тоннаж, т', 'Тип ТС', 'Статус',
+      'Заявка', 'Маршрут', 'КМ', 'Груз', 'Тоннаж, т', 'Тип ТС', 'Вид тендера',
       'Ставка, ₽/т', 'Стартовая, ₽/т', 'Погрузка', 'Окно', 'Приём ставок до',
       ...(withMine ? ['Мой отклик'] : []),
     ]
     const rows = sorted.map((r) => {
       const my = myBidOf(r)
-      const statusLabel = r.status === 'PUBLISHED'
-        ? (r.mode === 'AUCTION' ? 'Торги' : 'Закрытые ставки')
-        : REQUEST_STATUS_META[r.status].label
+      const tenderLabel = MODE_META[r.mode].label
       const rate = r.mode === 'CLOSED' ? 'Скрыта' : (r.bestRate != null ? r.bestRate : '—')
       return [
         r.number,
@@ -598,7 +607,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         r.cargo,
         r.tonnage,
         r.truckType,
-        statusLabel,
+        tenderLabel,
         rate,
         r.startRate,
         r.loadDate,
@@ -903,8 +912,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 />
               </div>
               <Select value={mode} onValueChange={(v) => setMode(v as ModeFilter)}>
-                <SelectTrigger className="w-[200px]" aria-label="Фильтр по статусу заявки">
-                  <SelectValue placeholder="Все статусы" />
+                <SelectTrigger className="w-[200px]" aria-label="Фильтр по виду тендера">
+                  <SelectValue placeholder="Все виды" />
                 </SelectTrigger>
                 <SelectContent>
                   {statusFilters.map((m) => (
@@ -957,7 +966,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                   title={mode === 'MY_BIDS' ? 'Откликов пока нет' : 'Заявок не найдено'}
                   hint={mode === 'MY_BIDS'
                     ? 'Заявки, куда перевозчик подавал ставку, появятся в этом списке'
-                    : 'Измените параметры поиска или фильтр статуса'}
+                    : 'Измените параметры поиска или фильтр вида тендера'}
                 />
               ) : (
                 <div className="-mx-2 overflow-x-auto px-2">
@@ -970,7 +979,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                         <SortableTh k="cargo" label="Груз" sort={sort} onSort={toggleSort} />
                         <SortableTh k="load" label="Погрузка" sort={sort} onSort={toggleSort} />
                         <SortableTh k="truck" label="Тип ТС" sort={sort} onSort={toggleSort} />
-                        <SortableTh k="status" label="Статус" sort={sort} onSort={toggleSort} title="Порядок конвейера: на площадке → выбран → проверка → у логиста → в 1С → закрыт" />
+                        <SortableTh k="mode" label="Вид тендера" sort={sort} onSort={toggleSort} title="Вид приёма ставок: торги на понижение или закрытые ставки" />
                         <SortableTh k="rate" label="Ставка" sort={sort} onSort={toggleSort} title="Лучшая ставка, иначе стартовая; у закрытых — стартовая" />
                         <SortableTh k="deadline" label="До окончания" sort={sort} onSort={toggleSort} title="Срок приёма ставок; без срока — в конце списка" />
                         <th scope="col" className="border-b border-slate-200 pb-2.5 font-semibold">Действие</th>
@@ -1191,7 +1200,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="cr-mode">Статус</Label>
+                <Label htmlFor="cr-mode">Вид тендера</Label>
                 <Select value={form.mode} onValueChange={(v) => setForm((f) => ({ ...f, mode: v as RequestMode }))}>
                   <SelectTrigger id="cr-mode"><SelectValue /></SelectTrigger>
                   <SelectContent>

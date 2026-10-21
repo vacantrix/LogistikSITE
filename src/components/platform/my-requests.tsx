@@ -8,6 +8,7 @@ import {
   Car,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Clock,
   ClipboardList,
   FileSignature,
@@ -23,6 +24,7 @@ import {
   Send,
   Sparkles,
   TrendingDown,
+  Trophy,
   Truck,
   Upload,
   User,
@@ -50,6 +52,7 @@ import {
 } from '@/components/platform/common'
 import { PIPELINE_STAGES, STAGE_OF_STATUS, StatusPipeline } from '@/components/platform/status-pipeline'
 import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
+import { AnimatedRate } from '@/components/platform/animated-rate'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
@@ -103,7 +106,7 @@ function agentLine(r: RequestDTO, myBid: BidDTO | null): { text: string; cls: st
         return { text: 'Ваша ставка сейчас лучшая — ждём закрытия приёма ставок', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
       return { text: 'Вашу ставку перебили — подайте новую, пониженную', cls: 'border-amber-200 bg-amber-50 text-amber-900' }
     case 'AWARDED':
-      return { text: 'Назначьте экипаж в разделе «Назначение экипажей» и загрузите документы здесь', cls: 'border-amber-200 bg-amber-50 text-amber-900' }
+      return { text: 'Вы выиграли — рейс закреплён за вами', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
     case 'DOCS_REVIEW': {
       const bad = r.documents.some((d) => d.status === 'REUPLOAD' || d.status === 'REJECTED')
       return bad
@@ -173,6 +176,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
   const [statusFilter, setStatusFilter] = useState<'ALL' | number>('ALL')
   const [now, setNow] = useState<number | null>(null)
   const [doneOpen, setDoneOpen] = useState(true)
+  // свёрнутый загрузчик документов на этапе «Подтверждено» (Task 50)
+  const [docsOpenId, setDocsOpenId] = useState<string | null>(null)
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
   // ——— окно ставки: форма → подтверждение → успех (как на площадке) ———
   const [bidReq, setBidReq] = useState<RequestDTO | null>(null)
@@ -485,11 +490,150 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
           ? { text: `Рейс забрал другой перевозчик${r.winnerName ? ` (${r.winnerName})` : ''} — заявка остаётся в полной истории`, cls: 'border-slate-300 bg-slate-100 text-slate-600' }
           : agentLine(r, myBid)
         const tl = bidding && now !== null && r.deadline ? timeLeft(r.deadline) : null
-        const inControl = !lost && (r.status === 'AWARDED' || r.status === 'DOCS_REVIEW')
+        const awarded = !lost && r.status === 'AWARDED'
+        const inControl = !lost && r.status === 'DOCS_REVIEW'
         const hasPending = r.documents.some((d) => d.status === 'PENDING')
         /** пропущенные документы: обязательные типы, по которым нет загрузки — подсвечиваем */
         const missingDocs = DOC_ORDER.filter((t) => !r.documents.some((d) => d.type === t))
         const compact = r.status === 'CONFIRMED' || r.status === 'CLOSED'
+        const docsOpen = docsOpenId === r.id
+
+        /** Секция документов: единый вид для «Подтверждено» (свёрнуто) и «Документы» (раскрыто) */
+        const docsSection = (
+          <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <FileText className="h-4 w-4 text-blue-600" aria-hidden />
+                Документы (6 файлов к заявке)
+              </h4>
+              {missingDocs.length > 0 && (
+                <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[11px] font-semibold text-amber-800" aria-label={`Пропущено документов: ${missingDocs.length} из ${DOC_ORDER.length}`}>
+                  Пропущено: {missingDocs.length} из {DOC_ORDER.length}
+                </Badge>
+              )}
+              {hasPending && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  disabled={busy !== null}
+                  onClick={() => void doVerify(r)}
+                  aria-label={`Отправить документы заявки ${r.number} на проверку нейросети`}
+                >
+                  <Send className="h-4 w-4" aria-hidden />
+                  Отправить на проверку
+                </Button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {DOC_ORDER.map((type) => {
+                const doc = r.documents.find((d) => d.type === type)
+                const Icon = DOC_ICONS[type]
+                const key = `${r.id}:${type}`
+                return (
+                  <div
+                    key={type}
+                    className={`flex flex-col rounded-xl border p-3 ${doc ? 'border-slate-200 bg-white' : 'border-dashed border-amber-300 bg-amber-50/70'}`}
+                  >
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <span className="flex items-center gap-2">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700" aria-hidden>
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="text-xs font-semibold leading-tight text-slate-800">{DOC_TYPE_LABEL[type]}</span>
+                      </span>
+                      {doc ? (
+                        <DocStatusBadge status={doc.status} />
+                      ) : (
+                        <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[10px] font-semibold text-amber-800">Не загружен</Badge>
+                      )}
+                    </div>
+
+                    {doc && (
+                      <img
+                        src={doc.dataUri}
+                        alt={`Документ «${DOC_TYPE_LABEL[type]}» — ${doc.fileName}`}
+                        className="mb-2 h-20 w-full rounded-md border border-slate-200 object-cover"
+                      />
+                    )}
+
+                    <div className="mb-2 min-h-0 flex-1 space-y-1">
+                      {doc?.quality != null && (
+                        <div className="text-[11px] text-muted-foreground">Качество: {doc.quality}</div>
+                      )}
+                      {doc?.message && <p className="text-[11px] leading-snug text-slate-600">{doc.message}</p>}
+                      {doc && doc.issues.map((is, i) => (
+                        <p key={i} className={`text-[11px] leading-snug ${issueClass(doc.status)}`}>• {is}</p>
+                      ))}
+                    </div>
+
+                    <input
+                      ref={(el) => {
+                        fileInputs.current[key] = el
+                      }}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      aria-label={`Загрузить ${DOC_TYPE_LABEL[type]}`}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        e.target.value = ''
+                        if (f) void handleFile(r, type, f)
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      variant={doc ? 'outline' : 'default'}
+                      className="w-full gap-1.5"
+                      disabled={busy !== null}
+                      onClick={() => fileInputs.current[key]?.click()}
+                      aria-label={doc ? `Заменить ${DOC_TYPE_LABEL[type]}` : `Загрузить ${DOC_TYPE_LABEL[type]}`}
+                    >
+                      {busy === `${r.id}:up:${type}`
+                        ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        : <Upload className="h-4 w-4" aria-hidden />}
+                      {doc ? 'Заменить' : 'Загрузить файл'}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+
+        /** Демо-кнопки комплекта документов */
+        const demoButtons = (
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={busy !== null}
+              onClick={() => void runDemo(r)}
+              aria-label={`Загрузить демо-образцы документов по заявке ${r.number}`}
+            >
+              {busy === `${r.id}:demo` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
+              Загрузить образцы документов (демо)
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={busy !== null}
+              onClick={() => void runBlurDemo(r)}
+              aria-label={`Загрузить демо-образец с браком по заявке ${r.number}`}
+            >
+              {busy === `${r.id}:blur` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileX className="h-4 w-4" aria-hidden />}
+              Брак: размытое ВУ (демо)
+            </Button>
+            {verifyingId === r.id && (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-blue-700" role="status">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Нейросеть проверяет…
+              </span>
+            )}
+          </div>
+        )
 
         return (
           <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)]">
@@ -643,7 +787,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                                 Скрыта
                               </>
                             ) : (
-                              rate(r.bestRate ?? r.startRate)
+                              <AnimatedRate value={r.bestRate ?? r.startRate} format={rate} />
                             )}
                           </div>
                         </div>
@@ -710,7 +854,91 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                   {/* Экипаж закрытого/подтверждённого рейса — в истории */}
                   {compact && !lost && r.driverId && <CrewChips r={r} carrier={carrier} />}
 
-                  {/* ——— Панель заявки в работе (AWARDED / DOCS_REVIEW) ——— */}
+                  {/* ——— Подтверждено: агент выиграл тендер (Task 50) ——— */}
+                  {awarded && (
+                    <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 sm:p-5" role="status">
+                      <div className="flex items-start gap-3">
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm" aria-hidden>
+                          <Trophy className="h-6 w-6" />
+                        </span>
+                        <div className="min-w-0">
+                          <h4 className="text-lg font-bold leading-snug text-emerald-900">Вы выиграли!</h4>
+                          <p className="mt-0.5 text-sm leading-snug text-emerald-800">
+                            Поздравляем: ставка {rate(r.bestRate)} согласована — рейс закреплён за «{carrierName}».
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Экипаж: что уже выбрано по рейсу */}
+                      <div className="rounded-xl border border-emerald-200 bg-white p-3.5">
+                        <h5 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          <Users className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+                          Экипаж
+                        </h5>
+                        <div className="mt-2">
+                          {r.driverId && r.truckId ? (
+                            <CrewChips r={r} carrier={carrier} />
+                          ) : (
+                            <p className="text-sm text-slate-600">Ещё не назначен — выберите состав, чтобы подготовить рейс.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <p className="text-sm leading-relaxed text-slate-700">
+                        Перейдите к{' '}
+                        <span className="font-semibold text-slate-900">«Подать документы»</span>, если требуется
+                        загрузить новые данные по новым водителям, ТС или прицепу, или выберите уже имеющегося
+                        из раздела{' '}
+                        <span className="font-semibold text-slate-900">«Назначение экипажей»</span>.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          onClick={() => onNavigate('apply')}
+                          className="gap-1.5"
+                          aria-label="Перейти к разделу «Подать документы»"
+                        >
+                          <Upload className="h-4 w-4" aria-hidden />
+                          Подать документы
+                        </Button>
+                        <Button
+                          onClick={() => onNavigate('crew')}
+                          variant="outline"
+                          className="gap-1.5 border-emerald-200 bg-white hover:bg-emerald-50"
+                          aria-label="Перейти к разделу «Назначение экипажей»"
+                        >
+                          <Users className="h-4 w-4" aria-hidden />
+                          Назначение экипажей
+                        </Button>
+                      </div>
+
+                      {/* Документы: свёрнутый загрузчик — раскрывается, когда пора подавать комплект */}
+                      <div className="border-t border-emerald-200 pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setDocsOpenId((cur) => (cur === r.id ? null : r.id))}
+                          aria-expanded={docsOpen}
+                          className="flex items-center gap-1.5 text-sm font-medium text-emerald-800 transition-colors hover:text-emerald-900"
+                          aria-label={`${docsOpen ? 'Скрыть' : 'Открыть'} загрузку документов по заявке ${r.number}`}
+                        >
+                          {docsOpen ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
+                          Загрузить документы по заявке
+                          {missingDocs.length > 0 && (
+                            <span className="text-xs font-normal text-emerald-700">
+                              · не загружено: {missingDocs.length} из {DOC_ORDER.length}
+                            </span>
+                          )}
+                        </button>
+                        {docsOpen && (
+                          <div className="mt-3 space-y-3">
+                            {docsSection}
+                            {demoButtons}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ——— Панель заявки в работе (DOCS_REVIEW): экипаж + комплект документов ——— */}
                   {inControl && (
                     <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
                       {/* a) Экипаж: только справочная информация — назначение выполняется в отдельном разделе */}
@@ -730,138 +958,11 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         )}
                       </div>
 
-                      {/* b) Документы — 4 слота */}
-                      <div>
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                          <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                            <FileText className="h-4 w-4 text-blue-600" aria-hidden />
-                            Документы (6 файлов к заявке)
-                          </h4>
-                          {missingDocs.length > 0 && (
-                            <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[11px] font-semibold text-amber-800" aria-label={`Пропущено документов: ${missingDocs.length} из ${DOC_ORDER.length}`}>
-                              Пропущено: {missingDocs.length} из {DOC_ORDER.length}
-                            </Badge>
-                          )}
-                          {hasPending && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-1.5"
-                              disabled={busy !== null}
-                              onClick={() => void doVerify(r)}
-                              aria-label={`Отправить документы заявки ${r.number} на проверку нейросети`}
-                            >
-                              <Send className="h-4 w-4" aria-hidden />
-                              Отправить на проверку
-                            </Button>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                          {DOC_ORDER.map((type) => {
-                            const doc = r.documents.find((d) => d.type === type)
-                            const Icon = DOC_ICONS[type]
-                            const key = `${r.id}:${type}`
-                            return (
-                              <div
-                                key={type}
-                                className={`flex flex-col rounded-xl border p-3 ${doc ? 'border-slate-200 bg-white' : 'border-dashed border-amber-300 bg-amber-50/70'}`}
-                              >
-                                <div className="mb-2 flex items-start justify-between gap-2">
-                                  <span className="flex items-center gap-2">
-                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700" aria-hidden>
-                                      <Icon className="h-4 w-4" />
-                                    </span>
-                                    <span className="text-xs font-semibold leading-tight text-slate-800">{DOC_TYPE_LABEL[type]}</span>
-                                  </span>
-                                  {doc ? (
-                                    <DocStatusBadge status={doc.status} />
-                                  ) : (
-                                    <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[10px] font-semibold text-amber-800">Не загружен</Badge>
-                                  )}
-                                </div>
-
-                                {doc && (
-                                  <img
-                                    src={doc.dataUri}
-                                    alt={`Документ «${DOC_TYPE_LABEL[type]}» — ${doc.fileName}`}
-                                    className="mb-2 h-20 w-full rounded-md border border-slate-200 object-cover"
-                                  />
-                                )}
-
-                                <div className="mb-2 min-h-0 flex-1 space-y-1">
-                                  {doc?.quality != null && (
-                                    <div className="text-[11px] text-muted-foreground">Качество: {doc.quality}</div>
-                                  )}
-                                  {doc?.message && <p className="text-[11px] leading-snug text-slate-600">{doc.message}</p>}
-                                  {doc && doc.issues.map((is, i) => (
-                                    <p key={i} className={`text-[11px] leading-snug ${issueClass(doc.status)}`}>• {is}</p>
-                                  ))}
-                                </div>
-
-                                <input
-                                  ref={(el) => {
-                                    fileInputs.current[key] = el
-                                  }}
-                                  type="file"
-                                  accept="image/*"
-                                  className="hidden"
-                                  aria-label={`Загрузить ${DOC_TYPE_LABEL[type]}`}
-                                  onChange={(e) => {
-                                    const f = e.target.files?.[0]
-                                    e.target.value = ''
-                                    if (f) void handleFile(r, type, f)
-                                  }}
-                                />
-                                <Button
-                                  size="sm"
-                                  variant={doc ? 'outline' : 'default'}
-                                  className="w-full gap-1.5"
-                                  disabled={busy !== null}
-                                  onClick={() => fileInputs.current[key]?.click()}
-                                  aria-label={doc ? `Заменить ${DOC_TYPE_LABEL[type]}` : `Загрузить ${DOC_TYPE_LABEL[type]}`}
-                                >
-                                  {busy === `${r.id}:up:${type}`
-                                    ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                                    : <Upload className="h-4 w-4" aria-hidden />}
-                                  {doc ? 'Заменить' : 'Загрузить файл'}
-                                </Button>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
+                      {/* b) Документы — 6 слотов */}
+                      {docsSection}
 
                       {/* c) Демо-кнопки */}
-                      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1.5"
-                          disabled={busy !== null}
-                          onClick={() => void runDemo(r)}
-                          aria-label={`Загрузить демо-образцы документов по заявке ${r.number}`}
-                        >
-                          {busy === `${r.id}:demo` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="h-4 w-4" aria-hidden />}
-                          Загрузить образцы документов (демо)
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1.5"
-                          disabled={busy !== null}
-                          onClick={() => void runBlurDemo(r)}
-                          aria-label={`Загрузить демо-образец с браком по заявке ${r.number}`}
-                        >
-                          {busy === `${r.id}:blur` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileX className="h-4 w-4" aria-hidden />}
-                          Брак: размытое ВУ (демо)
-                        </Button>
-                        {verifyingId === r.id && (
-                          <span className="flex items-center gap-1.5 text-sm font-medium text-blue-700" role="status">
-                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                            Нейросеть проверяет…
-                          </span>
-                        )}
-                      </div>
+                      {demoButtons}
                     </div>
                   )}
 
