@@ -310,7 +310,11 @@ export default function DriverLine({
         return false
       }
 
-      // ——— допуск: в базу записывается только водитель (Task 51) ———
+      // ——— допуск: в базу записывается только водитель (Task 51); фото документов
+      // сохраняются вместе с записью — для предосмотра в «Справочниках» (Task 54) ———
+      const driverPhotos = DRIVER_DOC_TYPES
+        .filter((tp) => uploads[tp])
+        .map((tp) => ({ label: DOC_TYPE_LABEL[tp], fileName: uploads[tp]!.fileName, dataUri: uploads[tp]!.dataUri }))
       const driverRes = await api.createDirectory('driver', {
         carrierId,
         fullName: effD.fullName.trim(),
@@ -325,7 +329,7 @@ export default function DriverLine({
         license: effD.license.trim(),
         licenseTill: effD.licenseTill.trim(),
         categories: effD.categories.trim(),
-      })
+      }, driverPhotos)
       const name = driverRes.driver?.fullName ?? effD.fullName.trim()
       setAdmitted(name)
       onAdmitted?.()
@@ -790,6 +794,10 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
 
     setChecking(true)
     try {
+      // фото ТС сохраняются вместе с записью — предосмотр в «Справочниках» (Task 54)
+      const truckPhotos = SOLO_PHOTO_KEYS
+        .filter((k) => photos[k])
+        .map((k) => ({ label: TRUCK_PHOTO_LABELS[k], fileName: photos[k]!.fileName, dataUri: photos[k]!.dataUri }))
       const res = await api.createDirectory('truck', {
         carrierId,
         brand: t.brand.trim(),
@@ -797,7 +805,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         sts: t.sts.trim(),
         color: t.color.trim(),
         owner: t.owner.trim(),
-      })
+      }, truckPhotos)
       const label = res.truck ? `${res.truck.brand} ${res.truck.plate}` : `${t.brand.trim()} ${t.plate.trim()}`
       setAdmitted(label)
       toast({ title: 'ТС допущено в базу', description: label })
@@ -915,6 +923,10 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
 
     setChecking(true)
     try {
+      // фото прицепа сохраняются вместе с записью — предосмотр в «Справочниках» (Task 54)
+      const trailerPhotos = SOLO_PHOTO_KEYS
+        .filter((k) => photos[k])
+        .map((k) => ({ label: TRAILER_PHOTO_LABELS[k], fileName: photos[k]!.fileName, dataUri: photos[k]!.dataUri }))
       const res = await api.createDirectory('trailer', {
         carrierId,
         type: tr.type || TRAILER_TYPES[0],
@@ -922,7 +934,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
         sts: tr.sts.trim(),
         color: tr.color.trim(),
         owner: tr.owner.trim(),
-      })
+      }, trailerPhotos)
       const label = res.trailer ? `${res.trailer.type} ${res.trailer.plate}` : `${tr.type} ${tr.plate.trim()}`
       setAdmitted(label)
       toast({ title: 'Прицеп допущен в базу', description: label })

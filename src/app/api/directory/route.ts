@@ -37,6 +37,30 @@ export async function POST(req: NextRequest) {
   const { kind, data } = (body ?? {}) as { kind?: string; data?: Record<string, string> }
   if (!kind || !data) return NextResponse.json({ error: 'Нужны kind и data' }, { status: 400 })
 
+  /** фото/документы записи справочника (Task 54): сохраняются после допуска записи */
+  const rawPhotos = Array.isArray(body?.photos) ? (body.photos as unknown[]) : []
+  const photos = rawPhotos
+    .filter((p): p is { label?: string; fileName?: string; dataUri: string } => {
+      if (!p || typeof p !== 'object') return false
+      const uri = (p as { dataUri?: unknown }).dataUri
+      return typeof uri === 'string' && uri.startsWith('data:image/')
+    })
+    .slice(0, 8)
+    .map((p) => ({
+      label: String(p.label ?? 'Фото документа').slice(0, 120),
+      fileName: String(p.fileName ?? 'photo.png').slice(0, 200) || 'photo.png',
+      dataUri: p.dataUri,
+    }))
+
+  /** записать фото под видом kind для созданной/обновлённой записи (идемпотентно — замена комплекта) */
+  const savePhotos = async (refId: string) => {
+    if (photos.length === 0) return
+    await db.directoryPhoto.deleteMany({ where: { kind, refId } })
+    await db.directoryPhoto.createMany({
+      data: photos.map((p) => ({ kind, refId, label: p.label, fileName: p.fileName, dataUri: p.dataUri })),
+    })
+  }
+
   try {
     switch (kind) {
       case 'cargo': {
@@ -84,6 +108,7 @@ export async function POST(req: NextRequest) {
         const driver = existing
           ? await db.driver.update({ where: { id: existing.id }, data: payload })
           : await db.driver.create({ data: { carrierId: data.carrierId, ...payload } })
+        await savePhotos(driver.id)
         notifyLive({ type: 'DIRECTORY_UPDATED', message: `Справочник: водитель ${driver.fullName} ${existing ? 'обновлён' : 'допущен в базу'}` })
         return NextResponse.json({ ok: true, driver: toDriverDTO(driver) }, { status: existing ? 200 : 201 })
       }
@@ -94,6 +119,7 @@ export async function POST(req: NextRequest) {
         const truck = existing
           ? await db.truck.update({ where: { id: existing.id }, data: payload })
           : await db.truck.create({ data: { carrierId: data.carrierId, ...payload } })
+        await savePhotos(truck.id)
         notifyLive({ type: 'DIRECTORY_UPDATED', message: `Справочник: ТС ${truck.brand} ${truck.plate} ${existing ? 'обновлено' : 'допущено в базу'}` })
         return NextResponse.json({ ok: true, truck: toTruckDTO(truck) }, { status: existing ? 200 : 201 })
       }
@@ -108,6 +134,7 @@ export async function POST(req: NextRequest) {
         const trailer = existingTrailer
           ? await db.trailer.update({ where: { id: existingTrailer.id }, data: trailerPayload })
           : await db.trailer.create({ data: { carrierId: data.carrierId, ...trailerPayload } })
+        await savePhotos(trailer.id)
         notifyLive({ type: 'DIRECTORY_UPDATED', message: `Справочник: прицеп ${trailer.type} ${trailer.plate} ${existingTrailer ? 'обновлён' : 'допущен в базу'}` })
         return NextResponse.json({ ok: true, trailer: toTrailerDTO(trailer) }, { status: existingTrailer ? 200 : 201 })
       }
@@ -181,7 +208,7 @@ export async function PUT(req: NextRequest) {
           where: { id },
           data: {
             plate: data.plate, sts: data.sts || '—', type: data.type || '—',
-            techTill: data.techTill || '—',
+            techTill: data.techTill || '—', owner: data.owner || '—',
           },
         })
         return NextResponse.json({ ok: true, trailer: toTrailerDTO(trailer) })

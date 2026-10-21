@@ -90,6 +90,24 @@ model Trailer {
   createdAt DateTime @default(now())
 }
 
+/**
+ * Фото/документы записей справочника (Task 54): паспорт и регистрация водителя,
+ * фото ТС и СТС, фото прицепа и СТС. Сохраняются при допуске записи через
+ * «Подать документы», показываются в «Справочниках» по иконке фото
+ * в модальном окне предосмотра с кнопкой «Скачать фото».
+ */
+model DirectoryPhoto {
+  id        String   @id @default(cuid())
+  kind      String // driver | truck | trailer
+  refId     String // id записи справочника (Driver/Truck/Trailer)
+  label     String // человекочитаемое название слота («Паспорт: стр. с фото», «Фото ТС»…)
+  fileName  String
+  dataUri   String
+  createdAt DateTime @default(now())
+
+  @@index([kind, refId])
+}
+
 // ============ Directory: cargos (единый справочник грузов) ============
 
 /**

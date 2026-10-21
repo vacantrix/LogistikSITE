@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CargoTypeDTO, CarrierDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TrailerDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SettingsDTO, TrailerDTO, TruckDTO,
 } from '@/lib/types'
 
 async function json<T>(res: Response): Promise<T> {
@@ -37,8 +37,11 @@ export const api = {
     fetch('/api/requests/bulk-assign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(json<{ assigned: number; total: number; results: { requestId: string; number: string; ok: boolean; error?: string }[] }>),
 
   directory: () => fetch('/api/directory', { cache: 'no-store' }).then(json<{ carriers: CarrierDTO[]; cargoTypes: CargoTypeDTO[] }>),
-  createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo', data: Record<string, unknown>) =>
-    fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data }) }).then(json<{ ok: boolean; driver?: DriverDTO; truck?: TruckDTO; trailer?: TrailerDTO; cargoType?: CargoTypeDTO }>),
+  createDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo', data: Record<string, unknown>, photos?: { label: string; fileName: string; dataUri: string }[]) =>
+    fetch('/api/directory', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, data, photos }) }).then(json<{ ok: boolean; driver?: DriverDTO; truck?: TruckDTO; trailer?: TrailerDTO; cargoType?: CargoTypeDTO }>),
+  /** Фото/документы записи справочника — для модального окна предосмотра (Task 54) */
+  directoryPhotos: (kind: 'driver' | 'truck' | 'trailer', id: string) =>
+    fetch(`/api/directory/photos?kind=${kind}&id=${id}`, { cache: 'no-store' }).then(json<{ photos: DirectoryPhotoDTO[] }>),
   /** Обновить запись базы аккаунта (в т.ч. сроки действия документов и справочник грузов) */
   updateDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo', id: string, data: Record<string, unknown>) =>
     fetch('/api/directory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, data }) }).then(json<{ ok: boolean; cargoType?: CargoTypeDTO }>),

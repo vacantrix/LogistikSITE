@@ -49,6 +49,14 @@ export interface TrailerDTO {
   createdAt: string
 }
 
+/** Фото/документ записи справочника (Task 54) — модальное окно предосмотра в «Справочниках» */
+export interface DirectoryPhotoDTO {
+  id: string
+  label: string
+  fileName: string
+  dataUri: string
+}
+
 export interface CarrierDTO {
   id: string
   name: string

@@ -13,6 +13,7 @@ import { Fragment } from 'react'
 import {
   BadgeCheck,
   CheckCircle2,
+  CircleAlert,
   FileCheck2,
   Handshake,
   MousePointerClick,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Badge } from '@/components/ui/badge'
 import { AgentStatusBadge } from '@/components/platform/common'
 import type { RequestDTO, RequestStatus } from '@/lib/types'
 
@@ -96,7 +98,7 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     ring: 'ring-emerald-100',
     countCls: 'text-emerald-700',
     line: '',
-    tip: 'Водитель выполнил рейс — логист закрыл заявку. Заявка переехала в папку «Завершенные» ниже.',
+    tip: 'Водитель выполнил рейс — логист закрыл заявку. Завершённые рейсы не показываются в кабинете агента — только активные и доступные к отклику.',
   },
 ]
 
@@ -113,34 +115,77 @@ export const STAGE_OF_STATUS: Record<RequestStatus, number> = {
 /**
  * Плашка положения заявки на линии этапов. Без заявки — вся линия серая;
  * с заявкой — подсвечены текущий этап и все пройденные, остальные серые.
- * Проигранная заявка (lost) — вся линия серая без подсветки этапов.
+ *
+ * frozen (Task 54, статусная модель «Моих заявок»): заявка, по которой агент
+ * не выиграл, НЕ продвигается дальше этапа «Согласование ставки» — линия
+ * подсвечивается только до него, в шапке итоговый статус: «Ставка перебита»
+ * (красным, если цену перебили — в идущих или завершённых торгах) либо
+ * замороженное «Согласование ставки».
  */
-export function StatusPipeline({ activeIdx, request, lost = false }: { activeIdx: number; request: RequestDTO | null; lost?: boolean }) {
-  const hasRequest = request !== null && !lost
+export function StatusPipeline({
+  activeIdx, request, frozen = null,
+}: {
+  activeIdx: number
+  request: RequestDTO | null
+  frozen?: 'outbid' | 'outbid-final' | 'lost' | 'withdrawn' | null
+}) {
+  /** замороженная заявка стопорится на этапе 1 «Согласование ставки» (индекс 1) */
+  const idx = frozen ? Math.min(activeIdx, 1) : activeIdx
+  const hasRequest = request !== null
+  const outbid = frozen === 'outbid' || frozen === 'outbid-final'
+  const frozenNote =
+    frozen === 'outbid'
+      ? '· снизьте ставку, чтобы вернуть лидерство — дальше заявка не двигается'
+      : frozen === 'outbid-final'
+        ? request?.status === 'PUBLISHED'
+          ? '· торги завершены: вашу ставку перебили — заявка остаётся в истории'
+          : '· рейс забрал другой перевозчик — заявка остаётся в истории'
+        : frozen === 'lost'
+          ? '· торги завершены не в вашу пользу — дальше «Согласования ставки» заявка не двигается'
+          : frozen === 'withdrawn'
+            ? '· вы снялись с торгов — заявка не продвигается'
+            : null
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardContent className="px-3 py-4 sm:px-6">
         {request === null ? (
           <div className="mb-3 text-xs text-slate-400">Выберите заявку — и здесь отразится, на каком этапе она находится</div>
-        ) : lost ? (
+        ) : outbid ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="font-semibold text-slate-600">Рейс забрал другой перевозчик</span>
-            <span className="text-slate-400">· заявка остаётся в полной истории</span>
+            <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-100 text-red-800">
+              <CircleAlert className="mr-1 h-3 w-3" aria-hidden />
+              Ставка перебита
+            </Badge>
+            <span>{frozenNote}</span>
+          </div>
+        ) : frozen ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
+              Согласование ставки
+            </Badge>
+            <span>{frozenNote}</span>
           </div>
         ) : (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <AgentStatusBadge status={request.status} />
+            {/* заявка без ставки агента стоит на «Выборе рейса» — бейдж дублирует этап, а не «Согласование ставки» */}
+            {activeIdx === 0 ? (
+              <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
+                Выбор рейса
+              </Badge>
+            ) : (
+              <AgentStatusBadge status={request.status} />
+            )}
             <span className="text-slate-400">· этап {activeIdx + 1} из {PIPELINE_STAGES.length}</span>
           </div>
         )}
         <div className="flex items-start overflow-x-auto pb-1" aria-label="Этапы заявки">
           {PIPELINE_STAGES.map((st, i) => {
             const Icon = st.icon
-            const colored = hasRequest && i <= activeIdx
-            const isCurrent = hasRequest && i === activeIdx
-            const isDone = hasRequest && i < activeIdx
-            const stateWord = lost
-              ? ' — забран другим перевозчиком'
+            const colored = hasRequest && i <= idx
+            const isCurrent = hasRequest && i === idx
+            const isDone = hasRequest && i < idx
+            const stateWord = frozen && i > idx
+              ? ' — закрыто'
               : isCurrent
                 ? ' — текущий этап'
                 : isDone
@@ -165,7 +210,7 @@ export function StatusPipeline({ activeIdx, request, lost = false }: { activeIdx
                         )}
                       </span>
                       <span className={`whitespace-nowrap text-sm font-bold leading-none ${isDone ? 'text-emerald-600' : isCurrent ? st.countCls : 'text-slate-400'}`}>
-                        {hasRequest ? (isDone ? 'Готово' : isCurrent ? 'Текущий этап' : 'Ожидает') : '\u00A0'}
+                        {hasRequest ? (isDone ? 'Готово' : isCurrent ? 'Текущий этап' : frozen && i > idx ? 'Закрыто' : 'Ожидает') : '\u00A0'}
                       </span>
                       <span className={`text-[11px] leading-tight sm:text-xs ${isCurrent ? 'font-semibold text-slate-900' : colored ? 'font-medium text-slate-600' : 'font-medium text-slate-400'}`}>
                         {st.label}
@@ -175,10 +220,11 @@ export function StatusPipeline({ activeIdx, request, lost = false }: { activeIdx
                   <TooltipContent side="bottom" className="max-w-64">
                     <span className="font-semibold">{st.label}. </span>{st.tip}
                     {isCurrent && <div className="mt-1 font-semibold">Заявка сейчас на этом этапе</div>}
+                    {frozen && i > idx && <div className="mt-1 font-semibold">Этап недоступен: заявка не продвинулась дальше «Согласования ставки»</div>}
                   </TooltipContent>
                 </Tooltip>
                 {i < PIPELINE_STAGES.length - 1 && (
-                  <div aria-hidden className={`mt-5 h-1 w-7 shrink-0 rounded-full sm:w-10 ${hasRequest && i < activeIdx ? `bg-gradient-to-r ${st.line}` : 'bg-slate-200'}`} />
+                  <div aria-hidden className={`mt-5 h-1 w-7 shrink-0 rounded-full sm:w-10 ${hasRequest && i < idx ? `bg-gradient-to-r ${st.line}` : 'bg-slate-200'}`} />
                 )}
               </Fragment>
             )
