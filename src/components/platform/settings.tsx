@@ -33,8 +33,13 @@ const fmtConf = (v: number): string => String(parseFloat(v.toFixed(3)))
 interface Draft {
   minQuality: number
   confReupload: number
+  confReject: number
   confAuto: number
 }
+
+const toDraft = (s: SettingsDTO): Draft => ({
+  minQuality: s.minQuality, confReupload: s.confReupload, confReject: s.confReject, confAuto: s.confAuto,
+})
 
 export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate }: TabProps) {
   const { toast } = useToast()
@@ -47,7 +52,7 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
     try {
       const s = await api.settings()
       setSettings(s)
-      setDraft({ minQuality: s.minQuality, confReupload: s.confReupload, confAuto: s.confAuto })
+      setDraft(toDraft(s))
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
@@ -63,10 +68,11 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
       const saved = await api.saveSettings({
         minQuality: draft.minQuality,
         confReupload: draft.confReupload,
+        confReject: draft.confReject,
         confAuto: draft.confAuto,
       })
       setSettings(saved)
-      setDraft({ minQuality: saved.minQuality, confReupload: saved.confReupload, confAuto: saved.confAuto })
+      setDraft(toDraft(saved))
       toast({
         title: 'Настройки сохранены',
         description: 'Пороги применены к проверке документов — без участия программиста',
@@ -92,6 +98,7 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
   const dirty = draft && settings && (
     draft.minQuality !== settings.minQuality ||
     draft.confReupload !== settings.confReupload ||
+    draft.confReject !== settings.confReject ||
     draft.confAuto !== settings.confAuto
   )
 
@@ -152,6 +159,26 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
                 />
                 <p className="text-xs text-muted-foreground">
                   Ниже порога поле не читается надёжно — документ возвращается агенту на перезагрузку.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <Label htmlFor="slider-reject">Порог отказа при расхождении</Label>
+                  <span className="text-sm font-bold text-slate-900">{fmtConf(draft.confReject)}</span>
+                </div>
+                <Slider
+                  id="slider-reject"
+                  value={[draft.confReject]}
+                  min={0.3}
+                  max={0.99}
+                  step={0.01}
+                  onValueChange={(v) => setDraft((d) => (d ? { ...d, confReject: v[0] } : d))}
+                  aria-label="Порог отказа при расхождении с заявкой"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Если прочитанное поле не совпало с заявкой и уверенность от этого порога — «Отказ с причиной»;
+                  ниже — документ уходит на ручную проверку. Не может быть ниже порога перезагрузки.
                 </p>
               </div>
 

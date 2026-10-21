@@ -253,7 +253,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
     if (amount == null) return
     setBusy(bidReq.id)
     try {
-      const { request } = await api.action(bidReq.id, 'bid', { carrierId: activeCarrierId, amount })
+      const { request } = await api.action(bidReq.id, 'bid', { amount })
       applyRequest(request)
       setLastBid(amount)
       setBidStep('success')
@@ -313,7 +313,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
     try {
       const samples: [DocType, string][] = [
         ['PASSPORT_PHOTO', sampleSvg('ПАСПОРТ РФ · СТР. С ФОТО', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678'], '#0f3b66')],
-        ['PASSPORT_REG', sampleSvg('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', ['13.03.2024  230-027', 'Г. АБИНСК, УЛ. ИНТЕРНАЦИОНАЛЬНАЯ', 'Д. 110'], '#0f3b66')],
+        ['PASSPORT_REG', sampleSvg('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', ['01.02.2020  770-001', 'Г. МОСКВА, УЛ. ПРИМЕРНАЯ', 'Д. 1'], '#0f3b66')],
         ['LICENSE', sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')],
         ['STS', sampleSvg('СТС ТЯГАЧА', ['А123ВС777', 'X9622277XKG123456', '99 00 123456'], '#14532d')],
         ['REQUEST_DOC', sampleSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', [`№ ${r.number}`, '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'СТАВКА: 8 200 РУБ/Т'], '#9a3412')],
@@ -451,7 +451,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
     if (!withdrawReq || !activeCarrierId) return
     setBusy(withdrawReq.id)
     try {
-      const { request } = await api.action(withdrawReq.id, 'withdraw', { carrierId: activeCarrierId })
+      const { request } = await api.action(withdrawReq.id, 'withdraw', {})
       applyRequest(request)
       toast({ title: 'Вы снялись с заявки', description: `${request.number} — ставка отозвана, торги продолжаются без вас` })
     } catch (e) {
@@ -670,7 +670,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
                     {doc && (
                       <img
-                        src={doc.dataUri}
+                        src={doc.url}
                         alt={`Документ «${DOC_TYPE_LABEL[type]}» — ${doc.fileName}`}
                         className="mb-2 h-20 w-full rounded-md border border-slate-200 object-cover"
                       />
@@ -922,7 +922,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     <div className="flex flex-col items-end gap-2">
                       <div className="text-right">
                         <div className="text-xs text-muted-foreground">
-                          {available ? 'Лучшая на площадке' : bidding ? 'Ваша ставка' : lost ? 'Ставка победителя' : 'Итоговая ставка'}
+                          {available ? (r.bestRate == null ? 'Стартовая ставка' : 'Лучшая на площадке') : bidding ? 'Ваша ставка' : lost ? 'Ставка победителя' : 'Итоговая ставка'}
                         </div>
                         <div className={`text-lg font-bold ${grey ? 'text-slate-500' : 'text-slate-900'}`}>
                           <AnimatedRate value={available ? (r.bestRate ?? r.startRate) : bidding ? (myBid?.amount ?? null) : r.bestRate} format={rate} />
@@ -1006,13 +1006,14 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         </div>
                       )}
                       <p className="text-xs leading-snug text-slate-600">
-                        Как только логист согласует ставку, заявка перейдёт в работу — здесь появятся водитель, ТС и документы. До этого можно подать новую, пониженную ставку.
+                        Когда приём ставок закончится, заявка автоматически уйдёт минимальной ставке — если это ваша, здесь появятся водитель, ТС и документы. До этого можно подать новую, пониженную ставку.
                       </p>
                       <div>
                         <Button
                           size="sm"
                           variant="outline"
                           className="gap-1.5"
+                          disabled={!r.deadline || (now !== null && Date.parse(r.deadline) <= now)}
                           onClick={() => { setBidReq(r); setBidAmount(''); setBidStep('form') }}
                           aria-label={`Подать новую ставку по заявке ${r.number}`}
                         >
@@ -1071,6 +1072,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       <div>
                         <Button
                           size="sm"
+                          disabled={!r.deadline || (now !== null && Date.parse(r.deadline) <= now)}
                           onClick={() => { setBidReq(r); setBidAmount(''); setBidStep('form') }}
                           aria-label={`Сделать ставку по заявке ${r.number}`}
                         >

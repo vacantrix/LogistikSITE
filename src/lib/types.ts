@@ -13,7 +13,6 @@ export interface DriverDTO {
   passport: string
   license: string
   licenseTill: string
-  medTill: string
   categories: string
   phone: string
   birthPlace: string
@@ -49,12 +48,13 @@ export interface TrailerDTO {
   createdAt: string
 }
 
-/** Фото/документ записи справочника (Task 54) — модальное окно предосмотра в «Справочниках» */
+/** Фото/документ записи справочника (Task 54) — модальное окно предосмотра в «Справочниках».
+ *  url — защищённая ссылка на файл (/api/files/...): отдаётся только логисту и владельцу записи */
 export interface DirectoryPhotoDTO {
   id: string
   label: string
   fileName: string
-  dataUri: string
+  url: string
 }
 
 export interface CarrierDTO {
@@ -97,7 +97,8 @@ export interface DocumentDTO {
   id: string
   type: DocType
   fileName: string
-  dataUri: string
+  /** защищённая ссылка на файл (/api/files/document/<id>) — сам файл в списках не передаётся */
+  url: string
   status: DocStatus
   quality: number | null
   engine: string | null
@@ -129,12 +130,16 @@ export interface RequestDTO {
   truckType: string
   mode: RequestMode
   startRate: number
+  /** лучшая ставка; перевозчику в закрытых торгах не передаётся до итогов (null) */
   bestRate: number | null
+  /** число активных ставок; перевозчику в закрытых торгах не передаётся до итогов (null) */
+  bidsCount: number | null
   status: RequestStatus
   loadDate: string
   loadWindow: string
   deadline: string | null
   winnerId: string | null
+  /** имя победителя: логисту — всегда, перевозчику — только если победил он сам */
   winnerName: string | null
   driverId: string | null
   truckId: string | null
@@ -144,6 +149,7 @@ export interface RequestDTO {
   createdAt: string
   updatedAt: string
   savings: number | null
+  /** логисту — все ставки, перевозчику — только свои */
   bids: BidDTO[]
   documents: DocumentDTO[]
   events: EventDTO[]
@@ -151,6 +157,8 @@ export interface RequestDTO {
 
 export interface SettingsDTO {
   confReupload: number
+  /** порог отказа при расхождении с заявкой (отдельно от confReupload) */
+  confReject: number
   confAuto: number
   minQuality: number
   rules: Record<string, string>
@@ -178,6 +186,15 @@ export interface EventFeedItem {
   message: string
   requestNumber?: string | null
   createdAt: string
+}
+
+/** Пользователь текущей сессии (GET /api/auth/me) */
+export interface SessionUserDTO {
+  id: string
+  login: string
+  name: string
+  role: 'logist' | 'carrier'
+  carrierId: string | null
 }
 
 // ——— Добавление водителя с нейросетью (intake) ———

@@ -1,0 +1,6 @@
+# Версии закреплены: engine.py перехватывает внутренний декодер PaddleX (режим «только русские буквы»)
+paddleocr==3.7.0
+paddlex==3.7.2
+paddlepaddle==3.3.1
+opencv-contrib-python==4.10.0.84
+numpy==2.3.5

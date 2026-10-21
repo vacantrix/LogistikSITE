@@ -17,6 +17,7 @@ model Carrier {
   contractDate String
   access       Boolean   @default(true)
   createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now()) @updatedAt // для инкрементальной выгрузки в 1С
   drivers      Driver[]
   trucks       Truck[]
   trailers     Trailer[]
@@ -52,7 +53,6 @@ model Driver {
   passport    String
   license     String
   licenseTill String
-  medTill     String   @default("—") // медсправка действует до (ДД.ММ.ГГГГ или «—»)
   categories  String
   phone       String   @default("—") // телефон водителя
   birthPlace  String   @default("—") // место рождения (для 1С)
@@ -61,6 +61,7 @@ model Driver {
   passportIssuedDate String @default("—") // дата выдачи паспорта (для 1С)
   position    String   @default("—") // должность (для 1С)
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 }
 
 model Truck {
@@ -75,6 +76,7 @@ model Truck {
   owner     String
   color     String   @default("—") // цвет кабины/тягача
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model Trailer {
@@ -88,6 +90,7 @@ model Trailer {
   color     String   @default("—") // цвет прицепа
   owner     String   @default("—") // собственник прицепа
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 /**
@@ -142,7 +145,7 @@ model Request {
   mode        String // AUCTION | CLOSED
   startRate   Float
   bestRate    Float?
-  status      String     @default("PUBLISHED")
+  status      String     @default("PUBLISHED") // PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED
   loadDate    String
   loadWindow  String
   deadline    DateTime?
@@ -177,7 +180,7 @@ model Document {
   id         String   @id @default(cuid())
   requestId  String
   request    Request  @relation(fields: [requestId], references: [id])
-  type       String // PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS
+  type       String // PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | REQUEST_DOC | POA
   fileName   String
   dataUri    String
   status     String   @default("PENDING") // PENDING | PASSED | REUPLOAD | REJECTED | MANUAL
@@ -191,20 +194,30 @@ model Document {
   updatedAt  DateTime @updatedAt
 }
 
+/**
+ * Журнал событий. carrierId — чьё это событие (ставка, отзыв, победа): перевозчик
+ * видит только свои события и общие (публикация, продление, повышение ставки),
+ * логист — все.
+ */
 model Event {
   id        String   @id @default(cuid())
   requestId String?
   request   Request? @relation(fields: [requestId], references: [id])
+  carrierId String?
   type      String
   message   String
   createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([carrierId])
 }
 
 // ============ Settings: confidence thresholds and rules ============
 
 model Setting {
   id           String @id @default("main")
-  confReupload Float  @default(0.6)
+  confReupload Float  @default(0.6) // ниже — поле не принимается, решает человек
+  confReject   Float  @default(0.6) // от этой уверенности расхождение с заявкой = отказ (отдельно от confReupload)
   confAuto     Float  @default(0.95)
   minQuality   Float  @default(60)
   rules        String @default("{}")

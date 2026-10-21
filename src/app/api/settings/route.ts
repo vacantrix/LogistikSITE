@@ -1,39 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import type { SettingsDTO } from '@/lib/types'
+import { requireUser } from '@/lib/auth'
+import { toSettingsDTO } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
-function parse(row: { confReupload: number; confAuto: number; minQuality: number; rules: string } | null): SettingsDTO {
-  return {
-    confReupload: row?.confReupload ?? 0.6,
-    confAuto: row?.confAuto ?? 0.95,
-    minQuality: row?.minQuality ?? 60,
-    rules: row ? JSON.parse(row.rules) : {},
-  }
+const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max)
+const num = (v: unknown): number | null => {
+  const n = Number(v)
+  return v == null || v === '' || !Number.isFinite(n) ? null : n
 }
 
-/** GET /api/settings — пороги уверенности и правила проверки */
+/** GET /api/settings — пороги уверенности и правила проверки (только логист) */
 export async function GET() {
-  const row = await db.setting.findUnique({ where: { id: 'main' } })
-  return NextResponse.json(parse(row))
+  const auth = await requireUser('logist')
+  if (auth instanceof NextResponse) return auth
+  return NextResponse.json(toSettingsDTO(await db.setting.findUnique({ where: { id: 'main' } })))
 }
 
-/** PUT /api/settings — обновить пороги и правила */
+/** PUT /api/settings — обновить пороги и правила (только логист) */
 export async function PUT(req: NextRequest) {
+  const auth = await requireUser('logist')
+  if (auth instanceof NextResponse) return auth
+
   const body = await req.json().catch(() => null)
-  if (!body) return NextResponse.json({ error: 'Некорректный JSON' }, { status: 400 })
-  const current = parse(await db.setting.findUnique({ where: { id: 'main' } }))
+  if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Некорректный JSON' }, { status: 400 })
+  const current = toSettingsDTO(await db.setting.findUnique({ where: { id: 'main' } }))
 
-  const confReupload = body.confReupload != null ? Math.min(Math.max(Number(body.confReupload), 0.3), 0.9) : current.confReupload
-  const confAuto = body.confAuto != null ? Math.min(Math.max(Number(body.confAuto), confReupload + 0.01), 0.999) : current.confAuto
-  const minQuality = body.minQuality != null ? Math.min(Math.max(Math.round(Number(body.minQuality)), 10), 95) : current.minQuality
-  const rules = body.rules && typeof body.rules === 'object' ? { ...current.rules, ...body.rules } : current.rules
+  const cr = num(body.confReupload)
+  const cj = num(body.confReject)
+  const ca = num(body.confAuto)
+  const mq = num(body.minQuality)
+  const confReupload = cr != null ? clamp(cr, 0.3, 0.9) : current.confReupload
+  // порог отказа — отдельная настройка: не ниже порога перезагрузки, не выше 0.999
+  const confReject = cj != null ? clamp(cj, confReupload, 0.999) : Math.max(current.confReject, confReupload)
+  const confAuto = ca != null ? clamp(ca, confReupload + 0.01, 0.999) : current.confAuto
+  const minQuality = mq != null ? clamp(Math.round(mq), 10, 95) : current.minQuality
+  const rules: Record<string, string> = { ...current.rules }
+  if (body.rules && typeof body.rules === 'object' && !Array.isArray(body.rules)) {
+    for (const [k, v] of Object.entries(body.rules as Record<string, unknown>).slice(0, 50)) {
+      if (typeof v === 'string') rules[k.slice(0, 64)] = v.slice(0, 500)
+    }
+  }
 
-  const saved = await db.setting.upsert({
-    where: { id: 'main' },
-    update: { confReupload, confAuto, minQuality, rules: JSON.stringify(rules) },
-    create: { id: 'main', confReupload, confAuto, minQuality, rules: JSON.stringify(rules) },
-  })
-  return NextResponse.json(parse(saved))
+  const data = { confReupload, confReject, confAuto, minQuality, rules: JSON.stringify(rules) }
+  const saved = await db.setting.upsert({ where: { id: 'main' }, update: data, create: { id: 'main', ...data } })
+  return NextResponse.json(toSettingsDTO(saved))
 }

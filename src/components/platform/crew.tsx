@@ -43,7 +43,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
-import { busyMaps, busyReason } from '@/lib/busy'
+import { busyElsewhere, busyMaps, busyReason } from '@/lib/busy'
 import { expiryInfo, type ExpiryInfo } from '@/lib/expiry'
 import { pointInfo } from '@/lib/points'
 import { AGENT_STATUS_LABEL, MODE_META, rate, REQUEST_STATUS_META } from '@/lib/status'
@@ -222,7 +222,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
 
   /** Выбор водителя: занятого — не применяем, вместо этого показываем сообщение «занят» */
   const pickDriver = (reqId: string, driverId: string) => {
-    const b = busyCrew.drivers.get(driverId)
+    const b = busyElsewhere(busyCrew.drivers, driverId, reqId)
     if (b) {
       const d = drivers.find((x) => x.id === driverId)
       toast({
@@ -236,7 +236,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
 
   /** Выбор тягача: занятое — не применяем, вместо этого показываем сообщение «занято» */
   const pickTruck = (reqId: string, truckId: string) => {
-    const b = busyCrew.trucks.get(truckId)
+    const b = busyElsewhere(busyCrew.trucks, truckId, reqId)
     if (b) {
       const t = trucks.find((x) => x.id === truckId)
       toast({
@@ -250,7 +250,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
 
   /** Выбор прицепа: занятый — не применяем, вместо этого показываем сообщение «занят» */
   const pickTrailer = (reqId: string, trailerId: string) => {
-    const b = busyCrew.trailers.get(trailerId)
+    const b = busyElsewhere(busyCrew.trailers, trailerId, reqId)
     if (b) {
       const z = trailers.find((x) => x.id === trailerId)
       toast({
@@ -458,11 +458,13 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
         }
         const trl = found.id
         // Правило занятости (Task 50): водитель/ТС/прицеп «в рейсе» назначить нельзя
-        const busyHit = busyCrew.drivers.get(drv.id) ?? busyCrew.trucks.get(trk.id) ?? busyCrew.trailers.get(trl)
+        const busyD = busyElsewhere(busyCrew.drivers, drv.id, byNo.id)
+        const busyT = busyElsewhere(busyCrew.trucks, trk.id, byNo.id)
+        const busyHit = busyD ?? busyT ?? busyElsewhere(busyCrew.trailers, trl, byNo.id)
         if (busyHit) {
-          const who = busyCrew.drivers.has(drv.id)
+          const who = busyD
             ? `Водитель ${drv.fullName}`
-            : busyCrew.trucks.has(trk.id)
+            : busyT
               ? `ТС ${trk.brand} (${trk.plate})`
               : `Прицеп ${trailerPlate}`
           row.message = `${who} занят — ${busyReason(busyHit.status)} по заявке ${busyHit.number}`
@@ -493,7 +495,6 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
     setImporting(true)
     try {
       const res = await api.bulkAssign({
-        carrierId: activeCarrierId,
         rows: ok.map((r) => ({ requestId: r.requestId!, driverId: r.driverId!, truckId: r.truckId!, trailerId: r.trailerId })),
       })
       toast({
@@ -620,7 +621,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                                 </SelectTrigger>
                                 <SelectContent>
                                   {drivers.map((d) => {
-                                    const b = busyCrew.drivers.get(d.id)
+                                    const b = busyElsewhere(busyCrew.drivers, d.id, r.id)
                                     return (
                                       <SelectItem key={d.id} value={d.id} className={b ? 'text-slate-400' : undefined}>
                                         {d.fullName}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
@@ -640,7 +641,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                                 </SelectTrigger>
                                 <SelectContent>
                                   {trucks.map((t) => {
-                                    const b = busyCrew.trucks.get(t.id)
+                                    const b = busyElsewhere(busyCrew.trucks, t.id, r.id)
                                     return (
                                       <SelectItem key={t.id} value={t.id} className={b ? 'text-slate-400' : undefined}>
                                         {t.brand} · {t.plate}{b ? ` · занято (${busyReason(b.status)}, ${b.number})` : ''}
@@ -661,7 +662,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                                 <SelectContent>
                                   {/* Прицеп обязателен: только реальные прицепы из базы, без варианта «Без прицепа» */}
                                   {trailers.map((z) => {
-                                    const b = busyCrew.trailers.get(z.id)
+                                    const b = busyElsewhere(busyCrew.trailers, z.id, r.id)
                                     return (
                                       <SelectItem key={z.id} value={z.id} className={b ? 'text-slate-400' : undefined}>
                                         {z.plate} · {z.type}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}

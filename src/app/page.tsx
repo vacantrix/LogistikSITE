@@ -2,16 +2,18 @@
 
 /**
  * Платформа «Автоматизация работы с привлечённым транспортом» — единый маршрут.
- * Два вида платформы по роли: внутренний контур АЭМЗ (Логист 1 / Логист 2) и
- * кабинет перевозчика. Разделы переключаются табами в рамках доступных роли.
+ * Два вида платформы по роли: внутренний контур АЭМЗ (логисты) и кабинет перевозчика.
+ * Роль и перевозчик берутся из сессии входа (/api/auth/me), а не выбираются в шапке:
+ * раньше роль хранилась в браузере, и любой мог стать логистом или другим перевозчиком.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
-import { RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw } from 'lucide-react'
 import { Shell, firstTabFor, navFor, type RoleSelection } from '@/components/platform/shell'
 import { RoleNotice, type TabKey } from '@/components/platform/common'
-import { api } from '@/lib/api'
-import type { CarrierDTO } from '@/lib/types'
+import { LoginScreen } from '@/components/platform/login-screen'
+import { api, UNAUTHORIZED_EVENT } from '@/lib/api'
+import type { SessionUserDTO } from '@/lib/types'
 
 import BoardTab from '@/components/platform/board'
 import ApplyTab from '@/components/platform/apply'
@@ -22,23 +24,17 @@ import RegistryTab from '@/components/platform/registry'
 import DirectoryTab from '@/components/platform/directories'
 import ReportsTab from '@/components/platform/reports'
 
-const ROLE_STORAGE_KEY = 'aemz-platform-role'
-
-function loadStoredRole(): RoleSelection {
-  try {
-    const raw = localStorage.getItem(ROLE_STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as RoleSelection
-      if (parsed.kind === 'logist' || parsed.kind === 'carrier') return parsed
-    }
-  } catch { /* ignore */ }
-  return { kind: 'logist', logistName: 'Логист 1' }
+/** Роль интерфейса из пользователя сессии */
+function roleOf(user: SessionUserDTO): RoleSelection {
+  return user.role === 'logist'
+    ? { kind: 'logist', logistName: user.name }
+    : { kind: 'carrier', carrierId: user.carrierId }
 }
 
 export default function Page() {
+  // undefined — проверяем сессию, null — не вошёл
+  const [user, setUser] = useState<SessionUserDTO | null | undefined>(undefined)
   const [tab, setTab] = useState<TabKey>('board')
-  const [carriers, setCarriers] = useState<CarrierDTO[]>([])
-  const [role, setRole] = useState<RoleSelection>({ kind: 'logist', logistName: 'Логист 1' })
   // real-time (Task 49): счётчик изменений с сервера
   const [liveTick, setLiveTick] = useState(0)
   // обработка потери соединения (Task 52): оверлей «Восстанавливаем соединение»
@@ -46,16 +42,36 @@ export default function Page() {
   // отсутствии сервиса интерфейс продолжает работать на автообновлении
   const [connLost, setConnLost] = useState(false)
   const wasConnectedRef = useRef(false)
-  // роль восстанавливается из хранилища сразу после монтирования;
-  // до этого момента ничего не сохраняем — чтобы не затереть выбранную ранее роль
-  const restoredRef = useRef(false)
 
-  // подключение к real-time шине ws-service через шлюз (Task 49).
-  // Правила гейта: только относительный путь и порт в query XTransformPort.
+  const loadSession = useCallback(async () => {
+    try {
+      const { user: u } = await api.me()
+      setUser(u)
+      setTab((cur) => (navFor(roleOf(u).kind).some((n) => n.key === cur) ? cur : firstTabFor(roleOf(u).kind)))
+    } catch {
+      setUser(null)
+    }
+  }, [])
+
+  // микротаск: проверка сессии после монтирования (как раньше восстанавливалась роль)
+  useEffect(() => { void Promise.resolve().then(loadSession) }, [loadSession])
+
+  // любой ответ 401 (сессия истекла, доступ перевозчика закрыт) возвращает на экран входа
   useEffect(() => {
+    const onUnauthorized = () => setUser(null)
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  }, [])
+
+  // подключение к real-time шине ws-service через шлюз (Task 49) — только после входа:
+  // шина проверяет ту же куку сессии. Правила гейта: относительный путь и порт в query XTransformPort.
+  const userId = user?.id ?? null
+  useEffect(() => {
+    if (!userId) return
     const socket: Socket = io('/?XTransformPort=3003', {
       transports: ['websocket', 'polling'],
       forceNew: true,
+      withCredentials: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -77,59 +93,32 @@ export default function Page() {
       wasConnectedRef.current = false
       setConnLost(false)
     }
+  }, [userId])
+
+  const logout = useCallback(async () => {
+    await api.logout().catch(() => {})
+    setUser(null)
+    setTab('board')
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    // микротаск: восстановление роли, затем справочник перевозчиков
-    void Promise.resolve().then(() => {
-      if (cancelled) return
-      const stored = loadStoredRole()
-      restoredRef.current = true
-      setRole(stored)
-      return api.directory()
-        .then((d) => {
-          if (cancelled) return
-          setCarriers(d.carriers)
-          // если сохранённый перевозчик исчез из справочника — берём первого доступного
-          setRole((cur) => (
-            cur.kind === 'carrier' && !d.carriers.some((c) => c.id === cur.carrierId)
-              ? { ...cur, carrierId: d.carriers[0]?.id ?? null }
-              : cur
-          ))
-        })
-        .catch(() => {})
-    })
-    return () => { cancelled = true }
-  }, [])
+  if (user === undefined) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50" role="status" aria-live="polite">
+        <Loader2 className="h-6 w-6 animate-spin text-slate-500" aria-hidden />
+        <span className="sr-only">Проверяем вход…</span>
+      </div>
+    )
+  }
+  if (user === null) return <LoginScreen onAuthed={() => void loadSession()} />
 
-  // сохраняем выбранную роль между визитами
-  useEffect(() => {
-    if (!restoredRef.current) return
-    try { localStorage.setItem(ROLE_STORAGE_KEY, JSON.stringify(role)) } catch { /* ignore */ }
-  }, [role])
-
-  // при смене роли — если текущий раздел недоступен, переходим на первый доступный
-  const changeRole = useCallback((r: RoleSelection) => {
-    restoredRef.current = true
-    setRole(r)
-    setTab((cur) => (navFor(r.kind).some((n) => n.key === cur) ? cur : firstTabFor(r.kind)))
-  }, [])
-
+  const role = roleOf(user)
   const activeCarrierId = role.kind === 'carrier' ? role.carrierId ?? null : null
-
   const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab, liveTick }
   // защита: раздел недоступен текущей роли — показываем пояснение вместо содержимого
   const allowed = navFor(role.kind).some((n) => n.key === tab)
 
   return (
-    <Shell
-      tab={tab}
-      onNavigate={setTab}
-      carriers={carriers.map((c) => ({ id: c.id, name: c.name }))}
-      role={role}
-      onRoleChange={changeRole}
-    >
+    <Shell tab={tab} onNavigate={setTab} role={role} userName={user.name} onLogout={() => void logout()}>
       {!allowed ? (
         <RoleNotice role={role.kind} />
       ) : (

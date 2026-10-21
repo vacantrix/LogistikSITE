@@ -1,237 +1,198 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { requireUser, viewerOf, type Role } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
+import {
+  applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, validateCrew,
+} from '@/lib/requests'
 
 export const dynamic = 'force-dynamic'
 
-const money = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽/т`
-
-/** Статусы, в которых экипаж считается «в рейсе» — занят под другую заявку (Task 50) */
-const BUSY_STATUSES = ['AT_LOGIST', 'CONFIRMED']
-
-/**
- * Правило занятости (Task 50): если водитель, ТС или прицеп уже закреплены за
- * рейсом «в работе» (у логиста на сверке или данные в 1С — водитель в рейсе),
- * назначить их на новую заявку нельзя. Возвращает текст ошибки
- * «<Кто> занят — уже в рейсе по заявке Z-XXXX» или null, если всё свободно.
- */
-async function busyConflict(
-  requestId: string,
-  driverId: string,
-  truckId: string,
-  trailerId?: string,
-): Promise<string | null> {
-  const active = await db.request.findMany({
-    where: {
-      status: { in: BUSY_STATUSES },
-      id: { not: requestId },
-      OR: [
-        { driverId },
-        { truckId },
-        ...(trailerId ? [{ trailerId }] : []),
-      ],
-    },
-    select: { id: true, number: true, status: true, driverId: true, truckId: true, trailerId: true },
-  })
-  if (active.length === 0) return null
-  const hit = active[0]
-  const place = `— уже ${hit.status === 'CONFIRMED' ? 'в рейсе' : 'готовится к рейсу'} по заявке ${hit.number}`
-  if (hit.driverId === driverId) {
-    const d = await db.driver.findUnique({ where: { id: driverId }, select: { fullName: true } })
-    return `Водитель ${d?.fullName ?? ''} занят ${place}`
-  }
-  if (hit.truckId === truckId) {
-    const t = await db.truck.findUnique({ where: { id: truckId }, select: { brand: true, plate: true } })
-    return `ТС ${t ? `${t.brand} (${t.plate})` : ''} занято ${place}`
-  }
-  const z = trailerId ? await db.trailer.findUnique({ where: { id: trailerId }, select: { plate: true } }) : null
-  return `Прицеп ${z?.plate ?? ''} занят ${place}`
+/** Кто может выполнять действие. Перевозчик действует только от своего имени — carrierId берётся из сессии. */
+const ACTION_ROLE: Record<string, Role> = {
+  bid: 'carrier',
+  withdraw: 'carrier',
+  assign: 'carrier',
+  'approve-crew': 'carrier',
+  extend: 'logist',
+  'direct-offer': 'logist',
+  'raise-rate': 'logist',
+  confirm: 'logist',
+  return: 'logist',
+  close: 'logist',
 }
+
+class ActionError extends Error {
+  constructor(message: string, readonly status = 400) { super(message) }
+}
+const fail = (message: string, status = 400): never => { throw new ActionError(message, status) }
+
+const MAX_RATE = 10_000_000
 
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.
- * action: bid | withdraw | award | extend | direct-offer | raise-rate |
- *         assign | confirm | return | close
+ * Перевозчик: bid | withdraw | assign | approve-crew.
+ * Логист: extend | direct-offer | raise-rate | confirm | return | close.
+ * Победителя торгов никто не выбирает вручную: по окончании срока заявка
+ * автоматически уходит минимальной ставке (src/lib/requests.ts → finalizeExpired).
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireUser()
+  if (auth instanceof NextResponse) return auth
+  const viewer = viewerOf(auth)
   const { id } = await params
-  const body = await req.json().catch(() => ({}))
-  const action = body.action as string
+  const body = (await req.json().catch(() => ({}))) as Record<string, unknown>
+  const action = typeof body.action === 'string' ? body.action : ''
 
-  const include = { bids: { include: { carrier: true } }, documents: true, events: true, winner: true, cargoType: true } as const
-
-  const request = await db.request.findUnique({ where: { id }, include })
-  if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
-
-  const ev = (type: string, message: string) => {
-    // real-time: событие мгновенно расходится по открытым сессиям (Task 49)
-    notifyLive({ type, message, requestId: id })
-    return db.event.create({ data: { requestId: id, type, message } })
+  if (action === 'award') {
+    return NextResponse.json({
+      error: 'Победитель определяется автоматически: по окончании приёма ставок заявка уходит перевозчику с минимальной ставкой',
+    }, { status: 400 })
   }
+  const role = ACTION_ROLE[action]
+  if (!role) return NextResponse.json({ error: `Неизвестное действие: ${action || '—'}` }, { status: 400 })
+  if (auth.role !== role) return NextResponse.json({ error: 'Недостаточно прав для этого действия' }, { status: 403 })
+
+  // итоги торгов по сроку подводятся до любого действия — ставка после срока не пройдёт
+  await finalizeExpired()
+  const visible = await loadRequestFor(id, viewer)
+  if (!visible) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
+
+  const me = auth.carrierId
+  let liveType = action
 
   try {
-    switch (action) {
-      // ------- агент -------
-      case 'bid': {
-        const { carrierId, amount } = body as { carrierId: string; amount: number }
-        if (request.status !== 'PUBLISHED') return NextResponse.json({ error: 'Заявка недоступна для ставок' }, { status: 400 })
-        const carrier = await db.carrier.findUnique({ where: { id: carrierId } })
-        if (!carrier || !carrier.access) return NextResponse.json({ error: 'Перевозчик без доступа к площадке' }, { status: 400 })
-        const amt = Math.round(Number(amount))
-        if (!amt || amt <= 0) return NextResponse.json({ error: 'Укажите ставку' }, { status: 400 })
-        if (request.mode === 'AUCTION') {
-          const floor = request.bestRate ?? request.startRate
-          if (amt >= floor) return NextResponse.json({ error: `Ставка должна быть ниже текущей лучшей (${money(floor)})` }, { status: 400 })
+    await inTx(async (tx) => {
+      const r = await tx.request.findUnique({ where: { id } })
+      if (!r) return fail('Заявка не найдена', 404)
+      const now = new Date()
+      const event = (type: string, message: string, carrierId: string | null = null) =>
+        tx.event.create({ data: { requestId: id, type, message, carrierId } })
+
+      switch (action) {
+        // ------- перевозчик: ставка -------
+        case 'bid': {
+          const amt = Math.round(Number(body.amount))
+          if (!Number.isFinite(amt) || amt <= 0 || amt > MAX_RATE) fail('Укажите ставку за тонну')
+          if (r.status !== 'PUBLISHED') fail('Заявка недоступна для ставок')
+          if (!r.deadline) fail('У заявки не задан срок приёма ставок — обратитесь к логисту')
+          if (r.deadline! <= now) fail('Приём ставок по заявке завершён')
+          const min = await minActiveBid(tx, id)
+          if (r.mode === 'AUCTION') {
+            const floor = min ?? r.startRate
+            if (amt >= floor) fail(`Ставка должна быть ниже текущей лучшей (${money(floor)})`)
+          }
+          const carrier = await tx.carrier.findUnique({ where: { id: me! }, select: { name: true } })
+          await tx.bid.create({ data: { requestId: id, carrierId: me!, amount: amt } })
+          // лучшая ставка — минимум активных ставок; считаем внутри транзакции, чтобы не «откатиться» вверх
+          await tx.request.update({ where: { id }, data: { bestRate: min == null ? amt : Math.min(min, amt) } })
+          await event('BID_PLACED', r.mode === 'CLOSED'
+            ? `${carrier?.name ?? 'Перевозчик'}: подана закрытая ставка`
+            : `${carrier?.name ?? 'Перевозчик'}: ставка ${money(amt)}`, me)
+          break
         }
-        await db.bid.create({ data: { requestId: id, carrierId, amount: amt } })
-        if (request.bestRate == null || amt < request.bestRate) {
-          await db.request.update({ where: { id }, data: { bestRate: amt } })
+
+        // ------- перевозчик: добровольный выход из заявки (Task 52) -------
+        case 'withdraw': {
+          // согласованную заявку у победителя не забираем (правило платформы, Task 50)
+          if (r.status !== 'PUBLISHED') fail('Выйти из заявки можно только пока идёт тендер — победитель уже определён')
+          const active = await tx.bid.count({ where: { requestId: id, carrierId: me!, withdrawn: false } })
+          if (!active) fail('Активной ставки на эту заявку нет — выходить не из чего')
+          await tx.bid.updateMany({ where: { requestId: id, carrierId: me! }, data: { withdrawn: true } })
+          await tx.request.update({ where: { id }, data: { bestRate: await minActiveBid(tx, id) } })
+          const carrier = await tx.carrier.findUnique({ where: { id: me! }, select: { name: true } })
+          await event('BID_WITHDRAWN', `${carrier?.name ?? 'Перевозчик'}: отозвал ставку и снялся с заявки`, me)
+          break
         }
-        await ev('BID_PLACED', request.mode === 'CLOSED'
-          ? `${carrier.name}: подана закрытая ставка`
-          : `${carrier.name}: ставка ${money(amt)}`)
-        break
-      }
 
-      // ------- агент: добровольный выход из заявки (Task 52) -------
-      case 'withdraw': {
-        // Выйти можно только из идущих торгов — согласованную заявку у победителя
-        // не забираем (правило платформы, Task 50)
-        if (request.status !== 'PUBLISHED') {
-          return NextResponse.json({ error: 'Выйти из заявки можно только пока идёт тендер — победитель уже согласован' }, { status: 400 })
+        // ------- логист: торги -------
+        case 'extend': {
+          if (r.status !== 'PUBLISHED') fail('Торги уже завершены')
+          const base = r.deadline && r.deadline > now ? r.deadline : now
+          await tx.request.update({ where: { id }, data: { deadline: new Date(base.getTime() + 2 * 3600_000) } })
+          await event('DEADLINE_EXTENDED', 'Логист продлил приём ставок на 2 часа')
+          break
         }
-        const { carrierId } = body as { carrierId: string }
-        const carrier = await db.carrier.findUnique({ where: { id: carrierId } })
-        if (!carrier) return NextResponse.json({ error: 'Перевозчик не найден' }, { status: 404 })
-        const activeBid = await db.bid.findFirst({ where: { requestId: id, carrierId, withdrawn: false } })
-        if (!activeBid) return NextResponse.json({ error: 'Активной ставки на эту заявку нет — выходить не из чего' }, { status: 400 })
-        // отзываем все ставки агента по заявке
-        await db.bid.updateMany({ where: { requestId: id, carrierId }, data: { withdrawn: true } })
-        // лучшая ставка пересчитывается только по активным ставкам
-        const best = await db.bid.aggregate({ where: { requestId: id, withdrawn: false }, _min: { amount: true } })
-        await db.request.update({ where: { id }, data: { bestRate: best._min.amount } })
-        await ev('BID_WITHDRAWN', `${carrier.name}: отозвал ставку и снялся с заявки`)
-        break
-      }
 
-      // ------- логист: торги -------
-      case 'award': {
-        // Правило платформы (Task 50): заявку нельзя забрать у победителя —
-        // согласовать можно только пока торги открыты
-        if (request.status !== 'PUBLISHED') {
-          return NextResponse.json({ error: 'Победитель уже согласован — заявку нельзя забрать у победителя' }, { status: 400 })
+        case 'direct-offer': {
+          if (r.status !== 'PUBLISHED') fail('Победитель уже определён — заявку нельзя забрать у победителя')
+          const carrierId = typeof body.carrierId === 'string' ? body.carrierId : ''
+          const carrier = carrierId ? await tx.carrier.findUnique({ where: { id: carrierId } }) : null
+          if (!carrier) fail('Перевозчик не найден', 404)
+          if (!carrier!.access) fail('У перевозчика закрыт доступ к площадке')
+          const rate = (await minActiveBid(tx, id)) ?? r.startRate
+          const moved = await tx.request.updateMany({
+            where: { id, status: 'PUBLISHED' },
+            data: { status: 'AWARDED', winnerId: carrierId, bestRate: rate },
+          })
+          if (moved.count === 0) fail('Заявка уже передана перевозчику')
+          await tx.bid.updateMany({ where: { requestId: id }, data: { isWinner: false } })
+          await event('DIRECT_OFFER', `Заявка предложена напрямую: ${carrier!.name} — ${money(rate)}`, carrierId)
+          await event('AUCTION_FINISHED', 'Приём ставок завершён — заявка передана перевозчику напрямую')
+          liveType = 'WINNER_AWARDED'
+          break
         }
-        const { bidId } = body as { bidId: string }
-        const bid = await db.bid.findUnique({ where: { id: bidId }, include: { carrier: true } })
-        if (!bid || bid.requestId !== id) return NextResponse.json({ error: 'Ставка не найдена' }, { status: 404 })
-        await db.bid.updateMany({ where: { requestId: id }, data: { isWinner: false } })
-        await db.bid.update({ where: { id: bidId }, data: { isWinner: true } })
-        await db.request.update({ where: { id }, data: { status: 'AWARDED', winnerId: bid.carrierId, bestRate: bid.amount } })
-        await ev('WINNER_AWARDED', `Логист согласовал победителя: ${bid.carrier.name} — ${money(bid.amount)}`)
-        break
-      }
 
-      case 'extend': {
-        if (request.status !== 'PUBLISHED') return NextResponse.json({ error: 'Торги уже завершены' }, { status: 400 })
-        const base = request.deadline && request.deadline > new Date() ? request.deadline : new Date()
-        const newDeadline = new Date(base.getTime() + 2 * 3600_000)
-        await db.request.update({ where: { id }, data: { deadline: newDeadline } })
-        await ev('DEADLINE_EXTENDED', 'Логист продлил торги на 2 часа')
-        break
-      }
-
-      case 'direct-offer': {
-        // Правило платформы (Task 50): заявку нельзя забрать у победителя —
-        // прямое предложение возможно только пока торги открыты
-        if (request.status !== 'PUBLISHED') {
-          return NextResponse.json({ error: 'Победитель уже согласован — заявку нельзя забрать у победителя' }, { status: 400 })
+        case 'raise-rate': {
+          if (r.status !== 'PUBLISHED') fail('Поднять стартовую ставку можно только пока идёт приём ставок')
+          const amt = Math.round(Number(body.amount))
+          if (!Number.isFinite(amt) || amt <= r.startRate || amt > MAX_RATE) fail(`Новая ставка должна быть выше ${money(r.startRate)}`)
+          await tx.request.update({ where: { id }, data: { startRate: amt } })
+          await event('RATE_RAISED', `Стартовая ставка повышена до ${money(amt)}`)
+          break
         }
-        const { carrierId } = body as { carrierId: string }
-        const carrier = await db.carrier.findUnique({ where: { id: carrierId } })
-        if (!carrier) return NextResponse.json({ error: 'Перевозчик не найден' }, { status: 404 })
-        const rate = request.bestRate ?? request.startRate
-        await db.request.update({ where: { id }, data: { status: 'AWARDED', winnerId: carrierId, bestRate: rate } })
-        await ev('DIRECT_OFFER', `Заявка предложена напрямую: ${carrier.name} — ${money(rate)}`)
-        break
-      }
 
-      case 'raise-rate': {
-        const { amount } = body as { amount: number }
-        const amt = Math.round(Number(amount))
-        if (!amt || amt <= request.startRate) return NextResponse.json({ error: `Новая ставка должна быть выше ${money(request.startRate)}` }, { status: 400 })
-        await db.request.update({ where: { id }, data: { startRate: amt } })
-        await ev('RATE_RAISED', `Стартовая ставка повышена до ${money(amt)}`)
-        break
-      }
-
-      // ------- агент: данные водителя и ТС -------
-      case 'assign': {
-        const { driverId, truckId, trailerId } = body as { driverId: string; truckId: string; trailerId?: string }
-        const driver = await db.driver.findUnique({ where: { id: driverId } })
-        const truck = await db.truck.findUnique({ where: { id: truckId } })
-        if (!driver || !truck) return NextResponse.json({ error: 'Выберите водителя и автомобиль из справочника' }, { status: 400 })
-        if (driver.carrierId !== request.winnerId || truck.carrierId !== request.winnerId) {
-          return NextResponse.json({ error: 'Водитель и ТС должны принадлежать перевозчику-победителю' }, { status: 400 })
+        // ------- перевозчик-победитель: экипаж -------
+        case 'assign':
+        case 'approve-crew': {
+          if (r.winnerId !== me) fail('Рейс закреплён за другим перевозчиком', 403)
+          if (r.status !== 'AWARDED' && r.status !== 'DOCS_REVIEW') {
+            fail('Экипаж можно менять, пока заявка у перевозчика — после передачи логисту состав зафиксирован')
+          }
+          const crew = await validateCrew(tx, r, { driverId: body.driverId, truckId: body.truckId, trailerId: body.trailerId })
+          if (typeof crew === 'string') return fail(crew)
+          await applyCrew(tx, r, crew)
+          const who = `${crew.driver.fullName}, ${crew.truck.brand} (${crew.truck.plate}) + ${crew.trailer.plate}`
+          if (action === 'assign') await event('DRIVER_ASSIGNED', `Указаны водитель и ТС: ${who}`, me)
+          else await event('CREW_APPROVED', `Экипаж утверждён агентом: ${who} — состав передан логисту`, me)
+          break
         }
-        const busy = await busyConflict(id, driverId, truckId, trailerId)
-        if (busy) return NextResponse.json({ error: busy }, { status: 400 })
-        await db.request.update({ where: { id }, data: { driverId, truckId, trailerId: trailerId || null } })
-        const trailer = trailerId ? await db.trailer.findUnique({ where: { id: trailerId } }) : null
-        await ev('DRIVER_ASSIGNED', `Указаны водитель и ТС: ${driver.fullName}, ${truck.brand} (${truck.plate})${trailer ? ` + ${trailer.plate}` : ''}`)
-        break
-      }
 
-      // ------- агент: утвердить экипаж (вкладка «Назначение экипажей») -------
-      case 'approve-crew': {
-        const { driverId, truckId, trailerId } = body as { driverId: string; truckId: string; trailerId?: string }
-        const driver = await db.driver.findUnique({ where: { id: driverId } })
-        const truck = await db.truck.findUnique({ where: { id: truckId } })
-        if (!driver || !truck) return NextResponse.json({ error: 'Выберите водителя и автомобиль из справочника' }, { status: 400 })
-        if (driver.carrierId !== request.winnerId || truck.carrierId !== request.winnerId) {
-          return NextResponse.json({ error: 'Водитель и ТС должны принадлежать перевозчику-победителю' }, { status: 400 })
+        // ------- логист: сверка -------
+        case 'confirm': {
+          if (r.status !== 'AT_LOGIST') fail('Подтвердить можно заявку в статусе «У логиста»')
+          await tx.request.update({ where: { id }, data: { status: 'CONFIRMED', passPackage: true, etrnStatus: 'SENT' } })
+          await event('CONFIRMED_1C', 'Данные подтверждены и переданы в 1C:ERP — справочник и реестр')
+          await event('PASS_SENT', 'Пакет на пропуск сформирован из заявки — логист загружает на платформу порта')
+          await event('ETRN_SENT', 'ЭТрН сформирована модулем «Логистика.Про», подпись — КЭП сотрудника и МЧД')
+          break
         }
-        const busy = await busyConflict(id, driverId, truckId, trailerId)
-        if (busy) return NextResponse.json({ error: busy }, { status: 400 })
-        await db.request.update({ where: { id }, data: { driverId, truckId, trailerId: trailerId || null } })
-        const trailer = trailerId ? await db.trailer.findUnique({ where: { id: trailerId } }) : null
-        await ev('CREW_APPROVED', `Экипаж утверждён агентом: ${driver.fullName}, ${truck.brand} (${truck.plate})${trailer ? ` + ${trailer.plate}` : ''} — состав передан логисту`)
-        break
+
+        case 'return': {
+          if (r.status !== 'AT_LOGIST') fail('Вернуть агенту можно только заявку на сверке у логиста')
+          const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : ''
+          if (!reason) fail('Укажите причину возврата')
+          await tx.request.update({ where: { id }, data: { status: 'AWARDED' } })
+          await event('RETURNED_TO_AGENT', `Возвращено агенту: ${reason}`)
+          break
+        }
+
+        case 'close': {
+          if (r.status !== 'CONFIRMED') fail('Закрыть можно подтверждённый рейс')
+          await tx.request.update({ where: { id }, data: { status: 'CLOSED', etrnStatus: 'SIGNED' } })
+          await event('TRIP_CLOSED', 'Рейс закрыт: данные в реестре, отчёты сходятся с бухгалтерией')
+          break
+        }
       }
-
-      // ------- логист: сверка -------
-      case 'confirm': {
-        if (request.status !== 'AT_LOGIST') return NextResponse.json({ error: 'Подтвердить можно заявку в статусе «У логиста»' }, { status: 400 })
-        await db.request.update({ where: { id }, data: { status: 'CONFIRMED', passPackage: true, etrnStatus: 'SENT' } })
-        await ev('CONFIRMED_1C', 'Данные подтверждены и переданы в 1C:ERP — справочник и реестр')
-        await ev('PASS_SENT', 'Пакет на пропуск сформирован из заявки — логист загружает на платформу порта')
-        await ev('ETRN_SENT', 'ЭТрН сформирована модулем «Логистика.Про», подпись — КЭП сотрудника и МЧД')
-        break
-      }
-
-      case 'return': {
-        const { reason } = body as { reason: string }
-        if (!reason?.trim()) return NextResponse.json({ error: 'Укажите причину возврата' }, { status: 400 })
-        await db.request.update({ where: { id }, data: { status: 'AWARDED' } })
-        await ev('RETURNED_TO_AGENT', `Возвращено агенту: ${reason.trim()}`)
-        break
-      }
-
-      case 'close': {
-        if (request.status !== 'CONFIRMED') return NextResponse.json({ error: 'Закрыть можно подтверждённый рейс' }, { status: 400 })
-        await db.request.update({ where: { id }, data: { status: 'CLOSED', etrnStatus: 'SIGNED' } })
-        await ev('TRIP_CLOSED', 'Рейс закрыт: данные в реестре, отчёты сходятся с бухгалтерией')
-        break
-      }
-
-      default:
-        return NextResponse.json({ error: `Неизвестное действие: ${action}` }, { status: 400 })
-    }
-
-    const fresh = await db.request.findUnique({ where: { id }, include })
-    return NextResponse.json({ request: toRequestDTO(fresh!) })
+    })
   } catch (e) {
-    console.error('action error', e)
-    return NextResponse.json({ error: 'Внутренняя ошибка действия' }, { status: 500 })
+    if (e instanceof ActionError) return NextResponse.json({ error: e.message }, { status: e.status })
+    console.error('action error', action, e)
+    return NextResponse.json({ error: 'Внутренняя ошибка действия — повторите' }, { status: 500 })
   }
+
+  notifyLive({ type: liveType, requestId: id })
+  const fresh = await loadRequestFor(id, viewer)
+  if (!fresh) return NextResponse.json({ ok: true })
+  return NextResponse.json({ request: toRequestDTO(fresh, viewer) })
 }

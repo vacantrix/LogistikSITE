@@ -1,19 +1,26 @@
 /**
- * Клиент self-hosted OCR-микросервиса (mini-services/ocr-service, порт 3020).
+ * Клиент локального OCR-сервиса (mini-services/paddle-ocr, порт 3020).
  *
- * Платформа вызывает сервис ДО резервных движков: если сервис поднят —
- * распознавание идёт «у нас на сервере» (PaddleOCR → GLM-4.6V внутри сервиса),
- * при недоступности платформа откатывается на встроенные движки verify.ts.
+ * Основной путь распознавания: PaddleOCR работает на нашем сервере, фото документов
+ * никуда не уходят. Если сервис не отвечает — документ уходит на ручную проверку
+ * (облачный резерв включается только явно, OCR_CLOUD_FALLBACK=1, см. verify.ts).
  *
+ * Ожидаемые данные заявки сервису не передаются: он только читает фото.
  * Отключить интеграцию: OCR_SERVICE_URL='' (пустая строка).
  */
-import type { DocType, ExpectedData, OcrOutput } from '@/lib/verify'
+import type { DocType, OcrOutput } from '@/lib/verify'
 
 const BASE = process.env.OCR_SERVICE_URL ?? 'http://127.0.0.1:3020'
+const TOKEN = process.env.OCR_SERVICE_TOKEN
 
 export function ocrServiceEnabled(): boolean {
   return BASE !== ''
 }
+
+const headers = (): Record<string, string> => ({
+  'Content-Type': 'application/json',
+  ...(TOKEN ? { 'X-OCR-Token': TOKEN } : {}),
+})
 
 export interface OcrServiceStatus {
   running: boolean
@@ -31,6 +38,7 @@ export async function ocrServiceStatus(): Promise<OcrServiceStatus> {
   if (!ocrServiceEnabled()) return { running: false }
   try {
     const res = await fetch(`${BASE}/health`, {
+      headers: headers(),
       signal: AbortSignal.timeout(3000),
       cache: 'no-store',
     })
@@ -59,20 +67,16 @@ export async function ocrServiceStatus(): Promise<OcrServiceStatus> {
   }
 }
 
-/** Распознавание через микросервис; null — сервис недоступен (платформа откатится на свой пайплайн) */
-export async function ocrServiceOcr(
-  dataUri: string,
-  type: DocType,
-  expected: ExpectedData | null,
-  intake: boolean,
-): Promise<OcrOutput | null> {
+/** Распознавание через локальный сервис; null — сервис недоступен или вид документа не поддерживается */
+export async function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): Promise<OcrOutput | null> {
   if (!ocrServiceEnabled()) return null
   try {
     const res = await fetch(`${BASE}/ocr`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type, dataUri, expected, intake }),
-      signal: AbortSignal.timeout(60_000),
+      headers: headers(),
+      body: JSON.stringify({ type, dataUri, intake }),
+      // первый вызов загружает модели PaddleOCR — даём запас
+      signal: AbortSignal.timeout(90_000),
     })
     if (!res.ok) return null
     const j = (await res.json()) as {
@@ -83,6 +87,7 @@ export async function ocrServiceOcr(
         fields?: Record<string, string>
         confidences?: Record<string, number>
         detectedType?: DocType | 'UNKNOWN'
+        confirmations?: Record<string, string[]>
       }
     }
     const ocr = j.ocr
@@ -93,6 +98,7 @@ export async function ocrServiceOcr(
       fields: ocr.fields ?? {},
       confidences: ocr.confidences ?? {},
       ...(ocr.detectedType ? { detectedType: ocr.detectedType } : {}),
+      ...(ocr.confirmations ? { confirmations: ocr.confirmations } : {}),
     }
   } catch {
     return null

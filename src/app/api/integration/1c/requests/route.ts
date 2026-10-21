@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { ONEC_ETRN_RU, ONEC_STATUS_RU, onecAuthorized, onecMeta, onecUnauthorized } from '@/lib/onec'
+import { finalizeExpired } from '@/lib/requests'
 import type { RequestStatus } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -13,6 +14,7 @@ const STATUSES = Object.keys(ONEC_STATUS_RU) as RequestStatus[]
  */
 export async function GET(req: NextRequest) {
   if (!onecAuthorized(req)) return onecUnauthorized()
+  await finalizeExpired() // статусы торгов, у которых истёк срок, — уже с победителем
 
   const sp = req.nextUrl.searchParams
 

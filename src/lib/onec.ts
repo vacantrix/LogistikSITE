@@ -8,22 +8,42 @@
  *   • GET  /api/integration/1c/etrn         — данные ЭТрН для 1С:ERP
  *   • POST /api/integration/1c/etrn        — подтверждения ЭТрН из 1С (SENT/SIGNED)
  *
- * Авторизация: заголовок X-API-Key (или ?apikey= для быстрых проверок).
- * Ключ задаётся переменной окружения ONEC_API_KEY, по умолчанию — демо-ключ.
+ * Авторизация: только заголовок X-API-Key (ключ в адресе попадал бы в логи прокси).
+ * Ключ задаётся переменной окружения ONEC_API_KEY (не короче 24 символов).
+ * Ключа по умолчанию нет: без переменной интеграция выключена и отвечает 503.
  */
+import { createHash, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import type { RequestStatus } from '@/lib/types'
 
-export const ONEC_API_KEY = process.env.ONEC_API_KEY ?? 'aemz-1c-demo-2024'
 export const ONEC_VERSION = '1.0.0'
 
+/** Ключ интеграции или null, если интеграция не настроена */
+export function onecApiKey(): string | null {
+  const key = process.env.ONEC_API_KEY
+  return key && key.length >= 24 ? key : null
+}
+
+/** Ключ для показа в интерфейсе: только начало и конец */
+export function onecKeyMasked(): string | null {
+  const key = onecApiKey()
+  return key ? `${key.slice(0, 4)}…${key.slice(-4)}` : null
+}
+
+const digest = (v: string) => createHash('sha256').update(v).digest()
+
 export function onecAuthorized(req: NextRequest): boolean {
+  const key = onecApiKey()
   const header = req.headers.get('x-api-key')
-  if (header === ONEC_API_KEY) return true
-  return req.nextUrl.searchParams.get('apikey') === ONEC_API_KEY
+  if (!key || !header) return false
+  // сравнение за постоянное время (хеши одной длины)
+  return timingSafeEqual(digest(header), digest(key))
 }
 
 export function onecUnauthorized(): NextResponse {
+  if (!onecApiKey()) {
+    return NextResponse.json({ ok: false, error: 'Интеграция с 1С не настроена: задайте ONEC_API_KEY на сервере' }, { status: 503 })
+  }
   return NextResponse.json(
     { ok: false, error: 'Не авторизован: передайте API-ключ в заголовке X-API-Key' },
     { status: 401 },

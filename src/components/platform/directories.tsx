@@ -67,7 +67,6 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
     { key: 'passport', label: 'Паспорт (серия и номер)', placeholder: '52 07 123456' },
     { key: 'license', label: 'Номер ВУ', placeholder: '52 07 123456' },
     { key: 'licenseTill', label: 'ВУ действует до', placeholder: 'ДД.ММ.ГГГГ' },
-    { key: 'medTill', label: 'Медсправка действует до', placeholder: 'ДД.ММ.ГГГГ' },
     { key: 'categories', label: 'Категории', placeholder: 'C, CE' },
   ],
   truck: [
@@ -95,7 +94,7 @@ const KIND_TITLES: Record<Kind, string> = {
 
 /** Плитки разделов на странице «Справочники» */
 const SECTIONS: { key: SectionKind; kind: Kind; icon: typeof User; hint: string }[] = [
-  { key: 'drivers', kind: 'driver', icon: User, hint: 'ФИО, паспорта, ВУ, медсправки' },
+  { key: 'drivers', kind: 'driver', icon: User, hint: 'ФИО, паспорта, ВУ' },
   { key: 'trucks', kind: 'truck', icon: Truck, hint: 'Марки, госномера, СТС, техосмотр' },
   { key: 'trailers', kind: 'trailer', icon: Wrench, hint: 'Типы, госномера, СТС, собственник' },
 ]
@@ -291,7 +290,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   // —— отфильтрованные выборки для таблиц ——
   const driversFlat = useMemo(
     () => allDrivers
-      .filter(({ d, carrierId }) => dirByCarrier(carrierId) && dirByQuery(d.fullName, d.passport, d.license, d.phone) && dirByExpiry([d.licenseTill, d.medTill])),
+      .filter(({ d, carrierId }) => dirByCarrier(carrierId) && dirByQuery(d.fullName, d.passport, d.license, d.phone) && dirByExpiry([d.licenseTill])),
     [allDrivers, dirByQuery, dirByExpiry, dirByCarrier],
   )
   const driversTotal = allDrivers.length
@@ -326,8 +325,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
       for (const d of c.drivers) {
         const v = expiryInfo(d.licenseTill)
         if (bad(v)) items.push({ key: `${d.id}-lic`, tab: 'drivers', icon: User, title: d.fullName, docLabel: 'Водительское удостоверение', info: v, carrierName: c.name })
-        const m = expiryInfo(d.medTill)
-        if (bad(m)) items.push({ key: `${d.id}-med`, tab: 'drivers', icon: User, title: d.fullName, docLabel: 'Медсправка', info: m, carrierName: c.name })
       }
       for (const t of c.trucks) {
         const v = expiryInfo(t.techTill)
@@ -628,7 +625,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                           {driversFlat.map(({ d, carrierName }) => (
                             <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('driver', d.id, {
                               fullName: d.fullName, birthDate: d.birthDate, passport: d.passport, license: d.license,
-                              licenseTill: d.licenseTill === '—' ? '' : d.licenseTill, medTill: d.medTill === '—' ? '' : d.medTill,
+                              licenseTill: d.licenseTill === '—' ? '' : d.licenseTill,
                               categories: d.categories,
                             })} onPhotos={() => setPhotoView({ kind: 'driver', id: d.id, title: d.fullName })} />
                           ))}
@@ -773,13 +770,13 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {photoList.map((p) => (
                 <figure key={p.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                  <img src={p.dataUri} alt={`Фото: ${p.label}`} className="h-44 w-full bg-slate-50 object-contain" />
+                  <img src={p.url} alt={`Фото: ${p.label}`} className="h-44 w-full bg-slate-50 object-contain" />
                   <figcaption className="space-y-2 p-2.5">
                     <div className="flex items-center justify-between gap-2">
                       <span className="truncate text-xs font-semibold text-slate-800">{p.label}</span>
                       {/* скачивание — внутри окна предосмотра (Task 54) */}
                       <a
-                        href={p.dataUri}
+                        href={`${p.url}?download=1`}
                         download={p.fileName}
                         className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 transition-colors hover:bg-blue-50"
                         aria-label={`Скачать фото: ${p.label}`}
@@ -824,8 +821,7 @@ function PhotosButton({ title, onOpen }: { title: string; onOpen: () => void }) 
 
 function DriverRow({ d, carrierName, showCarrier, onEdit, onPhotos }: { d: DriverDTO; carrierName: string; showCarrier: boolean; onEdit: () => void; onPhotos: () => void }) {
   const lic = expiryInfo(d.licenseTill)
-  const med = expiryInfo(d.medTill)
-  const tint = rowTint([lic.state, med.state] as ExpiryState[])
+  const tint = rowTint([lic.state] as ExpiryState[])
   return (
     <TableRow className={tint}>
       <TableCell className="font-medium text-slate-800">{d.fullName}</TableCell>
