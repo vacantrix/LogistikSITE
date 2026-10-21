@@ -53,3 +53,12 @@ server.log
 # Skills directory
 /skills/tool-results/
 /tool-results/
+
+# данные и служебные файлы — не для публичного репозитория
+/db/*.db
+/db/*.db-journal
+/upload/
+/skills/
+.zscripts/dev.pid
+!.env.example
+__pycache__/
