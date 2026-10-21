@@ -541,3 +541,16 @@ Work Log:
 
 Stage Summary:
 - Правки скриншот-запроса (кроме «переработки экрана логиста» — заморожена пользователем) собраны заново и живые: все 8 статусов в фильтре «Моих заявок», завершённая папка отдельным блоком, янтарная подсветка пропущенных документов, «Без прицепа» всегда вариант (UI + Excel + API null), Z-1041 у Перевозчика Б. Справочники: фильтры были на месте, убран дубль счётчика. Остаток по инвентарю Task 40: только реорганизация логиста (ждёт явного приказа).
+
+---
+Task ID: 43-b
+Agent: Z.ai Code (main)
+Task: GitHub push — финал
+
+Work Log:
+- Обнаружен созданный пользователем репозиторий vacantrix/LogistikSITE (public, сегодня 06:47) — «на гитхабе вроде получилось выдать» = репо создан вручную под другим именем; remote origin перенацелен с aemz-logistics на LogistikSITE.
+- git push → 403 «Permission to vacantrix/LogistikSITE.git denied to vacantrix»: fine-grained PAT создан ДО репозитория и не включает его в Repository access; collaborators API 403 подтверждает скоуп. gh repo create по-прежнему 403 (нет createRepository).
+- Блокер на стороне токена: нужен Repository access = All repositories (или + LogistikSITE) и Contents: Read and write у PAT — после этого `git push -u origin main` уводит 9 локальных коммитов одной командой.
+
+Stage Summary:
+- 9 коммитов готовы локально (последний df6c490, Task 43). Remote = vacantrix/LogistikSITE. Единственный недостающий шаг — расширить скоуп PAT на стороне GitHub.
