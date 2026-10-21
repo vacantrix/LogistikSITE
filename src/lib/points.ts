@@ -9,8 +9,10 @@ import { Anchor, Factory, Warehouse, type LucideIcon } from 'lucide-react'
  * так что ссылка открывает полноценный автомобильный маршрут даже для
  * придуманных адресов. Точка выгрузки названа по реальному оператору
  * Большого порта Санкт-Петербург — ООО «Терминал Святого Петра»
- * (stpetr.ru, Канонерский остров). Работа с Новороссийском временно
- * приостановлена — выгрузка идёт через Петербург.
+ * (stpetr.ru, Канонерский остров). Основная выгрузка — Петербург,
+ * часть рейсов идёт через порты и склады Юга (Новороссийск, Туапсе)
+ * и в города-потребители (Ставрополь, Сочи, Тихорецк и др.) — все
+ * точки заведены в справочник ниже с координатами для карты и маршрутов.
  */
 export interface PointInfo {
   /** Короткая подпись — город точки (для плотных мест: таблицы, списки, селекты) */
@@ -118,6 +120,36 @@ const SPOTS: PointInfo[] = [
     address: 'Краснодарский край, Абинский р-н, п. Ахтырский, ул. Степная, д. 9, лит. Б',
     icon: Warehouse, coords: '44.9680,38.2500', mapQuery: 'Ахтырский', known: true,
   },
+  {
+    short: 'Новороссийск',
+    name: 'Портовый терминал «НМТП»',
+    address: 'г. Новороссийск, ул. Портовая, д. 7, лит. А',
+    icon: Anchor, coords: '44.7239,37.7686', mapQuery: 'Новороссийск, порт', known: true,
+  },
+  {
+    short: 'Туапсе',
+    name: 'Склад «Туапсинский»',
+    address: 'Краснодарский край, г. Туапсе, ул. Портовая, д. 12, лит. Б',
+    icon: Warehouse, coords: '44.1023,39.0764', mapQuery: 'Туапсе', known: true,
+  },
+  {
+    short: 'Ставрополь',
+    name: 'Терминал «Ставрополь»',
+    address: 'г. Ставрополь, ул. Индустриальная, д. 5, лит. А',
+    icon: Warehouse, coords: '45.0428,41.9734', mapQuery: 'Ставрополь', known: true,
+  },
+  {
+    short: 'Сочи',
+    name: 'Склад «Сочи»',
+    address: 'Краснодарский край, г. Сочи, ул. Транспортная, д. 9, лит. А',
+    icon: Warehouse, coords: '43.5855,39.7231', mapQuery: 'Сочи', known: true,
+  },
+  {
+    short: 'Тихорецк',
+    name: 'Склад «Тихорецкий»',
+    address: 'Краснодарский край, г. Тихорецк, ул. Заводская, д. 14, лит. В',
+    icon: Warehouse, coords: '45.8547,40.1289', mapQuery: 'Тихорецк', known: true,
+  },
 ]
 
 const SPOT_KEYS: Array<{ keys: string[]; idx: number }> = [
@@ -130,21 +162,28 @@ const SPOT_KEYS: Array<{ keys: string[]; idx: number }> = [
   { keys: ['волгоград', 'волжск'], idx: 6 },
   { keys: ['холмск'], idx: 7 },
   { keys: ['ахтыр'], idx: 8 },
+  { keys: ['новоросс'], idx: 9 },
+  { keys: ['туапсе'], idx: 10 },
+  { keys: ['ставропол'], idx: 11 },
+  { keys: ['сочи'], idx: 12 },
+  { keys: ['тихорецк'], idx: 13 },
 ]
 
 /** Разворачивает точку маршрута из заявки в полное название и адрес */
 export function pointInfo(raw: string): PointInfo {
   const v = (raw ?? '').trim().toLowerCase()
   if (v.includes('завод') || v.includes('аэмз') || v.includes('абинск')) return FACTORY
+  // Сначала конкретные города (иначе «Новороссийск (порт)» ложно матчится
+  // как петербургский порт по слову «порт»)
+  for (const { keys, idx } of SPOT_KEYS) {
+    if (keys.some((k) => v.includes(k))) return SPOTS[idx]
+  }
   if (
     v.includes('порт') || v.includes('терминал') || v.includes('свят') ||
     v.includes('петр') || v.includes('спб') || v.includes('санкт') ||
     v.includes('канонер')
   ) return TERMINAL_ST_PETER
   if (v.includes('склад')) return WAREHOUSE_SPB
-  for (const { keys, idx } of SPOT_KEYS) {
-    if (keys.some((k) => v.includes(k))) return SPOTS[idx]
-  }
   const label = (raw ?? '').trim()
   return {
     short: label,

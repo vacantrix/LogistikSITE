@@ -2,6 +2,7 @@
 
 /** Раздел «Площадка заявок» — перевозчик выбирает заявку и делает ставку; логист публикует и контролирует */
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import dynamic from 'next/dynamic'
 import * as XLSX from 'xlsx'
 import {
   CheckCircle2,
@@ -15,6 +16,8 @@ import {
   Handshake,
   History,
   Lock,
+  Map as MapIcon,
+  MapPin,
   Plus,
   RefreshCw,
   ScanSearch,
@@ -61,10 +64,18 @@ import { RouteButton, RoutePointsInline } from '@/components/platform/route-dial
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
+import { formatKm, haversineKm, pointCoords, routeDistanceKm } from '@/lib/geo'
+import type { MapPoint } from '@/components/platform/delivery-map'
 import { DOC_TYPE_LABEL, fmtDateTime, num, rate, REQUEST_STATUS_META, timeLeft } from '@/lib/status'
 import type { BidDTO, CargoTypeDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
+
+/** Карта доставки: Leaflet работает только в браузере — подключаем без SSR */
+const DeliveryMap = dynamic(() => import('@/components/platform/delivery-map'), {
+  ssr: false,
+  loading: () => <div className="flex h-full items-center justify-center text-sm text-slate-500">Загружаем карту…</div>,
+})
 
 type ModeFilter = 'ALL' | RequestMode | 'MY_BIDS'
 
@@ -256,6 +267,83 @@ function AuctionDesk({ request, now, busy, onAward, onExtend, onOffer, onRaise }
   )
 }
 
+/** Формы множественного числа: pluralRu(3, ['точка','точки','точек']) → «точки» */
+function pluralRu(n: number, forms: [string, string, string]): string {
+  const a = Math.abs(n) % 100
+  const b = a % 10
+  if (a > 10 && a < 20) return forms[2]
+  if (b > 1 && b < 5) return forms[1]
+  if (b === 1) return forms[0]
+  return forms[2]
+}
+
+/** Точка на карте: пункт погрузки или группа заявок с одной точкой выгрузки */
+interface MapGroup {
+  id: string
+  lat: number
+  lng: number
+  short: string
+  name: string
+  address: string
+  kind: 'loading' | 'delivery'
+  requests: RequestDTO[]
+}
+
+/**
+ * Группирует заявки текущей выборки по координатам точек погрузки и выгрузки.
+ * Точки без координат в справочнике на карту не попадают.
+ */
+function buildMapPoints(list: RequestDTO[]): MapPoint[] {
+  const groups = new Map<string, MapGroup>()
+  for (const r of list) {
+    for (const [raw, kind] of [
+      [r.fromPoint, 'loading'],
+      [r.toPoint, 'delivery'],
+    ] as const) {
+      const info = pointInfo(raw)
+      const c = pointCoords(raw)
+      if (!c) continue
+      const key = `${kind}:${c.lat},${c.lng}`
+      const g = groups.get(key)
+      if (g) {
+        if (!g.requests.some((x) => x.id === r.id)) g.requests.push(r)
+      } else {
+        groups.set(key, {
+          id: key,
+          lat: c.lat,
+          lng: c.lng,
+          short: info.short,
+          name: info.name,
+          address: info.address,
+          kind,
+          requests: [r],
+        })
+      }
+    }
+  }
+  const loading = [...groups.values()].find((g) => g.kind === 'loading')
+  return [...groups.values()]
+    .map((g): MapPoint => ({
+      id: g.id,
+      lat: g.lat,
+      lng: g.lng,
+      short: g.short,
+      name: g.name,
+      address: g.address,
+      kind: g.kind,
+      distanceKm: g.kind === 'delivery' && loading ? Math.round(haversineKm(loading, g)) : null,
+      requests: g.requests.map((r) => ({
+        number: r.number,
+        cargo: r.cargo,
+        tonnage: r.tonnage,
+        loadDate: r.loadDate,
+      })),
+    }))
+    .sort((a, b) =>
+      a.kind === b.kind ? b.requests.length - a.requests.length : a.kind === 'loading' ? -1 : 1,
+    )
+}
+
 export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
@@ -286,6 +374,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
   const [bidStep, setBidStep] = useState<'form' | 'confirm' | 'success'>('form')
   const [bidFinal, setBidFinal] = useState<number | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // карта доставки: диалог + выбранная точка (фокус из бокового списка)
+  const [mapOpen, setMapOpen] = useState(false)
+  const [focusPointId, setFocusPointId] = useState<string | null>(null)
 
   // создание заявки — только логист
   const [createOpen, setCreateOpen] = useState(false)
@@ -389,11 +480,15 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
     })
   }, [requests, q, mode, myBidOf])
 
+  /** Точки для карты доставки — по текущей выборке заявок */
+  const mapPoints = useMemo(() => buildMapPoints(filtered), [filtered])
+  const deliveryCount = mapPoints.filter((p) => p.kind === 'delivery').length
+
   /** Выгрузка текущей выборки в Excel: то, что видно в таблице с учётом фильтров и поиска */
   const exportExcel = () => {
     const withMine = !isLogist
     const header = [
-      'Заявка', 'Маршрут', 'Груз', 'Тоннаж, т', 'Тип ТС', 'Статус',
+      'Заявка', 'Маршрут', 'КМ', 'Груз', 'Тоннаж, т', 'Тип ТС', 'Статус',
       'Ставка, ₽/т', 'Стартовая, ₽/т', 'Погрузка', 'Окно', 'Приём ставок до',
       ...(withMine ? ['Мой отклик'] : []),
     ]
@@ -406,6 +501,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
       return [
         r.number,
         `${r.fromPoint} → ${r.toPoint}`,
+        routeDistanceKm(r.fromPoint, r.toPoint) ?? '—',
         r.cargo,
         r.tonnage,
         r.truckType,
@@ -418,7 +514,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
         ...(withMine ? [my ? `Ваша ставка: ${my.amount} ₽/т` : '—'] : []),
       ]
     })
-    const cols = [{ wch: 10 }, { wch: 28 }, { wch: 22 }, { wch: 10 }, { wch: 9 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 17 }]
+    const cols = [{ wch: 10 }, { wch: 28 }, { wch: 9 }, { wch: 22 }, { wch: 10 }, { wch: 9 }, { wch: 18 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 17 }]
     if (withMine) cols.push({ wch: 19 })
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
     ws['!cols'] = cols
@@ -731,6 +827,32 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                 <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
                 Обновить
               </Button>
+
+              {/* Карта доставки — под поисковой строкой: точки выгрузки текущей выборки */}
+              <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-3.5 py-2.5">
+                <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white" aria-hidden>
+                    <MapPin className="h-4 w-4" />
+                  </span>
+                  <p className="min-w-0 text-sm text-slate-600">
+                    <span className="font-semibold text-slate-800">Карта доставки</span>{' '}
+                    — точки, куда нужно доставить груз: {deliveryCount}{' '}
+                    {pluralRu(deliveryCount, ['точка', 'точки', 'точек'])} · {filtered.length}{' '}
+                    {pluralRu(filtered.length, ['заявка', 'заявки', 'заявок'])} в выборке
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 gap-1.5 border-blue-200 bg-white hover:bg-blue-50"
+                  onClick={() => { setFocusPointId(null); setMapOpen(true) }}
+                  disabled={filtered.length === 0}
+                  aria-label="Открыть карту доставки"
+                >
+                  <MapIcon className="h-4 w-4 text-blue-600" aria-hidden />
+                  Открыть карту
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
@@ -751,6 +873,13 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                       <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">№ заявки</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Маршрут</th>
+                        <th
+                          scope="col"
+                          className="border-b border-slate-200 pb-2.5 pr-3 font-semibold"
+                          title="Расстояние от погрузки до назначения, по прямой"
+                        >
+                          КМ
+                        </th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Груз</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Погрузка</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Тип ТС</th>
@@ -763,6 +892,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                     <tbody>
                       {filtered.map((r) => {
                         const my = myBidOf(r)
+                        const km = routeDistanceKm(r.fromPoint, r.toPoint)
                         const expanded = isLogist && expandedId === r.id && r.status === 'PUBLISHED'
                         return (
                           <Fragment key={r.id}>
@@ -785,6 +915,13 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                               <RoutePointsInline from={r.fromPoint} to={r.toPoint} className="min-w-0" />
                               <RouteButton from={r.fromPoint} to={r.toPoint} number={r.number} variant="ghost" className="shrink-0 px-2" />
                             </div>
+                          </td>
+                          <td className="whitespace-nowrap border-b border-slate-100 py-3 pr-3 tabular-nums text-slate-700">
+                            {km !== null ? (
+                              <span title="Расстояние по прямой">{formatKm(km)}</span>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
                           </td>
                           <td className="border-b border-slate-100 py-3 pr-3 text-slate-700">
                             {r.cargo}
@@ -849,7 +986,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
                         </tr>
                         {expanded && (
                           <tr>
-                            <td colSpan={9} className="border-b border-slate-100 bg-blue-50/40 px-2 py-3">
+                            <td colSpan={10} className="border-b border-slate-100 bg-blue-50/40 px-2 py-3">
                               <AuctionDesk
                                 request={r}
                                 now={now}
@@ -1415,6 +1552,59 @@ export default function BoardTab({ activeCarrierId, role, onNavigate }: TabProps
             <Button variant="outline" onClick={() => setRaiseReq(null)}>Отмена</Button>
             <Button disabled={busyId !== null} onClick={() => void submitRaise()}>Поднять ставку</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Диалог «Карта доставки» — точки выгрузки по текущей выборке */}
+      <Dialog open={mapOpen} onOpenChange={(o) => { setMapOpen(o); if (!o) setFocusPointId(null) }}>
+        <DialogContent className="grid h-[92vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-blue-600" aria-hidden />
+              Карта доставки
+            </DialogTitle>
+            <DialogDescription>
+              Пункт погрузки и точки, куда нужно доставить груз по текущей выборке — {filtered.length}{' '}
+              {pluralRu(filtered.length, ['заявка', 'заявки', 'заявок'])}. Нажмите на маркер или точку в списке, чтобы увидеть заявки.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-col gap-3 md:flex-row">
+            {/* Боковой список точек: клик — фокус на маркере */}
+            <aside
+              className="flex max-h-44 w-full shrink-0 flex-col gap-1.5 overflow-y-auto pr-1 md:max-h-none md:w-64 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+              aria-label="Точки доставки"
+            >
+              {mapPoints.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setFocusPointId(p.id)}
+                  className={`flex items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                    focusPointId === p.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                  }`}
+                >
+                  <span
+                    className="mt-0.5 flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full px-1 text-[11px] font-bold text-white"
+                    style={{ background: p.kind === 'loading' ? '#d97706' : '#2563eb' }}
+                    aria-hidden
+                  >
+                    {p.kind === 'loading' ? '🏭' : p.requests.length}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-800">{p.short}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {p.kind === 'loading' ? 'погрузка' : 'выгрузка'}
+                      {p.distanceKm != null ? ` · ≈ ${formatKm(p.distanceKm)}` : ''}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </aside>
+            {/* Карта */}
+            <div className="relative min-h-[280px] flex-1 overflow-hidden rounded-xl border border-slate-200">
+              <DeliveryMap points={mapPoints} focusId={focusPointId} />
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </section>
