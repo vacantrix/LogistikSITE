@@ -556,9 +556,19 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     const list = requests ?? []
     const needle = q.trim().toLowerCase()
     return list.filter((r) => {
-      if (mode === 'MY_BIDS') {
+      // Логист видит всю площадку целиком — ему нужен полный контроль над заявками
+      if (isLogist) {
+        if (mode !== 'ALL' && r.mode !== mode) return false
+      } else if (mode === 'MY_BIDS') {
+        // «Мои отклики»: исключительно заявки, куда агент уже подал отклик;
+        // посторонние доступные заявки, на которые он ещё не реагировал, сюда не попадают
         if (!myBidOf(r)) return false
-      } else if (mode !== 'ALL' && r.mode !== mode) return false
+      } else {
+        // «Площадка заявок» у агента: только новые, доступные всем заявки —
+        // открытые и без его отклика; заявки с откликами живут в «Моих откликах»
+        if (r.status !== 'PUBLISHED' || myBidOf(r)) return false
+        if (mode !== 'ALL' && r.mode !== mode) return false
+      }
       if (!needle) return true
       // поиск и по полным адресам точек (Task 22): «промышленная» найдёт АЭМЗ, «портовая» — порт
       const a = pointInfo(r.fromPoint)
@@ -567,7 +577,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         a.name, a.address, b.name, b.address,
       ].some((v) => v.toLowerCase().includes(needle))
     })
-  }, [requests, q, mode, myBidOf])
+  }, [requests, q, mode, myBidOf, isLogist])
 
   /** выборка после сортировки (Task 49): пустые значения всегда в конце, вне зависимости от направления */
   const sorted = useMemo(() => {
@@ -968,8 +978,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 <EmptyState
                   title={mode === 'MY_BIDS' ? 'Откликов пока нет' : 'Заявок не найдено'}
                   hint={mode === 'MY_BIDS'
-                    ? 'Заявки, куда перевозчик подавал ставку, появятся в этом списке'
-                    : 'Измените параметры поиска или фильтр вида тендера'}
+                    ? 'Здесь собраны только заявки, куда вы подали отклик; новые доступны на «Площадке заявок»'
+                    : 'Здесь только новые заявки, открытые для всех; заявки с вашим откликом — в фильтре «Мои отклики»'}
                 />
               ) : (
                 <div className="-mx-2 overflow-x-auto px-2">
@@ -1016,7 +1026,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 )}
                               </div>
                             </td>
-                          <td className="border-b border-slate-100 py-3 pr-3">
+                          <td className="min-w-[300px] border-b border-slate-100 py-3 pr-3">
                             <div className="flex items-start gap-2">
                               <RoutePointsInline from={r.fromPoint} to={r.toPoint} className="min-w-0" />
                               <RouteButton from={r.fromPoint} to={r.toPoint} number={r.number} variant="ghost" className="shrink-0 px-2" />

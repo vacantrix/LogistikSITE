@@ -9,14 +9,16 @@
  * маршрута в Яндекс.Картах. Адреса берутся из lib/points.
  */
 import { useState, type ComponentProps } from 'react'
-import { ArrowRight, ExternalLink, MapPin } from 'lucide-react'
+import { ExternalLink, MapPin } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import { pointInfo, routeMapUrl } from '@/lib/points'
 
-/** Компактная пара точек маршрута: короткие имена + полные адреса */
+/** Компактная пара точек маршрута: строгая вертикальная сетка — иконки в
+ *  фиксированной колонке, названия и адреса — строго друг под другом,
+ *  независимо от длины текста. Погрузка сверху, выгрузка под ней. */
 export function RoutePointsInline({ from, to, className }: { from: string; to: string; className?: string }) {
   const a = pointInfo(from)
   const b = pointInfo(to)
@@ -24,17 +26,23 @@ export function RoutePointsInline({ from, to, className }: { from: string; to: s
   const ToIcon = b.icon
   return (
     <div className={`min-w-0 ${className ?? ''}`}>
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 font-medium text-slate-800">
-        <FromIcon className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
-        <span className="whitespace-nowrap">{a.short}</span>
-        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-        <ToIcon className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
-        <span className="whitespace-nowrap">{b.short}</span>
-      </div>
-      <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-        {a.address}
-        <span className="mx-1 text-slate-300" aria-hidden>→</span>
-        {b.address}
+      <div className="grid grid-cols-[0.875rem_1fr] items-start gap-x-2 gap-y-1.5">
+        {/* Погрузка */}
+        <span className="flex h-3.5 items-center" aria-hidden>
+          <FromIcon className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-medium leading-tight text-slate-800">{a.short}</div>
+          <div className="text-[11px] leading-snug text-muted-foreground">{a.address}</div>
+        </div>
+        {/* Выгрузка */}
+        <span className="flex h-3.5 items-center" aria-hidden>
+          <ToIcon className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+        </span>
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-medium leading-tight text-slate-800">{b.short}</div>
+          <div className="text-[11px] leading-snug text-muted-foreground">{b.address}</div>
+        </div>
       </div>
     </div>
   )

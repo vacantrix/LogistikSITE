@@ -250,10 +250,6 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
 
   /** Выбор прицепа: занятый — не применяем, вместо этого показываем сообщение «занят» */
   const pickTrailer = (reqId: string, trailerId: string) => {
-    if (trailerId === 'none') {
-      setSelFor(reqId, { trailerId })
-      return
-    }
     const b = busyCrew.trailers.get(trailerId)
     if (b) {
       const z = trailers.find((x) => x.id === trailerId)
@@ -293,13 +289,26 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
     [requests, activeCarrierId],
   )
 
-  const selOf = (r: RequestDTO): SelState =>
-    sel[r.id] ?? { driverId: r.driverId ?? undefined, truckId: r.truckId ?? undefined, trailerId: r.trailerId ?? undefined }
+  /**
+   * Состав по заявке. Прицеп обязателен: пока пользователь не выбрал прицеп
+   * сам, подставляем первый свободный из базы — в том числе поверх частичного
+   * выбора (водитель/тягач), чтобы автоподстановка не сбрасывалась. Если
+   * свободных прицепов нет, поле остаётся пустым с плейсхолдером
+   * «Выберите прицеп», и отправка формы заблокирована до сделанного выбора.
+   */
+  const selOf = (r: RequestDTO): SelState => {
+    const base = sel[r.id]
+    return {
+      driverId: base?.driverId ?? r.driverId ?? undefined,
+      truckId: base?.truckId ?? r.truckId ?? undefined,
+      trailerId: base?.trailerId ?? r.trailerId ?? trailers.find((z) => !busyCrew.trailers.has(z.id))?.id,
+    }
+  }
 
   const setSelFor = (id: string, patch: SelState) =>
     setSel((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...patch } }))
 
-  /** Передать экипаж логисту: водитель + тягач + прицеп (вариант «Без прицепа» — тоже валиден) вешаются на заявку */
+  /** Передать экипаж логисту: водитель + тягач + прицеп — обязательный комплект вешается на заявку */
   const assign = async (r: RequestDTO) => {
     const s = selOf(r)
     if (!s.driverId || !s.truckId || !s.trailerId) return
@@ -308,8 +317,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
       const { request } = await api.action(r.id, 'assign', {
         driverId: s.driverId,
         truckId: s.truckId,
-        // «Без прицепа» шлём как пустое значение — сервер сохранит null
-        trailerId: s.trailerId === 'none' ? undefined : s.trailerId,
+        trailerId: s.trailerId,
       })
       applyRequest(request)
       toast({
@@ -332,8 +340,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
       const { request } = await api.action(r.id, 'approve-crew', {
         driverId: s.driverId,
         truckId: s.truckId,
-        // «Без прицепа» шлём как пустое значение — сервер сохранит null
-        trailerId: s.trailerId === 'none' ? undefined : s.trailerId,
+        trailerId: s.trailerId,
       })
       applyRequest(request)
       toast({
@@ -439,17 +446,19 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
           row.message = `тягач «${truckPlate || '—'}» не найден в базе аккаунта`
           return row
         }
-        let trl: string | undefined
-        if (trailerPlate && !/^(—|-|нет|без)$/i.test(trailerPlate)) {
-          const found = trailers.find((z) => normPlate(z.plate) === normPlate(trailerPlate))
-          if (!found) {
-            row.message = `прицеп «${trailerPlate}» не найден в базе аккаунта`
-            return row
-          }
-          trl = found.id
+        // Прицеп обязателен для рейса: строка без прицепа не проходит проверку
+        if (!trailerPlate || /^(—|-|нет|без)$/i.test(trailerPlate)) {
+          row.message = 'прицеп не указан — прицеп обязателен для рейса'
+          return row
         }
+        const found = trailers.find((z) => normPlate(z.plate) === normPlate(trailerPlate))
+        if (!found) {
+          row.message = `прицеп «${trailerPlate}» не найден в базе аккаунта`
+          return row
+        }
+        const trl = found.id
         // Правило занятости (Task 50): водитель/ТС/прицеп «в рейсе» назначить нельзя
-        const busyHit = busyCrew.drivers.get(drv.id) ?? busyCrew.trucks.get(trk.id) ?? (trl ? busyCrew.trailers.get(trl) : undefined)
+        const busyHit = busyCrew.drivers.get(drv.id) ?? busyCrew.trucks.get(trk.id) ?? busyCrew.trailers.get(trl)
         if (busyHit) {
           const who = busyCrew.drivers.has(drv.id)
             ? `Водитель ${drv.fullName}`
@@ -460,7 +469,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
           return row
         }
         seen.add(byNo.id)
-        Object.assign(row, { requestId: byNo.id, driverId: drv.id, truckId: trk.id, trailerId: trl, ok: true, message: trl ? 'готова к передаче' : 'без прицепа — готова к передаче' })
+        Object.assign(row, { requestId: byNo.id, driverId: drv.id, truckId: trk.id, trailerId: trl, ok: true, message: 'готова к передаче' })
         return row
       })
 
@@ -479,7 +488,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
 
   /** Передача всех валидных строк: экипаж вешается на каждый рейс одним запросом */
   const runImport = async () => {
-    const ok = (importRows ?? []).filter((r) => r.ok && r.requestId && r.driverId && r.truckId)
+    const ok = (importRows ?? []).filter((r) => r.ok && r.requestId && r.driverId && r.truckId && r.trailerId)
     if (ok.length === 0 || !activeCarrierId) return
     setImporting(true)
     try {
@@ -647,11 +656,10 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                                 onValueChange={(v) => pickTrailer(r.id, v)}
                               >
                                 <SelectTrigger aria-label={`Выбор прицепа по заявке ${r.number}`}>
-                                  <SelectValue placeholder="Выберите прицепа" />
+                                  <SelectValue placeholder="Выберите прицеп" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {/* «Без прицепа» — всегда доступный вариант, независимо от базы */}
-                                  <SelectItem value="none">Без прицепа</SelectItem>
+                                  {/* Прицеп обязателен: только реальные прицепы из базы, без варианта «Без прицепа» */}
                                   {trailers.map((z) => {
                                     const b = busyCrew.trailers.get(z.id)
                                     return (
@@ -672,7 +680,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                               {truck ? <TruckCell t={truck} /> : <span className="text-[11px] text-slate-300">—</span>}
                             </td>
                             <td className="px-3 py-2 align-top">
-                              {trailer ? <TrailerCell z={trailer} /> : s.trailerId === 'none' ? <span className="text-[11px] font-medium text-slate-600">Едет без прицепа</span> : <span className="text-[11px] text-slate-300">—</span>}
+                              {trailer ? <TrailerCell z={trailer} /> : <span className="text-[11px] text-slate-300">—</span>}
                             </td>
                           </tr>
                         </tbody>
@@ -682,6 +690,12 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                     {drivers.length === 0 && (
                       <p className="text-xs text-amber-700">
                         В базе нет водителей — пополните её во вкладке «Подать документы».
+                      </p>
+                    )}
+
+                    {trailers.length === 0 && (
+                      <p className="text-xs text-amber-700">
+                        В базе нет прицепов — прицеп обязателен для рейса, пополните базу во вкладке «Подать документы».
                       </p>
                     )}
 
@@ -889,7 +903,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                   const s = selOf(approveReq)
                   const d = driverById(s.driverId)
                   const t = truckById(s.truckId)
-                  const z = s.trailerId && s.trailerId !== 'none' ? trailerById(s.trailerId) : undefined
+                  const z = s.trailerId ? trailerById(s.trailerId) : undefined
                   return (
                     <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800">
                       <div className="flex gap-2">
@@ -902,7 +916,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                       </div>
                       <div className="flex gap-2">
                         <span className="w-20 shrink-0 text-muted-foreground">Прицеп:</span>
-                        <span className="font-semibold text-slate-900">{z ? `${z.plate} · ${z.type}` : 'Без прицепа'}</span>
+                        <span className="font-semibold text-slate-900">{z ? `${z.plate} · ${z.type}` : '—'}</span>
                       </div>
                     </div>
                   )
