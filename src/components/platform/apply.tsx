@@ -6,9 +6,11 @@
  * строку, фотографии ниже линии); «+» добавляет линию для ручного ввода.
  * Excel из одной таблицы создаёт нужное число линий с подставленными данными,
  * ничего не записывая в базу. Кнопка «Проверить все» последовательно прогоняет
- * нейросеть по линиям и сама допускает карточки в базу (или отклоняет с причинами).
+ * линии: сначала проверяет обязательность всех полей и фото (незаполненное
+ * подсвечивается красным), затем нейросеть читает фото, заполняет пустые поля
+ * и сама допускает карточки в базу (или отклоняет с причинами).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import * as XLSX from 'xlsx'
 import {
@@ -117,16 +119,12 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const [checkingAll, setCheckingAll] = useState(false)
   const [excelName, setExcelName] = useState<string | null>(null)
 
-  // актуальные функции проверки и готовности линий (для «Проверить все»)
-  const checksRef = useRef(new Map<string, () => Promise<boolean>>())
-  const readyRef = useRef(new Map<string, boolean>())
+  // актуальные функции проверки линий (для «Проверить все»)
+  const checksRef = useRef(new Map<string, (quiet?: boolean) => Promise<boolean>>())
 
-  const registerCheck = useCallback((id: string, fn: (() => Promise<boolean>) | null) => {
+  const registerCheck = useCallback((id: string, fn: ((quiet?: boolean) => Promise<boolean>) | null) => {
     if (fn) checksRef.current.set(id, fn)
     else checksRef.current.delete(id)
-  }, [])
-  const registerReady = useCallback((id: string, ready: boolean) => {
-    readyRef.current.set(id, ready)
   }, [])
 
   const refreshCounts = useCallback(async () => {
@@ -145,32 +143,32 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const addLine = () => setLines((cur) => [...cur, { id: newLineId(), fromExcel: false }])
   const removeLine = (id: string) => {
     checksRef.current.delete(id)
-    readyRef.current.delete(id)
     setLines((cur) => (cur.length > 1 ? cur.filter((l) => l.id !== id) : cur))
   }
 
-  /** «Проверить все»: последовательно по линиям; честный отчёт, если проверять нечего */
+  /** «Проверить все»: в каждой линии сначала проверка обязательных полей (незаполненное
+   * подсвечивается), затем нейросеть и допуск; тихий режим — без отдельного тоста на линию */
   const checkAll = async () => {
     if (checkingAll) return
     setCheckingAll(true)
     let ran = 0
     let ok = 0
     try {
-      for (const [id, fn] of checksRef.current) {
-        const res = await fn()
+      for (const [, fn] of checksRef.current) {
+        const res = await fn(true)
         ran += 1
         if (res) ok += 1
         if (!res) setLines((cur) => [...cur]) // перерисовать после ответа линии
       }
       if (ran === 0) {
         toast({
-          title: 'Проверка не запущена',
-          description: 'Линии уже допущены или не заполнены',
+          title: 'Все линии уже допущены',
+          description: 'Проверять нечего — все линии уже в базе аккаунта',
         })
       } else {
         toast({
           title: `Проверка завершена: ${ok} из ${ran}`,
-          description: ok === ran ? 'Все линии допущены в базу' : 'Часть линий требует внимания — смотрите вердикты',
+          description: ok === ran ? 'Все линии допущены в базу' : 'Часть линий требует внимания — незаполненное подсвечено красным',
         })
         void refreshCounts()
       }
@@ -178,13 +176,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
       setCheckingAll(false)
     }
   }
-
-  /** готовых линий (есть фото или ФИО+ВУ) — блокировка «Проверить все» при нуле */
-  const readyCount = useMemo(
-    () => [...readyRef.current.values()].filter(Boolean).length,
-    // пересчитывается при рендере после registerReady-колбэков
-    [lines, checkingAll],
-  )
 
   const downloadTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([HEADER_ROW, ...SAMPLE_ROWS])
@@ -253,13 +244,12 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               <span className="flex-1" />
               <Button
                 onClick={() => void checkAll()}
-                disabled={checkingAll || readyCount === 0}
-                title={readyCount === 0 ? 'Ни одна линия не готова: нужны фото или ФИО+ВУ' : undefined}
-                className="gap-1.5"
+                disabled={checkingAll}
+                className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
               >
                 <CheckCircle2 className="h-4 w-4" aria-hidden />
                 {checkingAll ? 'Проверяем все линии…' : 'Проверить все'}
-                <Badge variant="outline" className="ml-1 border-blue-300 bg-white/70 text-blue-800">{lines.length}</Badge>
+                <Badge variant="outline" className="ml-1 border-slate-500 bg-white/70 text-slate-900">{lines.length}</Badge>
               </Button>
             </div>
           </motion.div>
@@ -277,7 +267,6 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               carrierId={activeCarrierId ?? ''}
               initial={line.initial}
               registerCheck={registerCheck}
-              registerReady={registerReady}
               onRemove={removeLine}
               onAdmitted={() => void refreshCounts()}
             />
