@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
 } from '@/lib/types'
 import {
   ACTIVE_TOKEN_KEY, accountById, getLastAccountId,
@@ -85,6 +85,16 @@ async function json<T>(res: Response): Promise<T> {
     } catch { /* приватный режим */ }
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
   }
+  // Журнал платформы (Task 76): серверная ошибка — отчёт из браузера (fire-and-forget),
+  // чтобы в «Журнале событий» были видны и те сбои, что сервер не поймал сам.
+  // Сам репорт не репортим (иначе цикл) — raw fetch с проглатыванием ошибок.
+  if (res.status >= 500 && typeof window !== 'undefined' && !res.url.includes('/api/platform-log/client')) {
+    void fetch('/api/platform-log/client', withAuth({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind: 'api5xx', message: `API ${res.status}: ${res.url}`, url: res.url }),
+    })).catch(() => { /* журнал недоступен — не критично */ })
+  }
   if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка запроса (${res.status})`)
   return data as T
 }
@@ -156,6 +166,17 @@ export const api = {
   settings: () => fetch('/api/settings', withAuth({ cache: 'no-store' })).then(json<SettingsDTO>),
   saveSettings: (data: Partial<SettingsDTO>) =>
     fetch('/api/settings', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<SettingsDTO>),
+
+  /** Журнал событий платформы (Task 76, только логист): лента + статистика за 24 ч */
+  platformLog: (params?: { level?: string; q?: string; limit?: number }) => {
+    const sp = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v !== undefined && v !== '') as [string, string][])
+    return fetch(`/api/platform-log${sp.toString() ? `?${sp}` : ''}`, withAuth({ cache: 'no-store' })).then(json<PlatformLogDTO>)
+  },
+
+  /** ЭДО (Task 76): пакеты документов рейсов + действия (формирование/подписание) */
+  edoList: () => fetch('/api/edo', withAuth({ cache: 'no-store' })).then(json<{ packages: EdoPackageDTO[] }>),
+  edoAction: (body: { requestId: string; action: 'create-expeditor-pack' | 'sign'; docId?: string }) =>
+    fetch('/api/edo', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ok: boolean }>),
 }
 
 export type { DriverIntakeSaved }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth'
+import { readSessionToken, SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,15 @@ export async function POST(req: NextRequest) {
   const res = NextResponse.json({ ok: true })
   if (!headerToken || headerToken === cookieToken) {
     res.cookies.set(SESSION_COOKIE, '', { ...sessionCookieOptions, maxAge: 0 })
+  }
+  // журнал платформы (Task 76): выход — кто вышел, разбираем из подписанного токена
+  const session = readSessionToken(headerToken ?? cookieToken)
+  if (session) {
+    await plog({
+      type: 'LOGOUT', source: 'auth/logout',
+      actor: { login: session.login, name: session.name, role: session.role },
+      message: `Выход из системы: ${session.name}`,
+    })
   }
   return res
 }

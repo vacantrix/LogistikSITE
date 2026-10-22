@@ -3,9 +3,45 @@ import { requireUser, viewerOf, type Role } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
+import { plog, plogError } from '@/lib/platform-log'
 import {
   applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
+
+/** Сообщение для «Журнала событий платформы» (Task 76) по выполненному действию */
+function actionLogMessage(action: string, actor: string, number: string, body: Record<string, unknown>, winnerName: string | null): string {
+  switch (action) {
+    case 'bid': return `Ставка ${money(Number(body.amount))} — №${number} (${actor})`
+    case 'withdraw': return `${actor}: отзыв ставки — №${number}`
+    case 'assign': return `Экипаж указан перевозчиком — №${number}`
+    case 'approve-crew': return `Экипаж утверждён агентом — №${number}`
+    case 'extend': return `Приём ставок продлён на 2 часа — №${number} (${actor})`
+    case 'direct-offer': return `Заявка №${number} передана напрямую: ${winnerName ?? '—'} (${actor})`
+    case 'raise-rate': return `Стартовая ставка повышена до ${money(Number(body.amount))} — №${number} (${actor})`
+    case 'confirm': return `Сверка подтверждена, пакет отправлен на оформление — №${number} (${actor})`
+    case 'return': return `Документы возвращены агенту на доработку — №${number} (${actor})`
+    case 'close': return `Рейс закрыт — №${number} (${actor})`
+    case 'delete': return `Заявка удалена — №${number} (${actor})`
+    case 'edit': return `Заявка отредактирована — №${number} (${actor})`
+    default: return `Действие «${action}» — №${number} (${actor})`
+  }
+}
+
+/** Тип события журнала платформы по действию (Task 76) */
+const ACTION_LOG_TYPE: Record<string, string> = {
+  bid: 'BID_PLACED',
+  withdraw: 'BID_WITHDRAWN',
+  assign: 'CREW_ASSIGNED',
+  'approve-crew': 'CREW_APPROVED',
+  extend: 'DEADLINE_EXTENDED',
+  'direct-offer': 'DIRECT_OFFER',
+  'raise-rate': 'RATE_RAISED',
+  confirm: 'TRIP_CONFIRMED',
+  return: 'DOCS_RETURNED',
+  close: 'TRIP_CLOSED',
+  delete: 'REQUEST_DELETED',
+  edit: 'REQUEST_UPDATED',
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -221,6 +257,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // ------- логист: сверка -------
         case 'confirm': {
           if (r.status !== 'AT_LOGIST') fail('Подтвердить можно заявку в статусе «У логиста»')
+          // ЭДО (Task 76): рейс подтвердился — транспортная накладная доступна к подписанию
+          // в разделе «Подписать ЭДО» (скан и реквизиты добираются там же, при чтении)
+          const tripSeq = r.number.replace(/^Z-/, '')
+          await tx.edoDocument.create({
+            data: { requestId: id, kind: 'ETRN', party: 'CARRIER', number: `ЭТрН ${tripSeq}`, payload: '{}' },
+          })
           await tx.request.update({
             where: { id },
             data: {
@@ -271,6 +313,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         case 'close': {
           if (r.status !== 'CONFIRMED') fail('Закрыть можно подтверждённый рейс')
           await tx.request.update({ where: { id }, data: { status: 'CLOSED', etrnStatus: 'SIGNED' } })
+          // ЭДО (Task 76): рейс закрыт — накладная подписана обеими сторонами,
+          // акт оказанных услуг добирается автоматически в разделе «Подписать ЭДО»
+          await tx.edoDocument.updateMany({
+            where: { requestId: id, kind: 'ETRN' },
+            data: { aemzSigned: true, partySigned: true, aemzSignedAt: now, partySignedAt: now, aemzSigner: 'КЭП АЭМЗ', partySigner: 'КЭП перевозчика' },
+          })
           await event('TRIP_CLOSED', 'Рейс закрыт: данные в реестре, отчёты сходятся с бухгалтерией')
           notes.push({
             carrierId: r.winnerId,
@@ -349,8 +397,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } catch (e) {
     if (e instanceof ActionError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('action error', action, e)
+    // журнал платформы (Task 76): сбой действия — ошибка в журнале у логиста
+    await plogError('api/requests/action', e, {
+      type: 'ACTION_FAILED', source: 'api/requests/action',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      requestId: id, requestNumber: visible.number,
+      message: `Сбой действия «${action}» — №${visible.number}`,
+    })
     return NextResponse.json({ error: 'Внутренняя ошибка действия — повторите' }, { status: 500 })
   }
+
+  // журнал событий платформы (Task 76): выполненное действие — с актёром и номером заявки
+  await plog({
+    type: ACTION_LOG_TYPE[action] ?? action.toUpperCase(), source: 'api/requests/action',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    requestId: id, requestNumber: visible.number, carrierName: visible.winner?.name ?? null,
+    message: actionLogMessage(action, auth.name, visible.number, body, visible.winner?.name ?? null),
+  })
 
   // персональные уведомления (Task 69) — после успешной транзакции, вне её
   for (const n of notes) {

@@ -24,6 +24,8 @@ import RegistryTab from '@/components/platform/registry'
 import RequestsRegistryTab from '@/components/platform/requests-registry'
 import DirectoryTab from '@/components/platform/directories'
 import ReportsTab from '@/components/platform/reports'
+import JournalTab from '@/components/platform/journal'
+import EdoTab from '@/components/platform/edo'
 
 /** Роль интерфейса из пользователя сессии */
 function roleOf(user: SessionUserDTO): RoleSelection {
@@ -62,6 +64,36 @@ export default function Page() {
     const onUnauthorized = () => setUser(null)
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  }, [])
+
+  // журнал платформы (Task 76): неперехваченные ошибки интерфейса уходят в
+  // «Журнал событий» (троттлинг — не чаще раза в 5 секунд, без спама)
+  useEffect(() => {
+    let lastSent = 0
+    const report = (kind: string, message: string, stack?: string) => {
+      const now = Date.now()
+      if (now - lastSent < 5000) return
+      lastSent = now
+      void fetch('/api/platform-log/client', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, message: message.slice(0, 1000), stack: stack?.slice(0, 3000), url: window.location.href }),
+      }).catch(() => { /* журнал недоступен — не критично */ })
+    }
+    const onError = (e: ErrorEvent) => {
+      if (e.message?.includes('ResizeObserver')) return // шум браузера, не ошибка платформы
+      report('window.error', e.message ?? 'Неизвестная ошибка', e.error?.stack)
+    }
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const reason = e.reason instanceof Error ? `${e.reason.message}` : String(e.reason ?? 'reject')
+      report('unhandledrejection', `Обещание отклонено: ${reason}`, e.reason instanceof Error ? e.reason.stack : undefined)
+    }
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onRejection)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onRejection)
+    }
   }, [])
 
   // подключение к real-time шине ws-service через шлюз (Task 49) — только после входа:
@@ -144,8 +176,10 @@ export default function Page() {
           {tab === 'verify' && <VerifyTab {...tabProps} />}
           {tab === 'requests' && <RequestsRegistryTab {...tabProps} />}
           {tab === 'registry' && <RegistryTab {...tabProps} />}
+          {tab === 'edo' && <EdoTab {...tabProps} />}
           {tab === 'directory' && <DirectoryTab {...tabProps} />}
           {tab === 'reports' && <ReportsTab {...tabProps} />}
+          {tab === 'journal' && <JournalTab {...tabProps} />}
         </>
       )}
 

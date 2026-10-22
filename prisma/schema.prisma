@@ -209,6 +209,7 @@ model Request {
   updatedAt     DateTime       @updatedAt
   bids          Bid[]
   documents     Document[]
+  edoDocuments  EdoDocument[]
   events        Event[]
   notifications Notification[]
 }
@@ -244,6 +245,63 @@ model Document {
   message    String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+/**
+ * Документ ЭДО рейса (Task 76, раздел «Подписать ЭДО»).
+ * Наш случай — цепочка АЭМЗ (грузоотправитель) → экспедитор → перевозчик:
+ *  — kind POA («Доверенность экспедитору») и ORDER («Поручение экспедитору»)
+ *    создаёт АЭМЗ — это его обязанность перед экспедитором;
+ *  — kind ETRN («Транспортная накладная / ЭТрН») появляется при подтверждении
+ *    рейса, kind ACT («Акт оказанных услуг») — после закрытия рейса.
+ * Каждая сторона подписывает своей КЭП: aemz* — КЭП логиста АЭМЗ,
+ * party* — подпись контрагента (экспедитор или перевозчик) через ЭДО-оператора.
+ */
+model EdoDocument {
+  id                   String   @id @default(cuid())
+  requestId            String
+  request              Request  @relation(fields: [requestId], references: [id])
+  kind                 String // POA | ORDER | ETRN | ACT
+  party                String // EXPEDITOR | CARRIER
+  number               String // номер документа (ДОВ-1042, ПОР-1042, ЭТрН 1042, АКТ-1042)
+  payload              String // JSON: реквизиты для рендера скана и подписантов
+  aemzSigned           Boolean  @default(false)
+  aemzSignedAt         DateTime?
+  aemzSigner           String?
+  partySigned          Boolean  @default(false)
+  partySignedAt        DateTime?
+  partySigner          String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([requestId])
+}
+
+/**
+ * Журнал событий платформы (Task 76, раздел «Журнал событий» у логиста).
+ * Сюда пишутся: бизнес-события всех заявок и кабинетов (вход/выход, ставки,
+ * документы, ЭДО, интеграция с 1С), предупреждения и ошибки сервера —
+ * в том числе необработанные (через instrumentation.ts → onRequestError)
+ * и ошибки клиентской части (эндпоинт /api/platform-log/client).
+ * level: INFO | WARN | ERROR.
+ */
+model PlatformLog {
+  id            String   @id @default(cuid())
+  level         String   @default("INFO") // INFO | WARN | ERROR
+  type          String // вид события: LOGIN | LOGOUT | REQUEST_CREATED | BID_PLACED | … | SERVER_ERROR | CLIENT_ERROR
+  source        String   @default("platform") // источник: api/requests/action, auth/login, browser, 1c/etrn…
+  actorLogin    String? // кто выполнил действие (логин учётки)
+  actorName     String? // имя пользователя
+  actorRole     String? // logist | carrier
+  requestId     String?
+  requestNumber String? // денормализованно, для ленты без join
+  carrierName   String? // перевозчик, которого касается событие
+  message       String
+  meta          String? // JSON: подробности (стек ошибки, параметры, код статуса)
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([level, createdAt])
 }
 
 /**

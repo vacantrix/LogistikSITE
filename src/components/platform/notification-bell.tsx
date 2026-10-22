@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Bell, CheckCheck, FileCheck2, Gavel, Trash2, TrendingDown, Trophy, Truck, Undo2, Users, type LucideIcon,
+  Bell, CheckCheck, FileCheck2, FileSignature, Gavel, Trash2, TrendingDown, Trophy, Truck, Undo2, Users, type LucideIcon,
 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,8 @@ const NOTIF_META: Record<string, { Icon: LucideIcon; cls: string }> = {
   DOCS_CONFIRMED: { Icon: CheckCheck, cls: 'bg-emerald-100 text-emerald-700' },
   TRIP_CLOSED: { Icon: Truck, cls: 'bg-slate-200 text-slate-700' },
   REQUEST_DELETED: { Icon: Trash2, cls: 'bg-red-100 text-red-700' },
+  EDO_READY: { Icon: FileSignature, cls: 'bg-teal-100 text-teal-700' },
+  EDO_SIGNED: { Icon: FileSignature, cls: 'bg-emerald-100 text-emerald-700' },
 }
 
 /** Куда вести по клику: раздел зависит от роли получателя */
@@ -46,6 +48,8 @@ const NAV_TARGET: Record<string, Partial<Record<RoleKind, TabKey>>> = {
   DOCS_CONFIRMED: { logist: 'requests', carrier: 'my' },
   TRIP_CLOSED: { logist: 'registry', carrier: 'my' },
   REQUEST_DELETED: { logist: 'requests', carrier: 'my' },
+  EDO_READY: { logist: 'edo', carrier: 'edo' },
+  EDO_SIGNED: { logist: 'edo', carrier: 'edo' },
 }
 
 /** «Только что / 7 мин назад / 3 ч назад / вчера / 12.03» */

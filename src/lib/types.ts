@@ -222,6 +222,88 @@ export interface SessionUserDTO {
   carrierId: string | null
 }
 
+// ——— Журнал событий платформы (Task 76) ———
+
+export type PlatformLogLevel = 'INFO' | 'WARN' | 'ERROR'
+
+/** Запись журнала платформы (GET /api/platform-log, только логист) */
+export interface PlatformLogEntryDTO {
+  id: string
+  level: PlatformLogLevel
+  type: string
+  source: string
+  actorName: string | null
+  actorLogin: string | null
+  actorRole: string | null
+  requestNumber: string | null
+  carrierName: string | null
+  message: string
+  meta: Record<string, unknown> | null
+  createdAt: string
+}
+
+/** Ответ GET /api/platform-log — лента + статистика за 24 часа */
+export interface PlatformLogDTO {
+  entries: PlatformLogEntryDTO[]
+  stats: {
+    counts24h: Record<PlatformLogLevel, number>
+    lastErrorAt: string | null
+    lastErrorMessage: string | null
+  }
+}
+
+// ——— ЭДО: подписание документов рейса (Task 76) ———
+
+/** Реквизиты документа ЭДО для рендера скана (рисует клиент) */
+export interface EdoDocPayloadDTO {
+  title: string
+  dateRu: string
+  org: string
+  lines: string[]
+  validTill?: string
+  driverName: string
+  carrierName: string
+  accent: string
+}
+
+export type EdoKind = 'POA' | 'ORDER' | 'ETRN' | 'ACT'
+export type EdoParty = 'EXPEDITOR' | 'CARRIER'
+
+/** Документ ЭДО рейса со статусами подписания сторон */
+export interface EdoDocDTO {
+  id: string
+  kind: EdoKind
+  party: EdoParty
+  title: string
+  partyRole: string
+  number: string
+  aemzSigned: boolean
+  aemzSignedAt: string | null
+  aemzSigner: string | null
+  partySigned: boolean
+  partySignedAt: string | null
+  partySigner: string | null
+  payload: EdoDocPayloadDTO
+  createdAt: string
+}
+
+/** Пакет ЭДО рейса: карточка рейса + комплекты документов */
+export interface EdoPackageDTO {
+  request: {
+    id: string
+    number: string
+    route: string
+    cargo: string
+    tonnage: number
+    loadDate: string
+    status: RequestStatus
+    winnerName: string | null
+    driverName: string | null
+    truckLabel: string | null
+  }
+  docs: EdoDocDTO[]
+}
+
 /** Персональное уведомление колокольчика (Task 69) */
 export interface NotificationDTO {
   id: string

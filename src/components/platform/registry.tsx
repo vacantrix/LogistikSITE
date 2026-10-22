@@ -3,11 +3,13 @@
 /**
  * «Реестр рейсов» — одна запись = один рейс: заявки, ставки, документы, затраты.
  * Вид синхронизирован с «Реестром заявок» (Task 75): верхние табы по статусам со
- * счётчиками (В 1С / Завершён), поиск по номеру/грузу/маршруту/перевозчику,
+ * счётчиками (В работе / Завершён), поиск по номеру/грузу/маршруту/перевозчику,
  * сортировка, яркие насыщенные пузыри статусов с подписью точного статуса,
  * sticky-шапка таблицы под шапкой сайта (md+) и список, уходящий вниз без
- * внутреннего скролл-окна. Действия — иконками (просмотр, закрыть рейс).
+ * внутреннего скролл-окна. Действия — иконками (просмотр, подписать ЭДО, закрыть рейс).
  * Карточка рейса — этапы (Pipeline) и журнал событий.
+ * Task 76: служебные упоминания 1С из статусов убраны — названия синхронизированы
+ * с реестром заявок («В работе»/«Завершён»); колонка документов ведёт в «Подписать ЭДО».
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, CircleCheck, Eye, ScrollText, Search } from 'lucide-react'
@@ -34,26 +36,33 @@ import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
 import {
-  REGISTRY_STEPS, REQUEST_STATUS_META, fmtDateTime, num, rate, registryStepIndex,
+  REGISTRY_STEPS, fmtDateTime, num, rate, registryStepIndex,
 } from '@/lib/status'
 import type { DriverDTO, RequestDTO, TrailerDTO, TruckDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-type TripGroup = 'in1c' | 'closed'
+type TripGroup = 'work' | 'closed'
 type SortOrder = 'desc' | 'asc'
 
 /**
- * Группы рейсов в стиле «Реестра заявок» (Task 75): цвета согласованы по смыслу —
- * фиолетовый «В 1С» = рейс выполняется (как «В работе» у заявок; CONFIRMED там тоже
- * «В работе»), изумрудный «Завершён» = рейс закрыт (как «Завершена»).
+ * Группы рейсов в стиле «Реестра заявок» (Task 75→76): цвета и названия согласованы —
+ * фиолетовый «В работе» = рейс выполняется (как «В работе» у заявок),
+ * изумрудный «Завершён» = рейс закрыт (как «Завершена»). Служебное «В 1С» из
+ * статусов убрано (Task 76) — этапы 1С остаются в событиях, а не в статусах.
  */
 const TRIP_GROUP_META: Record<TripGroup, { label: string; badge: string; dot: string }> = {
-  in1c: { label: 'В 1С', badge: 'bg-violet-500 text-white border-violet-600 shadow-sm', dot: 'bg-violet-500' },
+  work: { label: 'В работе', badge: 'bg-violet-500 text-white border-violet-600 shadow-sm', dot: 'bg-violet-500' },
   closed: { label: 'Завершён', badge: 'bg-emerald-500 text-white border-emerald-600 shadow-sm', dot: 'bg-emerald-500' },
 }
 
-const tripGroupOf = (status: string): TripGroup => (status === 'CLOSED' ? 'closed' : 'in1c')
+const tripGroupOf = (status: string): TripGroup => (status === 'CLOSED' ? 'closed' : 'work')
+
+/** Подпись точного статуса рейса без служебных процессов АЭМЗ (Task 76) */
+const TRIP_STATUS_SUB: Record<string, string> = {
+  CONFIRMED: 'Рейс выполняется',
+  CLOSED: 'Рейс закрыт',
+}
 
 /** Пайплайн из 8 статусов записи реестра */
 function Pipeline({ status, passPackage, etrnStatus }: { status: string; passPackage: boolean; etrnStatus: string }) {
@@ -107,7 +116,7 @@ function DocBadges({ r, stacked }: { r: RequestDTO; stacked?: boolean }) {
   )
 }
 
-export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
+export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [drivers, setDrivers] = useState<Map<string, DriverDTO>>(new Map())
@@ -173,7 +182,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   }, [base, group, q, order])
 
   const groupCounts = useMemo(() => {
-    const counts: Record<TripGroup, number> = { in1c: 0, closed: 0 }
+    const counts: Record<TripGroup, number> = { work: 0, closed: 0 }
     for (const r of base) counts[tripGroupOf(r.status)] += 1
     return counts
   }, [base])
@@ -309,11 +318,11 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                               </div>
                             </TableCell>
                             <TableCell className="whitespace-nowrap">
-                              {/* яркий пузырь группы + точный статус под ним (Task 75, как в реестре заявок) */}
+                              {/* яркий пузырь группы + точный статус под ним (Task 75/76) */}
                               <div className="flex flex-col items-start gap-0.5">
                                 <Badge variant="outline" className={`${g.badge} whitespace-nowrap`}>{g.label}</Badge>
                                 <span className="text-[11px] font-medium leading-tight text-slate-600">
-                                  {REQUEST_STATUS_META[r.status as RequestDTO['status']]?.label ?? r.status}
+                                  {TRIP_STATUS_SUB[r.status] ?? r.status}
                                 </span>
                               </div>
                             </TableCell>
@@ -348,7 +357,9 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                             <TableCell className={`whitespace-nowrap font-semibold ${(r.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
                               {rate(r.savings)}
                             </TableCell>
-                            <TableCell><DocBadges r={r} stacked /></TableCell>
+                            <TableCell onClick={(e) => { e.stopPropagation(); onNavigate('edo') }} className="cursor-pointer">
+                              <span title="Открыть «Подписать ЭДО»"><DocBadges r={r} stacked /></span>
+                            </TableCell>
                             <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-1">
                                 <Button
@@ -383,7 +394,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                   </Table>
                 </div>
                 <div className="border-t border-slate-100 px-4 py-2 text-xs text-muted-foreground">
-                  Нажмите на строку или иконку «Просмотр», чтобы открыть карточку рейса с этапами и журналом событий. «Закрыть рейс» — для рейсов с данными в 1С.
+                  Нажмите на строку или иконку «Просмотр», чтобы открыть карточку рейса с этапами и журналом событий. Колонка «Документы» ведёт в раздел «Подписать ЭДО»; «Закрыть рейс» — для рейсов в работе.
                 </div>
               </CardContent>
             </Card>
@@ -403,11 +414,11 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     {TRIP_GROUP_META[tripGroupOf(detail.status)].label}
                   </Badge>
                   <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-slate-100 text-slate-700">
-                    {REQUEST_STATUS_META[detail.status as RequestDTO['status']]?.label ?? detail.status}
+                    {TRIP_STATUS_SUB[detail.status] ?? detail.status}
                   </Badge>
                 </DialogTitle>
                 <DialogDescription>
-                  Этапы рейса и журнал событий — данные синхронизированы с 1C:ERP
+                  Этапы рейса, документы и журнал событий — статусы синхронно совпадают с реестром заявок
                 </DialogDescription>
               </DialogHeader>
 

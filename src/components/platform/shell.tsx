@@ -22,8 +22,8 @@
  */
 import { useState, type ComponentType } from 'react'
 import {
-  BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, FileUp, FolderOpen,
-  LayoutGrid, ListChecks, LogOut, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
+  BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, FileSignature, FileUp, FolderOpen,
+  History, LayoutGrid, ListChecks, LogOut, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -49,8 +49,10 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'verify', label: 'Проверка документов', roles: ['logist'] },
   { key: 'requests', label: 'Реестр заявок', roles: ['logist'] },
   { key: 'registry', label: 'Реестр рейсов', roles: ['logist'] },
+  { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier'] },
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier'] },
   { key: 'reports', label: 'Отчёты', roles: ['logist'] },
+  { key: 'journal', label: 'Журнал событий', roles: ['logist'] },
 ]
 
 /** Иконка и короткая подпись раздела для нижнего Tab Bar (мобильные) */
@@ -62,8 +64,10 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   verify: { Icon: ScanSearch, short: 'Проверка' },
   requests: { Icon: ListChecks, short: 'Заявки' },
   registry: { Icon: Truck, short: 'Рейсы' },
+  edo: { Icon: FileSignature, short: 'ЭДО' },
   directory: { Icon: FolderOpen, short: 'Справочники' },
   reports: { Icon: BarChart3, short: 'Отчёты' },
+  journal: { Icon: History, short: 'Журнал' },
 }
 
 /** Разделы, доступные выбранной роли */

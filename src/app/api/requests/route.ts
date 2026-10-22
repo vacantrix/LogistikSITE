@@ -5,6 +5,7 @@ import { requireUser, viewerOf } from '@/lib/auth'
 import { REQUEST_INCLUDE, toRequestDTO } from '@/lib/serialize'
 import { finalizeExpired, money, parseRuDate, requestWhereFor } from '@/lib/requests'
 import { notifyLive } from '@/lib/notify'
+import { plog, plogError } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -148,10 +149,22 @@ export async function POST(req: NextRequest) {
         include: REQUEST_INCLUDE,
       })
       notifyLive({ type: 'REQUEST_PUBLISHED', requestId: request.id })
+      // журнал событий платформы (Task 76): опубликована заявка
+      await plog({
+        type: 'REQUEST_CREATED', source: 'api/requests',
+        actor: { login: auth.login, name: auth.name, role: auth.role },
+        requestId: request.id, requestNumber: request.number,
+        message: `Опубликована заявка №${request.number}: ${request.fromPoint} → ${request.toPoint}, ${request.cargo}, стартовая ставка ${money(startRate)}`,
+      })
       return NextResponse.json({ request: toRequestDTO(request, viewer) }, { status: 201 })
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') continue
       console.error('request create error', e)
+      await plogError('api/requests', e, {
+        type: 'REQUEST_CREATE_FAILED',
+        actor: { login: auth.login, name: auth.name, role: auth.role },
+        message: 'Сбой публикации заявки',
+      })
       return NextResponse.json({ error: 'Не удалось опубликовать заявку' }, { status: 500 })
     }
   }

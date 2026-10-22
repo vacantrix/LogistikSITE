@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
+import { plogError } from '@/lib/platform-log'
 import type { Viewer } from '@/lib/auth'
 import { BUSY_STATUSES, busyReason } from '@/lib/busy'
 import { REQUEST_INCLUDE, type RequestFull } from '@/lib/serialize'
@@ -126,6 +127,11 @@ export async function finalizeExpired(now = new Date()): Promise<void> {
       }
     } catch (e) {
       console.error('finalizeExpired error', id, e)
+      // журнал платформы (Task 76): сбой автоподведения итогов — ошибка в журнале
+      await plogError('lib/requests/finalizeExpired', e, {
+        type: 'FINALIZE_FAILED', source: 'lib/requests/finalizeExpired', requestId: id,
+        message: 'Сбой автоподведения итогов торгов — победитель не определён, повтор на следующем запросе',
+      })
     }
   }
 }

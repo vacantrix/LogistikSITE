@@ -6,6 +6,7 @@ import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { inTx, loadRequestFor } from '@/lib/requests'
 import { loadVerifySettings } from '@/lib/settings'
+import { plog, plogError } from '@/lib/platform-log'
 import { verifyDocument, expectedFor } from '@/lib/verify'
 import type { DocType, VerifyVerdict } from '@/lib/verify'
 
@@ -66,6 +67,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         return { id: doc.id, v: await verifyDocument(doc.id, doc.type as DocType, doc.dataUri, expected, settings, doc.fileName) }
       } catch (e) {
         console.error('verify doc error', doc.id, e)
+        // журнал платформы (Task 76): сбой распознавания — ошибка в журнале
+        await plogError('api/requests/verify', e, {
+          type: 'OCR_FAILED', source: 'api/requests/verify',
+          requestId: id, requestNumber: request.number, carrierName: request.winner?.name ?? null,
+          message: `Не удалось распознать документ «${doc.fileName}» — №${request.number} (нужна ручная проверка)`,
+        })
         const v: VerifyVerdict = {
           status: 'MANUAL', quality: 0, engine: '—', fields: {}, confidences: {},
           issues: ['Ошибка распознавания'], message: 'Ошибка распознавания — требуется ручная проверка',
@@ -133,5 +140,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   })
 
   notifyLive({ type: 'DOCS_VERIFIED', requestId: id })
+  // журнал событий платформы (Task 76): итог автопроверки комплекта
+  const freshStatus = await db.request.findUnique({ where: { id }, select: { status: true } })
+  await plog({
+    type: 'DOCS_VERIFIED', source: 'api/requests/verify',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    requestId: id, requestNumber: request.number, carrierName: request.winner?.name ?? null,
+    message: freshStatus?.status === 'AT_LOGIST'
+      ? `Комплект документов прошёл автопроверку — передан логисту на сверку (№${request.number})`
+      : `Автопроверка выявила замечания — документы возвращены перевозчику (№${request.number})`,
+  })
   return respond()
 }
