@@ -1,18 +1,15 @@
 'use client'
 
-/** «Проверка документов» — экран логиста (Task 69: редизайн, прежнее название «Сверка документов»):
+/** «Проверка документов» — экран логиста (Task 69: редизайн; Task 71: экспресс-сличение убрано,
+ *  вердикт «Утвердить», статусы шапки карточки — иконками, список очереди как в «Моих заявках»):
  *  очередь с вычисляемыми состояниями (новые / ожидают проверки / расхождения / проверено /
- *  отклонено), фильтры и поиск, данные рейса из системы, сканы с зумом, сверка полей OCR,
- *  экспресс-сличение и вердикт (Task 62). */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+ *  отклонено), фильтры и поиск, данные рейса из системы, сканы с зумом, сверка полей OCR. */
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
 import {
-  AlertTriangle, Ban, Check, CheckCheck, CircleAlert, ClipboardCheck, Download, Info,
-  ListChecks, MapPin, Maximize2, Package, Search, Truck as TruckIcon, Undo2, UserCog, UserRound, X,
+  AlertTriangle, ArrowRight, Ban, Check, CheckCheck, CircleAlert, ClipboardCheck, Download, Hourglass,
+  Inbox, Info, ListChecks, MapPin, Maximize2, Package, ScanSearch, Search, Truck as TruckIcon,
+  Undo2, UserCog, UserRound, X,
 } from 'lucide-react'
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
-  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import {
   DocStatusBadge, EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusBadge, type TabProps,
 } from '@/components/platform/common'
@@ -38,20 +35,13 @@ import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
 import { DOC_TYPE_LABEL, rate } from '@/lib/status'
 import type {
-  DocStatus, DocType, DocumentDTO, DriverDTO, RequestDTO, TrailerDTO, TruckDTO, VerifyCheck,
+  DocStatus, DocType, DocumentDTO, DriverDTO, RequestDTO, RequestStatus, TrailerDTO, TruckDTO,
 } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
 const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
-
-/** экспресс-сличение: ключевые вопросы логиста по пакету документов (Task 62) */
-const VERIFY_CHECKS: { key: string; label: string }[] = [
-  { key: 'amount', label: 'Сумма по ТОРГ-12 / АКТ совпадает?' },
-  { key: 'doc-number', label: 'Номер ТН совпадает?' },
-  { key: 'stamps', label: 'Подписи и печати на месте?' },
-]
 
 /** причины возврата агенту — выбор из списка, не свободный текст */
 const RETURN_REASONS = ['Нет печати', 'Расхождение по весу', 'Нечитаемый скан', 'Не тот документ', 'Другое'] as const
@@ -154,27 +144,76 @@ type QueueState = 'new' | 'pending' | 'mismatch' | 'verified' | 'rejected'
 /** mismatch → pending → new → rejected → verified — порядок сортировки очереди */
 const STATE_ORDER: QueueState[] = ['mismatch', 'pending', 'new', 'rejected', 'verified']
 
-const STATE_META: Record<QueueState, { label: string; dot: string; bar: string; badge: string; chip: string }> = {
+const STATE_META: Record<QueueState, { label: string; dot: string; badge: string; chip: string; text: string }> = {
   new: {
-    label: 'Новые', dot: 'bg-sky-500', bar: 'border-l-sky-500',
+    label: 'Новые', dot: 'bg-sky-500', text: 'text-sky-700',
     badge: 'border-sky-200 bg-sky-50 text-sky-700', chip: 'border-sky-600 bg-sky-600 text-white',
   },
   pending: {
-    label: 'Ожидают проверки', dot: 'bg-blue-500', bar: 'border-l-blue-500',
+    label: 'Ожидают проверки', dot: 'bg-blue-500', text: 'text-blue-700',
     badge: 'border-blue-200 bg-blue-50 text-blue-700', chip: 'border-blue-600 bg-blue-600 text-white',
   },
   mismatch: {
-    label: 'Расхождения', dot: 'bg-red-500', bar: 'border-l-red-500',
+    label: 'Расхождения', dot: 'bg-red-500', text: 'text-red-600',
     badge: 'border-red-200 bg-red-50 text-red-700', chip: 'border-red-600 bg-red-600 text-white',
   },
   verified: {
-    label: 'Проверено', dot: 'bg-emerald-500', bar: 'border-l-emerald-500',
+    label: 'Проверено', dot: 'bg-emerald-500', text: 'text-emerald-600',
     badge: 'border-emerald-200 bg-emerald-50 text-emerald-700', chip: 'border-emerald-600 bg-emerald-600 text-white',
   },
   rejected: {
-    label: 'Отклонено', dot: 'bg-amber-500', bar: 'border-l-amber-500',
+    label: 'Отклонено', dot: 'bg-amber-500', text: 'text-amber-600',
     badge: 'border-amber-200 bg-amber-50 text-amber-700', chip: 'border-amber-600 bg-amber-600 text-white',
   },
+}
+
+/** иконки состояний очереди — чип в шапке карточки (Task 71) */
+const STATE_ICON: Record<QueueState, ComponentType<{ className?: string }>> = {
+  new: Inbox,
+  pending: Hourglass,
+  mismatch: CircleAlert,
+  verified: CheckCheck,
+  rejected: Undo2,
+}
+
+/** чип состояния очереди: иконка цвета состояния с подсказкой вместо текстового бейджа (Task 71) */
+function StateChip({ state }: { state: QueueState }) {
+  const meta = STATE_META[state]
+  const Icon = STATE_ICON[state]
+  return (
+    <span
+      role="img"
+      aria-label={meta.label}
+      title={meta.label}
+      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${meta.badge}`}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+    </span>
+  )
+}
+
+/** статус заявки в шапке карточки — иконкой с подсказкой (Task 71):
+ *  «У логиста — сверка», «Возвращено агенту», «Проверено» читаются по значку */
+const STATUS_CHIP_META: Partial<Record<RequestStatus, { Icon: ComponentType<{ className?: string }>; label: string; cls: string }>> = {
+  AT_LOGIST: { Icon: ScanSearch, label: 'У логиста — сверка', cls: 'border-blue-200 bg-blue-50 text-blue-600' },
+  DOCS_REVIEW: { Icon: Undo2, label: 'Возвращено агенту на доработку', cls: 'border-amber-200 bg-amber-50 text-amber-600' },
+  CONFIRMED: { Icon: CheckCheck, label: 'Проверено — данные в 1С', cls: 'border-emerald-200 bg-emerald-50 text-emerald-600' },
+}
+
+function StatusChip({ status }: { status: RequestStatus }) {
+  const meta = STATUS_CHIP_META[status]
+  if (!meta) return <StatusBadge status={status} />
+  const { Icon, label, cls } = meta
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${cls}`}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+    </span>
+  )
 }
 
 /** точка статуса документа во вкладке */
@@ -229,10 +268,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   const [stateFilter, setStateFilter] = useState<'ALL' | QueueState>('ALL')
   const [q, setQ] = useState('')
 
-  const [checks, setChecks] = useState<Record<string, boolean>>({})
   const [comment, setComment] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnReason, setReturnReason] = useState('')
@@ -276,6 +313,9 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
 
   const selected = useMemo(() => queue.find((r) => r.id === selectedId) ?? null, [queue, selectedId])
 
+  // состояние очереди выбранной заявки — для иконки в шапке карточки (Task 71)
+  const selectedState: QueueState | null = selected ? queueState(selected, driverMap, truckMap) : null
+
   // автоподбор заявки: только из рабочих состояний (new/pending/mismatch, т.е. статус AT_LOGIST);
   // проверенные и отклонённые заявки открываются только вручную из фильтров
   useEffect(() => {
@@ -283,13 +323,11 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
     setSelectedId(queue.find((r) => r.status === 'AT_LOGIST')?.id ?? null)
   }, [queue, selectedId])
 
-  // смена заявки: сброс экспресс-сличения, комментария, вкладки документа и модалки предосмотра
+  // смена заявки: сброс комментария, вкладки документа и модалки предосмотра
   useEffect(() => {
-    setChecks({})
     setComment('')
     setDocTab(null)
     setPreviewOpen(false)
-    setConfirmOpen(false)
   }, [selectedId])
 
   // счётчики состояний для фильтров (по всей очереди, без учёта поиска)
@@ -330,26 +368,16 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   const driver = selected ? driverMap.get(selected.driverId ?? '') ?? null : null
   const truck = selected ? truckMap.get(selected.truckId ?? '') ?? null : null
   const trailer = selected ? trailerMap.get(selected.trailerId ?? '') ?? null : null
-  const savedChecks: VerifyCheck[] = selected?.verifyChecks ?? []
 
   const isEditable = selected?.status === 'AT_LOGIST'
-  const answeredCount = VERIFY_CHECKS.filter((c) => checks[c.key] !== undefined).length
-  const allAnswered = answeredCount === VERIFY_CHECKS.length
-  const hasNoAnswer = VERIFY_CHECKS.some((c) => checks[c.key] === false)
-
-  /** ответы экспресс-сличения — только отвеченные пункты */
-  const buildChecks = (): VerifyCheck[] =>
-    VERIFY_CHECKS
-      .filter((c) => checks[c.key] !== undefined)
-      .map((c) => ({ key: c.key, label: c.label, ok: checks[c.key] === true }))
 
   const doConfirm = async (r: RequestDTO) => {
     setBusy(r.id)
     try {
-      await api.action(r.id, 'confirm', { checks: buildChecks(), comment })
+      await api.action(r.id, 'confirm', { comment })
       toast({
-        title: 'Данные переданы в 1C:ERP: справочник и реестр',
-        description: `Заявка №${r.number} записана в реестр рейсов, пакет на пропуск и ЭТрН сформированы`,
+        title: 'Заявка утверждена — данные переданы в 1С',
+        description: `№${r.number} записана в реестр рейсов, пакет на пропуск и ЭТрН сформированы`,
         action: (
           <ToastAction altText="Открыть реестр рейсов" onClick={() => onNavigate('registry')}>
             Открыть реестр
@@ -370,21 +398,11 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
     }
   }
 
-  /** подтверждение с проверкой экспресс-сличения: есть «Нет» среди всех ответов — спросить */
-  const onConfirmClick = () => {
-    if (!selected) return
-    if (allAnswered && hasNoAnswer) {
-      setConfirmOpen(true)
-      return
-    }
-    void doConfirm(selected)
-  }
-
   const doReturn = async () => {
     if (!selected || !returnReason) return
     setBusy(selected.id)
     try {
-      await api.action(selected.id, 'return', { reason: returnReason, comment: returnComment, checks: buildChecks() })
+      await api.action(selected.id, 'return', { reason: returnReason, comment: returnComment })
       toast({
         title: 'Заявка возвращена агенту',
         description: `№${selected.number}: агент получит причину и догрузит документы в ту же заявку`,
@@ -531,7 +549,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                   Ничего не найдено — измените фильтр или поисковый запрос.
                 </div>
               )}
-              <div className={`hidden max-h-[680px] space-y-2 overflow-y-auto pr-1 lg:block ${THIN_SCROLL}`}>
+              <div className={`hidden max-h-56 space-y-2 overflow-y-auto pr-1 sm:max-h-72 lg:max-h-[calc(100vh-14rem)] lg:block ${THIN_SCROLL}`}>
                 {visible.map((r) => {
                   const st = queueState(r, driverMap, truckMap)
                   const meta = STATE_META[st]
@@ -543,23 +561,28 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                       onClick={() => setSelectedId(r.id)}
                       aria-pressed={active}
                       aria-label={`Заявка №${r.number}, состояние: ${meta.label}`}
-                      className={`w-full rounded-xl border border-slate-200 border-l-4 ${meta.bar} p-3 text-left transition-colors ${
+                      className={`w-full rounded-xl border p-3 text-left transition-colors ${
                         active
-                          ? 'border-slate-400 bg-slate-50 ring-1 ring-slate-300'
-                          : 'bg-white hover:border-slate-300 hover:bg-slate-50'
+                          ? 'border-blue-500 bg-blue-50/70 shadow-sm'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-slate-900">№{r.number}</span>
-                        <span className="text-sm font-semibold text-slate-900">{rate(r.bestRate)}</span>
-                      </div>
-                      <div className="mt-0.5 truncate text-xs text-slate-600">{r.fromPoint} → {r.toPoint}</div>
-                      <div className="mt-1.5 flex items-center justify-between gap-2">
-                        <span className="truncate text-xs text-slate-500">{r.winnerName ?? '—'}</span>
-                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${meta.badge}`}>
-                          {meta.label}
-                        </span>
-                      </div>
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-sm font-bold text-blue-700">№{r.number}</span>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden title={`Состояние: ${meta.label}`} />
+                      </span>
+                      <span className="mt-1 flex items-center gap-1 text-xs text-slate-700">
+                        <span className="truncate">{r.fromPoint}</span>
+                        <ArrowRight className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                        <span className="truncate">{r.toPoint}</span>
+                      </span>
+                      <span className="mt-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="truncate text-slate-500">{r.winnerName ?? '—'}</span>
+                        <span className="shrink-0 font-semibold text-slate-900">{rate(r.bestRate)}</span>
+                      </span>
+                      <span className={`mt-1 block truncate text-[10px] font-semibold uppercase tracking-wide ${meta.text}`}>
+                        {meta.label}
+                      </span>
                     </button>
                   )
                 })}
@@ -575,12 +598,9 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <h3 className="text-lg font-bold text-slate-900">Заявка №{selected.number}</h3>
                       <span className="text-sm font-medium text-slate-500">· {selected.winnerName ?? '—'}</span>
-                      <StatusBadge status={selected.status} />
-                      {selected.status === 'AT_LOGIST' && (
-                        <Badge variant="outline" className={`${STATE_META[queueState(selected, driverMap, truckMap)].badge} whitespace-nowrap`}>
-                          {STATE_META[queueState(selected, driverMap, truckMap)].label}
-                        </Badge>
-                      )}
+                      {/* статусы шапки — иконками с подсказкой вместо текстовых бейджей (Task 71) */}
+                      <StatusChip status={selected.status} />
+                      {selected.status === 'AT_LOGIST' && selectedState && <StateChip state={selectedState} />}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
                       <span className="inline-flex min-w-0 items-center gap-1.5" title={driver?.fullName ?? undefined}>
@@ -790,156 +810,82 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     )}
                   </div>
 
-                  {/* решение: экспресс-сличение + вердикт */}
-                  <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-2">
-                    {/* экспресс-сличение */}
-                    <div>
-                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                        <ClipboardCheck className="h-4 w-4 text-blue-600" aria-hidden />
-                        Экспресс-сличение
-                      </div>
-                      <div className="text-xs text-slate-500">ответьте да/нет по ключевым параметрам пакета</div>
-
-                      {isEditable ? (
-                        <div className="mt-2.5 space-y-2">
-                          <ul className="space-y-1.5">
-                            {VERIFY_CHECKS.map((c) => (
-                              <li
-                                key={c.key}
-                                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2"
-                              >
-                                <span className="text-sm text-slate-700">{c.label}</span>
-                                <div className="flex gap-1.5">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    aria-pressed={checks[c.key] === true}
-                                    aria-label={`${c.label} — да`}
-                                    className={
-                                      checks[c.key] === true
-                                        ? 'border-emerald-400 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-700'
-                                        : 'text-slate-500'
-                                    }
-                                    onClick={() => setChecks((p) => ({ ...p, [c.key]: true }))}
-                                  >
-                                    Да
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    aria-pressed={checks[c.key] === false}
-                                    aria-label={`${c.label} — нет`}
-                                    className={
-                                      checks[c.key] === false
-                                        ? 'border-red-400 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-700'
-                                        : 'text-slate-500'
-                                    }
-                                    onClick={() => setChecks((p) => ({ ...p, [c.key]: false }))}
-                                  >
-                                    Нет
-                                  </Button>
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                          <div className="space-y-1.5">
-                            <Label htmlFor="verify-comment">Комментарий к проверке (необязательно)</Label>
-                            <Textarea
-                              id="verify-comment"
-                              rows={2}
-                              placeholder="Например: номера совпадают, печать читаема"
-                              value={comment}
-                              onChange={(e) => setComment(e.target.value)}
-                              aria-label="Комментарий к проверке документов"
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mt-2.5 space-y-2">
-                          {savedChecks.length > 0 ? (
-                            <ul className="space-y-1.5">
-                              {savedChecks.map((c) => (
-                                <li key={c.key} className="flex items-center justify-between gap-2 text-sm">
-                                  <span className="text-slate-700">{c.label}</span>
-                                  <Badge
-                                    variant="outline"
-                                    className={c.ok
-                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                      : 'border-red-200 bg-red-50 text-red-700'}
-                                  >
-                                    {c.ok ? 'Да' : 'Нет'}
-                                  </Badge>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="text-xs text-slate-500">Экспресс-сличение не заполнялось.</div>
-                          )}
-                          {selected.verifyComment && (
-                            <div className="text-xs text-slate-600">
-                              <span className="font-medium text-slate-700">Комментарий логиста:</span> {selected.verifyComment}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                  {/* решение по пакету (Task 71): экспресс-сличение убрано, «Подтвердить — данные в 1С» → «Утвердить» */}
+                  <div className="border-t border-slate-100 bg-slate-50/60 p-4 sm:p-5">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <ClipboardCheck className="h-4 w-4 text-blue-600" aria-hidden />
+                      Решение по пакету
                     </div>
 
-                    {/* вердикт */}
-                    <div className="xl:border-l xl:border-slate-100 xl:pl-5">
-                      <div className="text-sm font-semibold text-slate-800">Решение по пакету</div>
-                      {isEditable ? (
-                        <div className="mt-2.5 space-y-2.5">
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              variant="outline"
-                              disabled={busy === selected.id}
-                              onClick={() => { setReturnReason(''); setReturnComment(''); setReturnOpen(true) }}
-                              aria-label="Отправить документы на доработку — вернуть агенту"
-                            >
-                              <Undo2 className="h-4 w-4" aria-hidden />
-                              На доработку агенту
-                            </Button>
-                            <Button
-                              className="bg-emerald-600 text-white hover:bg-emerald-700"
-                              disabled={busy === selected.id}
-                              onClick={onConfirmClick}
-                              aria-label="Подтвердить проверку — данные в 1С"
-                            >
-                              <CheckCheck className="h-4 w-4" aria-hidden />
-                              Подтвердить — данные в 1С
-                            </Button>
-                          </div>
-                          {!allAnswered && (
-                            <div className="text-xs text-amber-600">
-                              Не все пункты сличения отмечены ({answeredCount}/{VERIFY_CHECKS.length})
-                            </div>
-                          )}
-                          {busy === selected.id && <div className="text-xs text-slate-400">Выполняется…</div>}
+                    {isEditable ? (
+                      <div className="mt-3 grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+                        {/* комментарий к решению */}
+                        <div className="space-y-1.5">
+                          <Label htmlFor="verify-comment">Комментарий к решению (необязательно)</Label>
+                          <Textarea
+                            id="verify-comment"
+                            rows={3}
+                            placeholder="Например: номера совпадают, печать читаема"
+                            value={comment}
+                            onChange={(e) => setComment(e.target.value)}
+                            aria-label="Комментарий к проверке документов"
+                          />
                           <p className="text-xs text-muted-foreground">
-                            При возврате агент получит причину и догрузит документы в ту же заявку.
+                            Утверждение передаёт данные в 1С и формирует пропуск с ЭТрН; возврат отправит пакет агенту на доработку.
                           </p>
                         </div>
-                      ) : (
-                        <div className="mt-2.5">
-                          {selected.status === 'CONFIRMED' ? (
+
+                        {/* кнопки решения */}
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            className="h-10 bg-emerald-600 text-white hover:bg-emerald-700"
+                            disabled={busy === selected.id}
+                            onClick={() => void doConfirm(selected)}
+                            aria-label="Утвердить пакет — данные передаются в 1С"
+                          >
+                            <CheckCheck className="h-4 w-4" aria-hidden />
+                            Утвердить
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="h-10 border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                            disabled={busy === selected.id}
+                            onClick={() => { setReturnReason(''); setReturnComment(''); setReturnOpen(true) }}
+                            aria-label="Отправить документы на доработку — вернуть агенту"
+                          >
+                            <Undo2 className="h-4 w-4" aria-hidden />
+                            На доработку агенту
+                          </Button>
+                          {busy === selected.id && <div className="text-xs text-slate-400">Выполняется…</div>}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2.5">
+                        {selected.status === 'CONFIRMED' ? (
+                          <div className="space-y-1.5">
                             <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
                               <CheckCheck className="h-3.5 w-3.5" aria-hidden />
-                              Проверено · передано в 1С
+                              Утверждено · данные в 1С
                             </Badge>
-                          ) : (
-                            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                              <div>
-                                Возвращено агенту на доработку
-                                {selected.verifyComment && (
-                                  <div className="mt-0.5 text-xs text-amber-700">Причина / комментарий: {selected.verifyComment}</div>
-                                )}
+                            {selected.verifyComment && (
+                              <div className="text-xs text-slate-600">
+                                <span className="font-medium text-slate-700">Комментарий логиста:</span> {selected.verifyComment}
                               </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                            <div>
+                              Возвращено агенту на доработку
+                              {selected.verifyComment && (
+                                <div className="mt-0.5 text-xs text-amber-700">Причина / комментарий: {selected.verifyComment}</div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -995,28 +941,6 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* подтверждение проверки при отметках «Нет» в экспресс-сличении */}
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Подтвердить проверку с расхождениями?</AlertDialogTitle>
-            <AlertDialogDescription>
-              В экспресс-сличении отмечены пункты «Нет».
-              {selected && <> Заявка №{selected.number} будет переведена в статус «Проверено» и передана в 1С с этими отметками.</>}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setConfirmOpen(false)}>Вернуться</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-emerald-600 text-white hover:bg-emerald-700"
-              onClick={() => { setConfirmOpen(false); if (selected) void doConfirm(selected) }}
-            >
-              Подтвердить с отметками
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* модальное окно предосмотра скана */}
       {activeDoc && selected && (

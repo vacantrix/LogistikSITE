@@ -100,7 +100,6 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
     trailerId: seesTrip ? r.trailerId : null,
     passPackage: r.passPackage,
     etrnStatus: r.etrnStatus,
-    verifyChecks: parseJson(r.verifyChecks, null),
     verifyComment: r.verifyComment,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),

@@ -117,8 +117,8 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     } else {
       const passed = docs.filter((d) => d.status === 'PASSED').length
       const manual = docs.filter((d) => d.status === 'MANUAL').length
-      // комплект обновился — прошлое экспресс-сличение недействительно (Task 62)
-      await tx.request.update({ where: { id }, data: { status: 'AT_LOGIST', verifyChecks: null, verifyComment: null } })
+      // комплект обновился — прошлый комментарий логиста недействителен
+      await tx.request.update({ where: { id }, data: { status: 'AT_LOGIST', verifyComment: null } })
       await tx.event.create({
         data: { requestId: id, type: 'DOC_VERIFIED', message: `Комплект прошёл проверку — передан логисту (принято автоматически: ${passed}, на ручной сверке: ${manual})` },
       })

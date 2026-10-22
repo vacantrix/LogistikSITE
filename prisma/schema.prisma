@@ -202,10 +202,6 @@ model Request {
   passPackage   Boolean        @default(false)
   etrnStatus    String         @default("NONE") // NONE | SENT | SIGNED
   /**
-   * экспресс-сличение логиста при сверке (Task 62): JSON [{key,label,ok}] — да/нет по ключевым полям
-   */
-  verifyChecks  String?
-  /**
    * комментарий логиста к сверки/отклонению (Task 62)
    */
   verifyComment String?

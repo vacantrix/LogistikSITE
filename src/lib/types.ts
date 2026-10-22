@@ -13,13 +13,6 @@ export type OwnershipType = 'OWNED' | 'HIRED' | 'LEASE'
 /** Статус прикреплённого документа записи справочника (Task 62) */
 export type DirectoryDocStatus = 'LOADED' | 'NEEDS_REVIEW' | 'EXPIRING' | 'MISSING'
 
-/** Экспресс-сличение логиста (Task 62): ответ да/нет на ключевой вопрос сверки */
-export interface VerifyCheck {
-  key: string
-  label: string
-  ok: boolean
-}
-
 export interface DriverDTO {
   id: string
   carrierId: string
@@ -176,8 +169,6 @@ export interface RequestDTO {
   trailerId: string | null
   passPackage: boolean
   etrnStatus: string
-  /** экспресс-сличение логиста (Task 62): сохранённые ответы да/нет — после сверки/отклонения */
-  verifyChecks: VerifyCheck[] | null
   /** комментарий логиста к сверки/отклонению (Task 62) */
   verifyComment: string | null
   createdAt: string
