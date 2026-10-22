@@ -820,3 +820,18 @@ Work Log:
 Stage Summary:
 - Песочница работает на V1.01 (вход по паролям: logist1/logist2/carrier-a/b/v/g, пароль aemz2024). Проверено в браузере: экран входа с V 1.01, вход логистом (площадка 28 заявок, сетка маршрута, сверка Z-1039 с полями OCR и типами REQUEST_DOC/POA), фото документа через /api/files/document/<id> → 200, без сессии → 401, /api/integration/1c/* без ключа → 401; вход перевозчиком А (7 доступных заявок, кабинет, «Мои заявки»). ws-service :3003 и ocr-service :3020 запущены; ошибок в консоли и dev.log нет.
 - Версии: V1.00 = f1c294d (ветка+тег v1.00), V1.01 = f568d8a (ветка+тег v1.01, метка в UI); переключение — git checkout v1.00 / v1.01.
+
+---
+Task ID: 58
+Agent: Z.ai Code (main)
+Task: Исправление поля пароля на экране входа: «глазик» показ/скрытие + неверный демо-пароль в панели подсказок
+
+Work Log:
+- Диагностика жалобы «пароль отображается в виде 1 знака при прожатии»: в Chromium точки маскировки рендерились нормально; реальная причина — NEXT_PUBLIC_DEMO_PASSWORD=1 в .env.local (ошибка настройки из Task 57): панель демо-доступов подставляла односимвольный пароль «1», а база была заполнена с SEED_PASSWORD=aemz2024 → в поле ровно 1 точка и вход не работал («Неверный логин или пароль»).
+- «Глазик»: в login-screen.tsx добавлены state showPassword, кнопка Eye/EyeOff (lucide) поверх поля (absolute right-0, 40×40, type="button", onMouseDown preventDefault — фокус остаётся в поле), aria-label/aria-pressed/title «Показать/Скрыть пароль», input получает type text/password, pr-11, spellCheck=false и font-mono (системный монобанк — раздельные точки в Safari/Firefox).
+- Конфиг: .env.local NEXT_PUBLIC_DEMO_PASSWORD синхронизирован с SEED_PASSWORD (node-скрипт без печати секрета); перезапуск dev-сервера двойным форком (setsid bash .zscripts/dev.sh) для инлайна новой NEXT_PUBLIC_* в клиентский бандл.
+- Верификация (agent-browser): панель показывает «Пароль для всех: AEMZ2024» (8 знаков), подстановка logist1 заполняет 8 точек, глазик раскрывает «aemz2024» открытым текстом и скрывает обратно (type password↔text проверен eval), вход логистом успешен (площадка 28 заявок); bunx tsc --noEmit и bun run lint — чисто.
+
+Stage Summary:
+- Экран входа V1.01: поле пароля с «глазиком», демо-панель показывает рабочий пароль AEMZ2024; вход logist1/carrier-* по подсказке из панели работает.
+- Изменены: src/components/platform/login-screen.tsx; .env.local вне репо (gitignore).

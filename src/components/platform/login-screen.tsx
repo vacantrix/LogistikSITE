@@ -6,7 +6,7 @@
  * когда задан NEXT_PUBLIC_DEMO_PASSWORD (тот же, что SEED_PASSWORD при заполнении базы).
  */
 import { useState } from 'react'
-import { Building2, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
+import { Building2, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
 
 /** Демо-доступы (демо-контур): пароль один, логины разные */
 export const DEMO_ACCOUNTS: { login: string; name: string; role: 'logist' | 'carrier' }[] = [
@@ -25,6 +25,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showDemo, setShowDemo] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const submit = async () => {
     if (!login.trim() || !password) {
@@ -87,15 +88,31 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               </div>
               <div>
                 <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-slate-700">Пароль</label>
-                <input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                />
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="current-password"
+                    spellCheck={false}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="h-10 w-full rounded-lg border border-slate-300 px-3 pr-11 font-mono text-sm outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                    aria-pressed={showPassword}
+                    title={showPassword ? 'Скрыть пароль' : 'Показать пароль'}
+                    className="absolute right-0 top-0 flex h-10 w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-500"
+                  >
+                    {showPassword
+                      ? <EyeOff className="h-4 w-4" aria-hidden />
+                      : <Eye className="h-4 w-4" aria-hidden />}
+                  </button>
+                </div>
               </div>
 
               {error && (
