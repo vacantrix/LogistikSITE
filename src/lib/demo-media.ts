@@ -1,6 +1,6 @@
 /** Клиентские хелперы работы с изображениями и демо-образцами документов */
 
-/** Читает файл и сжимает до dataUri JPEG (max 1280px, качество 0.8) */
+/** Читает файл и сжимает до dataUri JPEG (max 1280px, качество 0.8); PDF передаётся как есть */
 export async function fileToCompressedDataUri(file: File): Promise<string> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
@@ -8,6 +8,7 @@ export async function fileToCompressedDataUri(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
     reader.readAsDataURL(file)
   })
+  if (dataUrl.startsWith('data:application/pdf')) return dataUrl
   try {
     const img = document.createElement('img')
     img.decoding = 'async'

@@ -6,7 +6,8 @@ import type { IntakeDocVerdict, IntakeResult } from '@/lib/types'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+// документы распознаются по одному (5–40 с каждый) — несколько файлов могут занять минуты
+export const maxDuration = 600
 
 const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 

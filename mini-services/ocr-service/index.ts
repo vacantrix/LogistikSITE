@@ -6,7 +6,8 @@
  *
  *   1. PaddleOCR (self-hosted Python, mini-services/paddle-ocr) — PADDLE_OCR_URL,
  *      по умолчанию http://127.0.0.1:3031/ocr
- *      (контракт: POST { image, docType, fields[] } → { quality, fields, confidences, docType, confirmations })
+ *      (контракт: POST { image, docType, fields[] } → { quality, fields, confidences, docType, side?, confirmations })
+ *      Принимает изображения и PDF (первая страница); 422 — вид документа не распознаётся автоматически.
  *   2. GLM-4.6V (облачная VLM) — ТОЛЬКО при OCR_CLOUD_FALLBACK=1: фото паспортов уходят во внешний сервис.
  *      По умолчанию выключено; если PaddleOCR не ответил — 503, платформа отправит документ на ручную проверку.
  *
@@ -17,7 +18,10 @@
  *
  * Эндпоинты:
  *   GET  /health — статус сервиса и цепочки движков
- *   POST /ocr    — { type, dataUri, intake? } → { ok, ocr, chain }
+ *   POST /ocr    — { type, dataUri, intake? } → { ok, ocr, chain }; 422 — вид документа без шаблона
+ *
+ * Распознавание одного документа занимает 5–40 с, PaddleOCR обрабатывает их по одному,
+ * поэтому таймауты здесь длинные, а очередь держит сама платформа (src/lib/ocr-service.ts).
  */
 
 import ZAI from 'z-ai-web-dev-sdk'
@@ -26,7 +30,9 @@ const PORT = Number(process.env.OCR_PORT ?? 3020)
 const PADDLE_URL = process.env.PADDLE_OCR_URL ?? 'http://127.0.0.1:3031/ocr'
 const CLOUD_FALLBACK = process.env.OCR_CLOUD_FALLBACK === '1'
 const TOKEN = process.env.OCR_SERVICE_TOKEN ?? ''
-const VERSION = '1.0.0'
+const VERSION = '1.1.0'
+// один документ — до ~40 с (с повторным точным проходом — до ~90 с); Bun допускает idleTimeout до 255 с
+const PADDLE_TIMEOUT_MS = 170_000
 const STARTED_AT = Date.now()
 
 export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA'
@@ -37,19 +43,19 @@ const DOC_TYPE_LABEL: Record<DocType, string> = {
   PASSPORT_PHOTO: 'Паспорт: страница с фото',
   PASSPORT_REG: 'Паспорт: страница регистрации',
   LICENSE: 'Водительское удостоверение',
-  STS: 'СТС (лицевая сторона)',
+  STS: 'СТС (лицевая сторона или оборот)',
   REQUEST_DOC: 'Заявка на перевозку (скан)',
   POA: 'Доверенность',
 }
 
 /** Списки полей — зеркалят DOC_FIELDS платформы (держим синхронно) */
 const DOC_FIELDS: Record<DocType, string[]> = {
-  PASSPORT_PHOTO: ['Фамилия', 'Имя', 'Отчество', 'Дата рождения', 'Серия и номер', 'Дата выдачи', 'Код подразделения'],
+  PASSPORT_PHOTO: ['Фамилия', 'Имя', 'Отчество', 'Дата рождения', 'Серия и номер', 'Дата выдачи', 'Код подразделения', 'Место рождения'],
   PASSPORT_REG: ['Дата регистрации', 'Код подразделения', 'Адрес регистрации'],
   LICENSE: ['ФИО', 'Дата рождения', 'Номер ВУ', 'Категории', 'Дата выдачи', 'Действует до'],
   STS: ['Госномер', 'VIN', 'Номер СТС', 'Марка', 'Владелец'],
   REQUEST_DOC: ['Номер заявки', 'Дата заявки', 'Груз', 'Ставка'],
-  POA: ['Номер доверенности', 'Дата выдачи', 'Действительна до', 'Кем выдана (перевозчик)', 'Представитель (ФИО)'],
+  POA: ['Номер доверенности', 'Дата выдачи', 'Действительна до', 'Кем выдана (перевозчик)', 'Представитель (ФИО)', 'Паспорт представителя'],
 }
 
 interface OcrOutput {
@@ -58,8 +64,13 @@ interface OcrOutput {
   fields: Record<string, string>
   confidences: Record<string, number>
   detectedType?: DocType | 'UNKNOWN'
+  /** СТС: какая сторона на фото */
+  side?: 'front' | 'back'
   confirmations?: Record<string, string[]>
 }
+
+/** Ответ PaddleOCR: распознано, вид документа без шаблона (422) или сервис недоступен (null) */
+type PaddleResult = { kind: 'ok'; ocr: OcrOutput } | { kind: 'unsupported' } | null
 
 interface OcrRequestBody {
   type?: string
@@ -97,9 +108,9 @@ const DOC_TYPE_VALUES = DOC_TYPES
  * Реальный PaddleOCR разворачивается отдельным Python-процессом
  * (paddleocr + paddlepaddle) и подключается сюда переменной окружения:
  *   PADDLE_OCR_URL=http://127.0.0.1:3031/ocr
- * Контракт: POST { image (dataUri), docType, fields[] } → { quality, fields, confidences, docType? }
+ * Контракт: POST { image (dataUri), docType, fields[] } → { quality, fields, confidences, docType?, side? }
  */
-async function paddleOcr(dataUri: string, type: DocType): Promise<OcrOutput | null> {
+async function paddleOcr(dataUri: string, type: DocType): Promise<PaddleResult> {
   const url = PADDLE_URL
   if (!url) return null
   try {
@@ -107,15 +118,16 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<OcrOutput | nu
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: dataUri, docType: type, fields: DOC_FIELDS[type] }),
-      // первый вызов загружает модели — даём запас
-      signal: AbortSignal.timeout(80_000),
+      signal: AbortSignal.timeout(PADDLE_TIMEOUT_MS),
     })
+    if (res.status === 422) return { kind: 'unsupported' }
     if (!res.ok) return null
     const j = (await res.json()) as {
       quality?: number
       fields?: Record<string, string>
       confidences?: Record<string, number>
       docType?: string
+      side?: string
       confirmations?: Record<string, string[]>
     }
     if (typeof j.quality !== 'number' || !j.fields) return null
@@ -124,12 +136,16 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<OcrOutput | nu
       ? (rawType as DocType)
       : rawType === 'UNKNOWN' ? 'UNKNOWN' as const : undefined
     return {
-      engine: 'PaddleOCR (self-hosted)',
-      quality: Math.round(j.quality),
-      fields: j.fields,
-      confidences: j.confidences ?? {},
-      ...(detectedType ? { detectedType } : {}),
-      ...(j.confirmations ? { confirmations: j.confirmations } : {}),
+      kind: 'ok',
+      ocr: {
+        engine: 'PaddleOCR (self-hosted)',
+        quality: Math.round(j.quality),
+        fields: j.fields,
+        confidences: j.confidences ?? {},
+        ...(detectedType ? { detectedType } : {}),
+        ...(j.side === 'front' || j.side === 'back' ? { side: j.side } : {}),
+        ...(j.confirmations ? { confirmations: j.confirmations } : {}),
+      },
     }
   } catch {
     return null
@@ -202,7 +218,7 @@ let processed = 0
 Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
-  idleTimeout: 120,
+  idleTimeout: 200,
   async fetch(req) {
     const url = new URL(req.url)
     if (TOKEN && req.headers.get('x-ocr-token') !== TOKEN) return json({ ok: false, error: 'forbidden' }, 403)
@@ -234,24 +250,29 @@ Bun.serve({
       if (!type || !DOC_TYPES.includes(type)) {
         return json({ ok: false, error: `Неизвестный тип документа: ${body?.type ?? '—'}` }, 400)
       }
-      if (!dataUri || !dataUri.startsWith('data:image/')) {
-        return json({ ok: false, error: 'Ожидается изображение в dataUri (data:image/…)' }, 400)
+      const isPdf = Boolean(dataUri?.startsWith('data:application/pdf;'))
+      if (!dataUri || !(dataUri.startsWith('data:image/') || isPdf)) {
+        return json({ ok: false, error: 'Ожидается изображение или PDF в dataUri (data:image/… или data:application/pdf)' }, 400)
       }
 
       const chain: string[] = []
 
       // 1. PaddleOCR (если подключён)
       const paddle = await paddleOcr(dataUri, type)
-      if (paddle) {
+      if (paddle?.kind === 'ok') {
         chain.push('paddleocr')
-        lastEngine = paddle.engine
+        lastEngine = paddle.ocr.engine
         processed += 1
-        return json({ ok: true, ocr: paddle, chain })
+        return json({ ok: true, ocr: paddle.ocr, chain })
+      }
+      if (paddle?.kind === 'unsupported') {
+        chain.push('paddleocr:unsupported')
+        return json({ ok: false, error: `Вид документа ${type} автоматически не распознаётся`, chain }, 422)
       }
       chain.push('paddleocr:fail')
 
-      // 2. GLM-4.6V — только если облачный резерв явно включён
-      const glm = CLOUD_FALLBACK ? await glmOcr(dataUri, type) : null
+      // 2. GLM-4.6V — только если облачный резерв явно включён (PDF модель не принимает)
+      const glm = CLOUD_FALLBACK && !isPdf ? await glmOcr(dataUri, type) : null
       if (glm) {
         chain.push('glm-4.6v')
         lastEngine = glm.engine

@@ -78,7 +78,8 @@ model Driver {
   licenseTill        String
   categories         String
   phone              String   @default("—") // телефон водителя
-  birthPlace         String   @default("—") // место рождения (для 1С)
+  birthPlace         String   @default("—") // место рождения (для 1С и пропуска в порт)
+  address            String   @default("—") // адрес регистрации / место жительства (для пропуска в порт)
   citizenship        String   @default("—") // гражданство (для 1С)
   passportIssuedBy   String   @default("—") // кем выдан паспорт (для 1С)
   passportIssuedDate String   @default("—") // дата выдачи паспорта (для 1С)

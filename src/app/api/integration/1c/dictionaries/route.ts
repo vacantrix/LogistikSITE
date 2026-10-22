@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
         fullName: d.fullName,
         birthDate: d.birthDate,
         birthPlace: d.birthPlace,
+        address: d.address,
         citizenship: d.citizenship,
         passport: d.passport,
         passportIssuedBy: d.passportIssuedBy,

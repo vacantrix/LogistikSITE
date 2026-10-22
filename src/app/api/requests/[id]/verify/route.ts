@@ -7,11 +7,12 @@ import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { inTx, loadRequestFor } from '@/lib/requests'
 import { loadVerifySettings } from '@/lib/settings'
 import { plog, plogError } from '@/lib/platform-log'
-import { verifyDocument, expectedFor } from '@/lib/verify'
+import { verifyDocument, expectedFor, OcrUnavailableError } from '@/lib/verify'
 import type { DocType, VerifyVerdict } from '@/lib/verify'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+// документы распознаются по одному (5–40 с каждый): комплект из 6–10 файлов — несколько минут
+export const maxDuration = 600
 
 /** Комплект рейса: паспорт, регистрация, ВУ, СТС, заявка, доверенность */
 const ALL_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
@@ -60,12 +61,24 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const settings = await loadVerifySettings()
   const expected = expectedFor(driver, truck, request)
 
-  // распознавание идёт вне транзакции (долго); результат записывается, только если документ не заменили за это время
+  // распознавание идёт вне транзакции (долго); результат записывается, только если документ не заменили за это время.
+  // Запросы к OCR-сервису выстраиваются в очередь (src/lib/ocr-service.ts) — документы распознаются по одному.
+  const unavailable: string[] = []
   const verdicts: { id: string; v: VerifyVerdict }[] = await Promise.all(
     pending.map(async (doc) => {
       try {
         return { id: doc.id, v: await verifyDocument(doc.id, doc.type as DocType, doc.dataUri, expected, settings, doc.fileName) }
       } catch (e) {
+        if (e instanceof OcrUnavailableError) {
+          // сервис не ответил — это не повод для ручной сверки: документ остаётся «на проверке», проверку повторят
+          unavailable.push(doc.fileName)
+          const v: VerifyVerdict = {
+            status: 'PENDING', quality: 0, engine: '—', fields: {}, confidences: {},
+            issues: ['Сервис распознавания не ответил'],
+            message: 'Распознавание не выполнено — сервис занят или недоступен. Повторите проверку через минуту',
+          }
+          return { id: doc.id, v }
+        }
         console.error('verify doc error', doc.id, e)
         // журнал платформы (Task 76): сбой распознавания — ошибка в журнале
         await plogError('api/requests/verify', e, {
@@ -81,6 +94,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       }
     }),
   )
+  if (unavailable.length > 0) {
+    await plogError('api/requests/verify', new OcrUnavailableError(), {
+      type: 'OCR_FAILED', source: 'api/requests/verify',
+      requestId: id, requestNumber: request.number, carrierName: request.winner?.name ?? null,
+      message: `Сервис распознавания не ответил — документы остаются на проверке до повтора: ${unavailable.join(', ')} (№${request.number})`,
+    })
+  }
 
   await inTx(async (tx) => {
     for (const { id: docId, v } of verdicts) {
@@ -148,7 +168,9 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     requestId: id, requestNumber: request.number, carrierName: request.winner?.name ?? null,
     message: freshStatus?.status === 'AT_LOGIST'
       ? `Комплект документов прошёл автопроверку — передан логисту на сверку (№${request.number})`
-      : `Автопроверка выявила замечания — документы возвращены перевозчику (№${request.number})`,
+      : unavailable.length > 0
+        ? `Автопроверка не завершена: ${unavailable.length} док. ждут повторного распознавания (№${request.number})`
+        : `Автопроверка выявила замечания — документы возвращены перевозчику (№${request.number})`,
   })
   return respond()
 }

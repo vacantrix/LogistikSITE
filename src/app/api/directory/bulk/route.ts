@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
         fullName: d.fullName,
         birthDate: d.birthDate || '—',
         birthPlace: d.birthPlace || '—',
+        address: d.address || '—',
         citizenship: d.citizenship || 'РФ',
         passport: d.passport || '—',
         passportIssuedBy: d.passportIssuedBy || '—',

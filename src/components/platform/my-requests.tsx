@@ -288,6 +288,10 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
       case 'REJECTED':
         toast({ title: `${label}: отказ`, description: issues.join('; ') || message || undefined, variant: 'destructive' })
         break
+      case 'PENDING':
+        // после проверки документ остался «на проверке» — сервис распознавания не ответил
+        toast({ title: `${label}: распознавание не выполнено`, description: message ?? 'Повторите проверку через минуту' })
+        break
       default:
         toast({ title: `${label} отправлен на проверку нейросети` })
     }
@@ -691,13 +695,23 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       )}
                     </div>
 
-                    {doc && (
+                    {doc && (doc.isPdf ? (
+                      <a
+                        href={secureFileUrl(doc.url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mb-2 flex h-20 w-full items-center justify-center gap-2 rounded-md border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                      >
+                        <FileText className="h-6 w-6 text-red-600" aria-hidden />
+                        PDF — открыть
+                      </a>
+                    ) : (
                       <img
                         src={secureFileUrl(doc.url)}
                         alt={`Документ «${DOC_TYPE_LABEL[type]}» — ${doc.fileName}`}
                         className="mb-2 h-20 w-full rounded-md border border-slate-200 object-cover"
                       />
-                    )}
+                    ))}
 
                     <div className="mb-2 min-h-0 flex-1 space-y-1">
                       {doc?.quality != null && (
@@ -714,7 +728,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         fileInputs.current[key] = el
                       }}
                       type="file"
-                      accept="image/*"
+                      accept="image/*,application/pdf"
                       className="hidden"
                       aria-label={`Загрузить ${DOC_TYPE_LABEL[type]}`}
                       onChange={(e) => {

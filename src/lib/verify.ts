@@ -34,6 +34,8 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
 export interface FieldSpec {
   label: string
   kind: 'fio' | 'date' | 'passport' | 'license' | 'plate' | 'vin' | 'code' | 'text'
+  /** необязательное поле: если не найдено — не повод для ручной проверки (нет на этой стороне/версии документа) */
+  optional?: boolean
 }
 
 export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
@@ -45,6 +47,7 @@ export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
     { label: 'Серия и номер', kind: 'passport' },
     { label: 'Дата выдачи', kind: 'date' },
     { label: 'Код подразделения', kind: 'code' },
+    { label: 'Место рождения', kind: 'text', optional: true },
   ],
   PASSPORT_REG: [
     { label: 'Дата регистрации', kind: 'date' },
@@ -64,7 +67,8 @@ export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
     { label: 'VIN', kind: 'vin' },
     { label: 'Номер СТС', kind: 'passport' },
     { label: 'Марка', kind: 'text' },
-    { label: 'Владелец', kind: 'text' },
+    // собственник напечатан на обороте СТС — на лицевой стороне его нет
+    { label: 'Владелец', kind: 'text', optional: true },
   ],
   REQUEST_DOC: [
     { label: 'Номер заявки', kind: 'text' },
@@ -78,8 +82,17 @@ export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
     { label: 'Действительна до', kind: 'date' },
     { label: 'Кем выдана (перевозчик)', kind: 'text' },
     { label: 'Представитель (ФИО)', kind: 'fio' },
+    { label: 'Паспорт представителя', kind: 'passport', optional: true },
   ],
 }
+
+/** Оборот СТС: собственник и особые отметки (лизинг, временный учёт) */
+export const STS_BACK_FIELDS: FieldSpec[] = [
+  { label: 'Номер СТС', kind: 'passport' },
+  { label: 'Владелец', kind: 'text' },
+  { label: 'Лизингодатель', kind: 'text', optional: true },
+  { label: 'Временный учёт до', kind: 'date', optional: true },
+]
 
 /** Поле «срок действия» у документов, где он есть (у ВУ и доверенности подписи разные) */
 const EXPIRY_LABEL: Partial<Record<DocType, string>> = {
@@ -123,13 +136,16 @@ export interface OcrOutput {
   confidences: Record<string, number>
   /** какой вид документа распознан на изображении (для проверки соответствия слоту) */
   detectedType?: DocType | 'UNKNOWN'
+  /** сторона документа (у СТС — лицевая или оборот) */
+  side?: 'front' | 'back'
   /** независимые подтверждения, найденные самим движком: копии номера на полях паспорта,
    *  латинская строка ВУ, повторное чтение категорий, срок ВУ = выдача + 10 лет */
   confirmations?: Record<string, string[]>
 }
 
 export interface VerifyVerdict {
-  status: 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
+  /** PENDING — распознавание не выполнено (сервис занят), проверку нужно повторить */
+  status: 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL' | 'PENDING'
   quality: number
   engine: string
   fields: Record<string, string>
@@ -159,9 +175,13 @@ function pseudo(seed: string, min: number, max: number): number {
 const LAT2CYR: Record<string, string> = { A: 'А', B: 'В', C: 'С', E: 'Е', H: 'Н', K: 'К', M: 'М', O: 'О', P: 'Р', T: 'Т', X: 'Х', Y: 'У' }
 const CYR2LAT: Record<string, string> = Object.fromEntries(Object.entries(LAT2CYR).map(([l, c]) => [c, l]))
 
+/** Цифры, которые OCR путает с буквами в ФИО: «3ЕБКИН» → «ЗЕБКИН» */
+const DIGIT2CYR: Record<string, string> = { '3': 'З', '0': 'О', '6': 'Б' }
+
 function normalizeFio(s: string): string {
   return s.toUpperCase()
     .replace(/[ABCEHKMOPTXY]/g, (c) => LAT2CYR[c] ?? c)
+    .replace(/[306]/g, (c) => DIGIT2CYR[c] ?? c)
     .replace(/Ё/g, 'Е')
     .replace(/[^А-Я\- ]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -313,12 +333,25 @@ export async function vlmOcr(dataUri: string, type: DocType): Promise<OcrOutput 
   }
 }
 
-/** Распознавание настоящего фото: локальный сервис → облако (если явно разрешено) → null */
-export async function recognize(dataUri: string, type: DocType, intake: boolean): Promise<OcrOutput | null> {
+/** Сервис распознавания не ответил (занят или выключен): документ остаётся «на проверке», а не уходит в ручную */
+export class OcrUnavailableError extends Error {
+  constructor() { super('Сервис распознавания недоступен или занят') }
+}
+
+/**
+ * Распознавание настоящего фото: локальный сервис → облако (если явно разрешено).
+ * 'unsupported' — у локального движка нет шаблона этого вида документа (проверка вручную);
+ * OcrUnavailableError — сервис не ответил: проверку нужно повторить.
+ */
+export async function recognize(dataUri: string, type: DocType, intake: boolean): Promise<OcrOutput | 'unsupported'> {
   const local = await ocrServiceOcr(dataUri, type, intake)
-  if (local) return local
-  if (cloudOcrEnabled()) return vlmOcr(dataUri, type)
-  return null
+  if (local.kind === 'ok') return local.ocr
+  if (cloudOcrEnabled() && !dataUri.startsWith('data:application/pdf')) {   // облачная модель PDF не принимает
+    const cloud = await vlmOcr(dataUri, type)
+    if (cloud) return cloud
+  }
+  if (local.kind === 'unsupported') return 'unsupported'
+  throw new OcrUnavailableError()
 }
 
 // ---------------- правила проверки ----------------
@@ -327,7 +360,8 @@ const DATE_RE = /^\d{2}\.\d{2}\.\d{4}$/
 const PASSPORT_RE = /^\d{2}\s?\d{2}\s?\d{6}$/
 const LICENSE_RE = /^\d{2}\s?[\dА-ЯA-Z]{2}\s?\d{6}$/i
 const CODE_RE = /^\d{3}-\d{3}$/
-const PLATE_RE = /^[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\s?\d{2,3}$/i
+// госномер автомобиля (А123ВС777) или прицепа (АВ1234 23)
+const PLATE_RE = /^(?:[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}|[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{4})\s?\d{2,3}$/i
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/i
 
 export function parseDateRu(s: string): Date | null {
@@ -393,10 +427,12 @@ export function applyRules(
 
   // 3. Поля: формат → сверка с заявкой и правила → уверенность с подтверждениями
   let lowCount = 0
-  for (const f of DOC_FIELDS[type]) {
+  const specs = type === 'STS' && ocr.side === 'back' ? STS_BACK_FIELDS : DOC_FIELDS[type]
+  for (const f of specs) {
     const value = (fields[f.label] ?? '').trim()
     const conf = confidences[f.label] ?? 0
     if (!value) {
+      if (f.optional) continue
       issues.push(`Поле «${f.label}» не найдено — решает человек`)
       lowCount++
       continue
@@ -428,6 +464,9 @@ export function applyRules(
     if (type === 'PASSPORT_PHOTO' && partIdx !== undefined && fioParts[partIdx]) {
       matched(fioKey(value) === fioKey(fioParts[partIdx]), `${f.label} на документе («${value}») не совпадает с заявкой («${fioParts[partIdx]}»)`)
     }
+    if (f.label === 'Паспорт представителя' && expected.passport) {
+      matched(value.replace(/\s/g, '') === expected.passport.replace(/\s/g, ''), `Доверенность выдана на паспорт «${value}», а у водителя — «${expected.passport}»`)
+    }
     if (f.label === 'Серия и номер' && expected.passport) {
       matched(value.replace(/\s/g, '') === expected.passport.replace(/\s/g, ''), `Серия и номер паспорта («${value}») не совпадают с заявкой («${expected.passport}»)`)
     }
@@ -457,6 +496,10 @@ export function applyRules(
       const born = expected.birthDate ? parseDateRu(expected.birthDate) : null
       if (issued && born && issued < born) mismatch = 'Дата выдачи раньше даты рождения — неверные данные'
       if (issued && issued > startOfToday()) mismatch = `Дата выдачи (${value}) ещё не наступила — неверные данные`
+    }
+    if (f.label === 'Временный учёт до') {
+      const till = parseDateRu(value)
+      if (till && till < checkOn) mismatch = `Временная регистрация ТС (лизинг) до ${value} — на ${checkOn.toLocaleDateString('ru-RU')} уже истекла`
     }
     if (EXPIRY_LABEL[type] === f.label) {
       const till = parseDateRu(value)
@@ -489,6 +532,8 @@ export function applyRules(
       lowCount++
       continue
     }
+    // необязательное поле (место рождения, лизингодатель…) влияет на итог только расхождением
+    if (f.optional) continue
 
     // уверенность: от confAuto — сразу; от 0.80 — нужно одно подтверждение; от confReupload — два
     if (conf >= settings.confAuto) continue
@@ -532,11 +577,11 @@ export async function verifyDocument(
     if (!demoSamplesEnabled()) return reuploadVerdict('Нужна фотография документа (JPG, PNG или WebP) — демо-образцы на этом стенде отключены')
     return applyRules(simulateOcr(`${fileName}:${docId}`, type, expected), type, expected, settings)
   }
-  const ocr = await recognize(dataUri, type, false)
-  if (!ocr) {
+  const ocr = await recognize(dataUri, type, false) // OcrUnavailableError — наверх, документ остаётся на проверке
+  if (ocr === 'unsupported') {
     return manualVerdict(
-      'Автоматическое распознавание недоступно — документ проверит сотрудник вручную',
-      'Данные с фото не прочитаны (OCR-сервис недоступен или этот вид документа не распознаётся автоматически) — сверка вручную',
+      'Этот вид документа автоматически не распознаётся — его проверит сотрудник',
+      'Автоматического шаблона для этого документа нет — сверка вручную',
     )
   }
   return applyRules(ocr, type, expected, settings)
@@ -725,16 +770,22 @@ export async function analyzeIntakeDoc(
     }
   }
 
-  const ocr = await recognize(dataUri, type, true)
-  if (!ocr) {
+  let ocr: OcrOutput | 'unsupported'
+  try {
+    ocr = await recognize(dataUri, type, true)
+  } catch (e) {
+    if (!(e instanceof OcrUnavailableError)) throw e
     return {
-      status: 'MANUAL',
-      quality: 0,
-      engine: '—',
-      fields: {},
-      confidences: {},
-      issues: ['Распознавание недоступно — проверьте документ или заполните карточку вручную'],
-      message: 'Распознавание недоступно — данные можно ввести вручную',
+      status: 'PENDING', quality: 0, engine: '—', fields: {}, confidences: {},
+      issues: ['Сервис распознавания занят или недоступен — проверка не выполнена'],
+      message: 'Распознавание не выполнено — повторите проверку через минуту',
+    }
+  }
+  if (ocr === 'unsupported') {
+    return {
+      status: 'MANUAL', quality: 0, engine: '—', fields: {}, confidences: {},
+      issues: ['Автоматического шаблона для этого документа нет — проверьте его и заполните карточку вручную'],
+      message: 'Этот документ проверяется вручную',
     }
   }
   if (ocr.detectedType && ocr.detectedType !== 'UNKNOWN' && ocr.detectedType !== type) {
@@ -750,6 +801,8 @@ export interface IntakeDriverDraft {
   license: string
   licenseTill: string
   categories: string
+  birthPlace: string
+  address: string
   confidence: Record<string, number>
 }
 
@@ -789,6 +842,8 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
   const pOt = pick('PASSPORT_PHOTO', 'Отчество')
   const pBirth = pick('PASSPORT_PHOTO', 'Дата рождения')
   const pPass = pick('PASSPORT_PHOTO', 'Серия и номер')
+  const pPlace = pick('PASSPORT_PHOTO', 'Место рождения')
+  const rAddr = pick('PASSPORT_REG', 'Адрес регистрации')
   const lFio = pick('LICENSE', 'ФИО')
   const lBirth = pick('LICENSE', 'Дата рождения')
   const lNum = pick('LICENSE', 'Номер ВУ')
@@ -808,6 +863,8 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
     license: lNum.v,
     licenseTill: lTill.v,
     categories: lCats.v,
+    birthPlace: pPlace.v,
+    address: rAddr.v,
     confidence: {
       fullName: best({ v: fullName, c: Math.min(pFam.c, pIm.c) || pFam.c }, lFio).c,
       birthDate: best(pBirth, lBirth).c,
@@ -815,6 +872,8 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
       license: lNum.c,
       licenseTill: lTill.c,
       categories: lCats.c,
+      birthPlace: pPlace.c,
+      address: rAddr.c,
     },
   }
 

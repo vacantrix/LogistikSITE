@@ -10,9 +10,11 @@
  * Карточка рейса — этапы (Pipeline) и журнал событий.
  * Task 76: служебные упоминания 1С из статусов убраны — названия синхронизированы
  * с реестром заявок («В работе»/«Завершён»); колонка документов ведёт в «Подписать ЭДО».
+ * Кнопка «Авто в порт» — Excel в форме порта (19 колонок) по рейсам в работе: экипажи для пропуска.
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, CircleCheck, Eye, ScrollText, Search } from 'lucide-react'
+import { ChevronRight, CircleCheck, Eye, FileSpreadsheet, ScrollText, Search } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import {
   EmptyState, ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
@@ -35,6 +37,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
+import { PORT_COL_WIDTHS, buildPortRows, type PortExportEntry } from '@/lib/port-excel'
 import {
   REGISTRY_STEPS, fmtDateTime, num, rate, registryStepIndex,
 } from '@/lib/status'
@@ -190,6 +193,36 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   const detail = base.find((r) => r.id === detailId) ?? null
   const closeTarget = base.find((r) => r.id === closeId) ?? null
 
+  // ——— Excel «Авто в порт»: рейсы в работе из текущего списка (с учётом поиска) → форма порта ———
+  const exportPort = () => {
+    const trips = filtered.filter((r) => r.status === 'CONFIRMED')
+    const known = (v: string | undefined) => (v && v !== '—' ? v : '')
+    const entries: PortExportEntry[] = trips.flatMap((r) => {
+      const driver = r.driverId ? drivers.get(r.driverId) : undefined
+      if (!driver) return []
+      const truck = r.truckId ? trucks.get(r.truckId) : undefined
+      const trailer = r.trailerId ? trailers.get(r.trailerId) : undefined
+      const carrier = r.winnerName ?? ''
+      return [{
+        driver,
+        truck: truck ? { brand: truck.brand, plate: truck.plate, color: truck.color, owner: known(truck.owner) || carrier } : null,
+        trailer: trailer ? { plate: trailer.plate, owner: known(trailer.owner) || carrier } : null,
+      }]
+    })
+    if (entries.length === 0) {
+      toast({ title: 'Нет экипажей для пропуска', description: 'В списке нет рейсов в работе с назначенным водителем' })
+      return
+    }
+    const ws = XLSX.utils.aoa_to_sheet(buildPortRows(entries))
+    ws['!cols'] = PORT_COL_WIDTHS.map((wch) => ({ wch }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Лист1')
+    const d = new Date()
+    const day = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
+    XLSX.writeFile(wb, `Авто в порт ${day}.xls`, { bookType: 'xls' })
+    toast({ title: 'Файл «Авто в порт» сформирован', description: `Экипажей: ${entries.length}` })
+  }
+
   const closeTrip = async () => {
     if (!closeTarget) return
     setBusy(closeTarget.id)
@@ -215,9 +248,15 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   return (
     <div>
       <SectionHeader title="Реестр рейсов">
-        <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
-          Рейсов: {filtered.length}{filtered.length !== base.length ? ` из ${base.length}` : ''}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
+            Рейсов: {filtered.length}{filtered.length !== base.length ? ` из ${base.length}` : ''}
+          </Badge>
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={exportPort} disabled={requests === null}>
+            <FileSpreadsheet className="h-4 w-4 text-emerald-600" aria-hidden />
+            Авто в порт
+          </Button>
+        </div>
       </SectionHeader>
 
       {requests === null && !error && <LoadingBlock label="Загрузка реестра рейсов…" />}

@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
           license: license || '—', licenseTill: s(data.licenseTill, 20) || '—',
           categories: s(data.categories, 60) || '—',
           // кадровые поля проформы (Task 29)
-          phone: s(data.phone, 40) || '—', birthPlace: s(data.birthPlace) || '—',
+          phone: s(data.phone, 40) || '—', birthPlace: s(data.birthPlace) || '—', address: s(data.address) || '—',
           citizenship: s(data.citizenship, 60) || '—', position: s(data.position, 100) || '—',
           passportIssuedBy: s(data.passportIssuedBy) || '—', passportIssuedDate: s(data.passportIssuedDate, 20) || '—',
           // принадлежность (Task 62)

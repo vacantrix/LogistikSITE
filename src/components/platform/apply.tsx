@@ -18,6 +18,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import * as XLSX from 'xlsx'
+import { isPortSheet, parsePortRows, type PortLine } from '@/lib/port-excel'
 import {
   ArrowRight, CarFront, CheckCircle2, FileSpreadsheet, ScanLine, Truck, Upload, UserPlus,
 } from 'lucide-react'
@@ -42,7 +43,7 @@ const newLineId = () => {
 
 // ——— единый Excel-шаблон: 15 водитель + 5 «Тягач: …» + 5 «Прицеп: …» ———
 const DRIVER_COLS = [
-  'ФИО', 'Дата рождения', 'Гражданство', 'Телефон', 'Адрес регистрации',
+  'ФИО', 'Дата рождения', 'Место рождения', 'Гражданство', 'Телефон', 'Адрес регистрации',
   'Паспорт', 'Кем выдан', 'Дата выдачи паспорта', 'Должность',
   'ВУ номер', 'ВУ действует до', 'Категории',
 ]
@@ -52,28 +53,37 @@ const TRAILER_COLS = ['Прицеп: тип', 'Прицеп: госномер', 
 const HEADER_ROW = [...DRIVER_COLS, ...TRUCK_COLS, ...TRAILER_COLS]
 
 const SAMPLE_ROWS = [
-  ['Дорошенко Игорь Валерьевич', '03.08.1987', 'РФ', '+7 903 415-22-08', 'г. Краснодар, ул. Дзержинского, д. 100', '52 07 223344', 'ОВМ УМВД России по г. Краснодару', '12.03.2010', 'Водитель-экспедитор', '52 12 909090', '15.08.2032', 'C, CE', 'MAN TGX 18.470', 'В344ТН152', '99 15 121212', 'белый', 'ООО «Перевозчик Б»', TRAILER_TYPES[0], 'АТ5546152', '52 19 777777', 'серый', 'ООО «Перевозчик Б»'],
-  ['Захарова Ольга Ивановна', '17.11.1990', 'РФ', '+7 918 220-11-45', 'г. Абинск, ул. Мира, д. 12', '52 11 556677', 'ОВМ УМВД России по Краснодарскому краю', '05.09.2012', 'Водитель', '52 16 343434', '01.10.2033', 'C', '', '', '', '', '', '', '', '', '', ''],
+  ['Дорошенко Игорь Валерьевич', '03.08.1987', 'г. Краснодар', 'РФ', '+7 903 415-22-08', 'г. Краснодар, ул. Дзержинского, д. 100', '52 07 223344', 'ОВМ УМВД России по г. Краснодару', '12.03.2010', 'Водитель-экспедитор', '52 12 909090', '15.08.2032', 'C, CE', 'MAN TGX 18.470', 'В344ТН152', '99 15 121212', 'белый', 'ООО «Перевозчик Б»', TRAILER_TYPES[0], 'АТ5546152', '52 19 777777', 'серый', 'ООО «Перевозчик Б»'],
+  ['Захарова Ольга Ивановна', '17.11.1990', 'г. Абинск', 'РФ', '+7 918 220-11-45', 'г. Абинск, ул. Мира, д. 12', '52 11 556677', 'ОВМ УМВД России по Краснодарскому краю', '05.09.2012', 'Водитель', '52 16 343434', '01.10.2033', 'C', '', '', '', '', '', '', '', '', '', ''],
 ]
 
 const cellStr = (v: unknown): string => String(v ?? '').replace(/\s+/g, ' ').trim()
 
-/** Разбор Excel: колонки по заголовкам с приставками «Тягач:/Прицеп:» (fallback — позиционно) */
+/** Строка файла «Авто в порт» → карточки водителя, тягача и прицепа */
+const fromPortLine = (p: PortLine): DriverLineInitial => ({
+  driver: p.driver,
+  ...(p.truck ? { truck: p.truck } : {}),
+  ...(p.trailer ? { trailer: p.trailer } : {}),
+})
+
+/** Разбор Excel: колонки по заголовкам с приставками «Тягач:/Прицеп:»; файл в форме порта — отдельным разбором */
 export function parseLineRows(rows: unknown[][]): DriverLineInitial[] {
   if (rows.length === 0) return []
+  if (isPortSheet(rows[0])) return parsePortRows(rows).map(fromPortLine)
   const header = rows[0].map(cellStr)
   const findCol = (name: string): number => {
     const exact = header.findIndex((h) => h.toLowerCase() === name.toLowerCase())
     if (exact >= 0) return exact
-    // допускаем старые шаблоны: «Место рождения» = «Адрес регистрации»
-    if (/адрес регистрац|место рожден|пребыван/i.test(name)) {
-      return header.findIndex((h) => /адрес регистрац|место рожден|пребыван/i.test(h))
+    // старые шаблоны: адрес мог называться «Место жительства (пребывания)»
+    if (/адрес регистрац/i.test(name)) {
+      return header.findIndex((h) => /адрес регистрац|место жительства|пребыван/i.test(h))
     }
     return header.findIndex((h) => h.toLowerCase().includes(name.toLowerCase()))
   }
   const idx = {
     fullName: findCol('ФИО'), birthDate: findCol('Дата рождения'), citizenship: findCol('Гражданство'),
-    phone: findCol('Телефон'), birthPlace: findCol('Адрес регистрации'), passport: findCol('Паспорт'),
+    phone: findCol('Телефон'), address: findCol('Адрес регистрации'), birthPlace: findCol('Место рождения'),
+    passport: findCol('Паспорт'),
     passportIssuedBy: findCol('Кем выдан'), passportIssuedDate: findCol('Дата выдачи паспорта'),
     position: findCol('Должность'), license: findCol('ВУ номер'), licenseTill: findCol('ВУ действует до'),
     categories: findCol('Категории'),
@@ -93,7 +103,7 @@ export function parseLineRows(rows: unknown[][]): DriverLineInitial[] {
       driver: {
         fullName, license,
         birthDate: at(row, idx.birthDate), citizenship: at(row, idx.citizenship), phone: at(row, idx.phone),
-        birthPlace: at(row, idx.birthPlace), passport: at(row, idx.passport),
+        birthPlace: at(row, idx.birthPlace), address: at(row, idx.address), passport: at(row, idx.passport),
         passportIssuedBy: at(row, idx.passportIssuedBy), passportIssuedDate: at(row, idx.passportIssuedDate),
         position: at(row, idx.position), licenseTill: at(row, idx.licenseTill), categories: at(row, idx.categories),
       },

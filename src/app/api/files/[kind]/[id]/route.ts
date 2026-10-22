@@ -4,9 +4,9 @@ import { requireUserViaRequest } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-/** data:<mime>[;base64],<payload> → байты и тип; null — не изображение */
+/** data:<mime>[;base64],<payload> → байты и тип; null — не изображение и не PDF */
 function decodeDataUri(uri: string): { mime: string; bytes: Buffer } | null {
-  const m = uri.match(/^data:(image\/[a-z0-9.+-]+)(;[^,]*)?,([\s\S]*)$/i)
+  const m = uri.match(/^data:(image\/[a-z0-9.+-]+|application\/pdf)(;[^,]*)?,([\s\S]*)$/i)
   if (!m) return null
   const mime = m[1].toLowerCase()
   const isBase64 = (m[2] ?? '').toLowerCase().includes('base64')
@@ -62,6 +62,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ kind
   const file = dataUri ? decodeDataUri(dataUri) : null
   if (!file) return notFound()
   const download = req.nextUrl.searchParams.get('download') === '1'
+  const pdf = file.mime === 'application/pdf'
   return new NextResponse(new Uint8Array(file.bytes), {
     headers: {
       'Content-Type': file.mime,
@@ -69,8 +70,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ kind
       'Content-Disposition': `${download ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
-      // SVG-образцы не должны исполнять скрипты, даже если файл открыть отдельной вкладкой
-      'Content-Security-Policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
+      // SVG-образцы не должны исполнять скрипты, даже если файл открыть отдельной вкладкой.
+      // PDF открывается встроенным просмотрщиком браузера — в режиме sandbox браузер его блокирует,
+      // поэтому для PDF только запрет внешних загрузок и встраивания на чужие сайты
+      'Content-Security-Policy': pdf
+        ? "default-src 'none'; frame-ancestors 'self'"
+        : "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
     },
   })
 }

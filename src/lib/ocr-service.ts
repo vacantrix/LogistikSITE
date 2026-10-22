@@ -1,9 +1,14 @@
 /**
- * Клиент локального OCR-сервиса (mini-services/paddle-ocr, порт 3020).
+ * Клиент локального OCR-сервиса (шлюз mini-services/ocr-service на порту 3020
+ * или напрямую mini-services/paddle-ocr на 3031 — контракт POST /ocr у них общий).
  *
  * Основной путь распознавания: PaddleOCR работает на нашем сервере, фото документов
- * никуда не уходят. Если сервис не отвечает — документ уходит на ручную проверку
- * (облачный резерв включается только явно, OCR_CLOUD_FALLBACK=1, см. verify.ts).
+ * никуда не уходят. Если сервис не отвечает — документ остаётся «на проверке» и проверку
+ * повторяют (облачный резерв включается только явно, OCR_CLOUD_FALLBACK=1, см. verify.ts).
+ *
+ * PaddleOCR распознаёт документы по одному (5–40 с на документ). Поэтому запросы этого процесса
+ * выстраиваются в очередь здесь же: таймаут считается с момента отправки, а не с постановки
+ * в очередь, и пачка из 10 документов не «отваливается» по таймауту на середине.
  *
  * Ожидаемые данные заявки сервису не передаются: он только читает фото.
  * Отключить интеграцию: OCR_SERVICE_URL='' (пустая строка).
@@ -67,40 +72,62 @@ export async function ocrServiceStatus(): Promise<OcrServiceStatus> {
   }
 }
 
-/** Распознавание через локальный сервис; null — сервис недоступен или вид документа не поддерживается */
-export async function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): Promise<OcrOutput | null> {
-  if (!ocrServiceEnabled()) return null
-  try {
-    const res = await fetch(`${BASE}/ocr`, {
-      method: 'POST',
-      headers: headers(),
-      body: JSON.stringify({ type, dataUri, intake }),
-      // первый вызов загружает модели PaddleOCR — даём запас
-      signal: AbortSignal.timeout(90_000),
-    })
-    if (!res.ok) return null
-    const j = (await res.json()) as {
-      ok?: boolean
-      ocr?: {
-        engine?: string
-        quality?: number
-        fields?: Record<string, string>
-        confidences?: Record<string, number>
-        detectedType?: DocType | 'UNKNOWN'
-        confirmations?: Record<string, string[]>
+/** Результат распознавания: прочитано; вид документа без шаблона (проверка вручную); сервис не ответил */
+export type OcrServiceResult = { kind: 'ok'; ocr: OcrOutput } | { kind: 'unsupported' } | { kind: 'unavailable' }
+
+// один документ — до ~40 с, с повторным точным проходом — до ~90 с; первый вызов ещё и грузит модели
+const OCR_TIMEOUT_MS = 180_000
+
+let queue: Promise<unknown> = Promise.resolve()
+
+/** Очередь запросов к сервису: следующий документ уходит, только когда предыдущий распознан */
+function enqueue<T>(job: () => Promise<T>): Promise<T> {
+  const run = queue.then(job, job)
+  queue = run.catch(() => undefined)
+  return run
+}
+
+/** Распознавание через локальный сервис (изображение или PDF — сервис читает первую страницу) */
+export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): Promise<OcrServiceResult> {
+  if (!ocrServiceEnabled()) return Promise.resolve({ kind: 'unavailable' })
+  return enqueue(async (): Promise<OcrServiceResult> => {
+    try {
+      const res = await fetch(`${BASE}/ocr`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ type, dataUri, intake }),
+        signal: AbortSignal.timeout(OCR_TIMEOUT_MS),
+      })
+      if (res.status === 422) return { kind: 'unsupported' }
+      if (!res.ok) return { kind: 'unavailable' }
+      const j = (await res.json()) as {
+        ok?: boolean
+        ocr?: {
+          engine?: string
+          quality?: number
+          fields?: Record<string, string>
+          confidences?: Record<string, number>
+          detectedType?: DocType | 'UNKNOWN'
+          side?: string
+          confirmations?: Record<string, string[]>
+        }
       }
+      const ocr = j.ocr
+      if (!j.ok || !ocr || typeof ocr.quality !== 'number' || !ocr.engine) return { kind: 'unavailable' }
+      return {
+        kind: 'ok',
+        ocr: {
+          engine: ocr.engine,
+          quality: Math.round(ocr.quality),
+          fields: ocr.fields ?? {},
+          confidences: ocr.confidences ?? {},
+          ...(ocr.detectedType ? { detectedType: ocr.detectedType } : {}),
+          ...(ocr.side === 'front' || ocr.side === 'back' ? { side: ocr.side } : {}),
+          ...(ocr.confirmations ? { confirmations: ocr.confirmations } : {}),
+        },
+      }
+    } catch {
+      return { kind: 'unavailable' }
     }
-    const ocr = j.ocr
-    if (!j.ok || !ocr || typeof ocr.quality !== 'number' || !ocr.engine) return null
-    return {
-      engine: ocr.engine,
-      quality: Math.round(ocr.quality),
-      fields: ocr.fields ?? {},
-      confidences: ocr.confidences ?? {},
-      ...(ocr.detectedType ? { detectedType: ocr.detectedType } : {}),
-      ...(ocr.confirmations ? { confirmations: ocr.confirmations } : {}),
-    }
-  } catch {
-    return null
-  }
+  })
 }

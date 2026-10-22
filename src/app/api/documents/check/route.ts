@@ -5,7 +5,8 @@ import type { DocType } from '@/lib/verify'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+// распознавание одного документа — до ~90 с плюс ожидание в очереди OCR
+export const maxDuration = 300
 
 const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
 
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
   if (!DOC_TYPES.includes(type)) {
     return NextResponse.json({ error: 'Неизвестный вид документа' }, { status: 400 })
   }
-  const imgError = imageDataUriError(dataUri)
+  const imgError = imageDataUriError(dataUri, { pdf: true })
   if (imgError) return NextResponse.json({ error: imgError }, { status: 400 })
 
   const v = await analyzeIntakeDoc(fileName, type, dataUri as string, await loadVerifySettings())

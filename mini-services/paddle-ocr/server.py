@@ -1,6 +1,7 @@
 """Локальный OCR-сервис АЭМЗ Логистика: PaddleOCR на нашем сервере, фото никуда не уходят.
 
-Слушает только 127.0.0.1 (по умолчанию порт 3031). Два формата запроса на POST /ocr:
+Слушает только 127.0.0.1 (по умолчанию порт 3031). Принимает JPG, PNG, WebP и PDF (распознаётся первая
+страница — так присылают доверенности). Два формата запроса на POST /ocr:
   — платформы (src/lib/ocr-service.ts):   { type, dataUri, intake? } → { ok, ocr: {...} }
   — OCR-шлюза (mini-services/ocr-service): { image, docType, fields? } → { quality, fields, ... }
 GET /health — статус для экрана «Цепочка распознавания».
@@ -21,20 +22,42 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 import numpy as np
+import pypdfium2 as pdfium
 
 import engine
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PADDLE_OCR_PORT", "3031"))
 TOKEN = os.environ.get("OCR_SERVICE_TOKEN", "")
 MAX_BODY = 16_000_000          # ~12 МБ изображения в base64
 MAX_SIDE = 3000                # крупнее — уменьшаем: точность та же, время меньше
+PDF_DPI = 200                  # страницу PDF рисуем в 200 dpi — как обычный скан
 STARTED = time.time()
 LOCK = threading.Lock()        # PaddleOCR не потокобезопасен — распознаём по одному
 STATE = {"processed": 0, "ready": False, "last_engine": None}
 ENGINE_NAME = "PaddleOCR (локально)"
-DATA_URI_RE = re.compile(r"^data:image/(jpeg|jpg|png|webp);base64,(.+)$", re.S | re.I)
+DATA_URI_RE = re.compile(r"^data:(image/(?:jpeg|jpg|png|webp)|application/pdf);base64,(.+)$", re.S | re.I)
+
+
+def pdf_first_page(raw):
+    """Первая страница PDF → изображение BGR (или None, если файл не PDF или повреждён)."""
+    if not raw.startswith(b"%PDF-"):
+        return None
+    try:
+        doc = pdfium.PdfDocument(raw)
+        try:
+            if len(doc) == 0:
+                return None
+            page = doc[0]
+            # страница нестандартного размера не должна превратиться в гигантскую картинку
+            scale = min(PDF_DPI / 72, MAX_SIDE / max(1.0, *page.get_size()))
+            pil = page.render(scale=scale).to_pil().convert("RGB")
+        finally:
+            doc.close()
+    except pdfium.PdfiumError:
+        return None
+    return cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
 
 
 def decode_image(data_uri):
@@ -46,7 +69,10 @@ def decode_image(data_uri):
         raw = base64.b64decode(m.group(2), validate=False)
     except ValueError:
         return None
-    img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
+    if m.group(1).lower() == "application/pdf":
+        img = pdf_first_page(raw)
+    else:
+        img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         return None
     h, w = img.shape[:2]
@@ -63,10 +89,12 @@ def decode_image(data_uri):
 
 
 def warmup():
-    """Модели грузятся ~10–20 с: делаем это при старте, а не на первом документе."""
+    """Модели грузятся ~10–20 с: делаем это при старте, а не на первом документе
+    (точная нужна для полей паспорта и повторного прохода — грузим обе)."""
     try:
         with LOCK:
-            engine.get_ocr()
+            engine.get_ocr("fast")
+            engine.get_ocr("accurate")
         STATE["ready"] = True
         print("[paddle-ocr] модели загружены", flush=True)
     except Exception as e:  # noqa: BLE001 — сервис должен жить и сообщать статус
@@ -126,12 +154,12 @@ class Handler(BaseHTTPRequestHandler):
         doc = body.get("type") if platform else body.get("docType")
         data_uri = body.get("dataUri") if platform else body.get("image")
         if doc not in engine.SUPPORTED:
-            # заявка и доверенность — свободная форма, шаблонов нет: платформа отправит на ручную сверку
+            # заявка — свободная форма, шаблона нет: платформа отправит на ручную сверку
             return self.send_json({"ok": False, "error": f"вид документа {doc} не поддерживается"}, 422)
 
         path = decode_image(data_uri)
         if not path:
-            return self.send_json({"ok": False, "error": "нужно изображение JPG, PNG или WebP"}, 400)
+            return self.send_json({"ok": False, "error": "нужно изображение JPG, PNG, WebP или PDF"}, 400)
         t0 = time.time()
         try:
             with LOCK:
@@ -156,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
             "confidences": res["confidences"],
             "detectedType": res["docType"],
             "confirmations": res["confirmations"],
+            **({"side": res["side"]} if res.get("side") else {}),
         }
         if platform:
             return self.send_json({"ok": True, "ocr": ocr})

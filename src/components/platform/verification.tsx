@@ -723,6 +723,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                           {/* просмотр скана */}
                           <div className="self-start rounded-xl border border-slate-200 bg-slate-50 p-3">
                             <ZoomableThumb
+                              pdf={activeDoc.isPdf}
                               src={secureFileUrl(activeDoc.url)}
                               alt={`${DOC_TYPE_LABEL[activeDoc.type]} — ${activeDoc.fileName}`}
                               className="mx-auto max-h-64 w-auto cursor-zoom-in rounded-lg border border-slate-200 bg-slate-100 object-contain p-2"
@@ -991,6 +992,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
           title={`${DOC_TYPE_LABEL[activeDoc.type]} — №${selected.number}`}
           fileName={activeDoc.fileName}
           downloadUrl={secureFileUrl(`${activeDoc.url}?download=1`)}
+          pdf={activeDoc.isPdf}
         />
       )}
     </div>

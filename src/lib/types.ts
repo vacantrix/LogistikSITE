@@ -24,6 +24,8 @@ export interface DriverDTO {
   categories: string
   phone: string
   birthPlace: string
+  /** адрес регистрации (место жительства) — колонка формы «Авто в порт» */
+  address: string
   citizenship: string
   passportIssuedBy: string
   passportIssuedDate: string
@@ -118,6 +120,8 @@ export interface DocumentDTO {
   fileName: string
   /** защищённая ссылка на файл (/api/files/document/<id>) — сам файл в списках не передаётся */
   url: string
+  /** файл — PDF (доверенность, скан): показывается просмотрщиком PDF, а не картинкой */
+  isPdf: boolean
   status: DocStatus
   quality: number | null
   engine: string | null
@@ -346,6 +350,10 @@ export interface IntakeDriverDraft {
   license: string
   licenseTill: string
   categories: string
+  /** место рождения — со страницы паспорта с фото */
+  birthPlace: string
+  /** адрес регистрации — со страницы регистрации */
+  address: string
   confidence: Record<string, number>
 }
 

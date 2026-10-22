@@ -40,7 +40,7 @@ export const TRAILER_TYPES = ['Полуприцеп-штора', 'Полупри
 /** Человекочитаемые имена обязательных полей — для подсветки и текста ошибок (Task 44) */
 export const DRIVER_LABELS: Record<string, string> = {
   fullName: 'ФИО', birthDate: 'Дата рождения', citizenship: 'Гражданство', phone: 'Телефон',
-  birthPlace: 'Адрес регистрации', passport: 'Паспорт', passportIssuedBy: 'Кем выдан',
+  address: 'Адрес регистрации', passport: 'Паспорт', passportIssuedBy: 'Кем выдан',
   passportIssuedDate: 'Дата выдачи', position: 'Должность', license: 'ВУ номер',
   licenseTill: 'ВУ действует до', categories: 'Категории',
 }
@@ -67,7 +67,7 @@ const EMPTY_VERDICTS: Partial<Record<DocType, IntakeResult['documents'][number]>
 /** Данные из Excel/демо — поля, уже известные до проверки. Водительская карточка
  * использует только driver; truck/trailer из строки становятся отдельными карточками (Task 51) */
 export interface DriverLineInitial {
-  driver?: Partial<Record<'fullName' | 'birthDate' | 'citizenship' | 'phone' | 'birthPlace' | 'passport' | 'passportIssuedBy' | 'passportIssuedDate' | 'position' | 'license' | 'licenseTill' | 'categories', string>>
+  driver?: Partial<Record<'fullName' | 'birthDate' | 'citizenship' | 'phone' | 'birthPlace' | 'address' | 'passport' | 'passportIssuedBy' | 'passportIssuedDate' | 'position' | 'license' | 'licenseTill' | 'categories', string>>
   truck?: Partial<Record<'brand' | 'plate' | 'sts' | 'color' | 'owner', string>>
   trailer?: Partial<Record<'type' | 'plate' | 'sts' | 'color' | 'owner', string>>
 }
@@ -195,13 +195,14 @@ export default function DriverLine({
 }: DriverLineProps) {
   const { toast } = useToast()
 
-  // ——— данные водителя (12 полей) — ТОЛЬКО они в карточке «Добавить водителя» (Task 51) ———
+  // ——— данные водителя (13 полей) — ТОЛЬКО они в карточке «Добавить водителя» (Task 51) ———
   const [d, setD] = useState({
     fullName: initial?.driver?.fullName ?? '',
     birthDate: initial?.driver?.birthDate ?? '',
     citizenship: initial?.driver?.citizenship ?? '',
     phone: initial?.driver?.phone ?? '',
-    birthPlace: initial?.driver?.birthPlace ?? '', // поле «Адрес регистрации» (Task 33)
+    birthPlace: initial?.driver?.birthPlace ?? '', // место рождения (необязательное: для пропуска в порт)
+    address: initial?.driver?.address ?? '', // адрес регистрации (Task 33; раньше хранился в birthPlace)
     passport: initial?.driver?.passport ?? '',
     passportIssuedBy: initial?.driver?.passportIssuedBy ?? '',
     passportIssuedDate: initial?.driver?.passportIssuedDate ?? '',
@@ -281,7 +282,8 @@ export default function DriverLine({
           licenseTill: pick(d.licenseTill, res.driver.licenseTill),
           categories: pick(d.categories, res.driver.categories),
           citizenship: pick(d.citizenship, (res.driver as unknown as { citizenship?: string }).citizenship),
-          birthPlace: pick(d.birthPlace, (res.driver as unknown as { birthPlace?: string }).birthPlace),
+          birthPlace: pick(d.birthPlace, res.driver.birthPlace),
+          address: pick(d.address, res.driver.address),
         }
         setD(effD)
         setConf(res.driver.confidence ?? {})
@@ -322,6 +324,7 @@ export default function DriverLine({
         citizenship: effD.citizenship.trim(),
         phone: effD.phone.trim(),
         birthPlace: effD.birthPlace.trim(),
+        address: effD.address.trim(),
         passport: effD.passport.trim(),
         passportIssuedBy: effD.passportIssuedBy.trim(),
         passportIssuedDate: effD.passportIssuedDate.trim(),
@@ -431,7 +434,8 @@ export default function DriverLine({
             <FieldInput id={`${id}-bd`} label="Дата рождения" placeholder="14.02.1995" value={d.birthDate} conf={conf.birthDate} invalid={miss(d.birthDate)} disabled={lock} onChange={(v) => setField('birthDate', v)} />
             <FieldInput id={`${id}-cit`} label="Гражданство" placeholder="РФ" value={d.citizenship} invalid={miss(d.citizenship)} disabled={lock} onChange={(v) => setField('citizenship', v)} />
             <FieldInput id={`${id}-tel`} label="Телефон" placeholder="+7 900 000-00-00" value={d.phone} mono invalid={miss(d.phone)} disabled={lock} onChange={(v) => setField('phone', v)} />
-            <FieldInput id={`${id}-adr`} label="Адрес регистрации" placeholder="г. Краснодар, ул. Красная, д. 5" value={d.birthPlace} invalid={miss(d.birthPlace)} disabled={lock} onChange={(v) => setField('birthPlace', v)} />
+            <FieldInput id={`${id}-adr`} label="Адрес регистрации" placeholder="г. Краснодар, ул. Красная, д. 5" value={d.address} conf={conf.address} invalid={miss(d.address)} disabled={lock} onChange={(v) => setField('address', v)} />
+            <FieldInput id={`${id}-bpl`} label="Место рождения" placeholder="г. Краснодар" value={d.birthPlace} conf={conf.birthPlace} disabled={lock} onChange={(v) => setField('birthPlace', v)} />
             <FieldInput id={`${id}-pass`} label="Паспорт" placeholder="52 10 884610" value={d.passport} conf={conf.passport} mono invalid={miss(d.passport)} disabled={lock} onChange={(v) => setField('passport', v)} />
             <FieldInput id={`${id}-pby`} label="Кем выдан" placeholder="ОВМ УМВД…" value={d.passportIssuedBy} invalid={miss(d.passportIssuedBy)} disabled={lock} onChange={(v) => setField('passportIssuedBy', v)} />
             <FieldInput id={`${id}-pdate`} label="Дата выдачи" placeholder="10.06.2015" value={d.passportIssuedDate} invalid={miss(d.passportIssuedDate)} disabled={lock} onChange={(v) => setField('passportIssuedDate', v)} />

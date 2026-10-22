@@ -9,8 +9,14 @@ PaddleOCR (три нейросети: поиск строк, ориентаци�
 сервис получает только фото и ничего не знает о заявке.
 
 Поддерживаются: паспорт РФ (страница с фото; серия и номер — с полей страницы),
-страница регистрации, водительское удостоверение, СТС.
+страница регистрации, водительское удостоверение, СТС (лицевая сторона и оборот),
+доверенность по форме М-2.
+
+Скорость: сначала быстрая модель поиска текста (mobile), и только если документ не узнан
+или не хватает ключевых полей — второй проход точной (server). На ноутбуке без видеокарты
+это 6–17 с на документ вместо 30–90 с.
 """
+import os
 import re
 from datetime import date
 
@@ -32,8 +38,19 @@ SERIES_NUMBER_RE = re.compile(r"(\d{2}) ?(\d{2}) +(\d{6})")
 
 # вид документа по шаблону → тип документа платформы
 PLATFORM_TYPE = {"passport": "PASSPORT_PHOTO", "passport_registration": "PASSPORT_REG",
-                 "driver_license": "LICENSE", "vehicle_registration": "STS", "unknown": "UNKNOWN"}
-SUPPORTED = {"PASSPORT_PHOTO", "PASSPORT_REG", "LICENSE", "STS"}
+                 "driver_license": "LICENSE", "vehicle_registration": "STS", "vehicle_registration_back": "STS",
+                 "poa": "POA", "unknown": "UNKNOWN"}
+SUPPORTED = {"PASSPORT_PHOTO", "PASSPORT_REG", "LICENSE", "STS", "POA"}
+
+# модели: быстрая для первого прохода, точная — для повторного (переопределяются переменными окружения)
+FAST_DET = os.environ.get("OCR_DET_FAST", "PP-OCRv5_mobile_det")
+ACCURATE_DET = os.environ.get("OCR_DET_ACCURATE", "PP-OCRv5_server_det")
+REC_MODEL = os.environ.get("OCR_REC_MODEL", "eslav_PP-OCRv5_mobile_rec")
+UPSCALE_BELOW = int(os.environ.get("OCR_UPSCALE_BELOW", "1300"))   # мелкие сканы увеличиваем вдвое
+# точная модель ищет строки на кадре не больше этого размера: на фото паспорта 1500×2000 — 38 с вместо 70,
+# поля те же (сами строки читаются с исходного кадра)
+ACCURATE_MAX_SIDE = int(os.environ.get("OCR_ACCURATE_MAX_SIDE", "1600"))
+MARGIN_MAX_SIDE = 2000   # полоса с номером на полях паспорта (см. read_margin_number)
 
 
 def cyr(s):
@@ -81,7 +98,13 @@ def add_years(d, n):
 
 # ---------------- чтение текста ----------------
 
-_ocr = None
+_ocr = {}
+_mode = "fast"
+
+# признаки известных документов: если на фото нет ни одного, точный повторный проход не нужен —
+# это другая страница (военный учёт, семейное положение, оборот ВУ), её отправят на перезагрузку
+DOC_HINTS = ("ПАСПОРТ", "ФАМИЛИЯ", "ОТЧЕСТВО", "РОЖДЕНИЯ", "ПОДРАЗДЕЛЕНИЯ", "ВОДИТЕЛЬСК", "УДОСТОВЕРЕН",
+                                   "СВИДЕТЕЛЬСТВО", "СОБСТВЕННИК", "ДОВЕРЕННОСТ", "ЗАРЕГИСТРИР", "МЕСТОЖИТЕЛЬ")
 
 # «Только русские буквы»: нейросеть чтения на каждом шаге строки выдаёт проценты по всем символам —
 # и русским, и латинским. Для полей ФИО заново выбираем буквы только среди русских, перенося голоса
@@ -107,7 +130,8 @@ def _hook_decoder():
     P.CTCLabelDecode._aemz_hook = True
 
 
-TWINS = list(zip("ABEKMHOPCTYXaeopcxy", "АВЕКМНОРСТУХаеорсху"))   # латинская буква → русская того же вида
+TWINS = list(zip("ABEKMHOPCTYXaeopcxy306", "АВЕКМНОРСТУХаеорсхуЗОБ"))   # латинская буква или цифра → русская того же вида
+DIGIT_TWINS = str.maketrans("306", "ЗОБ")
 
 
 def greedy(probs, chars, allowed=None):
@@ -128,22 +152,27 @@ def greedy(probs, chars, allowed=None):
     return "".join(chars[i] for i in idx[keep]), (float(mx[keep].mean()) if keep.any() else 0.0)
 
 
-def get_ocr():
-    global _ocr
-    if _ocr is None:
+def get_ocr(mode=None):
+    """mode: fast — быстрая модель поиска текста, accurate — точная (медленнее в 3–5 раз)."""
+    mode = mode or _mode
+    if mode not in _ocr:
         from paddleocr import PaddleOCR
         if RUSSIAN_ONLY:
             _hook_decoder()
         # enable_mkldnn=False: в PaddlePaddle 3.3 ускоритель oneDNN падает на этих моделях
-        _ocr = PaddleOCR(lang="ru", use_doc_orientation_classify=False, use_doc_unwarping=False,
-                         use_textline_orientation=True, enable_mkldnn=False)
-    return _ocr
+        _ocr[mode] = PaddleOCR(
+            text_detection_model_name=FAST_DET if mode == "fast" else ACCURATE_DET,
+            text_recognition_model_name=REC_MODEL,
+            use_doc_orientation_classify=False, use_doc_unwarping=False,
+            use_textline_orientation=True, enable_mkldnn=False)
+    return _ocr[mode]
 
 
 def read_lines(path):
     ocr = get_ocr()
     _PROBS.clear()
-    res = ocr.predict(str(path))[0]
+    limit = {"text_det_limit_side_len": ACCURATE_MAX_SIDE, "text_det_limit_type": "max"} if _mode == "accurate" else {}
+    res = ocr.predict(str(path), **limit)[0]
     decoded = [(*greedy(p[b], chars), p[b], chars) for p, chars in _PROBS for b in range(p.shape[0])]
     lines = []
     for text, score, poly in zip(res["rec_texts"], res["rec_scores"], res["rec_polys"]):
@@ -165,15 +194,33 @@ def sharpness(path):
 
 # ---------------- общие помощники шаблонов ----------------
 
+def flat_text(lines):
+    """Весь текст одной строкой: верхний регистр, без пробелов и дефисов, латинские двойники → русские.
+    Штампы набирают вразрядку («З А Р Е Г И С Т Р И Р О В А Н») — так они тоже находятся."""
+    return re.sub(r"[\s\-]", "", " ".join(l["text"] for l in lines).upper()).translate(LAT2CYR)
+
+
+PASSPORT_MARKS = ("ПАСПОРТВЫДАН", "КОДПОДРАЗДЕЛЕНИЯ", "ДАТАВЫДАЧИ", "ФАМИЛИЯ", "ОТЧЕСТВО",
+                  "МЕСТОРОЖДЕНИЯ", "ЛИЧНАЯПОДПИСЬ", "ДАТАРОЖДЕНИЯ")
+
+
 def doc_type(lines):
-    text = " ".join(l["text"].upper() for l in lines)
-    if "ВОДИТЕЛЬСК" in text:
+    flat = flat_text(lines)
+    raw = " ".join(l["text"].upper() for l in lines)
+    # доверенность первой: в ней есть «фамилия, имя, отчество» и паспортные данные представителя
+    if "ДОВЕРЕННОСТЬ" in flat and ("ДЕЙСТВИТЕЛЬНА" in flat or "ДОВЕРЕННОСТЬ№" in flat or "ВЫДАНА" in flat):
+        return "poa"
+    if "ВОДИТЕЛЬСК" in flat or "DRIVING" in raw:
         return "driver_license"
-    if "СВИДЕТЕЛЬСТВО" in text and ("РЕГИСТРАЦ" in text or "ТРАНСПОРТН" in text):
+    if "СВИДЕТЕЛЬСТВО" in flat and ("РЕГИСТРАЦ" in flat or "ТРАНСПОРТН" in flat):
         return "vehicle_registration"
-    if "ФАМИЛИЯ" in text and "ОТЧЕСТВО" in text:
+    if "СОБСТВЕННИК" in flat and ("ГИБДД" in flat or "ОСОБЫЕОТМЕТКИ" in flat or "СУБЪЕКТ" in flat):
+        return "vehicle_registration_back"
+    marks = sum(m in flat for m in PASSPORT_MARKS)
+    margin_number = any(l["h"] > 1.5 * l["w"] and SERIES_NUMBER_RE.search(l["text"]) for l in lines)
+    if marks >= 3 or (marks >= 2 and margin_number and "ЗАРЕГИСТРИРОВАН" not in flat):
         return "passport"
-    if "ЗАРЕГИСТРИРОВАН" in text or "ЖИТЕЛЬСТВ" in text:
+    if "ЗАРЕГИСТРИРОВАН" in flat or "МЕСТОЖИТЕЛЬСТВА" in flat:
         return "passport_registration"
     return "unknown"
 
@@ -215,12 +262,36 @@ def field(value, src):
 
 
 def ru_field(src, value):
-    """Поле ФИО. Если значение — вся строка, буквы заново выбираются только среди русских (см. RUSSIAN_ONLY)."""
-    f = field(cyr(value) if value else None, src)
-    if RUSSIAN_ONLY and src and src.get("probs") and value == src["text"] and not re.search(r"\d", value):
+    """Поле ФИО: буквы заново выбираются только среди русских (см. RUSSIAN_ONLY). Цифры, похожие
+    на буквы («3ЕБКИН»), переносят свой голос на русскую букву. Если значение — хвост строки после
+    номера подписи («1. ЗЕБКИН»), перечитываем всю строку и берём буквенную часть."""
+    f = field(cyr(value).translate(DIGIT_TWINS) if value else None, src)
+    if RUSSIAN_ONLY and src and src.get("probs") and value and value.strip() in src["text"]:
         text, score = greedy(*src["probs"], allowed=RUSSIAN)
-        if text.strip():
-            f["value"], f["conf"] = re.sub(r"\s+", " ", text).strip(), round(score, 3)
+        text = re.sub(r"\s+", " ", text).strip()
+        letters = lambda t: len(re.sub(r"[^А-ЯA-Z0-9]", "", t.upper()))
+        if text and abs(letters(text) - letters(value)) <= 2:
+            f["value"], f["conf"] = text, round(score, 3)
+    return f
+
+
+def reread_code(path, f):
+    """Код подразделения («123-456»): первая цифра часто читается неверно («223»). Вырезку строки
+    увеличиваем вдвое и читаем точной моделью; берём чтение, в котором нейросеть увереннее."""
+    l = f["line"]
+    if not l:
+        return f
+    img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
+    pad = int(0.4 * l["h"])
+    crop = img[max(0, int(l["y0"]) - pad):int(l["y1"]) + pad, max(0, int(l["x0"]) - pad):int(l["x1"]) + pad]
+    if crop.size == 0:
+        return f
+    big = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    res = get_ocr("accurate").predict(big, use_textline_orientation=False)[0]
+    for t, sc in zip(res["rec_texts"], res["rec_scores"]):
+        m = re.fullmatch(r"\s*(\d{3})\s?[-–]\s?(\d{3})\s*", t)
+        if m and float(sc) > (f["conf"] or 0):
+            return {"value": f"{m.group(1)}-{m.group(2)}", "conf": round(float(sc), 3), "line": l}
     return f
 
 
@@ -230,7 +301,9 @@ def read_margin_number(path, lines):
     """Серия и номер напечатаны вертикально на полях обеих страниц. Вырезаем эту полосу, поворачиваем,
     увеличиваем и читаем ещё раз. Проверку ориентации строк здесь выключаем: на коротких цифрах (0, 3, 8)
     она путает верх и низ. Вместо неё читаем оба поворота и берём тот, где номер нашёлся."""
-    vertical = [l for l in lines if l["h"] > 1.5 * l["w"] and any(c.isdigit() for c in l["text"])]
+    # номер на полях — длинная вертикальная строка цифр; одиночная «цифра» (пятно, край голограммы)
+    # растянула бы полосу на всю страницу: чтение в 9 раз дольше и хуже
+    vertical = [l for l in lines if l["h"] > 1.5 * l["w"] and sum(c.isdigit() for c in l["text"]) >= 4]
     if not vertical:
         return []
     img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
@@ -240,7 +313,9 @@ def read_margin_number(path, lines):
     best = []
     for rot in (cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE):
         strip = cv2.resize(cv2.rotate(col, rot), None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        res = get_ocr().predict(strip, use_textline_orientation=False)[0]
+        # строки ищем на полосе не длиннее 2000 px (8 с вместо 20–30), читаются они с увеличенной полосы
+        res = get_ocr("accurate").predict(strip, use_textline_orientation=False,
+                                          text_det_limit_side_len=MARGIN_MAX_SIDE, text_det_limit_type="max")[0]
         toks = sorted((float(np.array(p)[:, 0].min()), t.strip(), float(s))
                       for t, s, p in zip(res["rec_texts"], res["rec_scores"], res["rec_polys"]) if re.fullmatch(r"\d[\d ]*", t.strip()))
         found, i = [], 0
@@ -258,11 +333,49 @@ def read_margin_number(path, lines):
     return best
 
 
+def above_value(lines, anchor, pred, rows=6.0):
+    """Ближайшая строка над значением, по центру того же столбца (фамилия над именем)."""
+    c = [l for l in lines if l is not anchor and pred(l["text"]) and 0 < anchor["cy"] - l["cy"] < rows * anchor["h"]
+         and abs(l["cx"] - anchor["cx"]) < 0.6 * max(l["w"], anchor["w"])]
+    return min(c, key=lambda l: anchor["cy"] - l["cy"]) if c else None
+
+
 def extract_passport(path, lines):
     f = {}
     for key, word in (("surname", "фамил"), ("name", "имя"), ("patronymic", "отчеств")):
         v = near_label(lines, word, is_upper_word)
         f[key] = ru_field(v, v["text"] if v else None)
+    if not f["surname"]["value"] and f["name"]["line"]:
+        # мелкая подпись «Фамилия» не прочиталась (старый паспорт, скан страницы А4): фамилия — над именем
+        v = above_value(lines, f["name"]["line"], lambda t: is_upper_word(t) and not re.search(r"\d|РОССИЙ|ФЕДЕРАЦ", t.upper()))
+        f["surname"] = ru_field(v, v["text"] if v else None)
+    place = near_label(lines, "мест", lambda t: bool(re.search(r"[А-ЯЁ]{3}", cyr(t))) and not DATE_RE.search(t) and t.upper() == t, up=2.0, down=3.0)
+    if not place:
+        # «Дата рождения» и «Место рождения»: подпись «Место» мелкая и теряется — берём нижнюю «рождения»
+        labs = sorted((l for l in lines if "рожден" in l["text"].lower()), key=lambda l: -l["cy"])
+        ok = lambda t: bool(re.search(r"[А-ЯЁ]{3}", cyr(t))) and not DATE_RE.search(t) and t.upper() == t and not re.search(r"МУЖ|ЖЕН", cyr(t))
+        for lab in labs:
+            c = [l for l in lines if l is not lab and l["x0"] > lab["x0"] + lab["h"] and -2.5 * lab["h"] < l["cy"] - lab["cy"] < 1.5 * lab["h"] and ok(l["text"])]
+            if c:
+                place = min(c, key=lambda l: abs(l["cy"] - lab["cy"]))
+                break
+    if place:
+        # место рождения бывает в две строки («Г. АБИНСК» / «КРАСНОДАРСКИЙ КРАЙ») — склеиваем столбец
+        parts, cur = [place], place
+        for _ in range(2):
+            nxt = next((l for l in lines if l not in parts and 0 < l["cy"] - cur["cy"] < 1.8 * cur["h"]
+                        and abs(l["cx"] - cur["cx"]) < 0.6 * max(l["w"], cur["w"]) and l["text"].upper() == l["text"]
+                        and re.search(r"[А-ЯЁ]{3}", cyr(l["text"])) and not re.search(r"\d", l["text"])), None)
+            if not nxt:
+                break
+            parts.append(nxt)
+            cur = nxt
+        if len(parts) == 1:
+            f["birth_place"] = ru_field(place, place["text"])
+        else:
+            f["birth_place"] = field(cyr(" ".join(l["text"] for l in parts)), min(parts, key=lambda l: l["conf"]))
+    else:
+        f["birth_place"] = field(None, None)
     v = near_label(lines, "рожд", lambda t: bool(DATE_RE.search(t)))
     f["birth_date"] = field(DATE_RE.search(v["text"]).group(0) if v else None, v)
     copies = read_margin_number(path, lines)
@@ -278,9 +391,71 @@ def extract_passport(path, lines):
     return f, copies
 
 
+# ---------------- общие помощники для значений под подписью ----------------
+
+def value_near(lines, label, pred, below=3.0):
+    """Значение справа от подписи в той же строке или ниже неё (СТС, доверенность): первое подходящее."""
+    c = [l for l in lines if l is not label and pred(l["text"]) and (
+        (abs(l["cy"] - label["cy"]) < 0.6 * max(l["h"], label["h"]) and l["x0"] > label["x0"])
+        or (0 < l["cy"] - label["cy"] < below * label["h"] and l["x1"] > label["x0"] - 2 * label["h"]))]
+    return min(c, key=lambda l: (abs(l["cy"] - label["cy"]), l["x0"])) if c else None
+
+
+def find_line(lines, *words):
+    """Первая строка, содержащая все слова (без учёта регистра и пробелов)."""
+    for l in lines:
+        t = re.sub(r"\s", "", l["text"].upper()).translate(LAT2CYR)
+        if all(w in t for w in words):
+            return l
+    return None
+
+
+# латинские двойники в строчных буквах подписей («Мaрка», «Moдель»)
+LOWER_TWINS = str.maketrans("aeopcxykmtbhAEOPCXYKMTBH", "аеорсхукмтвнАЕОРСХУКМТВН")
+# цифры, прочитанные как похожие буквы в датах («З1.12.2030»)
+DATE_TWINS = str.maketrans("ЗзОоOoбБ", "33000066")
+
+
+def fix_date_twins(t):
+    return re.sub(r"[\dЗзОоOoбБ]{2}[.,][\dЗзОоOoбБ]{2}[.,][\dЗзОоOoбБ]{4}", lambda m: m.group(0).translate(DATE_TWINS), t or "")
+
+
+CAR_PLATE_RE = re.compile(r"[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}\d{2,3}")
+TRAILER_PLATE_RE = re.compile(r"[АВЕКМНОРСТУХ]{2}\d{4}\d{2,3}")
+STS_NUMBER_RE = re.compile(r"\d{2}\s?\d{2}\s?\d{6}")
+VIN_RE = re.compile(r"[A-HJ-NPR-Z0-9]{17}")
+
+
+def as_plate(t):
+    """Госномер автомобиля или прицепа; в позициях букв 0 → О (OCR путает)."""
+    s = norm_plate(t)
+    for cand in (s, re.sub(r"^0", "О", s), re.sub(r"^(.)0", r"\1О", s)):
+        if CAR_PLATE_RE.fullmatch(cand) or TRAILER_PLATE_RE.fullmatch(cand):
+            return cand
+    return None
+
+
+def as_vin(t):
+    s = norm_vin(t).replace("O", "0").replace("I", "1").replace("Q", "0")
+    return s if VIN_RE.fullmatch(s) else None
+
+
+def sts_number(lines):
+    """Красный номер бланка СТС «99 00 123456» (печатается внизу и вертикально на поле)."""
+    c = [l for l in lines if STS_NUMBER_RE.fullmatch(l["text"].strip())]
+    if not c:
+        return None
+    best = max(c, key=lambda l: l["conf"])
+    d = re.sub(r"\s", "", best["text"])
+    return {"value": f"{d[:2]} {d[2:4]} {d[4:]}", "conf": round(best["conf"], 3), "line": best,
+            "copies": len({re.sub(r"\s", "", l["text"]) for l in c}), "count": len(c)}
+
+
 # ---------------- шаблоны ВУ, СТС, регистрации ----------------
 
-LABEL_RE = re.compile(r"^\s*(1|2|3|4[aаAА]|4[bвBВ]|4[cсCС]|5|8|9)\s*[.\),:]\s*(.*)$")
+# «1.», «4a)», а также без точки: «4a 01.02.2020» и одиночная «9» (цифры без точки — только одиночные,
+# иначе «99 00 123456» прочитался бы как подпись «9»)
+LABEL_RE = re.compile(r"^\s*(?:(1|2|3|5|8|9)\s*(?:[.\),:]\s*(.*)|$)|(4\s*[aаAАbвBВcсCС])\s*[.\),:]?\s*(.*))$")
 SUFFIX = {"а": "a", "a": "a", "А": "a", "A": "a", "в": "b", "b": "b", "В": "b", "B": "b", "с": "c", "c": "c", "С": "c", "C": "c"}
 
 
@@ -293,7 +468,7 @@ def reread_categories(path, lab):
     x0, x1 = int(lab["x0"]), int(min(W, lab["x0"] + 30 * h))
     y0, y1 = int(max(0, lab["cy"] - 1.2 * h)), int(min(H, lab["cy"] + 1.2 * h))
     strip = cv2.resize(img[y0:y1, x0:x1], None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-    res = get_ocr().predict(strip, use_textline_orientation=False)[0]
+    res = get_ocr("accurate").predict(strip, use_textline_orientation=False)[0]
     found = {}
     for t, s, p in sorted(zip(res["rec_texts"], res["rec_scores"], res["rec_polys"]), key=lambda r: np.array(r[2])[:, 0].min()):
         for x in re.split(r"[,.\s|\[\]()]+", t.upper().translate(CYR2LAT)):
@@ -304,11 +479,18 @@ def reread_categories(path, lab):
 
 
 def extract_driver_license(path, lines):
+    found = [(LABEL_RE.match(l["text"]), l) for l in lines]
+    found = [(m, l) for m, l in found if m]
+    dotted = sorted(l["x0"] for m, l in found if re.search(r"[.\),:]", l["text"]))
+    col_x = dotted[len(dotted) // 2] if dotted else None
     labels = {}
-    for l in lines:
-        m = LABEL_RE.match(l["text"])
-        if m:
-            labels[m.group(1)[0] + SUFFIX.get(m.group(1)[1:], "")] = (m.group(2).strip() or None, l)
+    for m, l in found:
+        bare = not re.search(r"[.\),:]", l["text"])
+        if bare and col_x is not None and abs(l["x0"] - col_x) > 2 * l["h"]:
+            continue
+        key = (m.group(1) or re.sub(r"\s", "", m.group(3)))
+        rest = (m.group(2) if m.group(1) else m.group(4)) or ""
+        labels.setdefault(key[0] + SUFFIX.get(key[1:], ""), (rest.strip() or None, l))
 
     def by_label(k):
         if k not in labels:
@@ -329,19 +511,32 @@ def extract_driver_license(path, lines):
              and re.fullmatch(r"[А-ЯЁ\- ]{3,}", cyr(l["text"]).strip())]
         src = min(c, key=lambda l: l["cy"]) if c else None
         v = src["text"] if src else None
-    f["surname"] = ru_field(src, v)
+    head = max((l["cy"] for l in lines if re.search(r"УДОСТОВЕРЕНИЕ|LICENCE|CONDUIRE", l["text"].upper())), default=0)
+    first_date = min((l["cy"] for l in lines if parse_date(l["text"])), default=None)
+    band = [l for l in lines if l["cy"] > head + 0.3 * l["h"] and (first_date is None or l["cy"] < first_date - 0.3 * l["h"])
+            and re.fullmatch(r"(?:\d\s*[.,]\s*)?[А-ЯЁ0-9][А-ЯЁ0-9\- ]{2,}", cyr(l["text"]).strip())
+            and re.search(r"[А-ЯЁ]{3}", cyr(l["text"]))]
+    band.sort(key=lambda l: l["cy"])
+    strip_num = lambda t: re.sub(r"^\s*\d\s*[.,]\s*", "", t).strip() if t else t
+    if not v and band:
+        src, v = band[0], strip_num(band[0]["text"])
+    f["surname"] = ru_field(src, strip_num(v))
     v, src = by_label("2")
-    f["name"] = ru_field(src, v)
+    if not v:
+        rest = [l for l in band if l is not f["surname"]["line"] and (f["surname"]["line"] is None or l["cy"] > f["surname"]["line"]["cy"])]
+        if rest:
+            src, v = rest[0], strip_num(rest[0]["text"])
+    f["name"] = ru_field(src, strip_num(v))
     dated = sorted([(parse_date(l["text"]), l) for l in lines if parse_date(l["text"])], key=lambda t: t[0])
     v3, s3 = by_label("3")
     birth = (v3, s3) if parse_date(v3) else ((dated[0][1]["text"], dated[0][1]) if dated else (None, None))
     f["birth_date"] = field(DATE_RE.search(birth[0]).group(0) if birth[0] else None, birth[1])
     v4a, s4a = by_label("4a")
     if not parse_date(v4a):
-        s4a = next((l for l in lines if re.search(r"4\s*[aаAА]\)", l["text"]) and parse_date(l["text"])), None)
+        s4a = next((l for l in lines if re.search(r"4\s*[aаAА]\)?\s", l["text"]) and parse_date(l["text"])), None)
         v4a = s4a["text"] if s4a else None
     f["issue_date"] = field(DATE_RE.search(v4a).group(0) if v4a else None, s4a)
-    exp = next((l for l in lines if re.search(r"4\s*[bвBВ]\)", l["text"]) and parse_date(l["text"])), dated[-1][1] if dated else None)
+    exp = next((l for l in lines if re.search(r"4\s*[bвBВ]\)?\s", l["text"]) and parse_date(l["text"])), dated[-1][1] if dated else None)
     f["expiry_date"] = field(DATE_RE.search(exp["text"]).group(0) if exp else None, exp)
     num = next((l for l in lines if re.fullmatch(r"(5\.\s*)?\d{2}\s?[\dА-ЯA-Z]{2}\s?\d{6}", l["text"].strip())), None)
     f["number"] = field(re.sub(r"^5\.\s*", "", num["text"]).strip() if num else None, num)
@@ -363,25 +558,151 @@ def extract_driver_license(path, lines):
 
 
 def extract_vehicle_registration(lines):
-    def after(word):
-        a = next((l for l in lines if word in l["text"].lower()), None)
-        v = right_of(lines, a) if a else None
-        return (v["text"], v) if v else (None, None)
-
+    """Лицевая сторона СТС: значения напечатаны ПОД подписями (раньше искали только справа)."""
     f = {}
-    v, src = after("регистрационный знак")
+    lab = find_line(lines, "РЕГИСТРАЦИОННЫЙ")
+    v = value_near(lines, lab, as_plate) if lab else None
     if not v:
-        src = next((l for l in lines if re.fullmatch(r"[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}\d{2,3}", norm_plate(l["text"]))), None)
-        v = src["text"] if src else None
-    f["plate"] = field(norm_plate(v) if v else None, src)
-    v, src = after("идентификационный")
+        v = next((l for l in lines if as_plate(l["text"])), None)
+    f["plate"] = field(as_plate(v["text"]) if v else None, v)
+    lab = find_line(lines, "ИДЕНТИФИКАЦ")
+    v = value_near(lines, lab, as_vin) if lab else None
     if not v:
-        src = next((l for l in lines if re.fullmatch(r"[A-Z0-9]{17}", norm_vin(l["text"]))), None)
-        v = src["text"] if src else None
-    f["vin"] = field(norm_vin(v) if v else None, src)
-    v, src = after("собственник")
-    f["owner"] = field(v, src)
-    return f
+        v = next((l for l in lines if as_vin(l["text"])), None)
+    f["vin"] = field(as_vin(v["text"]) if v else None, v)
+    # «Марка SCHMITZ S.KO»: подпись и значение часто читаются одной строкой
+    brand = None
+    for word in ("марка", "модель"):   # у СТС марка и модель обычно совпадают — модель как запасной вариант
+        for l in lines:
+            t = l["text"].translate(LOWER_TWINS)
+            m = re.match(rf"^\s*{word}\s*[:.]?\s*(.*)$", t, re.I)
+            if not m:
+                continue
+            val = l["text"][len(l["text"]) - len(m.group(1)):].strip() if m.group(1) else ""
+            if len(val) >= 2:
+                brand = field(val, l)
+            else:
+                r = right_of(lines, l)
+                brand = field(r["text"].strip(), r) if r else None
+            if brand:
+                break
+        if brand:
+            break
+    if not brand and f["vin"]["line"]:
+        vl = f["vin"]["line"]
+        for l in sorted((l for l in lines if 0 < l["cy"] - vl["cy"] < 4 * vl["h"]), key=lambda l: l["cy"]):
+            m = re.search(r"(?<![A-Za-z])([A-Z][A-Z0-9\-]{2,}(?:\s+[A-Z0-9][A-Z0-9\-]*)*)\s*$", l["text"])
+            if m and not as_vin(m.group(1)):
+                brand = field(m.group(1), l)
+                break
+    f["brand"] = brand or field(None, None)
+    n = sts_number(lines)
+    f["sts"] = {"value": n["value"], "conf": n["conf"], "line": n["line"]} if n else field(None, None)
+    f["owner"] = field(None, None)   # собственник — на обороте
+    return f, n
+
+
+def extract_sts_back(lines):
+    """Оборот СТС: собственник (часто лизингополучатель), лизингодатель и срок временного учёта."""
+    f = {}
+    lab = find_line(lines, "СОБСТВЕННИК", "ВЛАДЕЛЕЦ") or find_line(lines, "СОБСТВЕННИК")
+    stop = find_line(lines, "СУБЪЕКТ")
+    owner_lines = []
+    if lab:
+        owner_lines = [l for l in lines if l is not lab and l["cy"] > lab["cy"] + 0.4 * lab["h"]
+                       and (stop is None or l["cy"] < stop["cy"] - 0.4 * stop["h"]) and re.search(r"[А-ЯЁа-яё]{3}", l["text"])]
+    if owner_lines:
+        text = owner_lines[0]["text"]
+        if len(owner_lines) > 1 and re.search(r"лизингополучател", text, re.I) and not re.search(r"ООО|АО|ИП", text.upper()):
+            text = text + " " + owner_lines[1]["text"]
+        text = re.sub(r"(?i)^\s*лизингополучатель\s*[-–—:]?\s*", "", text).strip()
+        f["owner"] = field(text, min(owner_lines[:2], key=lambda l: l["conf"]))
+    else:
+        f["owner"] = field(None, None)
+    notes = fix_date_twins(" ".join(l["text"] for l in lines if stop is None or l["cy"] > stop["cy"]))
+    notes_up = notes.upper().translate(LAT2CYR)
+    m = re.search(r"ЛИЗИНГОДАТЕЛ[ЬЯ]\s+(.+?)\s+(?:ПО\s|$)", notes_up)
+    lessor_line = next((l for l in lines if "ЛИЗИНГОДАТЕЛ" in l["text"].upper()), None)
+    f["lessor"] = field(m.group(1).strip(' ,."') if m else None, lessor_line)
+    m = re.search(r"УЧ[ЕЁ]Т\s*Д[ОO]?\s*[:.]?\s*(\d{2}[.,]\d{2}[.,]\d{4})", re.sub(r"\s+", " ", notes_up))
+    till_line = next((l for l in lines if re.search(r"\d{2}[.,]\d{2}[.,]\d{4}", fix_date_twins(l["text"])) and stop is not None
+                      and l["cy"] > stop["cy"] and "ВЫДАЧИ" not in l["text"].upper()), None)
+    f["temp_till"] = field(m.group(1).replace(",", ".") if m else None, till_line if m else None)
+    n = sts_number(lines)
+    f["sts"] = {"value": n["value"], "conf": n["conf"], "line": n["line"]} if n else field(None, None)
+    return f, n
+
+
+# ---------------- доверенность (форма М-2) ----------------
+
+MONTHS = {"январ": 1, "феврал": 2, "март": 3, "апрел": 4, "ма": 5, "июн": 6, "июл": 7, "август": 8,
+          "сентябр": 9, "октябр": 10, "ноябр": 11, "декабр": 12}
+
+
+def any_date(t):
+    """«19.10.2026» или «19 октября 2026 г.» → «19.10.2026»."""
+    m = DATE_RE.search(t or "")
+    if m:
+        return f"{m.group(1)}.{m.group(2)}.{m.group(3)}"
+    m = re.search(r"(\d{1,2})\s+([а-яё]+)\s+(\d{4})", (t or "").lower())
+    if m:
+        mon = next((n for k, n in sorted(MONTHS.items(), key=lambda kv: -len(kv[0])) if m.group(2).startswith(k)), None)
+        if mon:
+            return f"{int(m.group(1)):02d}.{mon:02d}.{m.group(3)}"
+    return None
+
+
+def row_text(lines, label):
+    """Подпись и всё, что правее неё в той же строке документа, одной строкой."""
+    return " ".join([label["text"]] + [l["text"] for l in same_row_right(lines, label)])
+
+
+FIO_MIXED = re.compile(r"[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+")
+
+
+def extract_poa(lines):
+    f = {}
+    lab = find_line(lines, "ДОВЕРЕННОСТЬ№") or find_line(lines, "ДОВЕРЕННОСТЬ")
+    num = None
+    if lab:
+        m = re.search(r"№\s*(\S+)", row_text(lines, lab))
+        num = m.group(1) if m else None
+        if not num:
+            r = right_of(lines, lab)
+            num = r["text"].strip() if r and re.fullmatch(r"[\w/-]{1,12}", r["text"].strip()) else None
+    f["number"] = field(num, lab)
+    # «Дата выдачи» доверенности — первая такая подпись ниже заголовка (вторая — дата выдачи паспорта)
+    dlab = next((l for l in lines if "дата выдачи" in l["text"].lower() and (lab is None or l["cy"] > lab["cy"])), None)
+    f["issued"] = field(any_date(row_text(lines, dlab)) if dlab else None, dlab)
+    vlab = next((l for l in lines if "действительн" in l["text"].lower()), None)
+    f["valid_till"] = field(any_date(row_text(lines, vlab)) if vlab else None, vlab)
+    org = next((l for l in lines if re.search(r"(ООО|ОАО|ЗАО|АО|ИП)\s*.+ИНН\s*\d{10}", l["text"].upper())), None)
+    if org:
+        m = re.match(r"\s*(.+?)\s*,\s*ИНН\s*(\d{10,12})", org["text"], re.I)
+        f["issuer"] = field(m.group(1).strip() if m else None, org)
+        f["issuer_inn"] = field(m.group(2) if m else None, org)
+    else:
+        f["issuer"] = field(None, None)
+        f["issuer_inn"] = field(None, None)
+    glab = find_line(lines, "ДОВЕРЕННОСТЬВЫДАНА")
+    rep_line = None
+    if glab:
+        rep_line = next((l for l in same_row_right(lines, glab) if FIO_MIXED.search(l["text"])), None)
+        if not rep_line:
+            rep_line = value_near(lines, glab, lambda t: bool(FIO_MIXED.search(t)), below=1.5)
+    if not rep_line:
+        rep_line = next((l for l in lines if FIO_MIXED.fullmatch(l["text"].strip())), None)
+    rep_val = FIO_MIXED.search(rep_line["text"]).group(0) if rep_line else None
+    f["representative"] = ru_field(rep_line, rep_val) if rep_line else field(None, None)
+    plab = next((l for l in lines if "серия" in l["text"].lower()), None)
+    pas = None
+    if plab:
+        m = re.search(r"(\d{2})\s?(\d{2}).*?(\d{6})", row_text(lines, plab))
+        pas = f"{m.group(1)} {m.group(2)} {m.group(3)}" if m else None
+    f["passport"] = field(pas, plab)
+    # корешок доверенности (таблица вверху): номер и даты — независимое подтверждение
+    stub = [l["text"].strip() for l in lines if lab is None or l["cy"] < lab["cy"]]
+    return f, stub
 
 
 def extract_registration(lines):
@@ -404,15 +725,78 @@ def extract_registration(lines):
 
 # ---------------- итог в формате платформы ----------------
 
-def analyze(path):
-    """Фото → {quality, sharpness, docType, fields, confidences, confirmations} в терминах платформы.
+REQUIRED_KEYS = {
+    "passport": ("surname", "name", "birth_date", "series_number"),
+    "driver_license": ("surname", "name", "birth_date", "number"),
+    "vehicle_registration": ("plate", "vin"),
+}
+
+
+def prepare(path):
+    """Мелкие сканы увеличиваем вдвое: подписи паспорта высотой 10–16 px иначе не читаются."""
+    img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
+    if img is None or max(img.shape[:2]) >= UPSCALE_BELOW:
+        return path
+    big = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    out = path.with_name(path.stem + "_x2" + path.suffix)
+    cv2.imencode(path.suffix or ".jpg", big)[1].tofile(str(out))
+    return out
+
+
+def analyze(path, accurate_retry=True):
+    """Фото → {quality, sharpness, docType, side, fields, confidences, confirmations, engineMode}.
     Поля называются так же, как в DOC_FIELDS (src/lib/verify.ts)."""
+    global _mode
+    from pathlib import Path
+    path = Path(path)
     sharp = sharpness(path)
     quality = int(round(min(100.0, 60.0 * sharp / SHARPNESS_MIN)))
-    lines = read_lines(path)
+    work = prepare(path)
+    try:
+        _mode = "fast"
+        lines = read_lines(work)
+        out = _analyze_lines(work, lines, quality, sharp)
+        hinted = any(h in flat_text(lines) for h in DOC_HINTS)
+        if accurate_retry and _needs_retry(out) and (out["docType"] != "UNKNOWN" or hinted):
+            _mode = "accurate"
+            second = _analyze_lines(work, read_lines(work), quality, sharp)
+            if _score(second) > _score(out):
+                out = second
+    finally:
+        _mode = "fast"
+        if work != path:
+            try:
+                os.unlink(work)
+            except OSError:
+                pass
+    return out
+
+
+def _filled(out):
+    return sum(1 for v in out["fields"].values() if v)
+
+
+def _needs_retry(out):
+    if out["docType"] == "UNKNOWN":
+        return True
+    f = out["fields"]
+    if out["docType"] == "LICENSE":
+        # ФИО целиком (фамилия + имя), категории и обе даты — без них ВУ не проверить
+        words = [w for w in (f.get("ФИО") or "").split() if len(w) >= 2]
+        return len(words) < 2 or not f.get("Категории") or not f.get("Дата выдачи") or not f.get("Действует до")
+    if out["docType"] == "PASSPORT_PHOTO":
+        return sum(1 for k in ("Фамилия", "Имя", "Дата рождения", "Серия и номер") if not f.get(k)) >= 2
+    return False
+
+
+def _score(out):
+    return (out["docType"] != "UNKNOWN", _filled(out), sum(out["confidences"].values()))
+
+
+def _analyze_lines(path, lines, quality, sharp):
     dtype = doc_type(lines)
-    out = {"quality": quality, "sharpness": round(sharp, 1), "docType": PLATFORM_TYPE[dtype],
-           "fields": {}, "confidences": {}, "confirmations": {}}
+    out = {"quality": quality, "sharpness": round(sharp, 1), "docType": PLATFORM_TYPE[dtype], "side": "front",
+           "fields": {}, "confidences": {}, "confirmations": {}, "engineMode": _mode}
 
     def put(label, f):
         out["fields"][label] = f["value"] or ""
@@ -429,7 +813,8 @@ def analyze(path):
         put("Дата рождения", f["birth_date"])
         put("Серия и номер", f["series_number"])
         put("Дата выдачи", f["issue_date"])
-        put("Код подразделения", f["dept"])
+        put("Код подразделения", reread_code(path, f["dept"]))
+        put("Место рождения", f["birth_place"])
         if len(copies) >= 2 and len({(c["series"], c["number"]) for c in copies}) == 1:
             confirm("Серия и номер", f"{len(copies)} копии на полях страницы совпали")
 
@@ -460,18 +845,49 @@ def analyze(path):
             confirm("Дата выдачи", "срок действия — ровно 10 лет")
 
     elif dtype == "vehicle_registration":
-        f = extract_vehicle_registration(lines)
+        f, n = extract_vehicle_registration(lines)
         put("Госномер", f["plate"])
         put("VIN", f["vin"])
+        put("Номер СТС", f["sts"])
+        put("Марка", f["brand"])
         put("Владелец", f["owner"])
-        # номер СТС и марка шаблоном пока не читаются — платформа отправит их на ручную сверку
-        out["fields"]["Номер СТС"], out["confidences"]["Номер СТС"] = "", 0.0
-        out["fields"]["Марка"], out["confidences"]["Марка"] = "", 0.0
+        if n and n["count"] >= 2 and n["copies"] == 1:
+            confirm("Номер СТС", f"{n['count']} копии номера бланка совпали")
+
+    elif dtype == "vehicle_registration_back":
+        out["side"] = "back"
+        f, n = extract_sts_back(lines)
+        put("Номер СТС", f["sts"])
+        put("Владелец", f["owner"])
+        put("Лизингодатель", f["lessor"])
+        put("Временный учёт до", f["temp_till"])
+        if n and n["count"] >= 2 and n["copies"] == 1:
+            confirm("Номер СТС", f"{n['count']} копии номера бланка совпали")
+
+    elif dtype == "poa":
+        f, stub = extract_poa(lines)
+        put("Номер доверенности", f["number"])
+        put("Дата выдачи", f["issued"])
+        put("Действительна до", f["valid_till"])
+        put("Кем выдана (перевозчик)", f["issuer"])
+        put("Представитель (ФИО)", f["representative"])
+        put("Паспорт представителя", f["passport"])
+        put("ИНН организации", f["issuer_inn"])
+        stub_text = " ".join(stub)
+        if f["number"]["value"] and re.search(rf"(^|\s){re.escape(f['number']['value'])}(\s|$)", stub_text):
+            confirm("Номер доверенности", "совпал с корешком доверенности")
+        for label, key in (("Дата выдачи", "issued"), ("Действительна до", "valid_till")):
+            if f[key]["value"] and f[key]["value"] in stub_text:
+                confirm(label, "совпала с корешком доверенности")
+        if f["representative"]["value"] and norm_letters(f["representative"]["value"]) in norm_letters(stub_text):
+            confirm("Представитель (ФИО)", "совпало с корешком доверенности")
+        if f["issuer"]["value"] and norm_letters(f["issuer"]["value"]) in norm_letters(stub_text):
+            confirm("Кем выдана (перевозчик)", "совпало с корешком доверенности")
 
     elif dtype == "passport_registration":
         f = extract_registration(lines)
         put("Дата регистрации", f["reg_date"])
-        put("Код подразделения", f["dept"])
+        put("Код подразделения", reread_code(path, f["dept"]))
         put("Адрес регистрации", f["address"])
 
     return out

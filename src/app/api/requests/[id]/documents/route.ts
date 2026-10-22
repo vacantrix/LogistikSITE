@@ -4,7 +4,7 @@ import { requireUser, viewerOf } from '@/lib/auth'
 import { DOC_SELECT, toDocumentDTO, toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { inTx, loadRequestFor } from '@/lib/requests'
-import { imageDataUriError } from '@/lib/settings'
+import { imageDataUriError, isPdfDataUri } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,10 +22,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { type, fileName, dataUri } = (body ?? {}) as { type?: unknown; fileName?: unknown; dataUri?: unknown }
 
   if (typeof type !== 'string' || !DOC_TYPES.includes(type)) return NextResponse.json({ error: 'Неизвестный тип документа' }, { status: 400 })
-  const name = typeof fileName === 'string' ? fileName.trim().slice(0, 200) : ''
+  let name = typeof fileName === 'string' ? fileName.trim().slice(0, 200) : ''
   if (!name) return NextResponse.json({ error: 'Нужно имя файла' }, { status: 400 })
-  const imgError = imageDataUriError(dataUri)
+  // доверенности и сканы часто приходят в PDF — распознаётся первая страница
+  const imgError = imageDataUriError(dataUri, { pdf: true })
   if (imgError) return NextResponse.json({ error: imgError }, { status: 400 })
+  // по расширению интерфейс понимает, что показывать PDF, а не картинку
+  if (isPdfDataUri(dataUri as string) && !/\.pdf$/i.test(name)) name = `${name.slice(0, 196)}.pdf`
 
   const request = await db.request.findUnique({ where: { id }, select: { id: true, number: true, status: true, winnerId: true } })
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })

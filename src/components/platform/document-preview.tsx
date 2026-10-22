@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  Download, Fullscreen, Maximize, RotateCcw, RotateCw, ZoomIn, ZoomOut,
+  Download, FileText, Fullscreen, Maximize, RotateCcw, RotateCw, ZoomIn, ZoomOut,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,7 +44,7 @@ function ToolButton({ label, onClick, children, className }: {
   )
 }
 
-export function DocumentPreviewModal({ open, onOpenChange, src, title, fileName, downloadUrl }: {
+export function DocumentPreviewModal({ open, onOpenChange, src, title, fileName, downloadUrl, pdf = false }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** URL картинки (уже защищённый, secureFileUrl) */
@@ -55,6 +55,8 @@ export function DocumentPreviewModal({ open, onOpenChange, src, title, fileName,
   fileName?: string
   /** ссылка скачивания оригинала (уже с ?download=1) */
   downloadUrl?: string
+  /** PDF — показываем встроенным просмотрщиком браузера (у него свои зум и прокрутка) */
+  pdf?: boolean
 }) {
   const [scale, setScale] = useState(1)
   const [rotation, setRotation] = useState(0)
@@ -102,6 +104,21 @@ export function DocumentPreviewModal({ open, onOpenChange, src, title, fileName,
           </DialogDescription>
         </DialogHeader>
 
+        {pdf ? (
+          <>
+            {downloadUrl && (
+              <div className="flex justify-end">
+                <Button asChild size="sm" variant="outline" className="gap-1.5">
+                  <a href={downloadUrl} download>
+                    <Download className="h-4 w-4" aria-hidden />
+                    Скачать PDF
+                  </a>
+                </Button>
+              </div>
+            )}
+            <iframe src={src} title={title} className="min-h-0 flex-1 rounded-xl border border-slate-200 bg-slate-100" />
+          </>
+        ) : (<>
         {/* панель инструментов просмотра */}
         <div className="flex flex-wrap items-center gap-1.5" role="toolbar" aria-label="Инструменты просмотра документа">
           <ToolButton label="Повернуть против часовой стрелки" onClick={() => setRotation((r) => r - 90)}>
@@ -148,18 +165,34 @@ export function DocumentPreviewModal({ open, onOpenChange, src, title, fileName,
             className={`mx-auto my-6 max-h-full max-w-full object-contain ${scale === 1 ? 'cursor-zoom-in' : 'cursor-zoom-out'}`}
           />
         </div>
+        </>)}
       </DialogContent>
     </Dialog>
   )
 }
 
 /** Миниатюра документа с zoom-курсором: клик открывает полноразмерный просмотр */
-export function ZoomableThumb({ src, alt, className, onClick }: {
+export function ZoomableThumb({ src, alt, className, onClick, pdf = false }: {
   src: string
   alt: string
   className?: string
   onClick?: () => void
+  /** PDF — вместо картинки плашка «PDF», клик открывает просмотр */
+  pdf?: boolean
 }) {
+  if (pdf) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={`${alt} — открыть PDF`}
+        className="mx-auto flex h-40 w-full max-w-[240px] flex-col items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+      >
+        <FileText className="h-10 w-10 text-red-600" aria-hidden />
+        <span className="text-xs font-semibold">PDF — открыть</span>
+      </button>
+    )
+  }
   return (
     <img
       src={src}
