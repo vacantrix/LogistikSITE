@@ -1,21 +1,22 @@
 'use client'
 
-/** «Проверка документов» — экран логиста (Task 69: редизайн; Task 71: экспресс-сличение убрано,
- *  вердикт «Утвердить», статусы шапки карточки — иконками, список очереди как в «Моих заявках»):
+/** «Проверка документов» — экран логиста (Task 71: экспресс-сличение убрано, вердикт «Утвердить»,
+ *  статусы — иконками, очередь как в «Моих заявках»; Task 72: статус документа — иконкой-чипом,
+ *  кнопки «Увеличить»/«Скачать» убраны (клик по скану / окно предосмотра), яркая плашка решения):
  *  очередь с вычисляемыми состояниями (новые / ожидают проверки / расхождения / проверено /
  *  отклонено), фильтры и поиск, данные рейса из системы, сканы с зумом, сверка полей OCR. */
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
 import {
-  AlertTriangle, ArrowRight, Ban, Check, CheckCheck, CircleAlert, ClipboardCheck, Download, Hourglass,
-  Inbox, Info, ListChecks, MapPin, Maximize2, Package, ScanSearch, Search, Truck as TruckIcon,
+  AlertTriangle, ArrowRight, Ban, Check, CheckCheck, CircleAlert, CircleCheck, ClipboardCheck, Hourglass,
+  Inbox, Info, ListChecks, MapPin, Package, RefreshCw, ScanSearch, Search, Truck as TruckIcon,
   Undo2, UserCog, UserRound, X,
 } from 'lucide-react'
 import {
-  DocStatusBadge, EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusBadge, type TabProps,
+  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusBadge, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
 import { Badge } from '@/components/ui/badge'
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -33,11 +34,10 @@ import { ToastAction } from '@/components/ui/toast'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
-import { DOC_TYPE_LABEL, rate } from '@/lib/status'
+import { DOC_STATUS_META, DOC_TYPE_LABEL, rate } from '@/lib/status'
 import type {
   DocStatus, DocType, DocumentDTO, DriverDTO, RequestDTO, RequestStatus, TrailerDTO, TruckDTO,
 } from '@/lib/types'
-import { cn } from '@/lib/utils'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
@@ -225,6 +225,31 @@ function docDot(status: DocStatus): string {
     case 'MANUAL': return 'bg-blue-500'
     default: return 'bg-slate-400'
   }
+}
+
+/** иконки статусов документа — чип вместо текстового бейджа (Task 72):
+ *  «Передать дальше» и др. читаются по значку с подсказкой */
+const DOC_STATUS_ICON: Record<DocStatus, ComponentType<{ className?: string }>> = {
+  PENDING: Hourglass,
+  PASSED: CircleCheck,
+  REUPLOAD: RefreshCw,
+  REJECTED: Ban,
+  MANUAL: UserCog,
+}
+
+function DocStatusChip({ status }: { status: DocStatus }) {
+  const meta = DOC_STATUS_META[status]
+  const Icon = DOC_STATUS_ICON[status]
+  return (
+    <span
+      role="img"
+      aria-label={meta.label}
+      title={meta.label}
+      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${meta.badge}`}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+    </span>
+  )
 }
 
 /** есть ли OCR-расхождение хотя бы по одному обязательному полю любого документа */
@@ -713,26 +738,11 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                               )}
                               {activeDoc.engine && <span>{activeDoc.engine}</span>}
                             </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <DocStatusBadge status={activeDoc.status} />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setPreviewOpen(true)}
-                                aria-label="Увеличить скан документа"
-                              >
-                                <Maximize2 className="h-3.5 w-3.5" aria-hidden />
-                                Увеличить
-                              </Button>
-                              <a
-                                href={secureFileUrl(`${activeDoc.url}?download=1`)}
-                                download
-                                aria-label={`Скачать документ: ${activeDoc.fileName}`}
-                                className={cn(buttonVariants({ size: 'sm', variant: 'outline' }))}
-                              >
-                                <Download className="h-3.5 w-3.5" aria-hidden />
-                                Скачать
-                              </a>
+                            {/* Task 72: «Увеличить»/«Скачать» убраны — клик по скану открывает
+                                предосмотр (зум/поворот/скачивание), статус документа — иконкой */}
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                              <DocStatusChip status={activeDoc.status} />
+                              <span className="truncate text-[11px] text-slate-400">Клик по скану — просмотр и скачивание</span>
                             </div>
                           </div>
 
@@ -810,80 +820,110 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     )}
                   </div>
 
-                  {/* решение по пакету (Task 71): экспресс-сличение убрано, «Подтвердить — данные в 1С» → «Утвердить» */}
-                  <div className="border-t border-slate-100 bg-slate-50/60 p-4 sm:p-5">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
-                      <ClipboardCheck className="h-4 w-4 text-blue-600" aria-hidden />
-                      Решение по пакету
-                    </div>
-
+                  {/* решение по пакету (Task 72): карточка-действие, итоги — яркими плашками-пузырями */}
+                  <div className="border-t border-slate-100 p-4 sm:p-5">
                     {isEditable ? (
-                      <div className="mt-3 grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
-                        {/* комментарий к решению */}
-                        <div className="space-y-1.5">
-                          <Label htmlFor="verify-comment">Комментарий к решению (необязательно)</Label>
-                          <Textarea
-                            id="verify-comment"
-                            rows={3}
-                            placeholder="Например: номера совпадают, печать читаема"
-                            value={comment}
-                            onChange={(e) => setComment(e.target.value)}
-                            aria-label="Комментарий к проверке документов"
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Утверждение передаёт данные в 1С и формирует пропуск с ЭТрН; возврат отправит пакет агенту на доработку.
-                          </p>
+                      <div className="overflow-hidden rounded-2xl border border-blue-200/80 shadow-sm">
+                        <div className="flex items-center gap-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-emerald-50 px-4 py-3 sm:px-5">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-sm" aria-hidden>
+                            <ClipboardCheck className="h-5 w-5" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-900">Решение по пакету</div>
+                            <div className="text-xs text-slate-500">Сверьте сканы и поля, затем выберите одно из действий</div>
+                          </div>
                         </div>
+                        <div className="grid items-start gap-5 bg-white px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+                          {/* комментарий к решению */}
+                          <div className="space-y-1.5">
+                            <Label htmlFor="verify-comment">Комментарий к решению (необязательно)</Label>
+                            <Textarea
+                              id="verify-comment"
+                              rows={3}
+                              placeholder="Например: номера совпадают, печать читаема"
+                              value={comment}
+                              onChange={(e) => setComment(e.target.value)}
+                              aria-label="Комментарий к проверке документов"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Пояснение увидят перевозчик и агент — например, что именно нужно исправить.
+                            </p>
+                          </div>
 
-                        {/* кнопки решения */}
-                        <div className="flex flex-col gap-2">
-                          <Button
-                            className="h-10 bg-emerald-600 text-white hover:bg-emerald-700"
-                            disabled={busy === selected.id}
-                            onClick={() => void doConfirm(selected)}
-                            aria-label="Утвердить пакет — данные передаются в 1С"
-                          >
-                            <CheckCheck className="h-4 w-4" aria-hidden />
-                            Утвердить
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="h-10 border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                            disabled={busy === selected.id}
-                            onClick={() => { setReturnReason(''); setReturnComment(''); setReturnOpen(true) }}
-                            aria-label="Отправить документы на доработку — вернуть агенту"
-                          >
-                            <Undo2 className="h-4 w-4" aria-hidden />
-                            На доработку агенту
-                          </Button>
-                          {busy === selected.id && <div className="text-xs text-slate-400">Выполняется…</div>}
+                          {/* кнопки решения */}
+                          <div className="space-y-1.5">
+                            <Button
+                              className="h-11 w-full bg-emerald-600 text-white shadow-sm hover:bg-emerald-700"
+                              disabled={busy === selected.id}
+                              onClick={() => void doConfirm(selected)}
+                              aria-label="Утвердить пакет — данные передаются в 1С"
+                            >
+                              <CheckCheck className="h-4 w-4" aria-hidden />
+                              Утвердить
+                            </Button>
+                            <p className="px-1 text-[11px] leading-snug text-emerald-700">
+                              Данные уйдут в 1С, сформируются пропуск и ЭТрН
+                            </p>
+                            <Button
+                              variant="outline"
+                              className="mt-2 h-11 w-full border-amber-300 bg-white text-amber-800 hover:bg-amber-50"
+                              disabled={busy === selected.id}
+                              onClick={() => { setReturnReason(''); setReturnComment(''); setReturnOpen(true) }}
+                              aria-label="Отправить документы на доработку — вернуть агенту"
+                            >
+                              <Undo2 className="h-4 w-4" aria-hidden />
+                              На доработку агенту
+                            </Button>
+                            <p className="px-1 text-[11px] leading-snug text-slate-500">
+                              Пакет вернётся агенту с выбранной причиной
+                            </p>
+                            {busy === selected.id && <div className="text-xs text-slate-400">Выполняется…</div>}
+                          </div>
                         </div>
                       </div>
-                    ) : (
-                      <div className="mt-2.5">
-                        {selected.status === 'CONFIRMED' ? (
-                          <div className="space-y-1.5">
-                            <Badge variant="outline" className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700">
-                              <CheckCheck className="h-3.5 w-3.5" aria-hidden />
-                              Утверждено · данные в 1С
-                            </Badge>
-                            {selected.verifyComment && (
-                              <div className="text-xs text-slate-600">
-                                <span className="font-medium text-slate-700">Комментарий логиста:</span> {selected.verifyComment}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                            <div>
-                              Возвращено агенту на доработку
-                              {selected.verifyComment && (
-                                <div className="mt-0.5 text-xs text-amber-700">Причина / комментарий: {selected.verifyComment}</div>
+                    ) : selected.status === 'CONFIRMED' ? (
+                      /* утверждено — яркая изумрудная плашка-пузырь */
+                      <div className="relative w-fit max-w-full">
+                        <div className="rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-200 via-emerald-100 to-emerald-50 px-4 py-3 shadow-md shadow-emerald-200/70">
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm" aria-hidden>
+                              <CheckCheck className="h-5 w-5" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-emerald-900">Утверждено — данные переданы в 1С</div>
+                              {selected.verifyComment ? (
+                                <div className="mt-0.5 text-xs text-emerald-800">
+                                  <span className="font-semibold">Комментарий логиста:</span> {selected.verifyComment}
+                                </div>
+                              ) : (
+                                <div className="mt-0.5 text-xs text-emerald-700/90">Пропуск и ЭТрН сформированы</div>
                               )}
                             </div>
                           </div>
-                        )}
+                        </div>
+                        <span className="absolute -top-[7px] left-7 h-3.5 w-3.5 rotate-45 rounded-[3px] border-l-2 border-t-2 border-emerald-400 bg-emerald-200" aria-hidden />
+                      </div>
+                    ) : (
+                      /* возвращено агенту — яркая янтарная плашка-пузырь */
+                      <div className="relative w-fit max-w-full">
+                        <div className="rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-200 via-amber-100 to-amber-50 px-4 py-3 shadow-md shadow-amber-200/70">
+                          <div className="flex items-start gap-3">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white shadow-sm" aria-hidden>
+                              <Undo2 className="h-5 w-5" />
+                            </span>
+                            <div className="min-w-0">
+                              <div className="text-sm font-bold text-amber-900">Возвращено агенту на доработку</div>
+                              {selected.verifyComment ? (
+                                <div className="mt-0.5 text-xs text-amber-800">
+                                  <span className="font-semibold">Причина / комментарий:</span> {selected.verifyComment}
+                                </div>
+                              ) : (
+                                <div className="mt-0.5 text-xs text-amber-700/90">Пакет ждёт исправлений от перевозчика</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="absolute -top-[7px] left-7 h-3.5 w-3.5 rotate-45 rounded-[3px] border-l-2 border-t-2 border-amber-400 bg-amber-200" aria-hidden />
                       </div>
                     )}
                   </div>

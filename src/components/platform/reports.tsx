@@ -1,12 +1,15 @@
 'use client'
 
-/** «Отчёты» — экономия площадки, ставки по направлениям, история перевозчиков */
-import { useCallback, useEffect, useState } from 'react'
-import { Banknote, FileCheck, ShieldCheck, TrendingDown, Users } from 'lucide-react'
+/** «Отчёты» (Task 72) — понятная структура из четырёх блоков:
+ *  1) портфель заявок — воронка по шагам (в работе → проверка → логист → 1С);
+ *  2) ключевые показатели месяца; 3) ставки по направлениям; 4) экономия по заявкам и история перевозчиков. */
+import { useCallback, useEffect, useState, type ComponentType } from 'react'
+import {
+  Banknote, CheckCheck, FileCheck, FolderOpen, Hourglass, ScanSearch, ShieldCheck, TrendingDown, Users,
+} from 'lucide-react'
 import {
   ErrorBlock, KpiCard, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -22,6 +25,35 @@ function plural(n: number, one: string, few: string, many: string): string {
   if (m10 === 1 && m100 !== 11) return one
   if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
   return many
+}
+
+const FUNNEL_TONES: Record<string, string> = {
+  sky: 'bg-sky-50 text-sky-600 ring-sky-100',
+  amber: 'bg-amber-50 text-amber-600 ring-amber-100',
+  blue: 'bg-blue-50 text-blue-600 ring-blue-100',
+  emerald: 'bg-emerald-50 text-emerald-600 ring-emerald-100',
+}
+
+/** плитка воронки: сколько заявок на конкретном шаге прямо сейчас */
+function FunnelTile({ icon: Icon, label, value, hint, tone }: {
+  icon: ComponentType<{ className?: string }>
+  label: string
+  value: string
+  hint: string
+  tone: keyof typeof FUNNEL_TONES
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4">
+      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ring-1 ${FUNNEL_TONES[tone]}`} aria-hidden>
+        <Icon className="h-5 w-5" />
+      </span>
+      <div className="min-w-0">
+        <div className="text-xl font-bold leading-tight tabular-nums text-slate-900">{value}</div>
+        <div className="truncate text-sm font-medium text-slate-700">{label}</div>
+        <div className="truncate text-xs text-slate-400">{hint}</div>
+      </div>
+    </div>
+  )
 }
 
 export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
@@ -43,12 +75,12 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
 
   useEffect(() => { void load() }, [load])
 
-  // real-time (Task 49): событие из шины WS мгновенно догружает отчёты
+  // real-time: событие из шины WS мгновенно догружает отчёты
   useEffect(() => {
     if (liveTick > 0) void load()
   }, [liveTick, load])
 
-  // повторная загрузка по кнопке «Повторить» в блоке ошибки (кнопки «Обновить» больше нет — Task 63)
+  // повторная загрузка по кнопке «Повторить» в блоке ошибки
   const refresh = () => {
     void load()
   }
@@ -57,13 +89,17 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
   if (error && !report) return <ErrorBlock message={error} onRetry={refresh} />
 
   const kpi = report?.kpi
-  const directions = report?.byDirection ?? []
+  const directions = [...(report?.byDirection ?? [])].sort((a, b) => b.avgRate - a.avgRate)
   const maxAvg = Math.max(...directions.map((d) => d.avgRate), 1)
+  const savings = report?.savingsByRequest ?? []
+  const carriers = [...(report?.carriers ?? [])].sort((a, b) => b.taken - a.taken)
+  const bestSavings = [...savings].sort((a, b) => b.savings - a.savings).slice(0, 1)[0]
 
   return (
     <div>
       <SectionHeader
         title="Отчёты"
+        desc="Сводка площадки: портфель заявок, экономия и работа перевозчиков"
       />
 
       {error && report && (
@@ -72,41 +108,81 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
         </div>
       )}
 
-      {/* 1. KPI */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* 1. Портфель заявок — воронка по шагам */}
+      <Card className="border-slate-200 shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base text-slate-900">Портфель заявок</CardTitle>
+          <CardDescription>Сколько заявок сейчас находится на каждом шаге цикла</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <FunnelTile
+            icon={FolderOpen}
+            tone="sky"
+            label="В работе"
+            value={kpi ? String(kpi.openRequests) : '—'}
+            hint="открытые и активные заявки"
+          />
+          <FunnelTile
+            icon={Hourglass}
+            tone="amber"
+            label="Проверка документов"
+            value={kpi ? String(kpi.atVerify) : '—'}
+            hint="сканы проверяет нейросеть"
+          />
+          <FunnelTile
+            icon={ScanSearch}
+            tone="blue"
+            label="У логиста"
+            value={kpi ? String(kpi.atLogist) : '—'}
+            hint="ждут сверки и утверждения"
+          />
+          <FunnelTile
+            icon={CheckCheck}
+            tone="emerald"
+            label="Подтверждено"
+            value={kpi ? String(kpi.confirmed) : '—'}
+            hint="данные переданы в 1С"
+          />
+        </CardContent>
+      </Card>
+
+      {/* 2. Ключевые показатели */}
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           icon={<Banknote className="h-5 w-5" aria-hidden />}
-          label="Экономия"
+          label="Экономия за месяц"
           value={rate(kpi?.savingsMonth ?? null)}
           hint="разница стартовой и итоговой ставки"
           tone="green"
         />
         <KpiCard
           icon={<Users className="h-5 w-5" aria-hidden />}
-          label="Среднее число ставок на заявку"
+          label="Ставок на заявку"
           value={kpi ? String(kpi.avgBids) : '—'}
-          hint="конкуренция: кто участвует и кто выигрывает"
+          hint="средняя конкуренция на торгах"
           tone="blue"
         />
         <KpiCard
           icon={<ShieldCheck className="h-5 w-5" aria-hidden />}
-          label="Документов принято автоматически"
+          label="Документов принято авто"
           value={kpi ? `${kpi.docsAutoShare}%` : '—'}
+          hint="без ручной проверки логистом"
           tone="navy"
         />
         <KpiCard
           icon={<FileCheck className="h-5 w-5" aria-hidden />}
-          label="ЭТрН сформированы из 1С"
+          label="ЭТрН из 1С"
           value={kpi ? `${kpi.etrnShare}%` : '—'}
+          hint="доля рейсов с электронной накладной"
           tone="violet"
         />
       </div>
 
-      {/* 2. Ставки по направлениям */}
+      {/* 3. Ставки по направлениям */}
       <Card className="mt-6 border-slate-200 shadow-sm">
         <CardHeader>
           <CardTitle className="text-base text-slate-900">Ставки по направлениям</CardTitle>
-          <CardDescription>Средняя и минимальная итоговая ставка по каждому маршруту</CardDescription>
+          <CardDescription>Средняя и минимальная итоговая ставка по каждому маршруту, сверху — самые дорогие</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {directions.length === 0 && (
@@ -119,16 +195,19 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
             return (
               <div key={d.direction}>
                 <div className="mb-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-sm">
-                  <span className="font-medium text-slate-700">
-                    {d.direction} · {d.count} {plural(d.count, 'заявка', 'заявки', 'заявок')}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-medium text-slate-800">{d.direction}</span>
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                      {d.count} {plural(d.count, 'заявка', 'заявки', 'заявок')}
+                    </span>
                   </span>
                   <span className="font-semibold text-slate-900">{rate(d.avgRate)}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="h-3 flex-1 overflow-hidden rounded bg-slate-100">
-                    <div className="h-3 rounded bg-blue-600 transition-all" style={{ width: `${width}%` }} />
+                  <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-2.5 rounded-full bg-gradient-to-r from-blue-600 to-sky-400 transition-all" style={{ width: `${width}%` }} />
                   </div>
-                  <span className="shrink-0 text-xs text-slate-500">мин {rate(d.minRate)}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-slate-500">мин {rate(d.minRate)}</span>
                 </div>
               </div>
             )
@@ -136,12 +215,17 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
         </CardContent>
       </Card>
 
-      {/* 3. Экономия по заявкам + история перевозчиков */}
+      {/* 4. Экономия по заявкам + история перевозчиков */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base text-slate-900">Экономия по заявкам</CardTitle>
-            <CardDescription>Стартовая ставка → итоговая, сортировка по эффекту</CardDescription>
+            <CardDescription>
+              Стартовая ставка → итоговая, сортировка по эффекту
+              {bestSavings && bestSavings.savings > 0 && (
+                <> · лучшая — <b className="text-emerald-700">№{bestSavings.number}</b> ({rate(bestSavings.savings)})</>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -155,10 +239,10 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(report?.savingsByRequest ?? []).map((row) => (
+                  {savings.map((row) => (
                     <TableRow key={row.number}>
                       <TableCell className="whitespace-nowrap font-bold text-blue-700">№{row.number}</TableCell>
-                      <TableCell className="text-slate-600">{row.cargo}</TableCell>
+                      <TableCell className="max-w-[180px] truncate text-slate-600" title={row.cargo}>{row.cargo}</TableCell>
                       <TableCell className="whitespace-nowrap text-slate-600">
                         {rate(row.startRate)} → <span className="font-semibold text-slate-900">{rate(row.bestRate)}</span>
                       </TableCell>
@@ -170,7 +254,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                       </TableCell>
                     </TableRow>
                   ))}
-                  {(report?.savingsByRequest ?? []).length === 0 && (
+                  {savings.length === 0 && (
                     <TableRow><TableCell colSpan={4} className="text-center text-slate-400">Данных пока нет</TableCell></TableRow>
                   )}
                 </TableBody>
@@ -182,7 +266,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
         <Card className="border-slate-200 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base text-slate-900">История перевозчиков</CardTitle>
-            <CardDescription>Кто сколько рейсов взял и по каким ставкам работает</CardDescription>
+            <CardDescription>Кто сколько рейсов взял, по каким ставкам работает и сколько раз отказался</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -190,20 +274,30 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                 <TableHeader>
                   <TableRow className="bg-slate-50">
                     <TableHead>Перевозчик</TableHead>
-                    <TableHead>Взято заявок</TableHead>
+                    <TableHead className="text-center">Взято</TableHead>
                     <TableHead className="text-right">Средняя ставка</TableHead>
+                    <TableHead className="text-right">Отказов</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(report?.carriers ?? []).map((c) => (
+                  {carriers.map((c) => (
                     <TableRow key={c.name}>
                       <TableCell className="font-medium text-slate-800">{c.name}</TableCell>
-                      <TableCell className="font-semibold text-slate-800">{c.taken}</TableCell>
-                      <TableCell className="whitespace-nowrap text-right text-slate-700">{rate(c.avgRate)}</TableCell>
+                      <TableCell className="text-center font-semibold tabular-nums text-slate-800">{c.taken}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">{rate(c.avgRate)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {c.refused > 0 ? (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                            {c.refused}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">0</span>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
-                  {(report?.carriers ?? []).length === 0 && (
-                    <TableRow><TableCell colSpan={3} className="text-center text-slate-400">Данных пока нет</TableCell></TableRow>
+                  {carriers.length === 0 && (
+                    <TableRow><TableCell colSpan={4} className="text-center text-slate-400">Данных пока нет</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
