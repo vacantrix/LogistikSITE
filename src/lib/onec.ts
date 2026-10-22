@@ -66,6 +66,7 @@ export const ONEC_STATUS_RU: Record<RequestStatus, string> = {
   AT_LOGIST: 'Подготовка к рейсу',
   CONFIRMED: 'Данные в 1С',
   CLOSED: 'Рейс закрыт',
+  DELETED: 'Удалена',
 }
 
 export const ONEC_ETRN_RU: Record<string, string> = {

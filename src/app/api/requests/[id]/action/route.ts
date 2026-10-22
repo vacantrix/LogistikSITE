@@ -3,12 +3,14 @@ import { requireUser, viewerOf, type Role } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import {
-  applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, validateCrew,
+  applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
 
 export const dynamic = 'force-dynamic'
 
-/** Кто может выполнять действие. Перевозчик действует только от своего имени — carrierId берётся из сессии. */
+/** Кто может выполнять действие. Перевозчик действует только от своего имени — carrierId берётся из сессии.
+ *  RBAC (Task 65): действие delete — это разрешение delete_current_orders роли «Логист»:
+ *  удалять можно только текущие заявки (не завершённые рейсы — они в реестре и бухгалтерии). */
 const ACTION_ROLE: Record<string, Role> = {
   bid: 'carrier',
   withdraw: 'carrier',
@@ -20,6 +22,8 @@ const ACTION_ROLE: Record<string, Role> = {
   confirm: 'logist',
   return: 'logist',
   close: 'logist',
+  delete: 'logist',
+  edit: 'logist',
 }
 
 class ActionError extends Error {
@@ -51,7 +55,7 @@ function saveChecks(body: Record<string, unknown>): { key: string; label: string
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.
  * Перевозчик: bid | withdraw | assign | approve-crew.
- * Логист: extend | direct-offer | raise-rate | confirm | return | close.
+ * Логист: extend | direct-offer | raise-rate | confirm | return | close | delete | edit.
  * Победителя торгов никто не выбирает вручную: по окончании срока заявка
  * автоматически уходит минимальной ставке (src/lib/requests.ts → finalizeExpired).
  */
@@ -218,6 +222,50 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (r.status !== 'CONFIRMED') fail('Закрыть можно подтверждённый рейс')
           await tx.request.update({ where: { id }, data: { status: 'CLOSED', etrnStatus: 'SIGNED' } })
           await event('TRIP_CLOSED', 'Рейс закрыт: данные в реестре, отчёты сходятся с бухгалтерией')
+          break
+        }
+
+        // ------- логист: удаление текущей заявки (Task 65, RBAC: delete_current_orders) -------
+        case 'delete': {
+          if (r.status === 'CONFIRMED' || r.status === 'CLOSED') {
+            fail('Завершённые рейсы удалять нельзя — они уже в реестре рейсов и отчётах для бухгалтерии')
+          }
+          if (r.status === 'DELETED') fail('Заявка уже удалена')
+          await tx.request.update({ where: { id }, data: { status: 'DELETED' } })
+          await event('REQUEST_DELETED', `Заявка удалена логистом ${auth.name} — с площадки снята, ставки остановлены`)
+          liveType = 'REQUEST_DELETED'
+          break
+        }
+
+        // ------- логист: редактирование черновых параметров заявки (реестр заявок, Task 66) -------
+        case 'edit': {
+          if (r.status !== 'PUBLISHED') fail('Редактировать можно только заявки, ещё не ушедшие в работу')
+          const patch: Record<string, unknown> = {}
+          if (typeof body.category === 'string' && body.category.trim()) patch.category = body.category.trim().slice(0, 60)
+          if (typeof body.cargo === 'string' && body.cargo.trim()) patch.cargo = body.cargo.trim().slice(0, 200)
+          if (typeof body.fromPoint === 'string' && body.fromPoint.trim()) patch.fromPoint = body.fromPoint.trim().slice(0, 300)
+          if (typeof body.toPoint === 'string' && body.toPoint.trim()) patch.toPoint = body.toPoint.trim().slice(0, 300)
+          if (typeof body.loadDate === 'string' && body.loadDate.trim()) {
+            const d = parseRuDate(body.loadDate.trim())
+            if (!d) fail('Дата погрузки — в формате ДД.ММ.ГГГГ')
+            patch.loadDate = body.loadDate.trim()
+          }
+          if (typeof body.loadWindow === 'string' && body.loadWindow.trim()) patch.loadWindow = body.loadWindow.trim().slice(0, 40)
+          if (typeof body.comment === 'string') patch.comment = body.comment.trim().slice(0, 1000)
+          if (body.tonnage != null && body.tonnage !== '') {
+            const t = Number(body.tonnage)
+            if (!Number.isFinite(t) || t <= 0 || t > 200) fail('Тоннаж — число от 0 до 200 т')
+            patch.tonnage = t
+          }
+          if (typeof body.truckType === 'string' && body.truckType.trim()) patch.truckType = body.truckType.trim().slice(0, 40)
+          if (body.startRate != null && body.startRate !== '') {
+            const s = Number(body.startRate)
+            if (!Number.isFinite(s) || s <= 0 || s > MAX_RATE) fail('Стартовая ставка — положительное число, ₽/т')
+            patch.startRate = Math.round(s)
+          }
+          if (Object.keys(patch).length === 0) fail('Нет изменений для сохранения')
+          await tx.request.update({ where: { id }, data: patch })
+          await event('REQUEST_UPDATED', `Заявка отредактирована логистом ${auth.name}: ${Object.keys(patch).join(', ')}`)
           break
         }
       }

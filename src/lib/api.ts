@@ -65,8 +65,11 @@ export const api = {
     return fetch('/api/auth/logout', { method: 'POST' }).then(json<{ ok: boolean }>)
   },
 
-  listRequests: (params?: { status?: string; mode?: string; q?: string }) => {
-    const qs = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][])
+  listRequests: (params?: { status?: string; mode?: string; q?: string; includeDeleted?: boolean }) => {
+    const entries: [string, string][] = Object.entries(params ?? {})
+      .filter(([, v]) => v !== undefined && v !== null && v !== false && v !== '')
+      .map(([k, v]) => [k, v === true ? '1' : String(v)])
+    const qs = new URLSearchParams(entries)
     return fetch(`/api/requests${qs.toString() ? `?${qs}` : ''}`, withAuth({ cache: 'no-store' })).then(json<{ requests: RequestDTO[] }>)
   },
   getRequest: (id: string) => fetch(`/api/requests/${id}`, withAuth({ cache: 'no-store' })).then(json<{ request: RequestDTO }>),

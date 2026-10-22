@@ -8,11 +8,12 @@ import { notifyLive } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
-const STATUSES = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED']
+const STATUSES = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED', 'DELETED']
 const MODES = ['AUCTION', 'CLOSED']
 const MAX_DEADLINE_HOURS = 30 * 24
 
-/** GET /api/requests — список заявок (фильтры: status, mode, q). Перевозчик видит только свои и открытые. */
+/** GET /api/requests — список заявок (фильтры: status, mode, q; includeDeleted=1 — только для логиста).
+ *  Удалённые заявки (Task 65) по умолчанию скрыты от всех — их показывает только «Реестр заявок». */
 export async function GET(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
@@ -25,6 +26,8 @@ export async function GET(req: NextRequest) {
   const status = sp.get('status')
   const mode = sp.get('mode')
   const q = sp.get('q')?.trim().slice(0, 100)
+  const includeDeleted = sp.get('includeDeleted') === '1' && viewer.role === 'logist'
+  if (!includeDeleted) where.push({ status: { not: 'DELETED' } })
   if (status && STATUSES.includes(status)) where.push({ status })
   if (mode && MODES.includes(mode)) where.push({ mode })
   if (q) {
@@ -73,6 +76,9 @@ export async function POST(req: NextRequest) {
   const mode = body.mode == null || body.mode === '' ? 'AUCTION' : body.mode
   const startRate = Number(body.startRate)
   const tonnage = body.tonnage == null || body.tonnage === '' ? 20 : Number(body.tonnage)
+  // категория и комментарий для исполнителя (Task 64)
+  const category = str(body.category, 60) || 'Перевозка груза'
+  const comment = str(body.comment, 1000)
 
   // груз берём из справочника (единое имя) — свободный текст больше не источник
   let cargoName: string | null = null
@@ -132,6 +138,8 @@ export async function POST(req: NextRequest) {
         data: {
           number: `Z-${n}`,
           fromPoint, toPoint, cargo: cargoName, cargoTypeId,
+          category, comment,
+          createdBy: auth.name || '—',
           tonnage, truckType, mode,
           startRate: Math.round(startRate),
           loadDate, loadWindow, deadline,

@@ -7,7 +7,6 @@ import {
   ChevronRight,
   ClipboardList,
   FileBarChart2,
-  RefreshCw,
   ScanSearch,
   ShieldCheck,
   Truck,
@@ -41,11 +40,9 @@ export default function DashboardTab({ onNavigate }: TabProps) {
   const [requests, setRequests] = useState<RequestDTO[]>([])
   const [events, setEvents] = useState<EventFeedItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    setRefreshing(true)
     try {
       const [r, list, ev] = await Promise.all([api.reports(), api.listRequests(), api.events(15)])
       setReport(r)
@@ -56,7 +53,6 @@ export default function DashboardTab({ onNavigate }: TabProps) {
       setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [])
 
@@ -71,12 +67,7 @@ export default function DashboardTab({ onNavigate }: TabProps) {
 
   return (
     <section aria-label="Сводка платформы">
-      <SectionHeader title="Сводка">
-        <Button onClick={() => void load()} disabled={refreshing} className="gap-2" aria-label="Обновить данные сводки">
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
-          Обновить
-        </Button>
-      </SectionHeader>
+      <SectionHeader title="Сводка" />
 
       {loading && <LoadingBlock label="Загружаем сводку…" />}
       {!loading && error && <ErrorBlock message={error} onRetry={() => void load()} />}

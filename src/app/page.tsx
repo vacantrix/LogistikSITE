@@ -21,6 +21,7 @@ import MyRequestsTab from '@/components/platform/my-requests'
 import CrewTab from '@/components/platform/crew'
 import VerifyTab from '@/components/platform/verification'
 import RegistryTab from '@/components/platform/registry'
+import RequestsRegistryTab from '@/components/platform/requests-registry'
 import DirectoryTab from '@/components/platform/directories'
 import ReportsTab from '@/components/platform/reports'
 
@@ -131,6 +132,7 @@ export default function Page() {
           {tab === 'my' && <MyRequestsTab {...tabProps} />}
           {tab === 'crew' && <CrewTab {...tabProps} />}
           {tab === 'verify' && <VerifyTab {...tabProps} />}
+          {tab === 'requests' && <RequestsRegistryTab {...tabProps} />}
           {tab === 'registry' && <RegistryTab {...tabProps} />}
           {tab === 'directory' && <DirectoryTab {...tabProps} />}
           {tab === 'reports' && <ReportsTab {...tabProps} />}

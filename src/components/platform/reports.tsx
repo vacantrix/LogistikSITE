@@ -2,7 +2,7 @@
 
 /** «Отчёты» — экономия площадки, ставки по направлениям, история перевозчиков */
 import { useCallback, useEffect, useState } from 'react'
-import { Banknote, FileCheck, RefreshCw, ShieldCheck, TrendingDown, Users } from 'lucide-react'
+import { Banknote, FileCheck, ShieldCheck, TrendingDown, Users } from 'lucide-react'
 import {
   ErrorBlock, KpiCard, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
@@ -28,7 +28,6 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
   const [report, setReport] = useState<ReportSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -39,7 +38,6 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [])
 
@@ -50,8 +48,8 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
     if (liveTick > 0) void load()
   }, [liveTick, load])
 
+  // повторная загрузка по кнопке «Повторить» в блоке ошибки (кнопки «Обновить» больше нет — Task 63)
   const refresh = () => {
-    setRefreshing(true)
     void load()
   }
 
@@ -66,12 +64,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
     <div>
       <SectionHeader
         title="Отчёты"
-      >
-        <Button size="sm" variant="outline" onClick={refresh} disabled={refreshing}>
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden />
-          Обновить
-        </Button>
-      </SectionHeader>
+      />
 
       {error && report && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">

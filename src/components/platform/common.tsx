@@ -9,7 +9,7 @@ import { AGENT_STATUS_LABEL, DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } f
 import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
-export type TabKey = 'board' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'directory' | 'reports'
+export type TabKey = 'board' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports'
 
 /** Роль пользователя: сотрудник АЭМЗ (логист) или перевозчик */
 export type RoleKind = 'logist' | 'carrier'

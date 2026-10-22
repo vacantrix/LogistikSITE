@@ -10,7 +10,42 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: 
   AT_LOGIST: { label: 'У логиста — сверка', short: 'У логиста', badge: 'bg-blue-100 text-blue-800 border-blue-200', dot: 'bg-blue-600' },
   CONFIRMED: { label: 'Данные в 1С', short: 'В 1С', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
   CLOSED: { label: 'Рейс закрыт', short: 'Закрыт', badge: 'bg-slate-200 text-slate-700 border-slate-300', dot: 'bg-slate-500' },
+  DELETED: { label: 'Удалена', short: 'Удалена', badge: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-400' },
 }
+
+/** Категории заявки (Task 64) — единый список для формы создания и реестра заявок */
+export const REQUEST_CATEGORIES = [
+  'Перевозка груза',
+  'Услуги спецтехники',
+  'Погрузо-разгрузочные работы',
+  'Прочее',
+] as const
+
+/** Группы статусов в «Реестре заявок» (Task 66): Новая / В работе / Завершена / Удалена */
+export type RequestGroup = 'new' | 'working' | 'done' | 'deleted'
+
+export const REQUEST_GROUP_META: Record<RequestGroup, { label: string; badge: string; dot: string }> = {
+  new: { label: 'Новая', badge: 'bg-sky-100 text-sky-800 border-sky-200', dot: 'bg-sky-500' },
+  working: { label: 'В работе', badge: 'bg-violet-100 text-violet-800 border-violet-200', dot: 'bg-violet-500' },
+  done: { label: 'Завершена', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
+  deleted: { label: 'Удалена', badge: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-400' },
+}
+
+/** Группа реестра заявок для статуса заявки */
+export function requestGroupOf(status: string): RequestGroup {
+  switch (status) {
+    case 'PUBLISHED': return 'new'
+    case 'AWARDED':
+    case 'DOCS_REVIEW':
+    case 'AT_LOGIST': return 'working'
+    case 'CONFIRMED':
+    case 'CLOSED': return 'done'
+    default: return 'deleted'
+  }
+}
+
+/** Статусы заявок, которые логист может удалить (Task 65): текущие, ещё не завершённые */
+export const DELETABLE_STATUSES: readonly string[] = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST']
 
 /** Метки статусов глазами агента-перевозчика — реальная линия рейса без служебных
  *  процессов АЭМЗ: выбор рейса → согласование ставки → подтверждено → документы →
@@ -58,6 +93,7 @@ export const DOC_TYPE_LABEL: Record<string, string> = {
   STS: 'СТС, лицевая сторона',
   REQUEST_DOC: 'Заявка на перевозку (скан)',
   POA: 'Доверенность',
+  ATTACHMENT: 'Вложение к заявке',
 }
 
 /** Реестр: 8 статусов записи по порядку */

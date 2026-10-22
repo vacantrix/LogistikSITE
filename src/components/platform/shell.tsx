@@ -21,6 +21,7 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'apply', label: 'Подать документы', roles: ['carrier'] },
   { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'] },
   { key: 'verify', label: 'Сверка документов', roles: ['logist'] },
+  { key: 'requests', label: 'Реестр заявок', roles: ['logist'] },
   { key: 'registry', label: 'Реестр рейсов', roles: ['logist'] },
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier'] },
   { key: 'reports', label: 'Отчёты', roles: ['logist'] },

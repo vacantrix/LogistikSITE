@@ -206,3 +206,19 @@ export function routeMapUrl(from: string, to: string): string {
   const rtext = (a.coords && b.coords) ? `${a.coords}~${b.coords}` : (a.coords ?? a.mapQuery)
   return `https://yandex.ru/maps/?rtext=${encodeURIComponent(rtext)}&rtt=auto`
 }
+
+/**
+ * Подсказки автокомплита адресов в форме создания заявки (Task 64).
+ * value — то, что пишется в заявку: pointInfo(value) должен вернуть ту же точку
+ * (проверено по ключам поиска выше), поэтому маршрут, карта и КМ считаются корректно.
+ */
+export const POINT_SUGGESTIONS: { value: string; label: string; sub: string }[] = [
+  { value: 'Абинск, АЭМЗ', label: 'Абинск — Абинский ЭМЗ (погрузка)', sub: FACTORY.address },
+  { value: 'Порт Санкт-Петербург', label: 'Санкт-Петербург — Терминал Святого Петра', sub: TERMINAL_ST_PETER.address },
+  { value: 'Склад Санкт-Петербург', label: 'Санкт-Петербург — Склад «Южный»', sub: WAREHOUSE_SPB.address },
+  ...SPOTS.map((s, i) => {
+    const first = SPOT_KEYS[i]?.keys[0] ?? s.short
+    const city = first.charAt(0).toUpperCase() + first.slice(1)
+    return { value: city, label: `${s.short} — ${s.name}`, sub: s.address }
+  }),
+]

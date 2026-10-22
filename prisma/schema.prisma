@@ -152,6 +152,12 @@ model Request {
   cargo       String // денормализованное имя груза из справочника (CargoType.name)
   cargoTypeId String?
   cargoType   CargoType? @relation(fields: [cargoTypeId], references: [id])
+  /** категория заявки (Task 64): «Перевозка груза», «Услуги спецтехники», «Погрузо-разгрузочные работы», «Прочее» */
+  category    String     @default("Перевозка груза")
+  /** комментарий для исполнителя (Task 64) */
+  comment     String     @default("")
+  /** логист, создавший заявку (Task 66 — колонка «Логист / Создатель» в реестре заявок) */
+  createdBy   String     @default("—")
   tonnage     Float
   truckType   String
   mode        String // AUCTION | CLOSED

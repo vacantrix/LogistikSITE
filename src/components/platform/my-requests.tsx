@@ -43,7 +43,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   DocStatusBadge,
@@ -72,6 +71,7 @@ const DOC_ICONS: Record<DocType, typeof IdCard> = {
   STS: FileText,
   REQUEST_DOC: ClipboardList,
   POA: FileSignature,
+  ATTACHMENT: FileText,
 }
 
 const DOC_SHORT: Record<DocType, string> = {
@@ -81,6 +81,7 @@ const DOC_SHORT: Record<DocType, string> = {
   STS: 'СТС',
   REQUEST_DOC: 'Заявка (скан)',
   POA: 'Доверенность',
+  ATTACHMENT: 'Вложение',
 }
 
 const STATUS_ORDER: Record<RequestDTO['status'], number> = {
@@ -90,6 +91,7 @@ const STATUS_ORDER: Record<RequestDTO['status'], number> = {
   AT_LOGIST: 2,
   CONFIRMED: 3,
   CLOSED: 4,
+  DELETED: 5, // удалённые заявки в кабинет агента не попадают (фильтр выше), но тип требует полноты
 }
 
 /** Этап плашки для заявки из «Моих заявок»: ставка уже подана — «Согласование ставки» */
@@ -140,6 +142,7 @@ const DEMO_NAMES: Record<DocType, string> = {
   STS: 'sts_demo.jpg',
   REQUEST_DOC: 'zayavka_scan_demo.jpg',
   POA: 'doverennost_demo.jpg',
+  ATTACHMENT: 'vlozhenie_demo.jpg',
 }
 
 /** Чипы назначенного экипажа: водитель, тягач, прицеп */
@@ -170,9 +173,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
   const [activeId, setActiveId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'ALL' | number>('ALL')
-  // Task 61: «Доступна для отклика» по умолчанию скрыта — в кабинете остаются только заявки,
-  // по которым агент реально участвует; тумблер возвращает доступные в список
-  const [showAvailable, setShowAvailable] = useState(false)
+  // Task 61/63: «Доступна для отклика» по умолчанию скрыта — в кабинете остаются только заявки,
+  // по которым агент реально участвует. Тумблера больше нет (Task 63): увидеть доступные
+  // можно, выбрав этап «Выбор рейса» в фильтре этапов выше.
   const [now, setNow] = useState<number | null>(null)
   // свёрнутый загрузчик документов на этапе «Подтверждено» (Task 50)
   const [docsOpenId, setDocsOpenId] = useState<string | null>(null)
@@ -507,9 +510,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
   // ——— быстрый поиск + фильтр по статусу ———
   const q = query.trim().toLowerCase()
-  /** доступные для отклика скрыты, если тумблер выключен и этап «Выбор рейса» не выбран явно */
-  const availableHidden = !showAvailable && statusFilter !== 0
-  const isFiltered = q !== '' || statusFilter !== 'ALL' || showAvailable
+  /** доступные для отклика скрыты всегда, кроме явного выбора этапа «Выбор рейса» (Task 63) */
+  const availableHidden = statusFilter !== 0
+  const isFiltered = q !== '' || statusFilter !== 'ALL'
   const visible = mine.filter((m) => {
     const state = cardStateOf(m, now)
     if (availableHidden && state === 'available') return false
@@ -522,17 +525,12 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
     ]
     return hay.some((v) => v.toLowerCase().includes(q))
   })
-  /** сколько заявок «Доступна для отклика» сейчас спрятано из списка (для подсказки у тумблера) */
-  const hiddenAvailableCount = availableHidden
-    ? mine.filter((m) => cardStateOf(m, now) === 'available').length
-    : 0
   // статусы фильтра фиксированы — все 7 этапов линии видны всегда,
   // а не только те, что случайно есть среди заявок
   const stageOptions = PIPELINE_STAGES.map((_, i) => i)
   const resetFilters = () => {
     setQuery('')
     setStatusFilter('ALL')
-    setShowAvailable(false)
   }
 
   /** выбранная в списке заявка (по умолчанию — первая видима) */
@@ -575,7 +573,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
               ? `По запросу «${query.trim()}» заявок нет — измените условия или сбросьте фильтр`
               : statusFilter !== 'ALL'
                 ? 'По выбранному этапу заявок нет — измените условия или сбросьте фильтр'
-                : 'Все ваши заявки сейчас «Доступны для отклика» и скрыты — включите тумблер «Доступные для отклика» выше, чтобы увидеть их'}
+                : 'Все ваши заявки сейчас «Доступны для отклика» и скрыты — выберите этап «Выбор рейса» в фильтре выше, чтобы увидеть их'}
           </p>
           <Button variant="outline" size="sm" onClick={resetFilters} className="mt-3" aria-label="Сбросить поиск и фильтр">
             Сбросить поиск и фильтр
@@ -833,25 +831,6 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     ))}
                   </SelectContent>
                 </Select>
-                {/* Task 61: тумблер «Доступные для отклика» — по умолчанию выключен,
-                    чтобы новые заявки без ставки агента не загромождали кабинет */}
-                <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                  <Label htmlFor="show-available-switch" className="min-w-0 cursor-pointer">
-                    <span className="block text-xs font-medium leading-tight text-slate-700">Доступные для отклика</span>
-                    <span className="block text-[10px] leading-tight text-slate-400">
-                      {hiddenAvailableCount > 0
-                        ? `скрыто ${hiddenAvailableCount} — новые заявки без вашей ставки`
-                        : 'новые заявки без вашей ставки'}
-                    </span>
-                  </Label>
-                  <Switch
-                    id="show-available-switch"
-                    checked={showAvailable}
-                    onCheckedChange={setShowAvailable}
-                    aria-label="Показывать заявки, доступные для отклика"
-                    className="shrink-0"
-                  />
-                </div>
               </div>
               <nav aria-label="Список ваших заявок" className={`max-h-56 space-y-2 overflow-y-auto pr-1 sm:max-h-72 lg:max-h-[calc(100vh-14rem)] ${THIN_SCROLL}`}>
                 {visible.map((m) => {

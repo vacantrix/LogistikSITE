@@ -1,9 +1,11 @@
 /** Общие DTO платформы (клиент + сервер) */
 
-export type RequestStatus = 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'CONFIRMED' | 'CLOSED'
+/** Статусы заявки. DELETED (Task 65) — мягкое удаление: запись остаётся в реестре
+ *  заявок со статусом «Удалена», но исчезает с площадки и из кабинетов перевозчиков */
+export type RequestStatus = 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'CONFIRMED' | 'CLOSED' | 'DELETED'
 export type RequestMode = 'AUCTION' | 'CLOSED'
 export type DocStatus = 'PENDING' | 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
-export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA'
+export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA' | 'ATTACHMENT'
 
 /** Принадлежность записи справочника (Task 62): собственный парк / наёмный (ИП, ООО) / аренда-лизинг */
 export type OwnershipType = 'OWNED' | 'HIRED' | 'LEASE'
@@ -150,6 +152,12 @@ export interface RequestDTO {
   cargoTypeId: string | null
   /** группа груза из справочника (Металлопрокат, Оборудование…) */
   cargoCategory: string | null
+  /** категория заявки (Task 64) */
+  category: string
+  /** комментарий для исполнителя (Task 64) */
+  comment: string
+  /** логист, создавший заявку (Task 66 — реестр заявок) */
+  createdBy: string
   tonnage: number
   truckType: string
   mode: RequestMode
