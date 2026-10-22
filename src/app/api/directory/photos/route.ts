@@ -28,10 +28,14 @@ export async function GET(req: NextRequest) {
   }
   const photos = await db.directoryPhoto.findMany({
     where: { kind, refId: id },
-    select: { id: true, label: true, fileName: true },
+    select: { id: true, label: true, fileName: true, status: true },
     orderBy: { createdAt: 'asc' },
   })
   return NextResponse.json({
-    photos: photos.map((p) => ({ id: p.id, label: p.label, fileName: p.fileName, url: `/api/files/directory/${p.id}` })),
+    photos: photos.map((p) => ({
+      id: p.id, label: p.label, fileName: p.fileName,
+      url: `/api/files/directory/${p.id}`,
+      status: p.status === 'NEEDS_REVIEW' ? 'NEEDS_REVIEW' : 'LOADED',
+    })),
   })
 }

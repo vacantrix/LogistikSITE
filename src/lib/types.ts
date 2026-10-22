@@ -5,6 +5,19 @@ export type RequestMode = 'AUCTION' | 'CLOSED'
 export type DocStatus = 'PENDING' | 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
 export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA'
 
+/** Принадлежность записи справочника (Task 62): собственный парк / наёмный (ИП, ООО) / аренда-лизинг */
+export type OwnershipType = 'OWNED' | 'HIRED' | 'LEASE'
+
+/** Статус прикреплённого документа записи справочника (Task 62) */
+export type DirectoryDocStatus = 'LOADED' | 'NEEDS_REVIEW' | 'EXPIRING' | 'MISSING'
+
+/** Экспресс-сличение логиста (Task 62): ответ да/нет на ключевой вопрос сверки */
+export interface VerifyCheck {
+  key: string
+  label: string
+  ok: boolean
+}
+
 export interface DriverDTO {
   id: string
   carrierId: string
@@ -20,6 +33,11 @@ export interface DriverDTO {
   passportIssuedBy: string
   passportIssuedDate: string
   position: string
+  ownershipType: OwnershipType
+  /** собственник / контрагент (ИП / ООО «Название») */
+  ownerName: string
+  /** договор-основание (для аренды/лизинга) */
+  leaseContract: string
   createdAt: string
 }
 
@@ -33,6 +51,8 @@ export interface TruckDTO {
   techTill: string
   owner: string
   color: string
+  ownershipType: OwnershipType
+  leaseContract: string
   createdAt: string
 }
 
@@ -45,16 +65,20 @@ export interface TrailerDTO {
   techTill: string
   color: string
   owner: string
+  ownershipType: OwnershipType
+  leaseContract: string
   createdAt: string
 }
 
 /** Фото/документ записи справочника (Task 54) — модальное окно предосмотра в «Справочниках».
- *  url — защищённая ссылка на файл (/api/files/...): отдаётся только логисту и владельцу записи */
+ *  url — защищённая ссылка на файл (/api/files/...): отдаётся только логисту и владельцу записи.
+ *  status (Task 62): LOADED — загружен, NEEDS_REVIEW — требует проверки */
 export interface DirectoryPhotoDTO {
   id: string
   label: string
   fileName: string
   url: string
+  status: 'LOADED' | 'NEEDS_REVIEW'
 }
 
 export interface CarrierDTO {
@@ -146,6 +170,10 @@ export interface RequestDTO {
   trailerId: string | null
   passPackage: boolean
   etrnStatus: string
+  /** экспресс-сличение логиста (Task 62): сохранённые ответы да/нет — после сверки/отклонения */
+  verifyChecks: VerifyCheck[] | null
+  /** комментарий логиста к сверки/отклонению (Task 62) */
+  verifyComment: string | null
   createdAt: string
   updatedAt: string
   savings: number | null

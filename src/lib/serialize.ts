@@ -98,6 +98,8 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
     trailerId: seesTrip ? r.trailerId : null,
     passPackage: r.passPackage,
     etrnStatus: r.etrnStatus,
+    verifyChecks: parseJson(r.verifyChecks, null),
+    verifyComment: r.verifyComment,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     savings,
@@ -140,25 +142,34 @@ export function toDocumentDTO(d: DocumentLite): DocumentDTO {
   }
 }
 
+const OWNERSHIP = new Set(['OWNED', 'HIRED', 'LEASE'])
+/** принадлежность записи: незнакомое значение трактуем как собственный парк */
+const ownership = (v: string) => (OWNERSHIP.has(v) ? (v as 'OWNED' | 'HIRED' | 'LEASE') : 'OWNED')
+
 export function toDriverDTO(d: Driver): DriverDTO {
   return {
     id: d.id, carrierId: d.carrierId, fullName: d.fullName, birthDate: d.birthDate, passport: d.passport,
     license: d.license, licenseTill: d.licenseTill, categories: d.categories,
     phone: d.phone, birthPlace: d.birthPlace, citizenship: d.citizenship,
     passportIssuedBy: d.passportIssuedBy, passportIssuedDate: d.passportIssuedDate, position: d.position,
+    ownershipType: ownership(d.ownershipType), ownerName: d.ownerName, leaseContract: d.leaseContract,
     createdAt: d.createdAt.toISOString(),
   }
 }
 export function toTruckDTO(t: Truck): TruckDTO {
   return {
     id: t.id, carrierId: t.carrierId, brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
-    techTill: t.techTill, owner: t.owner, color: t.color, createdAt: t.createdAt.toISOString(),
+    techTill: t.techTill, owner: t.owner, color: t.color,
+    ownershipType: ownership(t.ownershipType), leaseContract: t.leaseContract,
+    createdAt: t.createdAt.toISOString(),
   }
 }
 export function toTrailerDTO(t: Trailer): TrailerDTO {
   return {
     id: t.id, carrierId: t.carrierId, plate: t.plate, sts: t.sts, type: t.type,
-    techTill: t.techTill, color: t.color, owner: t.owner, createdAt: t.createdAt.toISOString(),
+    techTill: t.techTill, color: t.color, owner: t.owner,
+    ownershipType: ownership(t.ownershipType), leaseContract: t.leaseContract,
+    createdAt: t.createdAt.toISOString(),
   }
 }
 export function toCarrierDTO(

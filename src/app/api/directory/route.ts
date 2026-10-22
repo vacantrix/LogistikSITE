@@ -11,6 +11,8 @@ export const dynamic = 'force-dynamic'
 const norm = (s: string) => s.replace(/\s/g, '').toUpperCase()
 /** Строковое поле из тела запроса: обрезка и ограничение длины */
 const s = (v: unknown, max = 300): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
+/** принадлежность записи (Task 62): OWNED | HIRED | LEASE */
+const ownershipType = (v: unknown): string => (v === 'HIRED' || v === 'LEASE' || v === 'OWNED' ? v : 'OWNED')
 const forbidden = () => NextResponse.json({ error: 'Недостаточно прав для этого действия' }, { status: 403 })
 
 /**
@@ -149,6 +151,9 @@ export async function POST(req: NextRequest) {
           phone: s(data.phone, 40) || '—', birthPlace: s(data.birthPlace) || '—',
           citizenship: s(data.citizenship, 60) || '—', position: s(data.position, 100) || '—',
           passportIssuedBy: s(data.passportIssuedBy) || '—', passportIssuedDate: s(data.passportIssuedDate, 20) || '—',
+          // принадлежность (Task 62)
+          ownershipType: ownershipType(data.ownershipType),
+          ownerName: s(data.ownerName, 200) || '—', leaseContract: s(data.leaseContract, 200) || '—',
         }
         const driver = existing
           ? await db.driver.update({ where: { id: existing.id }, data: payload })
@@ -166,6 +171,7 @@ export async function POST(req: NextRequest) {
         const payload = {
           brand: s(data.brand, 100) || '—', plate, vin: s(data.vin, 30) || '—', sts: s(data.sts, 40) || '—',
           techTill: s(data.techTill, 20) || '—', owner: s(data.owner, 200) || '—', color: s(data.color, 60) || '—',
+          ownershipType: ownershipType(data.ownershipType), leaseContract: s(data.leaseContract, 200) || '—',
         }
         const truck = existing
           ? await db.truck.update({ where: { id: existing.id }, data: payload })
@@ -184,6 +190,7 @@ export async function POST(req: NextRequest) {
         const trailerPayload = {
           type: s(data.type, 100) || '—', plate, sts: s(data.sts, 40) || '—',
           techTill: s(data.techTill, 20) || '—', color: s(data.color, 60) || '—', owner: s(data.owner, 200) || '—',
+          ownershipType: ownershipType(data.ownershipType), leaseContract: s(data.leaseContract, 200) || '—',
         }
         const trailer = existingTrailer
           ? await db.trailer.update({ where: { id: existingTrailer.id }, data: trailerPayload })
@@ -257,6 +264,8 @@ export async function PUT(req: NextRequest) {
             fullName, birthDate: s(data.birthDate, 20) || '—', passport: s(data.passport, 40) || '—',
             license: s(data.license, 40) || '—', licenseTill: s(data.licenseTill, 20) || '—',
             categories: s(data.categories, 60) || '—',
+            ownershipType: ownershipType(data.ownershipType),
+            ownerName: s(data.ownerName, 200) || '—', leaseContract: s(data.leaseContract, 200) || '—',
           },
         })
         notifyLive({ type: 'DIRECTORY_UPDATED' })
@@ -270,6 +279,7 @@ export async function PUT(req: NextRequest) {
           data: {
             brand: s(data.brand, 100) || '—', plate, vin: s(data.vin, 30) || '—', sts: s(data.sts, 40) || '—',
             techTill: s(data.techTill, 20) || '—', owner: s(data.owner, 200) || '—',
+            ownershipType: ownershipType(data.ownershipType), leaseContract: s(data.leaseContract, 200) || '—',
           },
         })
         notifyLive({ type: 'DIRECTORY_UPDATED' })
@@ -283,6 +293,7 @@ export async function PUT(req: NextRequest) {
           data: {
             plate, sts: s(data.sts, 40) || '—', type: s(data.type, 100) || '—',
             techTill: s(data.techTill, 20) || '—', owner: s(data.owner, 200) || '—',
+            ownershipType: ownershipType(data.ownershipType), leaseContract: s(data.leaseContract, 200) || '—',
           },
         })
         notifyLive({ type: 'DIRECTORY_UPDATED' })

@@ -30,6 +30,25 @@ const fail = (message: string, status = 400): never => { throw new ActionError(m
 const MAX_RATE = 10_000_000
 
 /**
+ * Экспресс-сличение (Task 62): массив ответов да/нет из тела запроса.
+ * Формат [{ key, label, ok }]; мусор отбрасываем, ограничиваем 12 пунктами и длину подписи.
+ */
+function saveChecks(body: Record<string, unknown>): { key: string; label: string; ok: boolean }[] | null {
+  const raw = body.checks
+  if (!Array.isArray(raw)) return null
+  const checks = (raw as unknown[])
+    .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+    .slice(0, 12)
+    .map((c) => ({
+      key: typeof c.key === 'string' ? c.key.trim().slice(0, 40) : '',
+      label: typeof c.label === 'string' ? c.label.trim().slice(0, 200) : '',
+      ok: c.ok === true,
+    }))
+    .filter((c) => c.key && c.label)
+  return checks.length > 0 ? checks : null
+}
+
+/**
  * POST /api/requests/[id]/action — действия рабочего процесса.
  * Перевозчик: bid | withdraw | assign | approve-crew.
  * Логист: extend | direct-offer | raise-rate | confirm | return | close.
@@ -161,8 +180,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // ------- логист: сверка -------
         case 'confirm': {
           if (r.status !== 'AT_LOGIST') fail('Подтвердить можно заявку в статусе «У логиста»')
-          await tx.request.update({ where: { id }, data: { status: 'CONFIRMED', passPackage: true, etrnStatus: 'SENT' } })
-          await event('CONFIRMED_1C', 'Данные подтверждены и переданы в 1C:ERP — справочник и реестр')
+          // экспресс-сличение (Task 62): ответы да/нет + комментарий сохраняются вместе с вердиктом
+          const checks = saveChecks(body)
+          await tx.request.update({
+            where: { id },
+            data: {
+              status: 'CONFIRMED', passPackage: true, etrnStatus: 'SENT',
+              ...(checks ? { verifyChecks: JSON.stringify(checks) } : {}),
+              ...(typeof body.comment === 'string' && body.comment.trim() ? { verifyComment: body.comment.trim().slice(0, 500) } : { verifyComment: null }),
+            },
+          })
+          await event('CONFIRMED_1C', 'Документы сверены и подтверждены — данные переданы в 1C:ERP (справочник и реестр)')
           await event('PASS_SENT', 'Пакет на пропуск сформирован из заявки — логист загружает на платформу порта')
           await event('ETRN_SENT', 'ЭТрН сформирована модулем «Логистика.Про», подпись — КЭП сотрудника и МЧД')
           break
@@ -172,8 +200,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (r.status !== 'AT_LOGIST') fail('Вернуть агенту можно только заявку на сверке у логиста')
           const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : ''
           if (!reason) fail('Укажите причину возврата')
-          await tx.request.update({ where: { id }, data: { status: 'AWARDED' } })
-          await event('RETURNED_TO_AGENT', `Возвращено агенту: ${reason}`)
+          const comment = typeof body.comment === 'string' ? body.comment.trim().slice(0, 500) : ''
+          const checks = saveChecks(body)
+          await tx.request.update({
+            where: { id },
+            data: {
+              status: 'AWARDED',
+              ...(checks ? { verifyChecks: JSON.stringify(checks) } : {}),
+              verifyComment: [reason, comment].filter(Boolean).join('. ') || null,
+            },
+          })
+          await event('RETURNED_TO_AGENT', `Возвращено агенту: ${[reason, comment].filter(Boolean).join('. ')}`)
           break
         }
 

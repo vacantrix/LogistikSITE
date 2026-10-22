@@ -60,6 +60,10 @@ model Driver {
   passportIssuedBy   String @default("—") // кем выдан паспорт (для 1С)
   passportIssuedDate String @default("—") // дата выдачи паспорта (для 1С)
   position    String   @default("—") // должность (для 1С)
+  // принадлежность (Task 62): OWNED — собственный штат, HIRED — наёмный от ИП/ООО, LEASE — аренда/лизинг
+  ownershipType String @default("OWNED")
+  ownerName     String @default("—") // собственник / контрагент (ИП / ООО «Название»)
+  leaseContract String @default("—") // договор-основание (для аренды/лизинга)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
 }
@@ -75,6 +79,9 @@ model Truck {
   techTill  String   @default("—") // техосмотр (диагностическая карта) до
   owner     String
   color     String   @default("—") // цвет кабины/тягача
+  // принадлежность (Task 62): OWNED — собственный парк, HIRED — наёмный (ИП/ООО), LEASE — аренда/лизинг
+  ownershipType String @default("OWNED")
+  leaseContract String @default("—") // договор-основание (для аренды/лизинга)
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 }
@@ -89,6 +96,9 @@ model Trailer {
   techTill  String   @default("—") // техосмотр до
   color     String   @default("—") // цвет прицепа
   owner     String   @default("—") // собственник прицепа
+  // принадлежность (Task 62): OWNED — собственный парк, HIRED — наёмный (ИП/ООО), LEASE — аренда/лизинг
+  ownershipType String @default("OWNED")
+  leaseContract String @default("—") // договор-основание (для аренды/лизинга)
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 }
@@ -106,6 +116,8 @@ model DirectoryPhoto {
   label     String // человекочитаемое название слота («Паспорт: стр. с фото», «Фото ТС»…)
   fileName  String
   dataUri   String
+  /** статус документа записи (Task 62): LOADED — загружен, NEEDS_REVIEW — требует проверки */
+  status    String   @default("LOADED")
   createdAt DateTime @default(now())
 
   @@index([kind, refId])
@@ -156,6 +168,10 @@ model Request {
   trailerId   String?
   passPackage Boolean    @default(false)
   etrnStatus  String     @default("NONE") // NONE | SENT | SIGNED
+  /** экспресс-сличение логиста при сверке (Task 62): JSON [{key,label,ok}] — да/нет по ключевым полям */
+  verifyChecks String?
+  /** комментарий логиста к сверки/отклонению (Task 62) */
+  verifyComment String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   bids        Bid[]

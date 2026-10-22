@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   CalendarClock,
@@ -25,10 +26,12 @@ import {
   Truck,
   User,
   Wrench,
+  X,
 } from 'lucide-react'
 import {
   ErrorBlock, ExpiryBadge, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
+import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -46,7 +49,9 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
 import { expiryInfo, rowTint, worseState, type ExpiryState } from '@/lib/expiry'
-import type { CarrierDTO, DirectoryPhotoDTO, DriverDTO, TrailerDTO, TruckDTO } from '@/lib/types'
+import type {
+  CarrierDTO, DirectoryPhotoDTO, DriverDTO, OwnershipType, TrailerDTO, TruckDTO,
+} from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
@@ -98,6 +103,96 @@ const SECTIONS: { key: SectionKind; kind: Kind; icon: typeof User; hint: string 
   { key: 'trucks', kind: 'truck', icon: Truck, hint: 'Марки, госномера, СТС, техосмотр' },
   { key: 'trailers', kind: 'trailer', icon: Wrench, hint: 'Типы, госномера, СТС, собственник' },
 ]
+
+// ——— принадлежность записи справочника (Task 62): собственный парк / наёмный / аренда-лизинг ———
+
+/** Подписи бейджа «Принадлежность» */
+const OWNERSHIP_LABEL: Record<OwnershipType, string> = {
+  OWNED: 'Собственный парк',
+  HIRED: 'Наёмный',
+  LEASE: 'Аренда · Лизинг',
+}
+
+/** Стили бейджа «Принадлежность» */
+const OWNERSHIP_BADGE_CLS: Record<OwnershipType, string> = {
+  OWNED: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  HIRED: 'border-blue-200 bg-blue-50 text-blue-700',
+  LEASE: 'border-amber-200 bg-amber-50 text-amber-700',
+}
+
+/** Ячейка «Принадлежность»: бейдж типа + собственник; для аренды/лизинга — строка договора (Task 62).
+ *  Для тягачей/прицепов имя собственника не дублируем — оно видно в колонке «Собственник» */
+function OwnershipCell({ type, owner, contract, hideOwner = false }: { type: OwnershipType; owner: string; contract: string; hideOwner?: boolean }) {
+  const showOwner = !hideOwner && owner !== '' && owner !== '—'
+  const showContract = type === 'LEASE' && contract !== '' && contract !== '—'
+  return (
+    <TableCell className="max-w-[210px]">
+      <Badge variant="outline" className={OWNERSHIP_BADGE_CLS[type]}>{OWNERSHIP_LABEL[type]}</Badge>
+      {showOwner && <div className="mt-1 truncate text-xs text-slate-500" title={owner}>{owner}</div>}
+      {showContract && (
+        <div className="truncate text-[11px] text-slate-400" title={`Договор-основание: ${contract}`}>{contract}</div>
+      )}
+    </TableCell>
+  )
+}
+
+// ——— окно «Прикрепленные документы»: слоты документов записи со статусами (Task 62) ———
+
+/** Ожидаемый скан записи: подпись + ключ даты срока (для статуса без загруженного файла) */
+interface PhotoSlot {
+  label: string
+  expiryKey?: 'licenseTill' | 'techTill'
+}
+
+const PHOTO_SLOTS: Record<Kind, PhotoSlot[]> = {
+  driver: [
+    { label: 'Паспорт: стр. с фото' },
+    { label: 'Паспорт: регистрация' },
+    { label: 'Водительское удостоверение', expiryKey: 'licenseTill' },
+  ],
+  truck: [
+    { label: 'СТС тягача' },
+    { label: 'Фото тягача' },
+    { label: 'Техосмотр (диагностическая карта)', expiryKey: 'techTill' },
+  ],
+  trailer: [
+    { label: 'СТС прицепа' },
+    { label: 'Фото прицепа' },
+    { label: 'Техосмотр (диагностическая карта)', expiryKey: 'techTill' },
+  ],
+}
+
+/** Бейдж статуса документа: иконка + подпись + классы */
+interface SlotStatus {
+  label: string
+  cls: string
+  icon: typeof X
+}
+
+const STATUS_LOADED: SlotStatus = { label: 'Загружен', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700', icon: CheckCircle2 }
+const STATUS_MISSING: SlotStatus = { label: 'Отсутствует', cls: 'border-slate-200 bg-slate-100 text-slate-500', icon: X }
+const STATUS_EXPIRED: SlotStatus = { label: 'Истекает срок', cls: 'border-red-300 bg-red-100 text-red-700', icon: CalendarClock }
+const STATUS_EXPIRING: SlotStatus = { label: 'Истекает срок', cls: 'border-amber-300 bg-amber-100 text-amber-700', icon: CalendarClock }
+const STATUS_REVIEW: SlotStatus = { label: 'Требует проверки', cls: 'border-amber-300 bg-amber-100 text-amber-700', icon: AlertTriangle }
+
+/** Статус слота документа: по скану (NEEDS_REVIEW) и сроку из карточки записи (Task 62) */
+function slotStatus(photo: DirectoryPhotoDTO | undefined, expiryDate: string | undefined): SlotStatus {
+  const info = expiryDate === undefined ? null : expiryInfo(expiryDate)
+  if (photo) {
+    // сначала скан: помеченный «требует проверки» важнее срока
+    if (photo.status === 'NEEDS_REVIEW') return STATUS_REVIEW
+    if (info?.state === 'expired') return STATUS_EXPIRED
+    if (info?.state === 'warn' || info?.state === 'soon') return STATUS_EXPIRING
+    return STATUS_LOADED
+  }
+  if (info) {
+    if (info.state === 'expired') return STATUS_EXPIRED
+    if (info.state === 'warn' || info.state === 'soon') return STATUS_EXPIRING
+    if (info.state === 'none') return STATUS_MISSING
+    return STATUS_LOADED
+  }
+  return STATUS_MISSING
+}
 
 /** Запись в блоке «Требуют внимания» */
 interface ExpiryItem {
@@ -191,10 +286,16 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   const [dirQuery, setDirQuery] = useState('')
   const [dirExpiry, setDirExpiry] = useState<'all' | 'soon' | 'expired'>('all')
   const [dirCarrier, setDirCarrier] = useState('all')
-  // ——— модальное окно предосмотра фото/документов записи (Task 54) ———
-  const [photoView, setPhotoView] = useState<{ kind: Kind; id: string; title: string } | null>(null)
+  // принадлежность записи: собственный парк / наёмный / аренда-лизинг (Task 62)
+  const [dirOwnership, setDirOwnership] = useState<'all' | OwnershipType>('all')
+  // ——— модальное окно «Прикрепленные документы» (Task 54 + статусы Task 62) ———
+  const [photoView, setPhotoView] = useState<{
+    kind: Kind; id: string; title: string; expiry?: { licenseTill?: string; techTill?: string }
+  } | null>(null)
   const [photoList, setPhotoList] = useState<DirectoryPhotoDTO[] | null>(null)
   const [photoLoading, setPhotoLoading] = useState(false)
+  // полноразмерный просмотр документа: поворот, зум, скачивание (Task 62)
+  const [preview, setPreview] = useState<{ src: string; title: string; fileName: string; downloadUrl: string } | null>(null)
 
   // открытие окна фото: подтягиваем загруженные и проверенные документы записи
   useEffect(() => {
@@ -238,6 +339,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
     setDirQuery('')
     setDirExpiry('all')
     setDirCarrier('all')
+    setDirOwnership('all')
   }, [])
 
   // на весь экран: блокируем прокрутку фона и закрываем по Escape
@@ -272,6 +374,10 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
     (carrierId: string) => !isLogist || dirCarrier === 'all' || carrierId === dirCarrier,
     [isLogist, dirCarrier],
   )
+  const dirByOwnership = useCallback(
+    (type: OwnershipType) => dirOwnership === 'all' || type === dirOwnership,
+    [dirOwnership],
+  )
 
   // —— полный (нефильтрованный) парк видимой области: сводка и счётчики ——
   const allDrivers = useMemo(
@@ -290,20 +396,23 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   // —— отфильтрованные выборки для таблиц ——
   const driversFlat = useMemo(
     () => allDrivers
-      .filter(({ d, carrierId }) => dirByCarrier(carrierId) && dirByQuery(d.fullName, d.passport, d.license, d.phone) && dirByExpiry([d.licenseTill])),
-    [allDrivers, dirByQuery, dirByExpiry, dirByCarrier],
+      .filter(({ d, carrierId }) => dirByCarrier(carrierId) && dirByOwnership(d.ownershipType)
+        && dirByQuery(d.fullName, d.passport, d.license, d.phone, d.ownerName) && dirByExpiry([d.licenseTill])),
+    [allDrivers, dirByQuery, dirByExpiry, dirByCarrier, dirByOwnership],
   )
   const driversTotal = allDrivers.length
   const trucksFlat = useMemo(
     () => allTrucks
-      .filter(({ t, carrierId }) => dirByCarrier(carrierId) && dirByQuery(t.brand, t.plate, t.vin, t.owner) && dirByExpiry([t.techTill])),
-    [allTrucks, dirByQuery, dirByExpiry, dirByCarrier],
+      .filter(({ t, carrierId }) => dirByCarrier(carrierId) && dirByOwnership(t.ownershipType)
+        && dirByQuery(t.brand, t.plate, t.vin, t.owner) && dirByExpiry([t.techTill])),
+    [allTrucks, dirByQuery, dirByExpiry, dirByCarrier, dirByOwnership],
   )
   const trucksTotal = allTrucks.length
   const trailersFlat = useMemo(
     () => allTrailers
-      .filter(({ z, carrierId }) => dirByCarrier(carrierId) && dirByQuery(z.plate, z.type, z.owner) && dirByExpiry([z.techTill])),
-    [allTrailers, dirByQuery, dirByExpiry, dirByCarrier],
+      .filter(({ z, carrierId }) => dirByCarrier(carrierId) && dirByOwnership(z.ownershipType)
+        && dirByQuery(z.plate, z.type, z.owner) && dirByExpiry([z.techTill])),
+    [allTrailers, dirByQuery, dirByExpiry, dirByCarrier, dirByOwnership],
   )
   const trailersTotal = allTrailers.length
 
@@ -341,7 +450,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   const expiredCount = expiryItems.filter((i) => i.info.state === 'expired').length
 
   const openAdd = (kind: Kind) => {
-    setForm({ carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? '') })
+    setForm({ carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? ''), ownershipType: 'OWNED' })
     setEditing(null)
     setAddKind(kind)
   }
@@ -585,9 +694,20 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                   query={dirQuery} onQuery={setDirQuery}
                   expiry={dirExpiry} onExpiry={setDirExpiry} withExpiry
                   count={`Показано: ${flat.length} из ${total}`}
-                  extraActive={dirCarrier !== 'all'}
-                  onReset={() => { setDirQuery(''); setDirExpiry('all'); setDirCarrier('all') }}
+                  extraActive={dirCarrier !== 'all' || dirOwnership !== 'all'}
+                  onReset={() => { setDirQuery(''); setDirExpiry('all'); setDirCarrier('all'); setDirOwnership('all') }}
                 >
+                  <Select value={dirOwnership} onValueChange={(v) => setDirOwnership(v as 'all' | OwnershipType)}>
+                    <SelectTrigger className="h-9 w-[200px]" aria-label="Фильтр по принадлежности">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Вся принадлежность</SelectItem>
+                      <SelectItem value="OWNED">Собственный парк</SelectItem>
+                      <SelectItem value="HIRED">Наёмные</SelectItem>
+                      <SelectItem value="LEASE">Аренда и лизинг</SelectItem>
+                    </SelectContent>
+                  </Select>
                   {isLogist && (
                     <Select value={dirCarrier} onValueChange={setDirCarrier}>
                       <SelectTrigger className="h-9 w-[230px]" aria-label="Фильтр по перевозчику">
@@ -616,6 +736,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>ВУ (номер)</TableHead>
                             <TableHead>ВУ действует до</TableHead>
                             <TableHead>Категории</TableHead>
+                            <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
                             {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
@@ -627,10 +748,13 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                               fullName: d.fullName, birthDate: d.birthDate, passport: d.passport, license: d.license,
                               licenseTill: d.licenseTill === '—' ? '' : d.licenseTill,
                               categories: d.categories,
-                            })} onPhotos={() => setPhotoView({ kind: 'driver', id: d.id, title: d.fullName })} />
+                              ownershipType: d.ownershipType,
+                              ownerName: d.ownerName === '—' ? '' : d.ownerName,
+                              leaseContract: d.leaseContract === '—' ? '' : d.leaseContract,
+                            })} onPhotos={() => setPhotoView({ kind: 'driver', id: d.id, title: d.fullName, expiry: { licenseTill: d.licenseTill } })} />
                           ))}
                           {driversFlat.length === 0 && (
-                            <TableRow><TableCell colSpan={isLogist ? 9 : 10} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={isLogist ? 10 : 11} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                           )}
                         </TableBody>
                       </>
@@ -645,6 +769,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>СТС</TableHead>
                             <TableHead>Техосмотр до</TableHead>
                             <TableHead>Собственник</TableHead>
+                            <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
                             {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
@@ -655,10 +780,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('truck', t.id, {
                               brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
                               techTill: t.techTill === '—' ? '' : t.techTill, owner: t.owner,
-                            })} onPhotos={() => setPhotoView({ kind: 'truck', id: t.id, title: `${t.brand} · ${t.plate}` })} />
+                              ownershipType: t.ownershipType,
+                              leaseContract: t.leaseContract === '—' ? '' : t.leaseContract,
+                            })} onPhotos={() => setPhotoView({ kind: 'truck', id: t.id, title: `${t.brand} · ${t.plate}`, expiry: { techTill: t.techTill } })} />
                           ))}
                           {trucksFlat.length === 0 && (
-                            <TableRow><TableCell colSpan={isLogist ? 8 : 9} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={isLogist ? 9 : 10} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                           )}
                         </TableBody>
                       </>
@@ -673,6 +800,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>СТС</TableHead>
                             <TableHead>Техосмотр до</TableHead>
                             <TableHead>Собственник</TableHead>
+                            <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
                             {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
@@ -683,10 +811,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('trailer', z.id, {
                               plate: z.plate, type: z.type, sts: z.sts, techTill: z.techTill === '—' ? '' : z.techTill,
                               owner: z.owner === '—' ? '' : z.owner,
-                            })} onPhotos={() => setPhotoView({ kind: 'trailer', id: z.id, title: `${z.type} · ${z.plate}` })} />
+                              ownershipType: z.ownershipType,
+                              leaseContract: z.leaseContract === '—' ? '' : z.leaseContract,
+                            })} onPhotos={() => setPhotoView({ kind: 'trailer', id: z.id, title: `${z.type} · ${z.plate}`, expiry: { techTill: z.techTill } })} />
                           ))}
                           {trailersFlat.length === 0 && (
-                            <TableRow><TableCell colSpan={isLogist ? 8 : 9} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={isLogist ? 9 : 10} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                           )}
                         </TableBody>
                       </>
@@ -729,6 +859,52 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
               </div>
             )}
 
+            {/* принадлежность записи: собственный парк / наёмный / аренда-лизинг (Task 62) */}
+            {dialogKind && (
+              <div className="space-y-1.5">
+                <Label>Принадлежность</Label>
+                <Select
+                  value={form.ownershipType ?? 'OWNED'}
+                  onValueChange={(v) => setForm((f) => ({ ...f, ownershipType: v }))}
+                >
+                  <SelectTrigger aria-label="Принадлежность записи">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="OWNED">Собственный парк (Компания)</SelectItem>
+                    <SelectItem value="HIRED">Наёмный (ИП / ООО)</SelectItem>
+                    <SelectItem value="LEASE">Аренда / Лизинг (по договору)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* наёмный водитель: кто именно нанимает (контрагент) */}
+            {dialogKind === 'driver' && (form.ownershipType ?? 'OWNED') !== 'OWNED' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="add-ownerName">Контрагент (ИП / ООО «Название»)</Label>
+                <Input
+                  id="add-ownerName"
+                  placeholder="ИП Смирнов О.В. или ООО «ТрансЛогистик»"
+                  value={form.ownerName ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, ownerName: e.target.value }))}
+                />
+              </div>
+            )}
+
+            {/* аренда / лизинг: договор-основание (Task 62) */}
+            {dialogKind && (form.ownershipType ?? 'OWNED') === 'LEASE' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="add-leaseContract">Договор-основание (№, дата)</Label>
+                <Input
+                  id="add-leaseContract"
+                  placeholder="№ 42-А от 15.01.2025"
+                  value={form.leaseContract ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, leaseContract: e.target.value }))}
+                />
+              </div>
+            )}
+
             {dialogKind && FORM_FIELDS[dialogKind].map((field) => (
               <div key={field.key} className="space-y-1.5">
                 <Label htmlFor={`add-${field.key}`}>{field.label}</Label>
@@ -751,52 +927,100 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
         </DialogContent>
       </Dialog>
 
-      {/* ——— модальное окно предосмотра фото/документов записи (Task 54) ——— */}
+      {/* ——— окно «Прикрепленные документы»: слоты со статусами (Task 54 + Task 62) ——— */}
       <Dialog open={!!photoView} onOpenChange={(o) => { if (!o) setPhotoView(null) }}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Документы — {photoView?.title}</DialogTitle>
-            <DialogDescription>
-              Загруженные и проверенные фото записи справочника. Каждое фото можно скачать.
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+          {photoView && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Прикрепленные документы — {photoView.title}</DialogTitle>
+                <DialogDescription>
+                  Клик по миниатюре открывает полноразмерный просмотр с поворотом и зумом.
+                </DialogDescription>
+              </DialogHeader>
 
-          {photoLoading ? (
-            <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-10 text-sm text-slate-500" role="status">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              Загружаем фото…
-            </div>
-          ) : photoList && photoList.length > 0 ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {photoList.map((p) => (
-                <figure key={p.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                  <img src={secureFileUrl(p.url)} alt={`Фото: ${p.label}`} className="h-44 w-full bg-slate-50 object-contain" />
-                  <figcaption className="space-y-2 p-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-xs font-semibold text-slate-800">{p.label}</span>
-                      {/* скачивание — внутри окна предосмотра (Task 54) */}
-                      <a
-                        href={secureFileUrl(`${p.url}?download=1`)}
-                        download={p.fileName}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 transition-colors hover:bg-blue-50"
-                        aria-label={`Скачать фото: ${p.label}`}
-                      >
-                        <Download className="h-3.5 w-3.5" aria-hidden />
-                        Скачать фото
-                      </a>
-                    </div>
-                    <div className="truncate text-[11px] text-slate-400" title={p.fileName}>{p.fileName}</div>
-                  </figcaption>
-                </figure>
-              ))}
-            </div>
-          ) : (
-            <p className="rounded-lg border border-dashed border-slate-300 px-4 py-10 text-center text-sm text-slate-500">
-              Фото не загружены — документы появятся здесь после допуска записи через «Подать документы».
-            </p>
+              {photoLoading ? (
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-10 text-sm text-slate-500" role="status">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  Загружаем фото…
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {PHOTO_SLOTS[photoView.kind].map((slot) => {
+                    const photo = photoList?.find((p) => p.label === slot.label)
+                    const expiryDate = slot.expiryKey ? photoView.expiry?.[slot.expiryKey] : undefined
+                    const status = slotStatus(photo, expiryDate)
+                    const StatusIcon = status.icon
+                    const info = expiryDate === undefined ? null : expiryInfo(expiryDate)
+                    return (
+                      <figure key={slot.label} className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+                        {/* статус документа — бейдж сверху карточки */}
+                        <div className="px-2.5 pt-2">
+                          <Badge variant="outline" className={status.cls}>
+                            <StatusIcon aria-hidden />
+                            {status.label}
+                          </Badge>
+                        </div>
+                        {photo ? (
+                          <div className="px-2.5 pt-2">
+                            <ZoomableThumb
+                              src={secureFileUrl(photo.url)}
+                              alt={`Скан: ${slot.label} — ${photoView.title}`}
+                              className="h-40 w-full bg-slate-50"
+                              onClick={() => setPreview({
+                                src: secureFileUrl(photo.url),
+                                title: `${slot.label} — ${photoView.title}`,
+                                fileName: photo.fileName,
+                                downloadUrl: secureFileUrl(`${photo.url}?download=1`),
+                              })}
+                            />
+                          </div>
+                        ) : (
+                          <div className={`mx-2.5 mt-2 flex flex-1 flex-col items-center justify-center gap-1 rounded-lg border px-3 py-8 text-center ${slot.expiryKey ? 'border-slate-200 bg-slate-50' : 'border-dashed border-slate-300 bg-slate-50'}`}>
+                            <ImageIcon className="h-5 w-5 text-slate-300" aria-hidden />
+                            <span className="text-xs text-slate-400">Скан не загружен</span>
+                          </div>
+                        )}
+                        <figcaption className="mt-auto space-y-1.5 p-2.5">
+                          <div className="truncate text-xs font-semibold text-slate-800" title={slot.label}>{slot.label}</div>
+                          {photo && <div className="truncate text-[11px] text-slate-400" title={photo.fileName}>{photo.fileName}</div>}
+                          {info && info.state !== 'none' && (
+                            <div className="text-[11px] text-slate-400">Срок действия: {info.date}</div>
+                          )}
+                          {photo && (
+                            /* скачивание — внутри окна документов (Task 54) */
+                            <a
+                              href={secureFileUrl(`${photo.url}?download=1`)}
+                              download={photo.fileName}
+                              className="inline-flex w-fit items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 transition-colors hover:bg-blue-50"
+                              aria-label={`Скачать: ${slot.label}`}
+                            >
+                              <Download className="h-3.5 w-3.5" aria-hidden />
+                              Скачать
+                            </a>
+                          )}
+                        </figcaption>
+                      </figure>
+                    )
+                  })}
+                </div>
+              )}
+            </>
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ——— полноразмерный просмотр документа: поворот, зум, скачивание (Task 62) ——— */}
+      {preview && (
+        <DocumentPreviewModal
+          open={!!preview}
+          onOpenChange={(o) => { if (!o) setPreview(null) }}
+          src={preview.src}
+          title={preview.title}
+          fileName={preview.fileName}
+          downloadUrl={preview.downloadUrl}
+        />
+      )}
     </div>
   )
 }
@@ -837,6 +1061,7 @@ function DriverRow({ d, carrierName, showCarrier, onEdit, onPhotos }: { d: Drive
           ))}
         </div>
       </TableCell>
+      <OwnershipCell type={d.ownershipType} owner={d.ownerName} contract={d.leaseContract} />
       <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(d.createdAt)}</TableCell>
       <TableCell>
         <PhotosButton title={d.fullName} onOpen={onPhotos} />
@@ -862,6 +1087,7 @@ function TruckRow({ t, carrierName, showCarrier, onEdit, onPhotos }: { t: TruckD
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{t.sts}</TableCell>
       <TableCell><ExpiryBadge date={t.techTill} /></TableCell>
       <TableCell className="text-slate-600">{t.owner}</TableCell>
+      <OwnershipCell type={t.ownershipType} owner={t.owner} contract={t.leaseContract} hideOwner />
       <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(t.createdAt)}</TableCell>
       <TableCell>
         <PhotosButton title={`${t.brand} · ${t.plate}`} onOpen={onPhotos} />
@@ -887,6 +1113,7 @@ function TrailerRow({ z, carrierName, showCarrier, onEdit, onPhotos }: { z: Trai
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{z.sts}</TableCell>
       <TableCell><ExpiryBadge date={z.techTill} /></TableCell>
       <TableCell className="text-slate-600">{z.owner}</TableCell>
+      <OwnershipCell type={z.ownershipType} owner={z.owner} contract={z.leaseContract} hideOwner />
       <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(z.createdAt)}</TableCell>
       <TableCell>
         <PhotosButton title={`${z.type} · ${z.plate}`} onOpen={onPhotos} />
