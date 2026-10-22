@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
 } from '@/lib/types'
 
 /** Событие окна: сервер ответил 401 — сессия истекла, страница показывает экран входа */
@@ -106,6 +106,13 @@ export const api = {
 
   reports: () => fetch('/api/reports', withAuth({ cache: 'no-store' })).then(json<ReportSummary>),
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, withAuth({ cache: 'no-store' })).then(json<{ events: EventFeedItem[] }>),
+
+  /** Уведомления колокольчика (Task 69): список + число непрочитанных */
+  listNotifications: () =>
+    fetch('/api/notifications', withAuth({ cache: 'no-store' })).then(json<{ notifications: NotificationDTO[]; unread: number }>),
+  /** Отметить прочитанными: конкретные id или все сразу ({ all: true }) */
+  markNotifications: (body: { ids?: string[]; all?: boolean }) =>
+    fetch('/api/notifications', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ok: boolean; unread: number }>),
   settings: () => fetch('/api/settings', withAuth({ cache: 'no-store' })).then(json<SettingsDTO>),
   saveSettings: (data: Partial<SettingsDTO>) =>
     fetch('/api/settings', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<SettingsDTO>),

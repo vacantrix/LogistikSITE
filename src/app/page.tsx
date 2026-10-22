@@ -122,7 +122,7 @@ export default function Page() {
   const allowed = navFor(role.kind).some((n) => n.key === tab)
 
   return (
-    <Shell tab={tab} onNavigate={setTab} role={role} userName={user.name} onLogout={() => void logout()}>
+    <Shell tab={tab} onNavigate={setTab} role={role} userName={user.name} onLogout={() => void logout()} liveTick={liveTick}>
       {!allowed ? (
         <RoleNotice role={role.kind} />
       ) : (

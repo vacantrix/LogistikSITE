@@ -74,7 +74,7 @@ import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
 import { formatKm, haversineKm, pointCoords, routeDistanceKm } from '@/lib/geo'
 import type { MapPoint } from '@/components/platform/delivery-map'
-import { DOC_TYPE_LABEL, fmtDateTime, MODE_META, num, rate, REQUEST_CATEGORIES, REQUEST_STATUS_META, DELETABLE_STATUSES, timeLeft } from '@/lib/status'
+import { DOC_TYPE_LABEL, fmtDateTime, MODE_META, num, rate, REQUEST_STATUS_META, DELETABLE_STATUSES, timeLeft } from '@/lib/status'
 import { fileToCompressedDataUri } from '@/lib/demo-media'
 import type { BidDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
@@ -87,7 +87,6 @@ const CREATE_DRAFT_KEY = 'aemz_request_draft_v1'
 
 const EMPTY_CREATE_FORM = {
   // 1 · основная информация
-  category: 'Перевозка груза',
   title: '', // наименование груза / суть заявки
   // 2 · параметры логистики
   fromPoint: '',
@@ -522,7 +521,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   // валидация (Task 64): «Создать» заблокирована, пока не заполнены обязательные поля
   const startRateNum = Number(form.startRate.replace(/\s/g, '').replace(',', '.'))
   const canCreate =
-    form.category.trim() !== '' &&
     form.title.trim() !== '' &&
     form.fromPoint.trim() !== '' &&
     form.toPoint.trim() !== '' &&
@@ -833,7 +831,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     setCreating(true)
     try {
       const { request } = await api.createRequest({
-        category: form.category,
         cargo: form.title.trim(),
         fromPoint: form.fromPoint.trim(),
         toPoint: form.toPoint.trim(),
@@ -1260,17 +1257,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 </h4>
                 <div className="grid grid-cols-1 gap-3">
                   <div className="space-y-1.5">
-                    <Label htmlFor="cr-category">Категория заявки <span className="text-red-500" aria-hidden>*</span></Label>
-                    <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v }))}>
-                      <SelectTrigger id="cr-category" aria-label="Категория заявки">
-                        <SelectValue placeholder="Выберите категорию" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {REQUEST_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
                     <Label htmlFor="cr-title">Наименование груза / суть заявки <span className="text-red-500" aria-hidden>*</span></Label>
                     <Input
                       id="cr-title"
@@ -1444,7 +1430,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Отмена</Button>
-              <Button onClick={() => void doCreate()} disabled={!canCreate || creating} aria-label="Создать заявку" title={canCreate ? 'Опубликовать заявку на площадке' : 'Заполните обязательные поля: категория, наименование, точки А и Б, стартовая ставка'}>
+              <Button onClick={() => void doCreate()} disabled={!canCreate || creating} aria-label="Создать заявку" title={canCreate ? 'Опубликовать заявку на площадке' : 'Заполните обязательные поля: наименование, точки А и Б, стартовая ставка'}>
                 {creating ? 'Создаём…' : 'Создать'}
               </Button>
             </DialogFooter>

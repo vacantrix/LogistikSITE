@@ -76,8 +76,7 @@ export async function POST(req: NextRequest) {
   const mode = body.mode == null || body.mode === '' ? 'AUCTION' : body.mode
   const startRate = Number(body.startRate)
   const tonnage = body.tonnage == null || body.tonnage === '' ? 20 : Number(body.tonnage)
-  // категория и комментарий для исполнителя (Task 64)
-  const category = str(body.category, 60) || 'Перевозка груза'
+  // комментарий для исполнителя (Task 64)
   const comment = str(body.comment, 1000)
 
   // груз берём из справочника (единое имя) — свободный текст больше не источник
@@ -138,7 +137,7 @@ export async function POST(req: NextRequest) {
         data: {
           number: `Z-${n}`,
           fromPoint, toPoint, cargo: cargoName, cargoTypeId,
-          category, comment,
+          comment,
           createdBy: auth.name || '—',
           tonnage, truckType, mode,
           startRate: Math.round(startRate),

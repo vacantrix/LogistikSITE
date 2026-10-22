@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, viewerOf, type Role } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
+import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
 import {
   applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
@@ -83,9 +84,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const me = auth.carrierId
   let liveType = action
+  /** отложенные персональные уведомления (Task 69): создаются после успешной транзакции */
+  let notes: { carrierId?: string | null; payload: NotifyPayload }[] = []
 
   try {
     await inTx(async (tx) => {
+      notes = [] // при повторе транзакции не дублируем
       const r = await tx.request.findUnique({ where: { id } })
       if (!r) return fail('Заявка не найдена', 404)
       const now = new Date()
@@ -105,6 +109,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             const floor = min ?? r.startRate
             if (amt >= floor) fail(`Ставка должна быть ниже текущей лучшей (${money(floor)})`)
           }
+          // чью лучшую ставку перебили (для уведомления BID_OUTBID, Task 69)
+          const prevBest = await tx.bid.findFirst({
+            where: { requestId: id, withdrawn: false },
+            orderBy: [{ amount: 'asc' }, { createdAt: 'asc' }],
+            select: { carrierId: true },
+          })
           const carrier = await tx.carrier.findUnique({ where: { id: me! }, select: { name: true } })
           await tx.bid.create({ data: { requestId: id, carrierId: me!, amount: amt } })
           // лучшая ставка — минимум активных ставок; считаем внутри транзакции, чтобы не «откатиться» вверх
@@ -112,6 +122,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           await event('BID_PLACED', r.mode === 'CLOSED'
             ? `${carrier?.name ?? 'Перевозчик'}: подана закрытая ставка`
             : `${carrier?.name ?? 'Перевозчик'}: ставка ${money(amt)}`, me)
+          notes.push({
+            payload: {
+              type: 'BID_PLACED',
+              title: `Новая ставка · №${r.number}`,
+              body: r.mode === 'CLOSED'
+                ? `${carrier?.name ?? 'Перевозчик'}: подана закрытая ставка — ${r.fromPoint} → ${r.toPoint}`
+                : `${carrier?.name ?? 'Перевозчик'}: ${money(amt)} — ${r.fromPoint} → ${r.toPoint}`,
+              requestId: id,
+            },
+          })
+          if (r.mode === 'AUCTION' && prevBest && prevBest.carrierId !== me) {
+            notes.push({
+              carrierId: prevBest.carrierId,
+              payload: {
+                type: 'BID_OUTBID',
+                title: `Ставку перебили · №${r.number}`,
+                body: `Новая лучшая ставка ${money(amt)} — ${r.fromPoint} → ${r.toPoint}. Можно предложить ниже, пока идёт приём ставок`,
+                requestId: id,
+              },
+            })
+          }
           break
         }
 
@@ -152,6 +183,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           await tx.bid.updateMany({ where: { requestId: id }, data: { isWinner: false } })
           await event('DIRECT_OFFER', `Заявка предложена напрямую: ${carrier!.name} — ${money(rate)}`, carrierId)
           await event('AUCTION_FINISHED', 'Приём ставок завершён — заявка передана перевозчику напрямую')
+          notes.push({
+            carrierId,
+            payload: {
+              type: 'WINNER_AWARDED',
+              title: `Вам назначена заявка · №${r.number}`,
+              body: `Ставка ${money(rate)} — ${r.fromPoint} → ${r.toPoint}. Укажите экипаж и подайте документы`,
+              requestId: id,
+            },
+          })
+          notes.push({
+            payload: {
+              type: 'AUCTION_FINISHED',
+              title: `Итоги торгов · №${r.number}`,
+              body: `Приём ставок завершён — заявка передана напрямую: ${carrier!.name}, ${money(rate)}`,
+              requestId: id,
+            },
+          })
           liveType = 'WINNER_AWARDED'
           break
         }
@@ -178,6 +226,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const who = `${crew.driver.fullName}, ${crew.truck.brand} (${crew.truck.plate}) + ${crew.trailer.plate}`
           if (action === 'assign') await event('DRIVER_ASSIGNED', `Указаны водитель и ТС: ${who}`, me)
           else await event('CREW_APPROVED', `Экипаж утверждён агентом: ${who} — состав передан логисту`, me)
+          notes.push({
+            payload: {
+              type: 'CREW_ASSIGNED',
+              title: `Экипаж ${action === 'assign' ? 'указан' : 'утверждён'} · №${r.number}`,
+              body: `${who} — документы можно подавать на сверку`,
+              requestId: id,
+            },
+          })
           break
         }
 
@@ -197,6 +253,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           await event('CONFIRMED_1C', 'Документы сверены и подтверждены — данные переданы в 1C:ERP (справочник и реестр)')
           await event('PASS_SENT', 'Пакет на пропуск сформирован из заявки — логист загружает на платформу порта')
           await event('ETRN_SENT', 'ЭТрН сформирована модулем «Логистика.Про», подпись — КЭП сотрудника и МЧД')
+          notes.push({
+            carrierId: r.winnerId,
+            payload: {
+              type: 'DOCS_CONFIRMED',
+              title: `Документы подтверждены · №${r.number}`,
+              body: 'Логист сверил пакет — данные переданы в 1С, рейс готовится (пропуск и ЭТрН)',
+              requestId: id,
+            },
+          })
           break
         }
 
@@ -215,6 +280,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             },
           })
           await event('RETURNED_TO_AGENT', `Возвращено агенту: ${[reason, comment].filter(Boolean).join('. ')}`)
+          notes.push({
+            carrierId: r.winnerId,
+            payload: {
+              type: 'DOCS_RETURNED',
+              title: `Документы возвращены · №${r.number}`,
+              body: `Причина: ${reason}. Исправьте пакет и подайте заново — та же заявка`,
+              requestId: id,
+            },
+          })
           break
         }
 
@@ -222,6 +296,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (r.status !== 'CONFIRMED') fail('Закрыть можно подтверждённый рейс')
           await tx.request.update({ where: { id }, data: { status: 'CLOSED', etrnStatus: 'SIGNED' } })
           await event('TRIP_CLOSED', 'Рейс закрыт: данные в реестре, отчёты сходятся с бухгалтерией')
+          notes.push({
+            carrierId: r.winnerId,
+            payload: {
+              type: 'TRIP_CLOSED',
+              title: `Рейс закрыт · №${r.number}`,
+              body: `${r.fromPoint} → ${r.toPoint} — рейс выполнен и закрыт, заявка завершена`,
+              requestId: id,
+            },
+          })
           break
         }
 
@@ -231,8 +314,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             fail('Завершённые рейсы удалять нельзя — они уже в реестре рейсов и отчётах для бухгалтерии')
           }
           if (r.status === 'DELETED') fail('Заявка уже удалена')
+          // уведомим всех, кто участвовал: победитель и активные ставки (Task 69)
+          const participants = await tx.bid.findMany({
+            where: { requestId: id, withdrawn: false },
+            select: { carrierId: true },
+          })
+          const notifiedCarriers = new Set<string>(participants.map((p) => p.carrierId))
+          if (r.winnerId) notifiedCarriers.add(r.winnerId)
           await tx.request.update({ where: { id }, data: { status: 'DELETED' } })
           await event('REQUEST_DELETED', `Заявка удалена логистом ${auth.name} — с площадки снята, ставки остановлены`)
+          for (const carrierId of notifiedCarriers) {
+            notes.push({
+              carrierId,
+              payload: {
+                type: 'REQUEST_DELETED',
+                title: `Заявка удалена · №${r.number}`,
+                body: `Логист снял заявку ${r.fromPoint} → ${r.toPoint} с площадки — участие в ней больше не требуется`,
+                requestId: id,
+              },
+            })
+          }
           liveType = 'REQUEST_DELETED'
           break
         }
@@ -241,7 +342,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         case 'edit': {
           if (r.status !== 'PUBLISHED') fail('Редактировать можно только заявки, ещё не ушедшие в работу')
           const patch: Record<string, unknown> = {}
-          if (typeof body.category === 'string' && body.category.trim()) patch.category = body.category.trim().slice(0, 60)
           if (typeof body.cargo === 'string' && body.cargo.trim()) patch.cargo = body.cargo.trim().slice(0, 200)
           if (typeof body.fromPoint === 'string' && body.fromPoint.trim()) patch.fromPoint = body.fromPoint.trim().slice(0, 300)
           if (typeof body.toPoint === 'string' && body.toPoint.trim()) patch.toPoint = body.toPoint.trim().slice(0, 300)
@@ -274,6 +374,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (e instanceof ActionError) return NextResponse.json({ error: e.message }, { status: e.status })
     console.error('action error', action, e)
     return NextResponse.json({ error: 'Внутренняя ошибка действия — повторите' }, { status: 500 })
+  }
+
+  // персональные уведомления (Task 69) — после успешной транзакции, вне её
+  for (const n of notes) {
+    try {
+      if (n.carrierId) await notifyCarrier(n.carrierId, n.payload)
+      else await notifyLogists(n.payload)
+    } catch (err) {
+      console.error('notification error', n.payload.type, err)
+    }
   }
 
   notifyLive({ type: liveType, requestId: id })

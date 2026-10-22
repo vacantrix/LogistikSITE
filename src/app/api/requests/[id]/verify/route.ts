@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { requireUser, viewerOf } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
+import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { inTx, loadRequestFor } from '@/lib/requests'
 import { loadVerifySettings } from '@/lib/settings'
 import { verifyDocument, expectedFor } from '@/lib/verify'
@@ -25,7 +26,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const viewer = viewerOf(auth)
   const { id } = await params
 
-  const request = await db.request.findUnique({ where: { id } })
+  const request = await db.request.findUnique({
+    where: { id },
+    include: { winner: { select: { name: true } } },
+  })
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
   if (auth.role === 'carrier' && request.winnerId !== auth.carrierId) {
     return NextResponse.json({ error: 'Проверку запускает перевозчик, за которым закреплён рейс' }, { status: 403 })
@@ -103,6 +107,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       await tx.event.create({
         data: { requestId: id, type: 'DOC_VERIFIED', message: `Проверка завершена: требуется исправление — ${blocked.map((d) => d.fileName).join(', ')}` },
       })
+      // перевозчику — что именно нужно исправить (Task 69)
+      await notifyCarrier(request.winnerId, {
+        type: 'DOCS_RETURNED',
+        title: `Автопроверка: нужны исправления · №${request.number}`,
+        body: `Перезагрузите: ${blocked.map((d) => d.fileName).join(', ')}`,
+        requestId: id,
+      })
     } else {
       const passed = docs.filter((d) => d.status === 'PASSED').length
       const manual = docs.filter((d) => d.status === 'MANUAL').length
@@ -110,6 +121,13 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       await tx.request.update({ where: { id }, data: { status: 'AT_LOGIST', verifyChecks: null, verifyComment: null } })
       await tx.event.create({
         data: { requestId: id, type: 'DOC_VERIFIED', message: `Комплект прошёл проверку — передан логисту (принято автоматически: ${passed}, на ручной сверке: ${manual})` },
+      })
+      // логисту — пакет готов к сверке (Task 69)
+      await notifyLogists({
+        type: 'DOCS_READY',
+        title: `Документы готовы к проверке · №${request.number}`,
+        body: `${request.winner?.name ?? 'Перевозчик'}: комплект прошёл автопроверку — заявка в очереди «Проверка документов»`,
+        requestId: id,
       })
     }
   })

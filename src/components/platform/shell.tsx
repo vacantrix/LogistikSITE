@@ -8,12 +8,12 @@
  *
  * Мобильная версия (ТЗ Task 67):
  *  — шапка предельно компактная (один ряд 48px), закреплена сверху (sticky) и содержит
- *    только критичное: логотип, название, профиль и выход;
+ *    только критичное: логотип, название, колокольчик уведомлений, профиль и выход;
  *  — основное меню перенесено в нижний Tab Bar (как в мобильных приложениях):
  *    зафиксирован внизу (position: fixed), виден поверх контента при скролле,
  *    до 5 иконок с подписями, лишние разделы — в меню «Ещё»;
  *  — учтены нижние безопасные зоны iOS/Android (env(safe-area-inset-bottom)).
- *  Десктоп: прежняя шапка с горизонтальным меню.
+ *  Десктоп: прежняя шапка с горизонтальным меню + колокольчик уведомлений (Task 69).
  */
 import { useState, type ComponentType } from 'react'
 import {
@@ -23,6 +23,7 @@ import {
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
+import { NotificationBell } from '@/components/platform/notification-bell'
 import type { RoleKind, TabKey } from '@/components/platform/common'
 
 /** Полный список разделов с пометкой ролей: L — логист, C — перевозчик.
@@ -35,7 +36,7 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
   { key: 'apply', label: 'Подать документы', roles: ['carrier'] },
   { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'] },
-  { key: 'verify', label: 'Сверка документов', roles: ['logist'] },
+  { key: 'verify', label: 'Проверка документов', roles: ['logist'] },
   { key: 'requests', label: 'Реестр заявок', roles: ['logist'] },
   { key: 'registry', label: 'Реестр рейсов', roles: ['logist'] },
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier'] },
@@ -48,7 +49,7 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   my: { Icon: ClipboardList, short: 'Заявки' },
   apply: { Icon: FileUp, short: 'Документы' },
   crew: { Icon: Users, short: 'Экипажи' },
-  verify: { Icon: ScanSearch, short: 'Сверка' },
+  verify: { Icon: ScanSearch, short: 'Проверка' },
   requests: { Icon: ListChecks, short: 'Заявки' },
   registry: { Icon: Truck, short: 'Рейсы' },
   directory: { Icon: FolderOpen, short: 'Справочники' },
@@ -183,13 +184,15 @@ function BottomTabBar({ tab, onNavigate, nav }: {
   )
 }
 
-export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
+export function Shell({ tab, onNavigate, role, userName, onLogout, liveTick, children }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
   role: RoleSelection
   /** имя вошедшего пользователя (логист или перевозчик) */
   userName: string
   onLogout: () => void
+  /** счётчик live-обновлений шины WS — догружает колокольчик уведомлений (Task 69) */
+  liveTick: number
   children: React.ReactNode
 }) {
   const isLogist = role.kind === 'logist'
@@ -209,6 +212,7 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
             <span className="max-w-[110px] truncate text-xs font-medium text-blue-100" title={userName}>
               {userName}
             </span>
+            <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
             <button
               type="button"
               onClick={onLogout}
@@ -244,6 +248,8 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
               {isLogist ? 'Внутренний контур АЭМЗ' : 'Кабинет перевозчика'}
             </span>
             <Truck className="hidden h-4 w-4 text-blue-300 sm:block" aria-hidden />
+            {/* колокольчик персональных уведомлений (Task 69) */}
+            <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
             {/* роль задаётся учётной записью: переключателя ролей больше нет */}
             <span className="max-w-[220px] truncate text-sm font-medium text-white sm:max-w-[280px]" title={userName}>
               {userName}

@@ -34,73 +34,96 @@ model Carrier {
  * У перевозчика carrierId связывает учётку с его кабинетом.
  */
 model User {
-  id           String   @id @default(cuid())
-  login        String   @unique
-  name         String
-  passwordHash String // scrypt: "salt:hash"
-  role         String // 'logist' | 'carrier'
-  carrierId    String?
-  carrier      Carrier? @relation("carrierUser", fields: [carrierId], references: [id])
-  createdAt    DateTime @default(now())
+  id            String         @id @default(cuid())
+  login         String         @unique
+  name          String
+  passwordHash  String // scrypt: "salt:hash"
+  role          String // 'logist' | 'carrier'
+  carrierId     String?
+  carrier       Carrier?       @relation("carrierUser", fields: [carrierId], references: [id])
+  createdAt     DateTime       @default(now())
+  notifications Notification[]
+}
+
+/**
+ * Персональное уведомление пользователя (Task 69). Создаётся сервером при событиях,
+ * значимых для конкретной роли: логисту — о ставках, экипажах и готовых документах;
+ * перевозчику — о победе, перебитой ставке, возврате/подтверждении документов и закрытии рейса.
+ * Доставляется колокольчиком в шапке; реал-тайм — через шину ws-service (notifyLive).
+ */
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String // BID_PLACED | BID_OUTBID | AUCTION_FINISHED | WINNER_AWARDED | CREW_ASSIGNED | DOCS_READY | DOCS_RETURNED | DOCS_CONFIRMED | TRIP_CLOSED | REQUEST_DELETED
+  title     String
+  body      String
+  requestId String?
+  request   Request? @relation(fields: [requestId], references: [id])
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, read])
 }
 
 model Driver {
-  id          String   @id @default(cuid())
-  carrierId   String
-  carrier     Carrier  @relation(fields: [carrierId], references: [id])
-  fullName    String
-  birthDate   String
-  passport    String
-  license     String
-  licenseTill String
-  categories  String
-  phone       String   @default("—") // телефон водителя
-  birthPlace  String   @default("—") // место рождения (для 1С)
-  citizenship String   @default("—") // гражданство (для 1С)
-  passportIssuedBy   String @default("—") // кем выдан паспорт (для 1С)
-  passportIssuedDate String @default("—") // дата выдачи паспорта (для 1С)
-  position    String   @default("—") // должность (для 1С)
+  id                 String   @id @default(cuid())
+  carrierId          String
+  carrier            Carrier  @relation(fields: [carrierId], references: [id])
+  fullName           String
+  birthDate          String
+  passport           String
+  license            String
+  licenseTill        String
+  categories         String
+  phone              String   @default("—") // телефон водителя
+  birthPlace         String   @default("—") // место рождения (для 1С)
+  citizenship        String   @default("—") // гражданство (для 1С)
+  passportIssuedBy   String   @default("—") // кем выдан паспорт (для 1С)
+  passportIssuedDate String   @default("—") // дата выдачи паспорта (для 1С)
+  position           String   @default("—") // должность (для 1С)
   // принадлежность (Task 62): OWNED — собственный штат, HIRED — наёмный от ИП/ООО, LEASE — аренда/лизинг
-  ownershipType String @default("OWNED")
-  ownerName     String @default("—") // собственник / контрагент (ИП / ООО «Название»)
-  leaseContract String @default("—") // договор-основание (для аренды/лизинга)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  ownershipType      String   @default("OWNED")
+  ownerName          String   @default("—") // собственник / контрагент (ИП / ООО «Название»)
+  leaseContract      String   @default("—") // договор-основание (для аренды/лизинга)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
 }
 
 model Truck {
-  id        String   @id @default(cuid())
-  carrierId String
-  carrier   Carrier  @relation(fields: [carrierId], references: [id])
-  brand     String
-  plate     String
-  vin       String
-  sts       String
-  techTill  String   @default("—") // техосмотр (диагностическая карта) до
-  owner     String
-  color     String   @default("—") // цвет кабины/тягача
+  id            String   @id @default(cuid())
+  carrierId     String
+  carrier       Carrier  @relation(fields: [carrierId], references: [id])
+  brand         String
+  plate         String
+  vin           String
+  sts           String
+  techTill      String   @default("—") // техосмотр (диагностическая карта) до
+  owner         String
+  color         String   @default("—") // цвет кабины/тягача
   // принадлежность (Task 62): OWNED — собственный парк, HIRED — наёмный (ИП/ООО), LEASE — аренда/лизинг
-  ownershipType String @default("OWNED")
-  leaseContract String @default("—") // договор-основание (для аренды/лизинга)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  ownershipType String   @default("OWNED")
+  leaseContract String   @default("—") // договор-основание (для аренды/лизинга)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
 }
 
 model Trailer {
-  id        String   @id @default(cuid())
-  carrierId String
-  carrier   Carrier  @relation(fields: [carrierId], references: [id])
-  plate     String
-  sts       String
-  type      String
-  techTill  String   @default("—") // техосмотр до
-  color     String   @default("—") // цвет прицепа
-  owner     String   @default("—") // собственник прицепа
+  id            String   @id @default(cuid())
+  carrierId     String
+  carrier       Carrier  @relation(fields: [carrierId], references: [id])
+  plate         String
+  sts           String
+  type          String
+  techTill      String   @default("—") // техосмотр до
+  color         String   @default("—") // цвет прицепа
+  owner         String   @default("—") // собственник прицепа
   // принадлежность (Task 62): OWNED — собственный парк, HIRED — наёмный (ИП/ООО), LEASE — аренда/лизинг
-  ownershipType String @default("OWNED")
-  leaseContract String @default("—") // договор-основание (для аренды/лизинга)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  ownershipType String   @default("OWNED")
+  leaseContract String   @default("—") // договор-основание (для аренды/лизинга)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
 }
 
 /**
@@ -116,7 +139,9 @@ model DirectoryPhoto {
   label     String // человекочитаемое название слота («Паспорт: стр. с фото», «Фото ТС»…)
   fileName  String
   dataUri   String
-  /** статус документа записи (Task 62): LOADED — загружен, NEEDS_REVIEW — требует проверки */
+  /**
+   * статус документа записи (Task 62): LOADED — загружен, NEEDS_REVIEW — требует проверки
+   */
   status    String   @default("LOADED")
   createdAt DateTime @default(now())
 
@@ -145,44 +170,51 @@ model CargoType {
 // ============ Requests (auctions) / trips ============
 
 model Request {
-  id          String     @id @default(cuid())
-  number      String     @unique
-  fromPoint   String
-  toPoint     String
-  cargo       String // денормализованное имя груза из справочника (CargoType.name)
-  cargoTypeId String?
-  cargoType   CargoType? @relation(fields: [cargoTypeId], references: [id])
-  /** категория заявки (Task 64): «Перевозка груза», «Услуги спецтехники», «Погрузо-разгрузочные работы», «Прочее» */
-  category    String     @default("Перевозка груза")
-  /** комментарий для исполнителя (Task 64) */
-  comment     String     @default("")
-  /** логист, создавший заявку (Task 66 — колонка «Логист / Создатель» в реестре заявок) */
-  createdBy   String     @default("—")
-  tonnage     Float
-  truckType   String
-  mode        String // AUCTION | CLOSED
-  startRate   Float
-  bestRate    Float?
-  status      String     @default("PUBLISHED") // PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED
-  loadDate    String
-  loadWindow  String
-  deadline    DateTime?
-  winnerId    String?
-  winner      Carrier?   @relation("winner", fields: [winnerId], references: [id])
-  driverId    String?
-  truckId     String?
-  trailerId   String?
-  passPackage Boolean    @default(false)
-  etrnStatus  String     @default("NONE") // NONE | SENT | SIGNED
-  /** экспресс-сличение логиста при сверке (Task 62): JSON [{key,label,ok}] — да/нет по ключевым полям */
-  verifyChecks String?
-  /** комментарий логиста к сверки/отклонению (Task 62) */
+  id            String         @id @default(cuid())
+  number        String         @unique
+  fromPoint     String
+  toPoint       String
+  cargo         String // денормализованное имя груза из справочника (CargoType.name)
+  cargoTypeId   String?
+  cargoType     CargoType?     @relation(fields: [cargoTypeId], references: [id])
+  /**
+   * комментарий для исполнителя (Task 64)
+   */
+  comment       String         @default("")
+  /**
+   * логист, создавший заявку (Task 66 — колонка «Логист / Создатель» в реестре заявок)
+   */
+  createdBy     String         @default("—")
+  tonnage       Float
+  truckType     String
+  mode          String // AUCTION | CLOSED
+  startRate     Float
+  bestRate      Float?
+  status        String         @default("PUBLISHED") // PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED
+  loadDate      String
+  loadWindow    String
+  deadline      DateTime?
+  winnerId      String?
+  winner        Carrier?       @relation("winner", fields: [winnerId], references: [id])
+  driverId      String?
+  truckId       String?
+  trailerId     String?
+  passPackage   Boolean        @default(false)
+  etrnStatus    String         @default("NONE") // NONE | SENT | SIGNED
+  /**
+   * экспресс-сличение логиста при сверке (Task 62): JSON [{key,label,ok}] — да/нет по ключевым полям
+   */
+  verifyChecks  String?
+  /**
+   * комментарий логиста к сверки/отклонению (Task 62)
+   */
   verifyComment String?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  bids        Bid[]
-  documents   Document[]
-  events      Event[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  bids          Bid[]
+  documents     Document[]
+  events        Event[]
+  notifications Notification[]
 }
 
 model Bid {
@@ -193,7 +225,9 @@ model Bid {
   carrier   Carrier  @relation(fields: [carrierId], references: [id])
   amount    Float
   isWinner  Boolean  @default(false)
-  /** ставка отозвана — агент добровольно снялся с заявки (Task 52) */
+  /**
+   * ставка отозвана — агент добровольно снялся с заявки (Task 52)
+   */
   withdrawn Boolean  @default(false)
   createdAt DateTime @default(now())
 }

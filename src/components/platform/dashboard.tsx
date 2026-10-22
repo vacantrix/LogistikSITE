@@ -30,7 +30,7 @@ const PIPELINE: RequestStatus[] = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LO
 
 const QUICK_ACTIONS = [
   { key: 'board', title: 'Площадка заявок', desc: 'Ставки и заявки в работе', icon: Truck },
-  { key: 'verify', title: 'Сверка документов', desc: 'Фото, поля, решение логиста', icon: ScanSearch },
+  { key: 'verify', title: 'Проверка документов', desc: 'Фото, поля, решение логиста', icon: ScanSearch },
   { key: 'reports', title: 'Отчёты', desc: 'Экономия и активность перевозчиков', icon: FileBarChart2 },
   { key: 'registry', title: 'Реестр рейсов', desc: 'Единый реестр для 1С:ERP', icon: Warehouse },
 ] as const

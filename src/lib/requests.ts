@@ -7,6 +7,7 @@
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { notifyLive } from '@/lib/notify'
+import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import type { Viewer } from '@/lib/auth'
 import { BUSY_STATUSES, busyReason } from '@/lib/busy'
 import { REQUEST_INCLUDE, type RequestFull } from '@/lib/serialize'
@@ -85,12 +86,12 @@ export async function finalizeExpired(now = new Date()): Promise<void> {
           orderBy: [{ amount: 'asc' }, { createdAt: 'asc' }],
           include: { carrier: { select: { name: true } } },
         })
-        if (!best) return false
+        if (!best) return null
         const moved = await tx.request.updateMany({
           where: { id, status: 'PUBLISHED', deadline: { lte: now } },
           data: { status: 'AWARDED', winnerId: best.carrierId, bestRate: best.amount },
         })
-        if (moved.count === 0) return false // уже подвёл итоги другой запрос
+        if (moved.count === 0) return null // уже подвёл итоги другой запрос
         await tx.bid.updateMany({ where: { requestId: id }, data: { isWinner: false } })
         await tx.bid.update({ where: { id: best.id }, data: { isWinner: true } })
         await tx.event.create({
@@ -102,9 +103,27 @@ export async function finalizeExpired(now = new Date()): Promise<void> {
         await tx.event.create({
           data: { requestId: id, type: 'AUCTION_FINISHED', message: 'Приём ставок завершён, победитель определён по минимальной ставке' },
         })
-        return true
+        return { carrierId: best.carrierId, carrierName: best.carrier.name, amount: best.amount }
       })
-      if (awarded) notifyLive({ type: 'WINNER_AWARDED', requestId: id })
+      if (awarded) {
+        notifyLive({ type: 'WINNER_AWARDED', requestId: id })
+        // персональные уведомления (Task 69): победителю и логистам
+        const req = await db.request.findUnique({ where: { id }, select: { number: true, fromPoint: true, toPoint: true } })
+        if (req) {
+          await notifyCarrier(awarded.carrierId, {
+            type: 'WINNER_AWARDED',
+            title: `Вы выиграли заявку · №${req.number}`,
+            body: `Ставка ${money(awarded.amount)} — ${req.fromPoint} → ${req.toPoint}. Укажите экипаж и подайте документы`,
+            requestId: id,
+          }).catch((e) => console.error('notification error WINNER_AWARDED', e))
+          await notifyLogists({
+            type: 'AUCTION_FINISHED',
+            title: `Итоги торгов · №${req.number}`,
+            body: `Приём ставок завершён — победитель: ${awarded.carrierName}, ${money(awarded.amount)}`,
+            requestId: id,
+          }).catch((e) => console.error('notification error AUCTION_FINISHED', e))
+        }
+      }
     } catch (e) {
       console.error('finalizeExpired error', id, e)
     }

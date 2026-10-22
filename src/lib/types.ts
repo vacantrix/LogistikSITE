@@ -152,8 +152,6 @@ export interface RequestDTO {
   cargoTypeId: string | null
   /** группа груза из справочника (Металлопрокат, Оборудование…) */
   cargoCategory: string | null
-  /** категория заявки (Task 64) */
-  category: string
   /** комментарий для исполнителя (Task 64) */
   comment: string
   /** логист, создавший заявку (Task 66 — реестр заявок) */
@@ -231,6 +229,18 @@ export interface SessionUserDTO {
   name: string
   role: 'logist' | 'carrier'
   carrierId: string | null
+}
+
+/** Персональное уведомление колокольчика (Task 69) */
+export interface NotificationDTO {
+  id: string
+  type: string
+  title: string
+  body: string
+  requestId: string | null
+  requestNumber: string | null
+  read: boolean
+  createdAt: string
 }
 
 // ——— Добавление водителя с нейросетью (intake) ———

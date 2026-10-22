@@ -81,7 +81,6 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
     cargo: r.cargo,
     cargoTypeId: r.cargoTypeId,
     cargoCategory: r.cargoType?.category ?? null,
-    category: r.category,
     comment: r.comment,
     createdBy: r.createdBy,
     tonnage: r.tonnage,

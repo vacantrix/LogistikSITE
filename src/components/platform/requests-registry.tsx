@@ -3,10 +3,10 @@
 /**
  * «Реестр заявок» (Task 66) — единый экран со всеми заявками платформы.
  * Быстрая навигация (Task 68): верхние табы — по статусам (Все / Новая / В работе /
- * Завершена / Удалена) со счётчиками и мгновенной фильтрацией; категория — фильтр-селект
- * в строке инструментов. Поиск по ID/грузу, сортировка по дате создания (по умолчанию —
- * самые свежие сверху). Статусы синхронизированы с пайплайном перевозчика и реестром
- * рейсов: один источник (статус заявки в БД) + liveTick-обновление.
+ * Завершена / Удалена) со счётчиками и мгновенной фильтрацией (Task 69 — категории
+ * удалены с платформы как ненужные). Поиск по ID/грузу, сортировка по дате создания
+ * (по умолчанию — самые свежие сверху). Статусы синхронизированы с пайплайном
+ * перевозчика и реестром рейсов: один источник (статус заявки в БД) + liveTick.
  * Действия по правам: Просмотр — всем, Редактировать и Удалить — логисту,
  * причём удаление доступно только для текущих (не завершённых) заявок.
  */
@@ -44,7 +44,7 @@ import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
 import { PointAutocomplete } from '@/components/platform/point-autocomplete'
 import {
-  DELETABLE_STATUSES, REQUEST_CATEGORIES, REQUEST_GROUP_META, REQUEST_STATUS_META,
+  DELETABLE_STATUSES, REQUEST_GROUP_META, REQUEST_STATUS_META,
   fmtDateTime, num, rate, requestGroupOf,
 } from '@/lib/status'
 import type { RequestDTO } from '@/lib/types'
@@ -72,9 +72,8 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
-  // фильтры реестра (Task 68: табы — статусы, категория — селект)
+  // фильтры реестра (Task 68: табы — статусы; Task 69 — категории удалены)
   const [group, setGroup] = useState<GroupFilter>('ALL') // таб статуса
-  const [cat, setCat] = useState<string>('ALL')
   const [q, setQ] = useState('')
   const [order, setOrder] = useState<SortOrder>('desc')
 
@@ -105,7 +104,6 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     const list = (requests ?? []).filter((r) => {
-      if (cat !== 'ALL' && r.category !== cat) return false
       if (group !== 'ALL' && requestGroupOf(r.status) !== group) return false
       if (!needle) return true
       // поиск по ID заявки или названию груза (+ маршрут для удобства)
@@ -115,14 +113,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
     return list.sort((a, b) => (order === 'desc'
       ? b.createdAt.localeCompare(a.createdAt) || b.number.localeCompare(a.number)
       : a.createdAt.localeCompare(b.createdAt) || a.number.localeCompare(b.number)))
-  }, [requests, cat, group, q, order])
-
-  /** счётчики по категориям — считаются по всей базе, а не по текущему поиску */
-  const catCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const r of requests ?? []) counts.set(r.category, (counts.get(r.category) ?? 0) + 1)
-    return counts
-  }, [requests])
+  }, [requests, group, q, order])
 
   const groupCounts = useMemo(() => {
     const counts = { new: 0, working: 0, done: 0, deleted: 0 } as Record<string, number>
@@ -197,19 +188,6 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   aria-label="Поиск по ID заявки или названию груза"
                 />
               </div>
-              <Select value={cat} onValueChange={setCat}>
-                <SelectTrigger className="w-[210px]" aria-label="Фильтр по категории">
-                  <SelectValue placeholder="Все категории" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">Все категории</SelectItem>
-                  {REQUEST_CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c} · {catCounts.get(c) ?? 0}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Select value={order} onValueChange={(v) => setOrder(v as SortOrder)}>
                 <SelectTrigger className="w-[190px]" aria-label="Сортировка по дате создания">
                   <SelectValue />
@@ -229,7 +207,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
               title={requests.length === 0 ? 'Заявок пока нет' : 'Ничего не найдено'}
               hint={requests.length === 0
                 ? 'Создайте первую заявку на «Площадке заявок» — она появится здесь'
-                : 'Измените категорию, статус или условия поиска'}
+                : 'Измените статус или условия поиска'}
             />
           ) : (
             <Card className="border-slate-200 shadow-sm">
@@ -240,7 +218,6 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                       <TableRow className="bg-slate-50">
                         <TableHead className="whitespace-nowrap">ID заявки</TableHead>
                         <TableHead className="whitespace-nowrap">Дата создания</TableHead>
-                        <TableHead className="whitespace-nowrap">Категория</TableHead>
                         <TableHead className="whitespace-nowrap">Статус</TableHead>
                         <TableHead className="whitespace-nowrap">Маршрут</TableHead>
                         <TableHead className="whitespace-nowrap">Логист / Создатель</TableHead>
@@ -257,7 +234,6 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                           <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setDetailId(r.id)}>
                             <TableCell className="whitespace-nowrap font-bold text-blue-700">№{r.number}</TableCell>
                             <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(r.createdAt)}</TableCell>
-                            <TableCell className="whitespace-nowrap text-slate-700">{r.category}</TableCell>
                             <TableCell className="whitespace-nowrap">
                               {/* группа статуса + точный статус (Task 67): «Завершена» — только закрытый рейс */}
                               <div className="flex flex-col items-start gap-0.5">
@@ -345,13 +321,12 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   </Badge>
                 </DialogTitle>
                 <DialogDescription>
-                  {detail.category} · создана {fmtDateTime(detail.createdAt)} · {detail.createdBy}
+                  Создана {fmtDateTime(detail.createdAt)} · {detail.createdBy}
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {[
                   { label: 'Наименование / суть', value: detail.cargo },
-                  { label: 'Категория', value: detail.category },
                   { label: 'Точка А (погрузка)', value: detail.fromPoint },
                   { label: 'Точка Б (выгрузка)', value: detail.toPoint },
                   { label: 'Желаемые сроки', value: `${detail.loadDate}, ${detail.loadWindow}` },
@@ -449,7 +424,6 @@ function EditDialog({ request, busy, onClose, onSaved }: {
 }) {
   const { toast } = useToast()
   const [form, setForm] = useState(() => request ? {
-    category: request.category,
     title: request.cargo,
     fromPoint: request.fromPoint,
     toPoint: request.toPoint,
@@ -460,7 +434,7 @@ function EditDialog({ request, busy, onClose, onSaved }: {
     truckType: request.truckType,
     startRate: String(request.startRate),
   } : {
-    category: '', title: '', fromPoint: '', toPoint: '',
+    title: '', fromPoint: '', toPoint: '',
     loadDate: '', loadWindow: '', comment: '', tonnage: '', truckType: 'Тент', startRate: '',
   })
 
@@ -468,7 +442,6 @@ function EditDialog({ request, busy, onClose, onSaved }: {
     if (!request) return
     try {
       await api.action(request.id, 'edit', {
-        category: form.category,
         cargo: form.title,
         fromPoint: form.fromPoint,
         toPoint: form.toPoint,
@@ -486,7 +459,7 @@ function EditDialog({ request, busy, onClose, onSaved }: {
     }
   }
 
-  const canSave = form.category.trim() !== '' && form.title.trim() !== '' && form.fromPoint.trim() !== '' && form.toPoint.trim() !== ''
+  const canSave = form.title.trim() !== '' && form.fromPoint.trim() !== '' && form.toPoint.trim() !== ''
 
   return (
     <Dialog open={!!request} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -500,15 +473,6 @@ function EditDialog({ request, busy, onClose, onSaved }: {
               </DialogDescription>
             </DialogHeader>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="er-category">Категория</Label>
-                <Select value={form.category} onValueChange={(v) => setForm((f) => ({ ...f, category: v }))}>
-                  <SelectTrigger id="er-category" aria-label="Категория заявки"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {REQUEST_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
               <div className="space-y-1.5">
                 <Label htmlFor="er-title">Наименование груза / суть</Label>
                 <Input id="er-title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
