@@ -965,9 +965,23 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 />
               ) : (
                 <div className="-mx-2 overflow-x-auto px-2">
-                  <table className="w-full min-w-[980px] border-separate border-spacing-0 text-sm">
+                  <table className="w-full min-w-[1180px] table-fixed border-separate border-spacing-0 text-sm">
+                    {/* Фиксированные пропорции колонок: равномерное распределение по ширине
+                        таблицы — заголовки и содержимое всегда на одних и тех же позициях */}
+                    <colgroup>
+                      <col className="w-[7%]" />
+                      <col className="w-[22%]" />
+                      <col className="w-[5%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[7%]" />
+                      <col className="w-[5%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[9%]" />
+                      <col className="w-[8%]" />
+                      <col className="w-[15%]" />
+                    </colgroup>
                     <thead>
-                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr className="whitespace-nowrap text-left text-xs uppercase tracking-wide text-slate-500">
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">№ заявки</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Маршрут</th>
                         <SortableTh k="km" label="КМ" sort={sort} onSort={toggleSort} title="Расстояние от погрузки до назначения, по прямой" />
@@ -1008,9 +1022,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 )}
                               </div>
                             </td>
-                          <td className="min-w-[300px] border-b border-slate-100 py-3 pr-3">
-                            <div className="flex items-start gap-2">
-                              <RoutePointsInline from={r.fromPoint} to={r.toPoint} className="min-w-0" />
+                          <td className="border-b border-slate-100 py-3 pr-3">
+                            <div className="flex items-center gap-2">
+                              <RoutePointsInline from={r.fromPoint} to={r.toPoint} className="min-w-0 flex-1" />
                               <RouteButton from={r.fromPoint} to={r.toPoint} number={r.number} variant="ghost" className="shrink-0 px-2" />
                             </div>
                           </td>
