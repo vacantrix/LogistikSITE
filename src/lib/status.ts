@@ -21,7 +21,11 @@ export const REQUEST_CATEGORIES = [
   'Прочее',
 ] as const
 
-/** Группы статусов в «Реестре заявок» (Task 66): Новая / В работе / Завершена / Удалена */
+/** Группы статусов в «Реестре заявок» (Task 66): Новая / В работе / Завершена / Удалена.
+ *  Синхронизация Рейсы → Заявки (Task 67): «Завершена» — только закрытый рейс (CLOSED).
+ *  Заявка в статусе CONFIRMED (данные в 1С, рейс выполняется — пропуск, ЭТрН, путь)
+ *  остаётся «В работе»; как только логист закрывает рейс в «Реестре рейсов», заявка
+ *  автоматически становится «Завершена» — без ручного обновления страницы. */
 export type RequestGroup = 'new' | 'working' | 'done' | 'deleted'
 
 export const REQUEST_GROUP_META: Record<RequestGroup, { label: string; badge: string; dot: string }> = {
@@ -37,8 +41,8 @@ export function requestGroupOf(status: string): RequestGroup {
     case 'PUBLISHED': return 'new'
     case 'AWARDED':
     case 'DOCS_REVIEW':
-    case 'AT_LOGIST': return 'working'
-    case 'CONFIRMED':
+    case 'AT_LOGIST':
+    case 'CONFIRMED': return 'working' // рейс выполняется — завершён только после закрытия
     case 'CLOSED': return 'done'
     default: return 'deleted'
   }

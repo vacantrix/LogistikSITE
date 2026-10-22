@@ -42,8 +42,8 @@ import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
 import { PointAutocomplete } from '@/components/platform/point-autocomplete'
 import {
-  DELETABLE_STATUSES, REQUEST_CATEGORIES, REQUEST_GROUP_META, fmtDateTime,
-  num, rate, requestGroupOf,
+  DELETABLE_STATUSES, REQUEST_CATEGORIES, REQUEST_GROUP_META, REQUEST_STATUS_META,
+  fmtDateTime, num, rate, requestGroupOf,
 } from '@/lib/status'
 import type { RequestDTO } from '@/lib/types'
 
@@ -252,7 +252,13 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                             <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(r.createdAt)}</TableCell>
                             <TableCell className="whitespace-nowrap text-slate-700">{r.category}</TableCell>
                             <TableCell className="whitespace-nowrap">
-                              <Badge variant="outline" className={`${g.badge} whitespace-nowrap`}>{g.label}</Badge>
+                              {/* группа статуса + точный статус (Task 67): «Завершена» — только закрытый рейс */}
+                              <div className="flex flex-col items-start gap-0.5">
+                                <Badge variant="outline" className={`${g.badge} whitespace-nowrap`}>{g.label}</Badge>
+                                <span className="text-[11px] leading-tight text-slate-500">
+                                  {REQUEST_STATUS_META[r.status as RequestDTO['status']]?.label ?? r.status}
+                                </span>
+                              </div>
                             </TableCell>
                             <TableCell className="max-w-[260px] text-slate-700">
                               <span className="block truncate" title={`${r.fromPoint} → ${r.toPoint}`}>
@@ -326,6 +332,9 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   Заявка <span className="text-blue-700">{detail.number}</span>
                   <Badge variant="outline" className={REQUEST_GROUP_META[requestGroupOf(detail.status)].badge}>
                     {REQUEST_GROUP_META[requestGroupOf(detail.status)].label}
+                  </Badge>
+                  <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-slate-100 text-slate-700">
+                    {REQUEST_STATUS_META[detail.status]?.label ?? detail.status}
                   </Badge>
                 </DialogTitle>
                 <DialogDescription>

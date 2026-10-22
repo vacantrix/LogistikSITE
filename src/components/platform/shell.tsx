@@ -1,13 +1,28 @@
 'use client'
 
 /**
- * Оболочка платформы: тёмно-синяя шапка с вошедшим пользователем и два вида платформы:
+ * Оболочка платформы: шапка с вошедшим пользователем и два вида платформы:
  *  — внутренний контур АЭМЗ (Логист 1 / Логист 2): площадка со встроенными торгами,
  *    сверка, реестр, справочники, отчёты;
  *  — кабинет перевозчика: участие в отборе рейсов, свои заявки и документы.
+ *
+ * Мобильная версия (ТЗ Task 67):
+ *  — шапка предельно компактная (один ряд 48px), закреплена сверху (sticky) и содержит
+ *    только критичное: логотип, название, профиль и выход;
+ *  — основное меню перенесено в нижний Tab Bar (как в мобильных приложениях):
+ *    зафиксирован внизу (position: fixed), виден поверх контента при скролле,
+ *    до 5 иконок с подписями, лишние разделы — в меню «Ещё»;
+ *  — учтены нижние безопасные зоны iOS/Android (env(safe-area-inset-bottom)).
+ *  Десктоп: прежняя шапка с горизонтальным меню.
  */
-import type { ReactNode } from 'react'
-import { Building2, LogOut, ShieldCheck, Truck, UserCog } from 'lucide-react'
+import { useState, type ComponentType } from 'react'
+import {
+  BarChart3, ClipboardList, FileUp, FolderOpen, LayoutGrid, ListChecks, LogOut,
+  MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, Building2, Users,
+} from 'lucide-react'
+import {
+  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+} from '@/components/ui/sheet'
 import type { RoleKind, TabKey } from '@/components/platform/common'
 
 /** Полный список разделов с пометкой ролей: L — логист, C — перевозчик.
@@ -27,6 +42,19 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'reports', label: 'Отчёты', roles: ['logist'] },
 ]
 
+/** Иконка и короткая подпись раздела для нижнего Tab Bar (мобильные) */
+const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; short: string }> = {
+  board: { Icon: LayoutGrid, short: 'Площадка' },
+  my: { Icon: ClipboardList, short: 'Заявки' },
+  apply: { Icon: FileUp, short: 'Документы' },
+  crew: { Icon: Users, short: 'Экипажи' },
+  verify: { Icon: ScanSearch, short: 'Сверка' },
+  requests: { Icon: ListChecks, short: 'Заявки' },
+  registry: { Icon: Truck, short: 'Рейсы' },
+  directory: { Icon: FolderOpen, short: 'Справочники' },
+  reports: { Icon: BarChart3, short: 'Отчёты' },
+}
+
 /** Разделы, доступные выбранной роли */
 export function navFor(role: RoleKind): { key: TabKey; label: string }[] {
   return NAV_ALL.filter((n) => n.roles.includes(role)).map(({ key, label }) => ({ key, label }))
@@ -44,6 +72,117 @@ export interface RoleSelection {
   carrierId?: string | null
 }
 
+/** Кнопка нижней панели: иконка + короткая подпись, полоска-индикатор у активного раздела */
+function TabItem({ tabKey, label, short, active, onClick, Icon }: {
+  tabKey: string
+  label: string
+  short: string
+  active: boolean
+  onClick: () => void
+  Icon: ComponentType<{ className?: string }>
+}) {
+  return (
+    <button
+      key={tabKey}
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      aria-label={label}
+      className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 px-0.5 pt-1.5 pb-1 transition-colors ${
+        active ? 'text-blue-700' : 'text-slate-500 active:bg-slate-100'
+      }`}
+    >
+      {/* индикатор активного раздела — полоска сверху */}
+      <span
+        aria-hidden
+        className={`absolute top-0 h-0.5 w-8 rounded-full bg-blue-700 transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`}
+      />
+      <Icon className="h-5 w-5" />
+      <span className="max-w-full truncate text-[10px] font-medium leading-none">{short}</span>
+    </button>
+  )
+}
+
+/** Нижний Tab Bar (мобильные, < md): до 5 разделов иконками с подписями.
+ *  Если разделов больше 5 — последний пункт «Ещё» открывает лист с остальными.
+ *  Зафиксирован внизу экрана, поверх контента при скролле, с safe-area iOS/Android. */
+function BottomTabBar({ tab, onNavigate, nav }: {
+  tab: TabKey
+  onNavigate: (t: TabKey) => void
+  nav: { key: TabKey; label: string }[]
+}) {
+  const [moreOpen, setMoreOpen] = useState(false)
+  const MAX_ITEMS = 5
+  const visible = nav.slice(0, MAX_ITEMS - (nav.length > MAX_ITEMS ? 1 : 0))
+  const hidden = nav.slice(visible.length)
+
+  return (
+    <>
+      <nav
+        aria-label="Нижняя навигация по разделам"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white shadow-[0_-4px_16px_rgba(15,23,42,0.08)] md:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="grid auto-cols-fr grid-flow-col">
+          {visible.map((n) => (
+            <TabItem
+              key={n.key}
+              tabKey={n.key}
+              label={n.label}
+              short={TAB_ICONS[n.key].short}
+              active={tab === n.key}
+              onClick={() => onNavigate(n.key)}
+              Icon={TAB_ICONS[n.key].Icon}
+            />
+          ))}
+          {hidden.length > 0 && (
+            <TabItem
+              key="__more"
+              tabKey="__more"
+              label="Все разделы"
+              short="Ещё"
+              active={hidden.some((n) => n.key === tab)}
+              onClick={() => setMoreOpen(true)}
+              Icon={MoreHorizontal}
+            />
+          )}
+        </div>
+      </nav>
+
+      {/* меню «Ещё»: разделы, не поместившиеся в панель */}
+      <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+        <SheetContent side="bottom" className="rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <SheetHeader className="pb-1 text-left">
+            <SheetTitle>Все разделы</SheetTitle>
+            <SheetDescription>Разделы, не поместившиеся в нижнюю панель</SheetDescription>
+          </SheetHeader>
+          <div className="grid grid-cols-1 gap-1 pb-2">
+            {hidden.map((n) => {
+              const { Icon } = TAB_ICONS[n.key]
+              const active = tab === n.key
+              return (
+                <button
+                  key={n.key}
+                  type="button"
+                  onClick={() => { setMoreOpen(false); onNavigate(n.key) }}
+                  aria-current={active ? 'page' : undefined}
+                  className={`flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                    active ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <Icon className="h-5 w-5 shrink-0" />
+                  <span className="flex-1">{n.label}</span>
+                  {active && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-700" aria-hidden />}
+                </button>
+              )
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
+  )
+}
+
 export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
@@ -51,7 +190,7 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
   /** имя вошедшего пользователя (логист или перевозчик) */
   userName: string
   onLogout: () => void
-  children: ReactNode
+  children: React.ReactNode
 }) {
   const isLogist = role.kind === 'logist'
   const nav = navFor(role.kind)
@@ -59,7 +198,30 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
       <header className="sticky top-0 z-40 bg-[#0E1B2C] text-white shadow-lg shadow-slate-900/10">
-        <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
+        {/* Мобильная шапка (ТЗ Task 67): один ряд, минимальная высота, только критичные
+            элементы — логотип, название, профиль и выход. Меню ушло в нижний Tab Bar. */}
+        <div className="flex h-12 items-center gap-2 px-3 md:hidden">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-600">
+            <ShieldCheck className="h-4 w-4" aria-hidden />
+          </div>
+          <div className="truncate text-sm font-bold leading-none">АЭМЗ Логистика</div>
+          <div className="ml-auto flex min-w-0 items-center gap-1.5">
+            <span className="max-w-[110px] truncate text-xs font-medium text-blue-100" title={userName}>
+              {userName}
+            </span>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/20 bg-white/10 text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
+              aria-label="Выйти из платформы"
+            >
+              <LogOut className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        </div>
+
+        {/* Десктопная шапка: полный блок с бейджем контура, именем и горизонтальным меню */}
+        <div className="hidden w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6 md:flex">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600">
               <ShieldCheck className="h-5 w-5" aria-hidden />
@@ -97,7 +259,7 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
             </button>
           </div>
         </div>
-        <nav aria-label="Разделы платформы" className="border-t border-white/10">
+        <nav aria-label="Разделы платформы" className="hidden border-t border-white/10 md:block">
           <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {nav.map((item) => (
               <button
@@ -132,6 +294,14 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
           </div>
         </div>
       </footer>
+
+      {/* Нижний Tab Bar (только мобильные): фиксирован поверх контента — под ним
+          оставляем отбеливающий отступ, чтобы подвал не перекрывался панелью */}
+      <div
+        aria-hidden
+        className="h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] bg-[#0E1B2C] md:hidden"
+      />
+      <BottomTabBar tab={tab} onNavigate={onNavigate} nav={nav} />
     </div>
   )
 }

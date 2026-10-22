@@ -363,6 +363,10 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     Запись №{closeTarget.number} · {closeTarget.fromPoint} → {closeTarget.toPoint} ·{' '}
                     {closeTarget.winnerName ?? '—'} — {rate(closeTarget.bestRate)}. Рейс будет помечен закрытым
                     в реестре, ЭТрН — подписанной. Отчёты для бухгалтерии пересчитаются автоматически.
+                    <span className="mt-2 block font-medium text-slate-900">
+                      Связанная заявка №{closeTarget.number} автоматически станет «Завершена» — статус синхронно
+                      обновится в реестре заявок и кабинетах без ручного обновления страницы.
+                    </span>
                   </>
                 )}
               </div>
