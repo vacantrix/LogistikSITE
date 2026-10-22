@@ -18,7 +18,7 @@
 import { useState, type ComponentType } from 'react'
 import {
   BarChart3, ClipboardList, FileUp, FolderOpen, LayoutGrid, ListChecks, LogOut,
-  MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, Building2, Users,
+  MoreHorizontal, ScanSearch, ShieldCheck, Truck, Users,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -236,18 +236,8 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, liveTick, chi
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            {/* бейдж вида платформы. Real-time индикатор убран (Task 52):
-                потеря связи теперь показывается оверлеем «Восстанавливаем соединение» */}
-            <span
-              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                isLogist ? 'border-blue-400/40 bg-blue-500/15 text-blue-200' : 'border-emerald-400/40 bg-emerald-500/15 text-emerald-200'
-              }`}
-              role="status"
-            >
-              {isLogist ? <UserCog className="h-3.5 w-3.5" aria-hidden /> : <Building2 className="h-3.5 w-3.5" aria-hidden />}
-              {isLogist ? 'Внутренний контур АЭМЗ' : 'Кабинет перевозчика'}
-            </span>
-            <Truck className="hidden h-4 w-4 text-blue-300 sm:block" aria-hidden />
+            {/* Real-time индикатор убран (Task 52): потеря связи показывается оверлеем
+                «Восстанавливаем соединение»; пузырь вида платформы убран (Task 70) */}
             {/* колокольчик персональных уведомлений (Task 69) */}
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
             {/* роль задаётся учётной записью: переключателя ролей больше нет */}

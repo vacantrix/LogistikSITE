@@ -6,7 +6,7 @@
  * когда задан NEXT_PUBLIC_DEMO_PASSWORD (тот же, что SEED_PASSWORD при заполнении базы).
  */
 import { useState } from 'react'
-import { Building2, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
+import { CircleAlert, Building2, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
 import { saveSessionToken } from '@/lib/api'
 
 /** Демо-доступы (демо-контур): пароль один, логины разные */
@@ -120,8 +120,9 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               </div>
 
               {error && (
-                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700" role="alert">
-                  {error}
+                <p className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700" role="alert">
+                  <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                  <span>{error}</span>
                 </p>
               )}
 
