@@ -1,10 +1,18 @@
 'use client'
 
-/** «Реестр рейсов» — одна запись = один рейс: заявки, ставки, документы, затраты */
+/**
+ * «Реестр рейсов» — одна запись = один рейс: заявки, ставки, документы, затраты.
+ * Вид синхронизирован с «Реестром заявок» (Task 75): верхние табы по статусам со
+ * счётчиками (В 1С / Завершён), поиск по номеру/грузу/маршруту/перевозчику,
+ * сортировка, яркие насыщенные пузыри статусов с подписью точного статуса,
+ * sticky-шапка таблицы под шапкой сайта (md+) и список, уходящий вниз без
+ * внутреннего скролл-окна. Действия — иконками (просмотр, закрыть рейс).
+ * Карточка рейса — этапы (Pipeline) и журнал событий.
+ */
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, ScrollText } from 'lucide-react'
+import { ChevronRight, CircleCheck, Eye, ScrollText, Search } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusBadge, type TabProps,
+  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -16,17 +24,36 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
+import { pointInfo } from '@/lib/points'
 import {
-  REGISTRY_STEPS, fmtDateTime, rate, num, registryStepIndex,
+  REGISTRY_STEPS, REQUEST_STATUS_META, fmtDateTime, num, rate, registryStepIndex,
 } from '@/lib/status'
 import type { DriverDTO, RequestDTO, TrailerDTO, TruckDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
+
+type TripGroup = 'in1c' | 'closed'
+type SortOrder = 'desc' | 'asc'
+
+/**
+ * Группы рейсов в стиле «Реестра заявок» (Task 75): цвета согласованы по смыслу —
+ * фиолетовый «В 1С» = рейс выполняется (как «В работе» у заявок; CONFIRMED там тоже
+ * «В работе»), изумрудный «Завершён» = рейс закрыт (как «Завершена»).
+ */
+const TRIP_GROUP_META: Record<TripGroup, { label: string; badge: string; dot: string }> = {
+  in1c: { label: 'В 1С', badge: 'bg-violet-500 text-white border-violet-600 shadow-sm', dot: 'bg-violet-500' },
+  closed: { label: 'Завершён', badge: 'bg-emerald-500 text-white border-emerald-600 shadow-sm', dot: 'bg-emerald-500' },
+}
+
+const tripGroupOf = (status: string): TripGroup => (status === 'CLOSED' ? 'closed' : 'in1c')
 
 /** Пайплайн из 8 статусов записи реестра */
 function Pipeline({ status, passPackage, etrnStatus }: { status: string; passPackage: boolean; etrnStatus: string }) {
@@ -55,9 +82,9 @@ function Pipeline({ status, passPackage, etrnStatus }: { status: string; passPac
   )
 }
 
-function DocBadges({ r }: { r: RequestDTO }) {
+function DocBadges({ r, stacked }: { r: RequestDTO; stacked?: boolean }) {
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className={stacked ? 'flex flex-col items-start gap-1' : 'flex flex-wrap gap-1'}>
       {r.passPackage && (
         <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
           Пропуск ✓
@@ -88,8 +115,15 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   const [trailers, setTrailers] = useState<Map<string, TrailerDTO>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const [detail, setDetail] = useState<RequestDTO | null>(null)
-  const [closeTarget, setCloseTarget] = useState<RequestDTO | null>(null)
+
+  // фильтры (Task 75 — вид «Реестра заявок»): таб статуса, поиск, сортировка
+  const [group, setGroup] = useState<'ALL' | TripGroup>('ALL')
+  const [q, setQ] = useState('')
+  const [order, setOrder] = useState<SortOrder>('desc')
+
+  // диалоги держим по id — свежие данные берём из списка (живое обновление)
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const [closeId, setCloseId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -119,12 +153,33 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
     if (liveTick > 0) void load()
   }, [liveTick, load])
 
-  const rows = useMemo(
-    () => (requests ?? [])
-      .filter((r) => r.status === 'CONFIRMED' || r.status === 'CLOSED')
-      .sort((a, b) => b.number.localeCompare(a.number)),
+  // записи реестра: подтверждённые (в 1С) и закрытые рейсы
+  const base = useMemo(
+    () => (requests ?? []).filter((r) => r.status === 'CONFIRMED' || r.status === 'CLOSED'),
     [requests],
   )
+
+  // ——— фильтрация и сортировка ———
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    const list = base.filter((r) => {
+      if (group !== 'ALL' && tripGroupOf(r.status) !== group) return false
+      if (!needle) return true
+      // поиск по номеру рейса, грузу, маршруту и перевозчику
+      return [r.number, r.cargo, r.fromPoint, r.toPoint, r.winnerName ?? '']
+        .some((v) => v.toLowerCase().includes(needle))
+    })
+    return list.sort((a, b) => (order === 'desc' ? b.number.localeCompare(a.number) : a.number.localeCompare(b.number)))
+  }, [base, group, q, order])
+
+  const groupCounts = useMemo(() => {
+    const counts: Record<TripGroup, number> = { in1c: 0, closed: 0 }
+    for (const r of base) counts[tripGroupOf(r.status)] += 1
+    return counts
+  }, [base])
+
+  const detail = base.find((r) => r.id === detailId) ?? null
+  const closeTarget = base.find((r) => r.id === closeId) ?? null
 
   const closeTrip = async () => {
     if (!closeTarget) return
@@ -135,8 +190,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
         title: 'Рейс закрыт',
         description: `№${closeTarget.number}: данные в реестре, ЭТрН подписана, отчёты сходятся с бухгалтерией`,
       })
-      setCloseTarget(null)
-      setDetail(null)
+      setCloseId(null)
       await load()
     } catch (e) {
       toast({
@@ -149,210 +203,305 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
     }
   }
 
-  if (requests === null && !error) return <LoadingBlock label="Загрузка реестра рейсов…" />
-  if (error) return <ErrorBlock message={error} onRetry={() => { setError(null); void load() }} />
-
   return (
     <div>
-      <SectionHeader
-        title="Реестр рейсов"
-      >
+      <SectionHeader title="Реестр рейсов">
         <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
-          Записей: {rows.length}
+          Рейсов: {filtered.length}{filtered.length !== base.length ? ` из ${base.length}` : ''}
         </Badge>
       </SectionHeader>
 
-      {rows.length === 0 ? (
-        <EmptyState
-          icon={<ScrollText className="h-10 w-10" aria-hidden />}
-          title="Реестр пуст"
-          hint="Подтвердите заявку на сверке — запись рейса появится здесь"
-        />
-      ) : (
-        <Card className="border-slate-200 shadow-sm">
-          <CardContent className="p-0">
-            <div className={`max-h-96 overflow-y-auto overflow-x-auto ${THIN_SCROLL}`}>
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50">
-                    <TableHead>№</TableHead>
-                    <TableHead>Погрузка</TableHead>
-                    <TableHead>Направление</TableHead>
-                    <TableHead>Груз</TableHead>
-                    <TableHead>Перевозчик</TableHead>
-                    <TableHead>Водитель</TableHead>
-                    <TableHead>ТС</TableHead>
-                    <TableHead>Ставка</TableHead>
-                    <TableHead>Экономия</TableHead>
-                    <TableHead>Документы</TableHead>
-                    <TableHead>Статус</TableHead>
-                    <TableHead className="text-right">Действие</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((r) => {
-                    const driver = r.driverId ? drivers.get(r.driverId) : undefined
-                    const truck = r.truckId ? trucks.get(r.truckId) : undefined
-                    const trailer = r.trailerId ? trailers.get(r.trailerId) : undefined
-                    return (
-                      <TableRow
-                        key={r.id}
-                        onClick={() => setDetail(r)}
-                        className="cursor-pointer hover:bg-slate-50"
-                      >
-                        <TableCell className="whitespace-nowrap font-bold text-blue-700">№{r.number}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600">{r.loadDate}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-700">{r.fromPoint} → {r.toPoint}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600">{r.cargo}, {num(r.tonnage)} т</TableCell>
-                        <TableCell className="whitespace-nowrap font-medium text-slate-800">{r.winnerName ?? '—'}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600">{driver?.fullName ?? '—'}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600">
-                          {truck ? `${truck.brand} · ${truck.plate}` : '—'}
-                          {trailer && <span className="text-slate-500"> + {trailer.plate}</span>}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-600">
-                          {rate(r.startRate)} → <span className="font-semibold text-slate-900">{rate(r.bestRate)}</span>
-                        </TableCell>
-                        <TableCell className={`whitespace-nowrap font-semibold ${(r.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                          {rate(r.savings)}
-                        </TableCell>
-                        <TableCell><DocBadges r={r} /></TableCell>
-                        <TableCell><StatusBadge status={r.status} /></TableCell>
-                        <TableCell
-                          className="text-right"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {r.status === 'CONFIRMED' ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={busy === r.id}
-                              onClick={() => setCloseTarget(r)}
-                              aria-label={`Закрыть рейс №${r.number}`}
-                            >
-                              Закрыть рейс
-                            </Button>
-                          ) : (
-                            <span className="text-slate-400">—</span>
-                          )}
-                        </TableCell>
+      {requests === null && !error && <LoadingBlock label="Загрузка реестра рейсов…" />}
+      {error && <ErrorBlock message={error} onRetry={() => { setError(null); void load() }} />}
+
+      {requests !== null && !error && (
+        <div className="space-y-4">
+          {/* Табы статусов (Task 75) — как в «Реестре заявок»: мгновенная фильтрация,
+              счётчики считаются по всей базе реестра, а не по текущему поиску */}
+          <Tabs value={group} onValueChange={(v) => setGroup(v as 'ALL' | TripGroup)}>
+            <TabsList className="h-auto flex-wrap justify-start gap-1 bg-slate-100 p-1">
+              <TabsTrigger value="ALL" className="gap-1.5 data-[state=active]:bg-white">
+                Все рейсы
+                <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{base.length}</Badge>
+              </TabsTrigger>
+              {(Object.keys(TRIP_GROUP_META) as TripGroup[]).map((g) => (
+                <TabsTrigger key={g} value={g} className="gap-1.5 data-[state=active]:bg-white">
+                  <span className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${TRIP_GROUP_META[g].dot}`} aria-hidden />
+                    {TRIP_GROUP_META[g].label}
+                  </span>
+                  <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{groupCounts[g]}</Badge>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+
+          {/* Инструменты: поиск и сортировка */}
+          <Card className="border-slate-200 shadow-sm">
+            <CardContent className="flex flex-wrap items-center gap-3 p-4">
+              <div className="relative min-w-[220px] flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
+                <Input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Поиск по номеру рейса, грузу, маршруту или перевозчику…"
+                  className="pl-9"
+                  aria-label="Поиск по номеру рейса, грузу, маршруту или перевозчику"
+                />
+              </div>
+              <Select value={order} onValueChange={(v) => setOrder(v as SortOrder)}>
+                <SelectTrigger className="w-[190px]" aria-label="Сортировка по номеру рейса">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="desc">Сначала новые</SelectItem>
+                  <SelectItem value="asc">Сначала старые</SelectItem>
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          {/* Таблица реестра */}
+          {filtered.length === 0 ? (
+            <EmptyState
+              icon={<ScrollText className="h-10 w-10" aria-hidden />}
+              title={base.length === 0 ? 'Реестр пуст' : 'Ничего не найдено'}
+              hint={base.length === 0
+                ? 'Подтвердите заявку на сверке — запись рейса появится здесь'
+                : 'Измените статус или условия поиска'}
+            />
+          ) : (
+            <Card className="border-slate-200 shadow-sm">
+              <CardContent className="p-0">
+                {/* Task 75: как в «Реестре заявок» (Task 71/73) — без внутреннего скролл-окна,
+                    список уходит вниз вместе со страницей; шапка таблицы прилипает под шапкой
+                    сайта (md:top = высота хедера), перехват скролла отключён через
+                    .registry-sticky-table (globals.css) */}
+                <div className="registry-sticky-table">
+                  <Table>
+                    <TableHeader className="z-10 bg-slate-50 shadow-[0_2px_6px_-2px_rgba(15,23,42,0.12)] md:sticky md:top-[105px]">
+                      <TableRow className="bg-slate-50">
+                        <TableHead className="whitespace-nowrap">№</TableHead>
+                        <TableHead className="whitespace-nowrap">Статус</TableHead>
+                        <TableHead className="whitespace-nowrap">Направление</TableHead>
+                        <TableHead className="whitespace-nowrap">Перевозчик</TableHead>
+                        <TableHead className="whitespace-nowrap">Груз</TableHead>
+                        <TableHead className="whitespace-nowrap">Экипаж</TableHead>
+                        <TableHead className="whitespace-nowrap">Ставка</TableHead>
+                        <TableHead className="whitespace-nowrap">Экономия</TableHead>
+                        <TableHead className="whitespace-nowrap">Документы</TableHead>
+                        <TableHead className="text-right">Действия</TableHead>
                       </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-            <div className="border-t border-slate-100 px-4 py-2 text-xs text-muted-foreground">
-              Нажмите на строку, чтобы открыть карточку рейса с этапами и журналом событий.
-            </div>
-          </CardContent>
-        </Card>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map((r) => {
+                        const g = TRIP_GROUP_META[tripGroupOf(r.status)]
+                        const driver = r.driverId ? drivers.get(r.driverId) : undefined
+                        const truck = r.truckId ? trucks.get(r.truckId) : undefined
+                        const trailer = r.trailerId ? trailers.get(r.trailerId) : undefined
+                        return (
+                          <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setDetailId(r.id)}>
+                            {/* номер + дата погрузки под ним (Task 75: компактно, как пузырь + подпись) */}
+                            <TableCell className="whitespace-nowrap">
+                              <div className="flex flex-col items-start leading-tight">
+                                <span className="font-bold text-blue-700">№{r.number}</span>
+                                <span className="text-[11px] text-slate-500">{r.loadDate}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {/* яркий пузырь группы + точный статус под ним (Task 75, как в реестре заявок) */}
+                              <div className="flex flex-col items-start gap-0.5">
+                                <Badge variant="outline" className={`${g.badge} whitespace-nowrap`}>{g.label}</Badge>
+                                <span className="text-[11px] font-medium leading-tight text-slate-600">
+                                  {REQUEST_STATUS_META[r.status as RequestDTO['status']]?.label ?? r.status}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="max-w-[150px] text-slate-700">
+                              <span className="block truncate" title={`${r.fromPoint} → ${r.toPoint}`}>
+                                {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
+                              </span>
+                            </TableCell>
+                            <TableCell className="max-w-[150px] text-slate-800">
+                              <span className="block whitespace-nowrap font-medium" title={r.winnerName ?? ''}>{r.winnerName ?? '—'}</span>
+                            </TableCell>
+                            <TableCell className="max-w-[140px] text-slate-600">
+                              <span className="block truncate" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-slate-600">
+                              {/* водитель + ТС одной компактной ячейкой */}
+                              <div className="flex max-w-[200px] flex-col items-start leading-tight">
+                                <span className="max-w-full truncate" title={driver?.fullName ?? ''}>{driver?.fullName ?? '—'}</span>
+                                <span className="max-w-full truncate text-[11px] text-slate-500" title={truck ? `${truck.brand} · ${truck.plate}${trailer ? ` + ${trailer.plate}` : ''}` : ''}>
+                                  {truck ? `${truck.brand} · ${truck.plate}` : '—'}
+                                  {trailer && ` + ${trailer.plate}`}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {/* итоговая ставка + старт под ней (Task 75: компактная ячейка) */}
+                              <div className="flex flex-col items-start leading-tight">
+                                <span className="font-semibold text-slate-900">{rate(r.bestRate)}</span>
+                                <span className="text-[11px] text-slate-500">старт {rate(r.startRate)}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className={`whitespace-nowrap font-semibold ${(r.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                              {rate(r.savings)}
+                            </TableCell>
+                            <TableCell><DocBadges r={r} stacked /></TableCell>
+                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+                                  onClick={() => setDetailId(r.id)}
+                                  aria-label={`Просмотреть рейс №${r.number}`}
+                                  title="Просмотр"
+                                >
+                                  <Eye className="h-4 w-4" aria-hidden />
+                                </Button>
+                                {r.status === 'CONFIRMED' && (
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    disabled={busy === r.id}
+                                    className="h-8 w-8 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
+                                    onClick={() => setCloseId(r.id)}
+                                    aria-label={`Закрыть рейс №${r.number}`}
+                                    title="Закрыть рейс"
+                                  >
+                                    <CircleCheck className="h-4 w-4" aria-hidden />
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="border-t border-slate-100 px-4 py-2 text-xs text-muted-foreground">
+                  Нажмите на строку или иконку «Просмотр», чтобы открыть карточку рейса с этапами и журналом событий. «Закрыть рейс» — для рейсов с данными в 1С.
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {/* карточка рейса */}
-      <Dialog open={!!detail} onOpenChange={(o) => { if (!o) setDetail(null) }}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>
-              Карточка рейса №{detail?.number}
-              {detail && <StatusBadge status={detail.status} />}
-            </DialogTitle>
-            <DialogDescription>
-              {detail && <>Этапы рейса и журнал событий — данные синхронизированы с 1C:ERP</>}
-            </DialogDescription>
-          </DialogHeader>
-
+      <Dialog open={!!detail} onOpenChange={(o) => { if (!o) setDetailId(null) }}>
+        <DialogContent className={`max-h-[85vh] overflow-y-auto sm:max-w-3xl ${THIN_SCROLL}`}>
           {detail && (
-            <div className="space-y-4">
-              <Pipeline status={detail.status} passPackage={detail.passPackage} etrnStatus={detail.etrnStatus} />
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex flex-wrap items-center gap-2">
+                  Рейс <span className="text-blue-700">№{detail.number}</span>
+                  <Badge variant="outline" className={TRIP_GROUP_META[tripGroupOf(detail.status)].badge}>
+                    {TRIP_GROUP_META[tripGroupOf(detail.status)].label}
+                  </Badge>
+                  <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-slate-100 text-slate-700">
+                    {REQUEST_STATUS_META[detail.status as RequestDTO['status']]?.label ?? detail.status}
+                  </Badge>
+                </DialogTitle>
+                <DialogDescription>
+                  Этапы рейса и журнал событий — данные синхронизированы с 1C:ERP
+                </DialogDescription>
+              </DialogHeader>
 
-              <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Направление</div>
-                  <div className="text-sm font-medium text-slate-800">{detail.fromPoint} → {detail.toPoint}</div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Груз</div>
-                  <div className="text-sm font-medium text-slate-800">{detail.cargo}, {num(detail.tonnage)} т · {detail.truckType}</div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Погрузка</div>
-                  <div className="text-sm font-medium text-slate-800">{detail.loadDate} · {detail.loadWindow}</div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Перевозчик</div>
-                  <div className="text-sm font-medium text-slate-800">{detail.winnerName ?? '—'}</div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Водитель</div>
-                  <div className="text-sm font-medium text-slate-800">
-                    {detail.driverId ? drivers.get(detail.driverId)?.fullName ?? '—' : '—'}
+              <div className="space-y-4">
+                <Pipeline status={detail.status} passPackage={detail.passPackage} etrnStatus={detail.etrnStatus} />
+
+                <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Направление</div>
+                    <div className="text-sm font-medium text-slate-800">{detail.fromPoint} → {detail.toPoint}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Груз</div>
+                    <div className="text-sm font-medium text-slate-800">{detail.cargo}, {num(detail.tonnage)} т · {detail.truckType}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Погрузка</div>
+                    <div className="text-sm font-medium text-slate-800">{detail.loadDate} · {detail.loadWindow}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Перевозчик</div>
+                    <div className="text-sm font-medium text-slate-800">{detail.winnerName ?? '—'}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Водитель</div>
+                    <div className="text-sm font-medium text-slate-800">
+                      {detail.driverId ? drivers.get(detail.driverId)?.fullName ?? '—' : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">ТС</div>
+                    <div className="text-sm font-medium text-slate-800">
+                      {detail.truckId ? (() => {
+                        const t = trucks.get(detail.truckId)
+                        return t ? `${t.brand} · ${t.plate}` : '—'
+                      })() : '—'}
+                      {detail.trailerId && trailers.get(detail.trailerId) && (
+                        <span className="text-slate-500"> + {trailers.get(detail.trailerId)?.plate}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Ставка</div>
+                    <div className="text-sm font-medium text-slate-800">{rate(detail.startRate)} → {rate(detail.bestRate)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Экономия</div>
+                    <div className={`text-sm font-semibold ${(detail.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                      {rate(detail.savings)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Документы</div>
+                    <div className="mt-0.5"><DocBadges r={detail} /></div>
                   </div>
                 </div>
+
+                {/* журнал событий */}
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">ТС</div>
-                  <div className="text-sm font-medium text-slate-800">
-                    {detail.truckId ? (() => {
-                      const t = trucks.get(detail.truckId)
-                      return t ? `${t.brand} · ${t.plate}` : '—'
-                    })() : '—'}
-                    {detail.trailerId && trailers.get(detail.trailerId) && (
-                      <span className="text-slate-500"> + {trailers.get(detail.trailerId)?.plate}</span>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Журнал событий</div>
+                  <div className={`max-h-60 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 ${THIN_SCROLL}`}>
+                    {[...detail.events]
+                      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+                      .map((ev) => (
+                        <div key={ev.id} className="flex items-start gap-3 text-sm">
+                          <span className="shrink-0 font-mono text-xs text-slate-500">{fmtDateTime(ev.createdAt)}</span>
+                          <span className="text-slate-700">{ev.message}</span>
+                        </div>
+                      ))}
+                    {detail.events.length === 0 && (
+                      <div className="text-sm text-slate-400">Событий пока нет</div>
                     )}
                   </div>
                 </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Ставка</div>
-                  <div className="text-sm font-medium text-slate-800">{rate(detail.startRate)} → {rate(detail.bestRate)}</div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Экономия</div>
-                  <div className={`text-sm font-semibold ${(detail.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                    {rate(detail.savings)}
+
+                {detail.status === 'CONFIRMED' && (
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3">
+                    <Button
+                      size="sm"
+                      disabled={busy === detail.id}
+                      onClick={() => setCloseId(detail.id)}
+                    >
+                      Закрыть рейс
+                    </Button>
                   </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">Документы</div>
-                  <div className="mt-0.5"><DocBadges r={detail} /></div>
-                </div>
+                )}
               </div>
-
-              {/* журнал событий */}
-              <div>
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Журнал событий</div>
-                <div className={`max-h-60 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 ${THIN_SCROLL}`}>
-                  {[...detail.events]
-                    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-                    .map((ev) => (
-                      <div key={ev.id} className="flex items-start gap-3 text-sm">
-                        <span className="shrink-0 font-mono text-xs text-slate-500">{fmtDateTime(ev.createdAt)}</span>
-                        <span className="text-slate-700">{ev.message}</span>
-                      </div>
-                    ))}
-                  {detail.events.length === 0 && (
-                    <div className="text-sm text-slate-400">Событий пока нет</div>
-                  )}
-                </div>
-              </div>
-
-              {detail.status === 'CONFIRMED' && (
-                <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3">
-                  <Button
-                    size="sm"
-                    disabled={busy === detail.id}
-                    onClick={() => setCloseTarget(detail)}
-                  >
-                    Закрыть рейс
-                  </Button>
-                </div>
-              )}
-            </div>
+            </>
           )}
         </DialogContent>
       </Dialog>
 
       {/* подтверждение закрытия рейса */}
-      <AlertDialog open={!!closeTarget} onOpenChange={(o) => { if (!o) setCloseTarget(null) }}>
+      <AlertDialog open={!!closeTarget} onOpenChange={(o) => { if (!o) setCloseId(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Закрыть рейс?</AlertDialogTitle>
