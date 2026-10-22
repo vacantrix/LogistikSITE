@@ -12,7 +12,7 @@ import { Loader2, RefreshCw } from 'lucide-react'
 import { Shell, firstTabFor, navFor, type RoleSelection } from '@/components/platform/shell'
 import { RoleNotice, type TabKey } from '@/components/platform/common'
 import { LoginScreen } from '@/components/platform/login-screen'
-import { api, UNAUTHORIZED_EVENT } from '@/lib/api'
+import { api, getSessionToken, UNAUTHORIZED_EVENT } from '@/lib/api'
 import type { SessionUserDTO } from '@/lib/types'
 
 import BoardTab from '@/components/platform/board'
@@ -68,7 +68,10 @@ export default function Page() {
   const userId = user?.id ?? null
   useEffect(() => {
     if (!userId) return
-    const socket: Socket = io('/?XTransformPort=3003', {
+    // Авторизация шины: кука сессии (основной способ) или токен в query — для окна
+    // предпросмотра, где браузер не отдает сторонние куки (см. ws-service allowRequest).
+    const token = getSessionToken()
+    const socket: Socket = io(`/?XTransformPort=3003${token ? `&token=${encodeURIComponent(token)}` : ''}`, {
       transports: ['websocket', 'polling'],
       forceNew: true,
       withCredentials: true,

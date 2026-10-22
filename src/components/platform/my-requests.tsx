@@ -56,7 +56,7 @@ import { PIPELINE_STAGES, STAGE_OF_STATUS, StatusPipeline } from '@/components/p
 import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
 import { AnimatedRate } from '@/components/platform/animated-rate'
 import { useToast } from '@/hooks/use-toast'
-import { api } from '@/lib/api'
+import { api, secureFileUrl } from '@/lib/api'
 import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
 import { DOC_TYPE_LABEL, fmtDateTime, rate, timeLeft } from '@/lib/status'
 import { pointInfo } from '@/lib/points'
@@ -670,7 +670,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
                     {doc && (
                       <img
-                        src={doc.url}
+                        src={secureFileUrl(doc.url)}
                         alt={`Документ «${DOC_TYPE_LABEL[type]}» — ${doc.fileName}`}
                         className="mb-2 h-20 w-full rounded-md border border-slate-200 object-cover"
                       />

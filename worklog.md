@@ -849,3 +849,21 @@ Work Log:
 
 Stage Summary:
 - База данных восстановлена из сидов; будущие pull/rebase безопасны — в текущем main (3eba848) db/*.db больше не отслеживается (.gitignore /db/*.db).
+
+---
+Task ID: 59
+Agent: Z.ai Code (main)
+Task: Вход не работает во встроенном окне предпросмотра — фолбэк Bearer-токен сессии
+
+Work Log:
+- Диагноз по dev.log: POST /api/auth/login 200, затем GET /api/auth/me 401 — пароль принимается, кука сессии ставится, но браузер не возвращает её: окно предпросмотра — iframe на стороннем домене, сторонние куки (SameSite=Lax) блокируются браузером. Тот же паттерн повторялся в нескольких попытках пользователя.
+- Сервер (src/lib/auth.ts): getSessionUser() теперь читает куку, а при её отсутствии — заголовок Authorization: Bearer (тот же подписанный HMAC токен); проверка роли/доступа вынесена в accessChecked; добавлен requireUserViaRequest(req) — токен ещё и query-параметром t (для <img src>, которым нельзя послать заголовок).
+- /api/auth/login отдаёт токен в JSON ({user, token}) — кука остаётся основным способом.
+- Клиент (src/lib/api.ts): saveSessionToken/getSessionToken (localStorage aemz_session_token), withAuth() добавляет Bearer ко всем запросам api.*, secureFileUrl() добавляет ?t= к ссылкам /api/files; на 401 токен сбрасывается и шлётся aemz:unauthorized. login-screen сохраняет токен после входа; logout чистит.
+- <img src> переведены на secureFileUrl(): verification.tsx, my-requests.tsx, directories.tsx (фото + download-ссылка).
+- ws-service (mini-services/ws-service/index.ts): allowRequest принимает также token из query (проверка tokenValid — та же HMAC-подпись и exp); bun --hot перезагрузил код без рестарта. page.tsx добавляет &token= к io('/?XTransformPort=3003…').
+- Верификация agent-browser: вход carrier-b → LOGGED IN; localStorage получил токен; cookies clear + reload → «STILL LOGGED IN VIA TOKEN» (точная имитация iframe-сценария); /api/auth/me и /api/requests с Bearer → 200; консоль и errors чистые, WS без ошибок соединения. bunx tsc --noEmit и bun run lint — 0 ошибок.
+- Примечание: токен в localStorage читаем скриптами страницы (XSS-поверхность) — принятый компромисс для работоспособности предпросмотра; кука HttpOnly остаётся основным способом в обычном браузере.
+
+Stage Summary:
+- Вход работает и в обычной вкладке (кука), и во встроенном окне предпросмотра (Bearer-токен + ?t= для фото + ?token= для WS-шины). Пользовательский сценарий «прогрузка и ничего не происходит» устранён.

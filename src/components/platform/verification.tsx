@@ -24,7 +24,7 @@ import {
 import { ToastAction } from '@/components/ui/toast'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { api } from '@/lib/api'
+import { api, secureFileUrl } from '@/lib/api'
 import { DOC_TYPE_LABEL, rate } from '@/lib/status'
 import type { DocType, DocumentDTO, DriverDTO, RequestDTO, TruckDTO } from '@/lib/types'
 
@@ -387,7 +387,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                       {/* фото документа */}
                       <div className="self-start rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <img
-                          src={activeDoc.url}
+                          src={secureFileUrl(activeDoc.url)}
                           alt={`${DOC_TYPE_LABEL[activeDoc.type]} — ${activeDoc.fileName}`}
                           className="mx-auto max-h-72 w-auto rounded-lg border border-slate-200 bg-slate-100 object-contain p-2"
                         />

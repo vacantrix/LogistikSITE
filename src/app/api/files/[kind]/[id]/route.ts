@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/auth'
+import { requireUserViaRequest } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,9 +22,10 @@ function decodeDataUri(uri: string): { mime: string; bytes: Buffer } | null {
  * GET /api/files/document/<id> — фото документа рейса (логист или перевозчик-победитель);
  * GET /api/files/directory/<id> — фото записи справочника (логист или владелец записи).
  * ?download=1 — отдать файлом. Раньше фото отдавались целиком в каждом списке и без проверки прав.
+ * Сессия: кука или заголовок, а для <img src> — ещё и query-параметр t (см. requireUserViaRequest).
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ kind: string; id: string }> }) {
-  const auth = await requireUser()
+  const auth = await requireUserViaRequest(req)
   if (auth instanceof NextResponse) return auth
   const { kind, id } = await params
   const notFound = () => NextResponse.json({ error: 'Файл не найден' }, { status: 404 })

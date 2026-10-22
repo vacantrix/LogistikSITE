@@ -36,13 +36,11 @@ interface LiveEvent {
   ts: string
 }
 
-/** Проверка куки сессии платформы (формат src/lib/auth.ts: base64url(json).hmac) */
-function sessionValid(cookieHeader: string | undefined): boolean {
+/** Проверка подписанного токена сессии платформы (формат src/lib/auth.ts: base64url(json).hmac) */
+function tokenValid(raw: string | null | undefined): boolean {
   if (!AUTH_SECRET) return true
-  const raw = (cookieHeader ?? '').split(';').map((c) => c.trim()).find((c) => c.startsWith(`${SESSION_COOKIE}=`))
   if (!raw) return false
-  const token = decodeURIComponent(raw.slice(SESSION_COOKIE.length + 1))
-  const [body, sig] = token.split('.')
+  const [body, sig] = raw.split('.')
   if (!body || !sig) return false
   const expected = createHmac('sha256', AUTH_SECRET).update(body).digest('base64url')
   if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false
@@ -54,6 +52,14 @@ function sessionValid(cookieHeader: string | undefined): boolean {
   }
 }
 
+/** Проверка куки сессии платформы */
+function sessionValid(cookieHeader: string | undefined): boolean {
+  if (!AUTH_SECRET) return true
+  const raw = (cookieHeader ?? '').split(';').map((c) => c.trim()).find((c) => c.startsWith(`${SESSION_COOKIE}=`))
+  if (!raw) return false
+  return tokenValid(decodeURIComponent(raw.slice(SESSION_COOKIE.length + 1)))
+}
+
 const httpServer = createServer()
 const io = new Server(httpServer, {
   // DO NOT change the path: it is used by Caddy to forward the request to the correct port
@@ -61,7 +67,13 @@ const io = new Server(httpServer, {
   // браузер подключается через тот же адрес, что и сайт, — открытый CORS не нужен
   cors: ALLOWED_ORIGINS.length ? { origin: ALLOWED_ORIGINS, credentials: true } : undefined,
   allowRequest: (req, callback) => {
-    const ok = sessionValid(req.headers.cookie)
+    // Основной способ — кука сессии; во встроенном окне предпросмотра браузер может
+    // не отдавать сторонние куки — тогда клиент передаёт тот же токен query-параметром token.
+    let qpToken: string | null = null
+    try {
+      qpToken = new URL(req.url ?? '/', 'http://localhost').searchParams.get('token')
+    } catch { /* некорректный url — проверяем только куку */ }
+    const ok = sessionValid(req.headers.cookie) || tokenValid(qpToken)
     callback(ok ? null : 'unauthorized', ok)
   },
   pingTimeout: 60000,

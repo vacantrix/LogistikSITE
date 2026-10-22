@@ -7,6 +7,7 @@
  */
 import { useState } from 'react'
 import { Building2, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
+import { saveSessionToken } from '@/lib/api'
 
 /** Демо-доступы (демо-контур): пароль один, логины разные */
 export const DEMO_ACCOUNTS: { login: string; name: string; role: 'logist' | 'carrier' }[] = [
@@ -45,6 +46,9 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
         setError(data?.error ?? 'Не удалось войти')
         return
       }
+      // Токен сессии сохраняем как фолбэк: во встроенном окне предпросмотра браузер
+      // может не принимать куки — тогда API вызовы пойдут с Authorization: Bearer.
+      if (typeof data?.token === 'string') saveSessionToken(data.token)
       onAuthed()
     } catch {
       setError('Сервер недоступен — попробуйте ещё раз')

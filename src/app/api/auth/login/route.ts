@@ -29,7 +29,10 @@ export async function POST(req: NextRequest) {
   }
 
   const session = { id: user.id, login: user.login, name: user.name, role: user.role as 'logist' | 'carrier', carrierId: user.carrierId }
-  const res = NextResponse.json({ user: session })
-  res.cookies.set(SESSION_COOKIE, createSessionToken(session), sessionCookieOptions)
+  // Токен отдаётся и в ответе: во встроенном окне предпросмотра браузер может не
+  // принимать куки — клиент хранит его и шлёт заголовком Authorization: Bearer.
+  const token = createSessionToken(session)
+  const res = NextResponse.json({ user: session, token })
+  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions)
   return res
 }

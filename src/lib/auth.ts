@@ -1,12 +1,17 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
+import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
 /**
  * Аутентификация платформы:
  * — пароли хранятся как scrypt-хеш с солью;
- * — сессия — подписанная HMAC-SHA256 кука (HttpOnly, SameSite=Lax, 7 дней);
+ * — сессия — подписанный HMAC-SHA256 токен (7 дней);
+ * — токен передаётся кукой (HttpOnly, SameSite=Lax) — основной способ;
+ * — если браузер не возвращает куку (окно предпросмотра во встроенном фрейме,
+ *   сторонние куки заблокированы браузером) — тот же токен можно передать
+ *   заголовком Authorization: Bearer или query-параметром t (для <img src>);
  * — каждый API-маршрут сам проверяет сессию и роль через requireUser().
  */
 
@@ -87,24 +92,23 @@ export function readSessionToken(token: string | undefined | null): SessionUser 
   }
 }
 
-/** Сессия текущего запроса (server-side) */
+/** Сессия текущего запроса (server-side): кука, при её отсутствии — заголовок Authorization: Bearer */
 export async function getSessionUser(): Promise<SessionUser | null> {
   const store = await cookies()
-  return readSessionToken(store.get(SESSION_COOKIE)?.value)
+  const fromCookie = readSessionToken(store.get(SESSION_COOKIE)?.value)
+  if (fromCookie) return fromCookie
+  // Фолбэк для контекстов, где браузер не принимает/не отдаёт куки (iframe предпросмотра):
+  // клиент хранит тот же подписанный токен и передаёт его заголовком.
+  const h = await headers()
+  const authz = h.get('authorization')
+  if (authz?.toLowerCase().startsWith('bearer ')) {
+    return readSessionToken(authz.slice(7).trim())
+  }
+  return null
 }
 
-/**
- * Проверка доступа для API-маршрута. Возвращает пользователя или готовый ответ 401/403:
- *
- *   const auth = await requireUser('logist')
- *   if (auth instanceof NextResponse) return auth
- *
- * Для перевозчика дополнительно проверяется, что учётка привязана к перевозчику и его
- * доступ к площадке не закрыт: логист может отозвать доступ, а кука живёт 7 дней.
- */
-export async function requireUser(...roles: Role[]): Promise<SessionUser | NextResponse> {
-  const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Требуется вход в систему' }, { status: 401 })
+/** Проверка роли и (для перевозчика) доступа к площадке — общая для requireUser* */
+async function accessChecked(user: SessionUser, roles: Role[]): Promise<SessionUser | NextResponse> {
   if (roles.length > 0 && !roles.includes(user.role)) {
     return NextResponse.json({ error: 'Недостаточно прав для этого действия' }, { status: 403 })
   }
@@ -114,6 +118,32 @@ export async function requireUser(...roles: Role[]): Promise<SessionUser | NextR
     if (!carrier?.access) return NextResponse.json({ error: 'Доступ перевозчика к площадке закрыт' }, { status: 403 })
   }
   return user
+}
+
+/**
+ * Проверка доступа для API-маршрута. Возвращает пользователя или готовый ответ 401/403:
+ *
+ *   const auth = await requireUser('logist')
+ *   if (auth instanceof NextResponse) return auth
+ *
+ * Для перевозчика дополнительно проверяется, что учётка привязана к перевозчику и его
+ * доступ к площадке не закрыт: логист может отозвать доступ, а сессия живёт 7 дней.
+ */
+export async function requireUser(...roles: Role[]): Promise<SessionUser | NextResponse> {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: 'Требуется вход в систему' }, { status: 401 })
+  return accessChecked(user, roles)
+}
+
+/**
+ * Вариант requireUser для маршрутов, которые отдаются как <img src> и не могут
+ * послать заголовок Authorization: токен принимается также query-параметром t
+ * (тот же подписанный токен сессии; клиент добавляет его через secureFileUrl()).
+ */
+export async function requireUserViaRequest(req: NextRequest, ...roles: Role[]): Promise<SessionUser | NextResponse> {
+  const fromQuery = readSessionToken(req.nextUrl.searchParams.get('t'))
+  if (fromQuery) return accessChecked(fromQuery, roles)
+  return requireUser(...roles)
 }
 
 /** Кто смотрит данные — для фильтрации ответов (ставки, документы, справочник) */
