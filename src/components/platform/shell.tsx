@@ -120,7 +120,12 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, children }: {
 
       <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs">
-          <div>АЭМЗ · Отдел логистики</div>
+          <div>
+            АЭМЗ · Отдел логистики
+            <span className="ml-2 rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
+              V 1.01
+            </span>
+          </div>
           <div className="text-blue-300">
             {isLogist ? userName : 'Кабинет перевозчика'}
           </div>

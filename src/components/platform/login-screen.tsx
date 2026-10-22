@@ -160,6 +160,9 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
 
       <footer className="bg-[#0E1B2C] py-4 text-center text-xs text-blue-200">
         АЭМЗ · Отдел логистики
+        <span className="ml-2 rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
+          V 1.01
+        </span>
       </footer>
     </div>
   )
