@@ -115,13 +115,15 @@ function agentLine(r: RequestDTO, myBid: BidDTO | null): { text: string; cls: st
     case 'DOCS_REVIEW': {
       const bad = r.documents.some((d) => d.status === 'REUPLOAD' || d.status === 'REJECTED')
       return bad
-        ? { text: 'Требует исправления: причина по каждому документу, догрузка — в ту же заявку', cls: 'border-amber-300 bg-amber-50 text-amber-900' }
-        : { text: 'Нейросеть проверяет документы', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+        ? { text: 'Требует исправления: причина у каждого документа — догрузите исправленные сканы через «Подать документы»', cls: 'border-amber-300 bg-amber-50 text-amber-900' }
+        : { text: 'Нейросеть проверяет документы — статус обновится автоматически', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
     }
     case 'AT_LOGIST':
-      return { text: 'Комплект у логиста — идёт сверка фото с полями', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+      return { text: 'Комплект у логиста — идёт сверка фото с полями заявки', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
     case 'CONFIRMED':
-      return { text: 'Готово — водитель может выезжать на погрузку', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
+      return { text: 'Данные переданы в 1С — водитель может выезжать на погрузку', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
+    case 'CLOSED':
+      return { text: 'Рейс выполнен и закрыт — данные в реестре рейсов и бухгалтерии АЭМЗ', cls: 'border-emerald-300 bg-emerald-50 text-emerald-900' }
     default:
       return { text: 'Рейс закрыт', cls: 'border-slate-300 bg-slate-100 text-slate-600' }
   }
@@ -496,14 +498,14 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
   }
 
   /**
-   * Кабинет агента видит только (Task 54):
-   * — заявки, на которые он откликнулся (торги или в работе);
-   * — новые заявки, открытые для отклика;
-   * операционные и финальные этапы («Документы», «Подготовка к рейсу», «Готово»)
-   * агенту не показываются — там работает логист.
+   * Кабинет агента — сквозная синхронизация с логистом (Task 68):
+   * — заявки, где агент участвует (ставка или победа), видны на ВСЕХ этапах жизненного
+   *   цикла: торги → документы → подготовка к рейсу → готово → завершено;
+   * — новые заявки, открытые для отклика (скрыты, пока не выбран этап «Выбор рейса»);
+   * статус в кабинете зеркалит то, что видит логист в «Реестре заявок»: один источник —
+   * статус заявки в БД, мгновенное обновление — liveTick по событию шины WS.
    */
   const mine = (requests ?? [])
-    .filter((r) => r.status === 'PUBLISHED' || r.status === 'AWARDED')
     .filter((r) => r.status === 'PUBLISHED' || r.winnerId === activeCarrierId || r.bids.some((b) => b.carrierId === activeCarrierId))
     .filter((r) => !hiddenIds.has(r.id))
     .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || (a.updatedAt < b.updatedAt ? 1 : -1))
@@ -609,6 +611,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       : agentLine(r, myBid)
         const tl = bidding && now !== null && r.deadline ? timeLeft(r.deadline) : null
         const awarded = !grey && r.status === 'AWARDED'
+        /** завершённый рейс (Task 68): карточка остаётся в кабинете с итоговым статусом,
+            агенту доступно только скрытие из кабинета — операции с рейсом у логиста */
+        const closed = r.status === 'CLOSED'
         const hasPending = r.documents.some((d) => d.status === 'PENDING')
         /** пропущенные документы: обязательные типы, по которым нет загрузки — подсвечиваем */
         const missingDocs = DOC_ORDER.filter((t) => !r.documents.some((d) => d.type === t))
@@ -624,13 +629,16 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                 : cardState === 'withdrawn'
                   ? 'withdrawn'
                   : null
-        /** цвет большой карточки по состоянию (Task 52): красная — перебита, серая — выход/проигрыш */
+        /** цвет большой карточки по состоянию (Task 52): красная — перебита, серая — выход/проигрыш,
+            приглушённая — завершённый рейс (Task 68) */
         const cardCls =
           cardState === 'outbid'
             ? 'border-red-300 bg-red-50/50 shadow-sm'
             : grey
               ? 'border-slate-200 bg-slate-100/80 shadow-sm'
-              : 'border-slate-200 shadow-sm'
+              : closed
+                ? 'border-emerald-200 bg-emerald-50/40 shadow-sm'
+                : 'border-slate-200 shadow-sm'
 
         /** Секция документов: единый вид для «Подтверждено» (свёрнуто) и «Документы» (раскрыто) */
         const docsSection = (
@@ -949,8 +957,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           <div className="whitespace-nowrap text-xs text-slate-500">ваша ставка: {rate(myBid.amount)}</div>
                         )}
                       </div>
-                      {grey ? (
-                        /* серые карточки (выход/проигрыш): кнопка «Удалить» — скрыть только из кабинета (Task 52) */
+                      {(grey || closed) ? (
+                        /* серые карточки (выход/проигрыш) и завершённые рейсы: кнопка «Удалить» —
+                           скрыть только из своего кабинета (Task 52/68) */
                         <Button
                           size="sm"
                           variant="outline"

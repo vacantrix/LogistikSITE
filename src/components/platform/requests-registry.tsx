@@ -2,9 +2,11 @@
 
 /**
  * «Реестр заявок» (Task 66) — единый экран со всеми заявками платформы.
- * Визуальное разделение по категориям (табы с мгновенной фильтрацией), поиск
- * по ID/грузу, фильтр по статусу (Новая / В работе / Завершена / Удалена),
- * сортировка по дате создания (по умолчанию — самые свежие сверху).
+ * Быстрая навигация (Task 68): верхние табы — по статусам (Все / Новая / В работе /
+ * Завершена / Удалена) со счётчиками и мгновенной фильтрацией; категория — фильтр-селект
+ * в строке инструментов. Поиск по ID/грузу, сортировка по дате создания (по умолчанию —
+ * самые свежие сверху). Статусы синхронизированы с пайплайном перевозчика и реестром
+ * рейсов: один источник (статус заявки в БД) + liveTick-обновление.
  * Действия по правам: Просмотр — всем, Редактировать и Удалить — логисту,
  * причём удаление доступно только для текущих (не завершённых) заявок.
  */
@@ -70,9 +72,9 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
-  // фильтры реестра
-  const [cat, setCat] = useState<string>('ALL') // таб категории
-  const [group, setGroup] = useState<GroupFilter>('ALL')
+  // фильтры реестра (Task 68: табы — статусы, категория — селект)
+  const [group, setGroup] = useState<GroupFilter>('ALL') // таб статуса
+  const [cat, setCat] = useState<string>('ALL')
   const [q, setQ] = useState('')
   const [order, setOrder] = useState<SortOrder>('desc')
 
@@ -161,17 +163,22 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
 
       {requests !== null && !error && (
         <div className="space-y-4">
-          {/* Табы категорий — переключение мгновенно фильтрует список (Task 66) */}
-          <Tabs value={cat} onValueChange={setCat}>
+          {/* Табы статусов (Task 68) — быстрая навигация по стадиям заявки:
+              Новая → В работе → Завершена / Удалена. Переключение мгновенно фильтрует список,
+              счётчики считаются по всей базе, а не по текущему поиску */}
+          <Tabs value={group} onValueChange={(v) => setGroup(v as GroupFilter)}>
             <TabsList className="h-auto flex-wrap justify-start gap-1 bg-slate-100 p-1">
               <TabsTrigger value="ALL" className="gap-1.5 data-[state=active]:bg-white">
                 Все заявки
                 <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{requests.length}</Badge>
               </TabsTrigger>
-              {REQUEST_CATEGORIES.map((c) => (
-                <TabsTrigger key={c} value={c} className="gap-1.5 data-[state=active]:bg-white">
-                  {c}
-                  <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{catCounts.get(c) ?? 0}</Badge>
+              {(Object.keys(REQUEST_GROUP_META) as (keyof typeof REQUEST_GROUP_META)[]).map((g) => (
+                <TabsTrigger key={g} value={g} className="gap-1.5 data-[state=active]:bg-white">
+                  <span className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${REQUEST_GROUP_META[g].dot}`} aria-hidden />
+                    {REQUEST_GROUP_META[g].label}
+                  </span>
+                  <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{groupCounts[g] ?? 0}</Badge>
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -190,15 +197,15 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   aria-label="Поиск по ID заявки или названию груза"
                 />
               </div>
-              <Select value={group} onValueChange={(v) => setGroup(v as GroupFilter)}>
-                <SelectTrigger className="w-[180px]" aria-label="Фильтр по статусу">
-                  <SelectValue placeholder="Все статусы" />
+              <Select value={cat} onValueChange={setCat}>
+                <SelectTrigger className="w-[210px]" aria-label="Фильтр по категории">
+                  <SelectValue placeholder="Все категории" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ALL">Все статусы</SelectItem>
-                  {(Object.keys(REQUEST_GROUP_META) as (keyof typeof REQUEST_GROUP_META)[]).map((g) => (
-                    <SelectItem key={g} value={g}>
-                      {REQUEST_GROUP_META[g].label} · {groupCounts[g] ?? 0}
+                  <SelectItem value="ALL">Все категории</SelectItem>
+                  {REQUEST_CATEGORIES.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c} · {catCounts.get(c) ?? 0}
                     </SelectItem>
                   ))}
                 </SelectContent>
