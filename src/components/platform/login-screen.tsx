@@ -4,10 +4,15 @@
  * Экран входа на платформу: логин + пароль из созданного справочника
  * пользователей. Демо-доступы показываются только на демо-стенде —
  * когда задан NEXT_PUBLIC_DEMO_PASSWORD (тот же, что SEED_PASSWORD при заполнении базы).
+ *
+ * Мультиаккаунт (Task 74): сохранённые в этом браузере аккаунты показываются
+ * чипами «Продолжить как» — вход одним кликом без повторного набора пароля;
+ * новый вход добавляется в реестр и не выбрасывает другие аккаунты.
  */
 import { useState } from 'react'
-import { CircleAlert, Building2, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
-import { saveSessionToken } from '@/lib/api'
+import { Building2, ChevronRight, CircleAlert, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
+import { activateAccount, listAccounts, saveSessionToken } from '@/lib/api'
+import type { SavedAccount } from '@/lib/accounts'
 
 /** Демо-доступы (демо-контур): пароль один, логины разные */
 export const DEMO_ACCOUNTS: { login: string; name: string; role: 'logist' | 'carrier' }[] = [
@@ -27,6 +32,8 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [showDemo, setShowDemo] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  // Сохранённые аккаунты браузера (читаем один раз при открытии экрана)
+  const [saved] = useState<SavedAccount[]>(() => listAccounts())
 
   const submit = async () => {
     if (!login.trim() || !password) {
@@ -48,7 +55,10 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
       }
       // Токен сессии сохраняем как фолбэк: во встроенном окне предпросмотра браузер
       // может не принимать куки — тогда API вызовы пойдут с Authorization: Bearer.
-      if (typeof data?.token === 'string') saveSessionToken(data.token)
+      // Вместе с карточкой пользователя аккаунт попадает в реестр браузера (Task 74):
+      // его можно будет открыть в новой вкладке или выбрать в меню аккаунта.
+      if (typeof data?.token === 'string' && data?.user) saveSessionToken(data.token, data.user)
+      else if (typeof data?.token === 'string') saveSessionToken(data.token)
       onAuthed()
     } catch {
       setError('Сервер недоступен — попробуйте ещё раз')
@@ -69,6 +79,41 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
             <h1 className="mt-4 text-2xl font-bold text-slate-900">АЭМЗ Логистика</h1>
             <p className="mt-1 text-sm text-slate-500">Платформа работы с привлечённым транспортом</p>
           </div>
+
+          {/* Мультиаккаунт (Task 74): быстрый вход в сохранённые аккаунты этого браузера */}
+          {saved.length > 0 && (
+            <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Продолжить как</p>
+              <div className="mt-2 space-y-1.5">
+                {saved.map((a) => (
+                  <button
+                    key={a.userId}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      if (activateAccount(a.userId)) onAuthed()
+                    }}
+                    aria-label={`Продолжить как ${a.name}`}
+                    className="flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60 disabled:opacity-60"
+                  >
+                    {a.role === 'logist'
+                      ? <UserCog className="h-5 w-5 shrink-0 text-blue-600" aria-hidden />
+                      : <Building2 className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-slate-900">{a.name}</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {a.login} · {a.role === 'logist' ? 'логист АЭМЗ' : 'перевозчик'}
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2.5 border-t border-slate-100 pt-2 text-[11px] text-slate-400">
+                Или войдите другой учётной записью — сохранённые аккаунты не выбрасываются
+              </p>
+            </div>
+          )}
 
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <form

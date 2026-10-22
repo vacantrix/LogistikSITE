@@ -2,35 +2,60 @@
 import type {
   CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
 } from '@/lib/types'
+import {
+  ACTIVE_TOKEN_KEY, accountById, getLastAccountId,
+  listAccounts, migrateLegacyToken, removeAccountByToken, upsertAccount,
+} from '@/lib/accounts'
 
-/** Событие окна: сервер ответил 401 — сессия истекла, страница показывает экран входа */
+/** Переключение аккаунта / «добавить аккаунт» / список сохранённых — для UI шапки и экрана входа */
+export { activateAccount, beginAddAccount, listAccounts } from '@/lib/accounts'
+
+/** Событие окна: сервер ответил 401 — сессия этой вкладки недействительна, страница показывает экран входа */
 export const UNAUTHORIZED_EVENT = 'aemz:unauthorized'
 
-// ——— токен сессии (фолбэк для окна предпросмотра, где браузер блокирует сторонние куки) ———
-// Кука остаётся основным способом; если она не работает (iframe на чужом домене),
-// тот же подписанный токен хранится в localStorage и уходит заголовком Authorization: Bearer.
-const TOKEN_KEY = 'aemz_session_token'
+// ——— токен сессии (мультиаккаунт, Task 74) ———
+// Активный токен хранится в sessionStorage — СВОЙ для каждой вкладки, поэтому две
+// вкладки могут работать под разными учётками. Реестр всех аккаунтов браузера —
+// в localStorage (см. lib/accounts.ts): новая вкладка продолжает с последнего
+// активного аккаунта, меню аккаунта позволяет переключиться. Кука остаётся фолбэком
+// для контекстов без заголовка; сервер при наличии Authorization читает только его.
 
-export function saveSessionToken(token: string | null | undefined): void {
+/**
+ * Сохранить токен активной сессии этой вкладки. С user — аккаунт дополнительно
+ * попадает в реестр браузера (для переключения и новых вкладок).
+ */
+export function saveSessionToken(token: string | null | undefined, user?: SessionUserDTO): void {
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token)
-    else localStorage.removeItem(TOKEN_KEY)
+    if (token) {
+      sessionStorage.setItem(ACTIVE_TOKEN_KEY, token)
+      if (user) upsertAccount(user, token)
+    } else {
+      sessionStorage.removeItem(ACTIVE_TOKEN_KEY)
+    }
   } catch { /* приватный режим — работаем на куке */ }
 }
 
 export function getSessionToken(): string | null {
   try {
-    return localStorage.getItem(TOKEN_KEY)
+    const active = sessionStorage.getItem(ACTIVE_TOKEN_KEY)
+    if (active) return active
+  } catch {
+    return null
+  }
+  // Новая вкладка: продолжаем с последнего активного аккаунта реестра браузера
+  try {
+    migrateLegacyToken()
+    const last = getLastAccountId()
+    const acc = (last ? accountById(last) : null) ?? listAccounts()[0] ?? null
+    if (!acc) return null
+    sessionStorage.setItem(ACTIVE_TOKEN_KEY, acc.token)
+    return acc.token
   } catch {
     return null
   }
 }
 
-function clearSessionToken(): void {
-  saveSessionToken(null)
-}
-
-/** init для fetch(): добавляет Authorization: Bearer из сохранённого токена (если есть) */
+/** init для fetch(): добавляет Authorization: Bearer из токена ЭТОЙ вкладки (если есть) */
 function withAuth(init: RequestInit = {}): RequestInit {
   const token = getSessionToken()
   if (!token) return init
@@ -51,7 +76,13 @@ export function secureFileUrl(url: string): string {
 async function json<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}))
   if (res.status === 401 && typeof window !== 'undefined') {
-    clearSessionToken()
+    // Сессия этой вкладки недействительна: убираем из реестра только её аккаунт,
+    // сохранённые аккаунты других вкладок не трогаем (мультиаккаунт, Task 74)
+    try {
+      const token = sessionStorage.getItem(ACTIVE_TOKEN_KEY)
+      if (token) removeAccountByToken(token)
+      sessionStorage.removeItem(ACTIVE_TOKEN_KEY)
+    } catch { /* приватный режим */ }
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
   }
   if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка запроса (${res.status})`)
@@ -61,8 +92,17 @@ async function json<T>(res: Response): Promise<T> {
 export const api = {
   me: () => fetch('/api/auth/me', withAuth({ cache: 'no-store' })).then(json<{ user: SessionUserDTO }>),
   logout: () => {
-    clearSessionToken()
-    return fetch('/api/auth/logout', { method: 'POST' }).then(json<{ ok: boolean }>)
+    // Токен уходит заголовком: сервер сбросит общую куку только если она принадлежит
+    // выходящему аккаунту — сессии других вкладок/аккаунтов не затрагиваются (Task 74)
+    return fetch('/api/auth/logout', withAuth({ method: 'POST' }))
+      .then(json<{ ok: boolean }>)
+      .finally(() => {
+        try {
+          const token = sessionStorage.getItem(ACTIVE_TOKEN_KEY)
+          if (token) removeAccountByToken(token)
+          sessionStorage.removeItem(ACTIVE_TOKEN_KEY)
+        } catch { /* приватный режим */ }
+      })
   },
 
   listRequests: (params?: { status?: string; mode?: string; q?: string; includeDeleted?: boolean }) => {

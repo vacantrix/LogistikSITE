@@ -8,10 +8,11 @@ import { db } from '@/lib/db'
  * Аутентификация платформы:
  * — пароли хранятся как scrypt-хеш с солью;
  * — сессия — подписанный HMAC-SHA256 токен (7 дней);
- * — токен передаётся кукой (HttpOnly, SameSite=Lax) — основной способ;
- * — если браузер не возвращает куку (окно предпросмотра во встроенном фрейме,
- *   сторонние куки заблокированы браузером) — тот же токен можно передать
- *   заголовком Authorization: Bearer или query-параметром t (для <img src>);
+ * — токен передаётся заголовком Authorization: Bearer (свой для каждой вкладки,
+ *   мультиаккаунт) или кукой (HttpOnly, SameSite=Lax) как фолбэк;
+ * — кука — фолбэк для контекстов без заголовка (прямые ссылки, <img src>; в окне
+ *   предпросмотра куки могут блокироваться — тогда работает только заголовок);
+ * — для <img src> токен можно передать и query-параметром t;
  * — каждый API-маршрут сам проверяет сессию и роль через requireUser().
  */
 
@@ -92,19 +93,23 @@ export function readSessionToken(token: string | undefined | null): SessionUser 
   }
 }
 
-/** Сессия текущего запроса (server-side): кука, при её отсутствии — заголовок Authorization: Bearer */
+/**
+ * Сессия текущего запроса (server-side).
+ * Приоритет: заголовок Authorization: Bearer → кука. Заголовок шлёт конкретная
+ * вкладка со своим токеном (мультиаккаунт, Task 74): две вкладки одного браузера
+ * могут работать под разными учётками, несмотря на общую куку. Если заголовок
+ * передан, куку не читаем — иначе чужая кука «перезатёрла» бы аккаунт вкладки.
+ */
 export async function getSessionUser(): Promise<SessionUser | null> {
-  const store = await cookies()
-  const fromCookie = readSessionToken(store.get(SESSION_COOKIE)?.value)
-  if (fromCookie) return fromCookie
-  // Фолбэк для контекстов, где браузер не принимает/не отдаёт куки (iframe предпросмотра):
-  // клиент хранит тот же подписанный токен и передаёт его заголовком.
   const h = await headers()
   const authz = h.get('authorization')
   if (authz?.toLowerCase().startsWith('bearer ')) {
     return readSessionToken(authz.slice(7).trim())
   }
-  return null
+  // Фолбэк для контекстов, где клиент не хранит токен (переход по прямой ссылке,
+  // <img> без t) — общая кука браузера, как до мультиаккаунта.
+  const store = await cookies()
+  return readSessionToken(store.get(SESSION_COOKIE)?.value)
 }
 
 /** Проверка роли и (для перевозчика) доступа к площадке — общая для requireUser* */

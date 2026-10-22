@@ -12,7 +12,7 @@ import { Loader2, RefreshCw } from 'lucide-react'
 import { Shell, firstTabFor, navFor, type RoleSelection } from '@/components/platform/shell'
 import { RoleNotice, type TabKey } from '@/components/platform/common'
 import { LoginScreen } from '@/components/platform/login-screen'
-import { api, getSessionToken, UNAUTHORIZED_EVENT } from '@/lib/api'
+import { api, beginAddAccount, getSessionToken, UNAUTHORIZED_EVENT } from '@/lib/api'
 import type { SessionUserDTO } from '@/lib/types'
 
 import BoardTab from '@/components/platform/board'
@@ -100,7 +100,17 @@ export default function Page() {
   }, [userId])
 
   const logout = useCallback(async () => {
+    // api.logout() снимает сессию только аккаунта этой вкладки (Task 74):
+    // другие вкладки и сохранённые аккаунты продолжают работать
     await api.logout().catch(() => {})
+    setUser(null)
+    setTab('board')
+  }, [])
+
+  // «Добавить аккаунт» (Task 74): на экран входа, не выбрасывая сохранённые аккаунты —
+  // вернуться можно одним кликом через «Продолжить как» на экране входа
+  const addAccount = useCallback(() => {
+    beginAddAccount()
     setUser(null)
     setTab('board')
   }, [])
@@ -122,7 +132,7 @@ export default function Page() {
   const allowed = navFor(role.kind).some((n) => n.key === tab)
 
   return (
-    <Shell tab={tab} onNavigate={setTab} role={role} userName={user.name} onLogout={() => void logout()} liveTick={liveTick}>
+    <Shell tab={tab} onNavigate={setTab} role={role} user={user} onLogout={() => void logout()} onAddAccount={addAccount} liveTick={liveTick}>
       {!allowed ? (
         <RoleNotice role={role.kind} />
       ) : (

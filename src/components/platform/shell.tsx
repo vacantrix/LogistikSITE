@@ -14,17 +14,27 @@
  *    до 5 иконок с подписями, лишние разделы — в меню «Ещё»;
  *  — учтены нижние безопасные зоны iOS/Android (env(safe-area-inset-bottom)).
  *  Десктоп: прежняя шапка с горизонтальным меню + колокольчик уведомлений (Task 69).
+ *
+ *  Мультиаккаунт (Task 74): вместо отдельной кнопки «Выйти» — меню аккаунта:
+ *  текущий пользователь, быстрое переключение на сохранённые в браузере аккаунты,
+ *  «Добавить аккаунт» (вход под новой учёткой без выбрасывания текущих сессий)
+ *  и выход — затрагивающий только аккаунт этой вкладки.
  */
 import { useState, type ComponentType } from 'react'
 import {
-  BarChart3, ClipboardList, FileUp, FolderOpen, LayoutGrid, ListChecks, LogOut,
-  MoreHorizontal, ScanSearch, ShieldCheck, Truck, Users,
+  BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, FileUp, FolderOpen,
+  LayoutGrid, ListChecks, LogOut, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { NotificationBell } from '@/components/platform/notification-bell'
 import type { RoleKind, TabKey } from '@/components/platform/common'
+import type { SessionUserDTO } from '@/lib/types'
+import { activateAccount, listAccounts } from '@/lib/api'
 
 /** Полный список разделов с пометкой ролей: L — логист, C — перевозчик.
  *  Сводка удалена (полоса «Требует внимания» на площадке), торги влиты в площадку,
@@ -184,19 +194,114 @@ function BottomTabBar({ tab, onNavigate, nav }: {
   )
 }
 
-export function Shell({ tab, onNavigate, role, userName, onLogout, liveTick, children }: {
+/** Иконка и бейдж роли в меню аккаунта */
+function RoleIcon({ role, className }: { role: 'logist' | 'carrier'; className?: string }) {
+  return role === 'logist'
+    ? <UserCog className={`${className ?? 'h-4 w-4'} text-blue-600`} aria-hidden />
+    : <Building2 className={`${className ?? 'h-4 w-4'} text-emerald-600`} aria-hidden />
+}
+
+const roleLabelOf = (role: 'logist' | 'carrier'): string => (role === 'logist' ? 'логист АЭМЗ' : 'перевозчик')
+
+/**
+ * Меню аккаунта (Task 74): текущий пользователь, переключение на сохранённые
+ * в браузере аккаунты, «Добавить аккаунт» и выход. Переключение активирует токен
+ * другого аккаунта для этой вкладки и перезагружает страницу.
+ */
+function AccountMenu({ user, compact, onLogout, onAddAccount }: {
+  user: SessionUserDTO
+  /** компактный вид для мобильной шапки (48px) */
+  compact?: boolean
+  onLogout: () => void
+  onAddAccount: () => void
+}) {
+  const others = listAccounts().filter((a) => a.userId !== user.id)
+
+  const switchTo = (userId: string) => {
+    if (activateAccount(userId)) window.location.reload()
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {compact ? (
+          <button
+            type="button"
+            aria-label="Меню аккаунта"
+            title={`${user.name} — меню аккаунта`}
+            className="flex h-8 min-w-0 items-center gap-1 rounded-md border border-white/20 bg-white/10 px-1.5 text-xs font-medium text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
+          >
+            <CircleUserRound className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="max-w-[92px] truncate">{user.name}</span>
+            <ChevronDown className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Меню аккаунта"
+            title={`${user.name} — меню аккаунта`}
+            className="flex h-9 max-w-full items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 text-sm font-medium text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
+          >
+            <CircleUserRound className="h-[18px] w-[18px] shrink-0" aria-hidden />
+            <span className="max-w-[180px] truncate sm:max-w-[240px]">{user.name}</span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
+          </button>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuLabel>
+          <span className="block truncate font-semibold text-slate-900">{user.name}</span>
+          <span className="block truncate text-xs font-normal text-slate-500">
+            {user.login} · {roleLabelOf(user.role)}
+          </span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {others.length > 0 && (
+          <>
+            <DropdownMenuLabel className="text-xs font-medium text-slate-500">Сменить аккаунт</DropdownMenuLabel>
+            {others.map((a) => (
+              <DropdownMenuItem key={a.userId} onSelect={() => switchTo(a.userId)} className="gap-2.5">
+                <RoleIcon role={a.role} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{a.name}</span>
+                  <span className="block truncate text-xs text-slate-500">{a.login}</span>
+                </span>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem onSelect={onAddAccount} className="gap-2.5">
+          <UserPlus className="h-4 w-4" aria-hidden />
+          Добавить аккаунт
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={onLogout} className="gap-2.5 text-red-600 focus:text-red-700">
+          <LogOut className="h-4 w-4" aria-hidden />
+          Выйти
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liveTick, children }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
   role: RoleSelection
-  /** имя вошедшего пользователя (логист или перевозчик) */
-  userName: string
+  /** вошедший пользователь (логист или перевозчик) */
+  user: SessionUserDTO
+  /** выход из аккаунта этой вкладки */
   onLogout: () => void
+  /** «Добавить аккаунт»: на экран входа, сохраняя сессии других аккаунтов (Task 74) */
+  onAddAccount: () => void
   /** счётчик live-обновлений шины WS — догружает колокольчик уведомлений (Task 69) */
   liveTick: number
   children: React.ReactNode
 }) {
   const isLogist = role.kind === 'logist'
   const nav = navFor(role.kind)
+  const userName = user.name
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
@@ -209,18 +314,9 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, liveTick, chi
           </div>
           <div className="truncate text-sm font-bold leading-none">АЭМЗ Логистика</div>
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
-            <span className="max-w-[110px] truncate text-xs font-medium text-blue-100" title={userName}>
-              {userName}
-            </span>
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
-            <button
-              type="button"
-              onClick={onLogout}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/20 bg-white/10 text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
-              aria-label="Выйти из платформы"
-            >
-              <LogOut className="h-4 w-4" aria-hidden />
-            </button>
+            {/* меню аккаунта: смена/добавление/выход (Task 74) */}
+            <AccountMenu user={user} compact onLogout={onLogout} onAddAccount={onAddAccount} />
           </div>
         </div>
 
@@ -240,19 +336,8 @@ export function Shell({ tab, onNavigate, role, userName, onLogout, liveTick, chi
                 «Восстанавливаем соединение»; пузырь вида платформы убран (Task 70) */}
             {/* колокольчик персональных уведомлений (Task 69) */}
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
-            {/* роль задаётся учётной записью: переключателя ролей больше нет */}
-            <span className="max-w-[220px] truncate text-sm font-medium text-white sm:max-w-[280px]" title={userName}>
-              {userName}
-            </span>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="flex h-9 items-center gap-1.5 rounded-md border border-white/20 bg-white/10 px-3 text-xs font-semibold text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
-              aria-label="Выйти из платформы"
-            >
-              <LogOut className="h-4 w-4" aria-hidden />
-              Выйти
-            </button>
+            {/* меню аккаунта: смена/добавление/выход (Task 74); роль задаётся учётной записью */}
+            <AccountMenu user={user} onLogout={onLogout} onAddAccount={onAddAccount} />
           </div>
         </div>
         <nav aria-label="Разделы платформы" className="hidden border-t border-white/10 md:block">
