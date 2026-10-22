@@ -21,10 +21,10 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: 
 export type RequestGroup = 'new' | 'working' | 'done' | 'deleted'
 
 export const REQUEST_GROUP_META: Record<RequestGroup, { label: string; badge: string; dot: string }> = {
-  new: { label: 'Новая', badge: 'bg-sky-100 text-sky-800 border-sky-200', dot: 'bg-sky-500' },
-  working: { label: 'В работе', badge: 'bg-violet-100 text-violet-800 border-violet-200', dot: 'bg-violet-500' },
-  done: { label: 'Завершена', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
-  deleted: { label: 'Удалена', badge: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-400' },
+  new: { label: 'Новая', badge: 'bg-sky-500 text-white border-sky-600 shadow-sm', dot: 'bg-sky-500' },
+  working: { label: 'В работе', badge: 'bg-violet-500 text-white border-violet-600 shadow-sm', dot: 'bg-violet-500' },
+  done: { label: 'Завершена', badge: 'bg-emerald-500 text-white border-emerald-600 shadow-sm', dot: 'bg-emerald-500' },
+  deleted: { label: 'Удалена', badge: 'bg-red-500 text-white border-red-600 shadow-sm', dot: 'bg-red-500' },
 }
 
 /** Группа реестра заявок для статуса заявки */

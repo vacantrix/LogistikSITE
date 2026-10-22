@@ -212,9 +212,12 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
           ) : (
             <Card className="border-slate-200 shadow-sm">
               <CardContent className="p-0">
-                <div className="max-h-96 overflow-y-auto overflow-x-auto">
+                {/* Task 73: список без внутреннего скролл-окна — уходит вниз вместе со страницей;
+                    шапка таблицы прилипает под шапкой сайта (md:top = высота хедера),
+                    перехват скролла контейнером отключён через .registry-sticky-table (globals.css) */}
+                <div className="registry-sticky-table">
                   <Table>
-                    <TableHeader>
+                    <TableHeader className="z-10 bg-slate-50 shadow-[0_2px_6px_-2px_rgba(15,23,42,0.12)] md:sticky md:top-[105px]">
                       <TableRow className="bg-slate-50">
                         <TableHead className="whitespace-nowrap">ID заявки</TableHead>
                         <TableHead className="whitespace-nowrap">Дата создания</TableHead>
@@ -235,10 +238,11 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                             <TableCell className="whitespace-nowrap font-bold text-blue-700">№{r.number}</TableCell>
                             <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(r.createdAt)}</TableCell>
                             <TableCell className="whitespace-nowrap">
-                              {/* группа статуса + точный статус (Task 67): «Завершена» — только закрытый рейс */}
+                              {/* группа статуса + точный статус (Task 67): «Завершена» — только закрытый рейс.
+                                  Task 73: яркий насыщенный пузырь группы + читаемая подпись под ним */}
                               <div className="flex flex-col items-start gap-0.5">
                                 <Badge variant="outline" className={`${g.badge} whitespace-nowrap`}>{g.label}</Badge>
-                                <span className="text-[11px] leading-tight text-slate-500">
+                                <span className="text-[11px] font-medium leading-tight text-slate-600">
                                   {REQUEST_STATUS_META[r.status as RequestDTO['status']]?.label ?? r.status}
                                 </span>
                               </div>
