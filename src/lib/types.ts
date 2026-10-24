@@ -289,6 +289,30 @@ export interface EdoDocDTO {
   partySigner: string | null
   payload: EdoDocPayloadDTO
   createdAt: string
+  /** ЭТрН, отправленная через Диадок (null — не отправлялась) */
+  diadoc: EdoDiadocDTO | null
+}
+
+/** Документооборот ЭТрН в Диадоке: этап перевозки (kl-status), УИД ГИС ЭПД, ошибки */
+export interface EdoDiadocDTO {
+  messageId: string
+  stage: string | null
+  uid: string | null
+  gisStatus: string | null
+  gisError: string | null
+  sentAt: string | null
+  syncedAt: string | null
+}
+
+/** Состояние интеграции с Диадоком для раздела «Подписать ЭДО» */
+export interface DiadocInfoDTO {
+  enabled: boolean
+  /** «тестовая площадка Диадока» / «Диадок» */
+  stand: string
+  /** test — тестовая подпись; delay — Т1 подписывают своей КЭП в веб-интерфейсе Диадока */
+  signMode: 'test' | 'delay'
+  lastSyncAt: string | null
+  lastError: string | null
 }
 
 /** Пакет ЭДО рейса: карточка рейса + комплекты документов */

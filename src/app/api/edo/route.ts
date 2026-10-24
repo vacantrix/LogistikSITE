@@ -3,11 +3,15 @@ import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
-import { plog } from '@/lib/platform-log'
+import { plog, plogError } from '@/lib/platform-log'
 import {
   AEMZ_ORG, EDO_KIND_META, EDO_PARTY_ROLE, edoDocNumber, ensureEdoDocuments,
   buildEdoPayload, type EdoKind,
 } from '@/lib/edo'
+import { DiadocError } from '@/lib/diadoc/client'
+import { diadocEnabled } from '@/lib/diadoc/config'
+import { diadocInfo, etrnDraft, sendEtrnT1, syncDiadoc } from '@/lib/diadoc/etrn'
+import type { EtrnT1Input } from '@/lib/diadoc/waybill'
 
 export const dynamic = 'force-dynamic'
 
@@ -91,11 +95,44 @@ export async function GET() {
         partySigner: d.partySigner,
         payload: safePayload(d.payload),
         createdAt: d.createdAt.toISOString(),
+        // ЭТрН, отправленная через Диадок: этап перевозки, УИД ГИС ЭПД, ошибки
+        diadoc: d.diadocMessageId ? {
+          messageId: d.diadocMessageId,
+          stage: d.diadocStage,
+          uid: d.etrnUid,
+          gisStatus: d.gisStatus,
+          gisError: d.gisError,
+          sentAt: d.diadocSentAt?.toISOString() ?? null,
+          syncedAt: d.diadocSyncedAt?.toISOString() ?? null,
+        } : null,
       })),
     }
   })
 
-  return NextResponse.json({ packages })
+  return NextResponse.json({ packages, diadoc: await diadocInfo() })
+}
+
+/** Ошибка Диадока — понятный ответ интерфейсу и запись в журнал платформы */
+async function diadocFailure(
+  e: unknown,
+  source: string,
+  auth: { login: string; name: string; role: string },
+  ctx: { requestId?: string; requestNumber?: string; carrierName?: string } = {},
+): Promise<NextResponse> {
+  const isDiadoc = e instanceof DiadocError
+  const message = e instanceof Error ? e.message : 'Ошибка Диадока'
+  // ошибки ввода (400) — подсказка логисту, остальное — сбой интеграции в журнал
+  if (!isDiadoc || e.status !== 400) {
+    await plogError(source, e, {
+      type: 'DIADOC_ERROR', source,
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      requestId: ctx.requestId ?? null, requestNumber: ctx.requestNumber ?? null, carrierName: ctx.carrierName ?? null,
+      message: `Диадок: ${message}`,
+      meta: isDiadoc ? { status: e.status, details: e.details ?? null } : null,
+    })
+  }
+  const status = isDiadoc && e.status >= 400 && e.status < 500 ? (e.status === 401 || e.status === 402 ? 502 : e.status) : 502
+  return NextResponse.json({ error: message }, { status })
 }
 
 function safePayload(raw: string): Record<string, unknown> {
@@ -117,10 +154,20 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
 
-  const body = (await req.json().catch(() => ({}))) as { requestId?: string; docId?: string; action?: string }
+  const body = (await req.json().catch(() => ({}))) as { requestId?: string; docId?: string; action?: string; input?: unknown }
   const requestId = typeof body.requestId === 'string' ? body.requestId : ''
   const docId = typeof body.docId === 'string' ? body.docId : ''
   const action = typeof body.action === 'string' ? body.action : ''
+
+  // ——— Диадок: сверка статусов ЭТрН (обе роли — «Обновить статусы») ———
+  if (action === 'diadoc-sync') {
+    if (!diadocEnabled()) return NextResponse.json({ error: 'Интеграция с Диадоком не настроена' }, { status: 400 })
+    try {
+      return NextResponse.json({ ok: true, ...(await syncDiadoc()) })
+    } catch (e) {
+      return diadocFailure(e, 'diadoc/sync', auth)
+    }
+  }
 
   const trip = await db.request.findUnique({
     where: { id: requestId },
@@ -190,11 +237,35 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // ——— Диадок: черновик и отправка ЭТрН (титул Т1 за АЭМЗ) ———
+  if (action === 'etrn-draft' || action === 'etrn-send') {
+    if (!diadocEnabled()) return NextResponse.json({ error: 'Интеграция с Диадоком не настроена' }, { status: 400 })
+    if (auth.role !== 'logist') return NextResponse.json({ error: 'ЭТрН отправляет логист АЭМЗ — грузоотправитель' }, { status: 403 })
+    const doc = await db.edoDocument.findFirst({ where: { id: docId, requestId, kind: 'ETRN' }, select: { id: true } })
+    if (!doc) return NextResponse.json({ error: 'Транспортная накладная не найдена' }, { status: 404 })
+    try {
+      if (action === 'etrn-draft') return NextResponse.json({ draft: await etrnDraft(doc.id) })
+      if (!body.input || typeof body.input !== 'object') return NextResponse.json({ error: 'Нет данных ЭТрН' }, { status: 400 })
+      const message = await sendEtrnT1(doc.id, body.input as EtrnT1Input, { login: auth.login, name: auth.name, role: auth.role })
+      return NextResponse.json({ ok: true, message })
+    } catch (e) {
+      return diadocFailure(e, 'diadoc/etrn', auth, { requestId, requestNumber: trip.number, carrierName })
+    }
+  }
+
   // ——— подписание документа своей стороной ———
   if (action === 'sign') {
     const doc = await db.edoDocument.findFirst({ where: { id: docId, requestId } })
     if (!doc) return NextResponse.json({ error: 'Документ не найден' }, { status: 404 })
     if (!isEdoKind(doc.kind)) return NextResponse.json({ error: 'Неизвестный вид документа' }, { status: 400 })
+    // при подключённом Диадоке ЭТрН подписывается у оператора ЭДО, а не отметкой в платформе
+    if (doc.kind === 'ETRN' && diadocEnabled()) {
+      return NextResponse.json({
+        error: auth.role === 'logist'
+          ? 'ЭТрН подписывается через Диадок: нажмите «Отправить ЭТрН в Диадок»'
+          : 'Подпишите титул перевозчика Т2 в своём Диадоке — платформа увидит подпись автоматически',
+      }, { status: 400 })
+    }
     if (doc.aemzSigned && doc.partySigned) return NextResponse.json({ error: 'Документ уже подписан обеими сторонами' }, { status: 400 })
 
     const now = new Date()

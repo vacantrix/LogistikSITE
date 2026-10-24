@@ -52,6 +52,7 @@ const TYPE_LABEL: Record<string, string> = {
   TRIP_CONFIRMED: 'Сверка подтверждена', DOCS_RETURNED: 'Возврат на доработку',
   TRIP_CLOSED: 'Рейс закрыт', ETRN_1C: 'ЭТрН из 1С',
   EDO_PACK_CREATED: 'Комплект ЭДО', EDO_SIGNED: 'Подписано ЭДО',
+  DIADOC_SENT: 'ЭТрН в Диадок', DIADOC_STATUS: 'Статус ЭТрН', DIADOC_ERROR: 'Ошибка Диадока',
   SERVER_ERROR: 'Сбой сервера', ACTION_FAILED: 'Сбой действия', FINALIZE_FAILED: 'Сбой итогов',
   CLIENT_ERROR: 'Ошибка интерфейса',
 }

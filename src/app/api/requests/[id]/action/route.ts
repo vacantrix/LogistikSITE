@@ -312,11 +312,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
         case 'close': {
           if (r.status !== 'CONFIRMED') fail('Закрыть можно подтверждённый рейс')
-          await tx.request.update({ where: { id }, data: { status: 'CLOSED', etrnStatus: 'SIGNED' } })
+          // ЭТрН, отправленная через Диадок, живёт своим документооборотом: статус и подписи
+          // берутся из Диадока, при закрытии рейса их не подменяем
+          const viaDiadoc = await tx.edoDocument.count({ where: { requestId: id, kind: 'ETRN', diadocMessageId: { not: null } } })
+          await tx.request.update({ where: { id }, data: { status: 'CLOSED', ...(viaDiadoc ? {} : { etrnStatus: 'SIGNED' }) } })
           // ЭДО (Task 76): рейс закрыт — накладная подписана обеими сторонами,
           // акт оказанных услуг добирается автоматически в разделе «Подписать ЭДО»
           await tx.edoDocument.updateMany({
-            where: { requestId: id, kind: 'ETRN' },
+            where: { requestId: id, kind: 'ETRN', diadocMessageId: null },
             data: { aemzSigned: true, partySigned: true, aemzSignedAt: now, partySignedAt: now, aemzSigner: 'КЭП АЭМЗ', partySigner: 'КЭП перевозчика' },
           })
           await event('TRIP_CLOSED', 'Рейс закрыт: данные в реестре, отчёты сходятся с бухгалтерией')

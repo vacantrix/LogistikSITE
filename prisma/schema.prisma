@@ -13,6 +13,9 @@ model Carrier {
   id           String    @id @default(cuid())
   name         String
   inn          String
+  kpp          String    @default("") // КПП — для поиска ящика в Диадоке (ИНН + КПП)
+  phone        String    @default("") // контактный телефон перевозчика — в ЭТрН
+  diadocBoxId  String    @default("") // ящик перевозчика в Диадоке (находится по ИНН при отправке ЭТрН)
   contractNo   String
   contractDate String
   access       Boolean   @default(true)
@@ -272,10 +275,38 @@ model EdoDocument {
   partySigned          Boolean  @default(false)
   partySignedAt        DateTime?
   partySigner          String?
+  // ——— Диадок: ЭТрН через API оператора ЭДО (src/lib/diadoc) ———
+  diadocBoxId          String? // ящик АЭМЗ, из которого отправлен титул Т1
+  diadocMessageId      String? // MessageId сообщения с титулами Т1/Т2 (он же kl-id перевозки)
+  diadocEntityId       String? // EntityId титула Т1
+  diadocStage          String? // kl-status — этап перевозки по данным Диадока (r-wait-carrier-sign, on-the-way, completed…)
+  etrnUid              String? // УИД ТрН (mt-id) — присваивает ГИС ЭПД после регистрации Т1
+  gisStatus            String? // последний статус обработки в ГИС ЭПД
+  gisError             String? // текст ошибки Диадока или ГИС ЭПД, если она была
+  etrnInput            String? // JSON: данные ЭТрН, которые логист подтвердил при отправке Т1
+  diadocSentAt         DateTime?
+  diadocSyncedAt       DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
   @@index([requestId])
+}
+
+/**
+ * Состояние интеграции с Диадоком (одна запись id = "main").
+ * refresh_token ротируется при каждом обмене — новое значение сохраняется здесь,
+ * иначе через 30 дней интеграция остановится. Переменная DIADOC_REFRESH_TOKEN
+ * нужна только для первого запуска.
+ */
+model DiadocState {
+  id                   String    @id @default("main")
+  refreshToken         String?
+  accessToken          String?
+  accessTokenExpiresAt DateTime?
+  eventsIndexKey       String? // позиция в ленте событий ящика АЭМЗ (BoxEvent.IndexKey)
+  lastSyncAt           DateTime?
+  lastError            String?
+  updatedAt            DateTime  @updatedAt
 }
 
 /**

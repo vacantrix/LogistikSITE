@@ -1,7 +1,8 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CargoTypeDTO, CarrierDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
 } from '@/lib/types'
+import type { EtrnT1Input } from '@/lib/diadoc/waybill'
 import {
   ACTIVE_TOKEN_KEY, accountById, getLastAccountId,
   listAccounts, migrateLegacyToken, removeAccountByToken, upsertAccount,
@@ -174,9 +175,17 @@ export const api = {
   },
 
   /** ЭДО (Task 76): пакеты документов рейсов + действия (формирование/подписание) */
-  edoList: () => fetch('/api/edo', withAuth({ cache: 'no-store' })).then(json<{ packages: EdoPackageDTO[] }>),
+  edoList: () => fetch('/api/edo', withAuth({ cache: 'no-store' })).then(json<{ packages: EdoPackageDTO[]; diadoc: DiadocInfoDTO }>),
   edoAction: (body: { requestId: string; action: 'create-expeditor-pack' | 'sign'; docId?: string }) =>
     fetch('/api/edo', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ok: boolean }>),
+  /** Диадок: черновик ЭТрН из данных рейса и отправка титула Т1 */
+  etrnDraft: (requestId: string, docId: string) =>
+    fetch('/api/edo', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, docId, action: 'etrn-draft' }) })).then(json<{ draft: EtrnT1Input }>),
+  etrnSend: (requestId: string, docId: string, input: EtrnT1Input) =>
+    fetch('/api/edo', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, docId, action: 'etrn-send', input }) })).then(json<{ ok: boolean; message: string }>),
+  /** Диадок: сверить статусы ЭТрН сейчас */
+  diadocSync: () =>
+    fetch('/api/edo', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'diadoc-sync' }) })).then(json<{ ok: boolean; checked: number; changed: number }>),
 }
 
 export type { DriverIntakeSaved }
