@@ -108,7 +108,7 @@ function ExpiryText({ info }: { info: ExpiryInfo }) {
 function DriverCell({ d }: { d: DriverDTO }) {
   return (
     <div className="min-w-0 space-y-0.5 text-[11px] leading-snug text-slate-600" aria-label="Данные водителя из базы">
-      <div className="truncate text-xs font-semibold text-slate-900">{d.fullName}</div>
+      <div className="break-words text-xs font-semibold text-slate-900">{d.fullName}</div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="whitespace-nowrap">ВУ: <span className="font-mono">{d.license}</span></span>
         <ExpiryText info={expiryInfo(d.licenseTill)} />
@@ -126,13 +126,13 @@ function DriverCell({ d }: { d: DriverDTO }) {
 function TruckCell({ t }: { t: TruckDTO }) {
   return (
     <div className="min-w-0 space-y-0.5 text-[11px] leading-snug text-slate-600" aria-label="Данные тягача из базы">
-      <div className="truncate text-xs font-semibold text-slate-900">{t.brand}</div>
+      <div className="break-words text-xs font-semibold text-slate-900">{t.brand}</div>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5">
         <span className="whitespace-nowrap">Госномер: <span className="font-mono">{t.plate}</span></span>
         {t.color && t.color !== '—' && <span className="whitespace-nowrap">Цвет: {t.color}</span>}
         <span className="whitespace-nowrap">Техосмотр: <ExpiryText info={expiryInfo(t.techTill)} /></span>
       </div>
-      {t.owner && t.owner !== '—' && <div className="truncate">Собственник: {t.owner}</div>}
+      {t.owner && t.owner !== '—' && <div className="break-words">Собственник: {t.owner}</div>}
     </div>
   )
 }
@@ -141,13 +141,13 @@ function TruckCell({ t }: { t: TruckDTO }) {
 function TrailerCell({ z }: { z: TrailerDTO }) {
   return (
     <div className="min-w-0 space-y-0.5 text-[11px] leading-snug text-slate-600" aria-label="Данные прицепа из базы">
-      <div className="truncate text-xs font-semibold text-slate-900">{z.type}</div>
+      <div className="break-words text-xs font-semibold text-slate-900">{z.type}</div>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5">
         <span className="whitespace-nowrap">Госномер: <span className="font-mono">{z.plate}</span></span>
         {z.color && z.color !== '—' && <span className="whitespace-nowrap">Цвет: {z.color}</span>}
         <span className="whitespace-nowrap">Техосмотр: <ExpiryText info={expiryInfo(z.techTill)} /></span>
       </div>
-      {z.owner && z.owner !== '—' && <div className="truncate">Собственник: {z.owner}</div>}
+      {z.owner && z.owner !== '—' && <div className="break-words">Собственник: {z.owner}</div>}
     </div>
   )
 }
@@ -214,7 +214,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   const trucks = carrier?.trucks ?? []
   const trailers = carrier?.trailers ?? []
 
-  // ——— Правило занятости (Task 50): кто уже «в рейсе» (комплект у логиста или данные в 1С) ———
+  // ——— Правило занятости (Task 50): кто уже «в рейсе» (комплект у логиста или рейс выполняется) ———
   const busyCrew = useMemo(
     () => busyMaps(requests ?? []),
     [requests],
@@ -290,20 +290,26 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   )
 
   /**
-   * Состав по заявке. Прицеп обязателен: пока пользователь не выбрал прицеп
-   * сам, подставляем первый свободный из базы — в том числе поверх частичного
-   * выбора (водитель/тягач), чтобы автоподстановка не сбрасывалась. Если
-   * свободных прицепов нет, поле остаётся пустым с плейсхолдером
-   * «Выберите прицеп», и отправка формы заблокирована до сделанного выбора.
+   * Состав по заявке. Сохранённый в заявке экипаж подставляется, только если он
+   * не занят другим рейсом — занятого по умолчанию не предлагаем. Прицеп
+   * обязателен: пока пользователь не выбрал прицеп сам, подставляем первый
+   * свободный из базы. Если свободных нет, поле остаётся пустым с плейсхолдером,
+   * и отправка формы заблокирована до сделанного выбора.
    */
   const selOf = (r: RequestDTO): SelState => {
     const base = sel[r.id]
+    const free = (map: typeof busyCrew.drivers, id: string | null) => (id && !busyElsewhere(map, id, r.id) ? id : undefined)
     return {
-      driverId: base?.driverId ?? r.driverId ?? undefined,
-      truckId: base?.truckId ?? r.truckId ?? undefined,
-      trailerId: base?.trailerId ?? r.trailerId ?? trailers.find((z) => !busyCrew.trailers.has(z.id))?.id,
+      driverId: base?.driverId ?? free(busyCrew.drivers, r.driverId),
+      truckId: base?.truckId ?? free(busyCrew.trucks, r.truckId),
+      trailerId: base?.trailerId ?? free(busyCrew.trailers, r.trailerId)
+        ?? trailers.find((z) => !busyElsewhere(busyCrew.trailers, z.id, r.id))?.id,
     }
   }
+
+  /** Список выбора: сначала свободные, занятые — в конце с пометкой «занят» */
+  const freeFirst = <T extends { id: string }>(list: T[], map: typeof busyCrew.drivers, reqId: string): T[] =>
+    [...list].sort((a, b) => Number(Boolean(busyElsewhere(map, a.id, reqId))) - Number(Boolean(busyElsewhere(map, b.id, reqId))))
 
   const setSelFor = (id: string, patch: SelState) =>
     setSel((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...patch } }))
@@ -599,93 +605,66 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                       </table>
                     </div>
 
-                    {/* ——— состав экипажа: таблица из трёх колонок, состав подтягивается из базы ——— */}
-                    <div className="overflow-x-auto rounded-lg border border-slate-200">
-                      <table className="w-full min-w-[640px] text-left text-sm">
-                        <thead>
-                          <tr className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
-                            <th scope="col" className="px-3 py-2 font-semibold">Водитель</th>
-                            <th scope="col" className="px-3 py-2 font-semibold">Тягач</th>
-                            <th scope="col" className="px-3 py-2 font-semibold">Прицеп</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          <tr>
-                            <td className="px-3 py-2 align-top">
-                              <Select
-                                value={s.driverId ?? ''}
-                                onValueChange={(v) => pickDriver(r.id, v)}
-                              >
-                                <SelectTrigger aria-label={`Выбор водителя по заявке ${r.number}`}>
-                                  <SelectValue placeholder="Выберите водителя" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {drivers.map((d) => {
-                                    const b = busyElsewhere(busyCrew.drivers, d.id, r.id)
-                                    return (
-                                      <SelectItem key={d.id} value={d.id} className={b ? 'text-slate-400' : undefined}>
-                                        {d.fullName}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
-                                      </SelectItem>
-                                    )
-                                  })}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="px-3 py-2 align-top">
-                              <Select
-                                value={s.truckId ?? ''}
-                                onValueChange={(v) => pickTruck(r.id, v)}
-                              >
-                                <SelectTrigger aria-label={`Выбор тягача по заявке ${r.number}`}>
-                                  <SelectValue placeholder="Выберите тягача" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {trucks.map((t) => {
-                                    const b = busyElsewhere(busyCrew.trucks, t.id, r.id)
-                                    return (
-                                      <SelectItem key={t.id} value={t.id} className={b ? 'text-slate-400' : undefined}>
-                                        {t.brand} · {t.plate}{b ? ` · занято (${busyReason(b.status)}, ${b.number})` : ''}
-                                      </SelectItem>
-                                    )
-                                  })}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                            <td className="px-3 py-2 align-top">
-                              <Select
-                                value={s.trailerId ?? ''}
-                                onValueChange={(v) => pickTrailer(r.id, v)}
-                              >
-                                <SelectTrigger aria-label={`Выбор прицепа по заявке ${r.number}`}>
-                                  <SelectValue placeholder="Выберите прицеп" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {/* Прицеп обязателен: только реальные прицепы из базы, без варианта «Без прицепа» */}
-                                  {trailers.map((z) => {
-                                    const b = busyElsewhere(busyCrew.trailers, z.id, r.id)
-                                    return (
-                                      <SelectItem key={z.id} value={z.id} className={b ? 'text-slate-400' : undefined}>
-                                        {z.plate} · {z.type}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
-                                      </SelectItem>
-                                    )
-                                  })}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                          </tr>
-                          <tr className="bg-slate-50/50">
-                            <td className="px-3 py-2 align-top">
-                              {driver ? <DriverCell d={driver} /> : <span className="text-[11px] text-slate-300">—</span>}
-                            </td>
-                            <td className="px-3 py-2 align-top">
-                              {truck ? <TruckCell t={truck} /> : <span className="text-[11px] text-slate-300">—</span>}
-                            </td>
-                            <td className="px-3 py-2 align-top">
-                              {trailer ? <TrailerCell z={trailer} /> : <span className="text-[11px] text-slate-300">—</span>}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
+                    {/* ——— состав экипажа: три колонки (на телефоне — друг под другом), состав из базы ——— */}
+                    <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3">
+                      <div className="min-w-0 space-y-2">
+                        <div className="text-xs font-semibold text-slate-500">Водитель</div>
+                        <Select value={s.driverId ?? ''} onValueChange={(v) => pickDriver(r.id, v)}>
+                          <SelectTrigger className="w-full" aria-label={`Выбор водителя по заявке ${r.number}`}>
+                            <SelectValue placeholder="Выберите водителя" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {freeFirst(drivers, busyCrew.drivers, r.id).map((d) => {
+                              const b = busyElsewhere(busyCrew.drivers, d.id, r.id)
+                              return (
+                                <SelectItem key={d.id} value={d.id} className={b ? 'text-slate-400' : undefined}>
+                                  {d.fullName}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
+                                </SelectItem>
+                              )
+                            })}
+                          </SelectContent>
+                        </Select>
+                        {driver ? <DriverCell d={driver} /> : <span className="text-[11px] text-slate-300">—</span>}
+                      </div>
+                      <div className="min-w-0 space-y-2">
+                        <div className="text-xs font-semibold text-slate-500">Тягач</div>
+                        <Select value={s.truckId ?? ''} onValueChange={(v) => pickTruck(r.id, v)}>
+                          <SelectTrigger className="w-full" aria-label={`Выбор тягача по заявке ${r.number}`}>
+                            <SelectValue placeholder="Выберите тягач" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {freeFirst(trucks, busyCrew.trucks, r.id).map((t) => {
+                              const b = busyElsewhere(busyCrew.trucks, t.id, r.id)
+                              return (
+                                <SelectItem key={t.id} value={t.id} className={b ? 'text-slate-400' : undefined}>
+                                  {t.brand} · {t.plate}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
+                                </SelectItem>
+                              )
+                            })}
+                          </SelectContent>
+                        </Select>
+                        {truck ? <TruckCell t={truck} /> : <span className="text-[11px] text-slate-300">—</span>}
+                      </div>
+                      <div className="min-w-0 space-y-2">
+                        <div className="text-xs font-semibold text-slate-500">Прицеп</div>
+                        <Select value={s.trailerId ?? ''} onValueChange={(v) => pickTrailer(r.id, v)}>
+                          <SelectTrigger className="w-full" aria-label={`Выбор прицепа по заявке ${r.number}`}>
+                            <SelectValue placeholder="Выберите прицеп" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {/* Прицеп обязателен: только реальные прицепы из базы, без варианта «Без прицепа» */}
+                            {freeFirst(trailers, busyCrew.trailers, r.id).map((z) => {
+                              const b = busyElsewhere(busyCrew.trailers, z.id, r.id)
+                              return (
+                                <SelectItem key={z.id} value={z.id} className={b ? 'text-slate-400' : undefined}>
+                                  {z.plate} · {z.type}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
+                                </SelectItem>
+                              )
+                            })}
+                          </SelectContent>
+                        </Select>
+                        {trailer ? <TrailerCell z={trailer} /> : <span className="text-[11px] text-slate-300">—</span>}
+                      </div>
                     </div>
 
                     {drivers.length === 0 && (
@@ -833,7 +812,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
           <div className={`max-h-[50vh] overflow-auto rounded-xl border border-slate-200 ${THIN_SCROLL}`}>
             <table className="w-full min-w-[720px] text-left text-xs">
               <thead>
-                <tr className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                <tr className="bg-slate-50 text-xs text-slate-500">
                   <th scope="col" className="px-3 py-2 font-semibold">Стр.</th>
                   <th scope="col" className="px-3 py-2 font-semibold">Заявка</th>
                   <th scope="col" className="px-3 py-2 font-semibold">Водитель</th>

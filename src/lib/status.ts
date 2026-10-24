@@ -4,23 +4,25 @@ import { EyeOff, TrendingDown, type LucideIcon } from 'lucide-react'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
 export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: string; badge: string; dot: string }> = {
+  DRAFT: { label: 'Черновик', short: 'Черновик', badge: 'bg-slate-50 text-slate-600 border-dashed border-slate-300', dot: 'bg-slate-400' },
   PUBLISHED: { label: 'На площадке', short: 'На площадке', badge: 'bg-sky-100 text-sky-800 border-sky-200', dot: 'bg-sky-500' },
   AWARDED: { label: 'Перевозчик выбран', short: 'Выбран', badge: 'bg-violet-100 text-violet-800 border-violet-200', dot: 'bg-violet-500' },
   DOCS_REVIEW: { label: 'Документы проверяются', short: 'Проверка', badge: 'bg-amber-100 text-amber-800 border-amber-200', dot: 'bg-amber-500' },
   AT_LOGIST: { label: 'У логиста — сверка', short: 'У логиста', badge: 'bg-blue-100 text-blue-800 border-blue-200', dot: 'bg-blue-600' },
-  CONFIRMED: { label: 'Данные в 1С', short: 'В 1С', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
+  CONFIRMED: { label: 'Рейс выполняется', short: 'В рейсе', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
   CLOSED: { label: 'Рейс закрыт', short: 'Закрыт', badge: 'bg-slate-200 text-slate-700 border-slate-300', dot: 'bg-slate-500' },
   DELETED: { label: 'Удалена', short: 'Удалена', badge: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-400' },
 }
 
-/** Группы статусов в «Реестре заявок» (Task 66): Новая / В работе / Завершена / Удалена.
+/** Группы статусов в «Реестре заявок» (Task 66): Черновик / Новая / В работе / Завершена / Удалена.
  *  Синхронизация Рейсы → Заявки (Task 67): «Завершена» — только закрытый рейс (CLOSED).
- *  Заявка в статусе CONFIRMED (данные в 1С, рейс выполняется — пропуск, ЭТрН, путь)
+ *  Заявка в статусе CONFIRMED (рейс выполняется — пропуск, ЭТрН в Диадоке, путь)
  *  остаётся «В работе»; как только логист закрывает рейс в «Реестре рейсов», заявка
  *  автоматически становится «Завершена» — без ручного обновления страницы. */
-export type RequestGroup = 'new' | 'working' | 'done' | 'deleted'
+export type RequestGroup = 'draft' | 'new' | 'working' | 'done' | 'deleted'
 
 export const REQUEST_GROUP_META: Record<RequestGroup, { label: string; badge: string; dot: string }> = {
+  draft: { label: 'Черновик', badge: 'bg-slate-100 text-slate-700 border-dashed border-slate-400', dot: 'bg-slate-400' },
   new: { label: 'Новая', badge: 'bg-sky-500 text-white border-sky-600 shadow-sm', dot: 'bg-sky-500' },
   working: { label: 'В работе', badge: 'bg-violet-500 text-white border-violet-600 shadow-sm', dot: 'bg-violet-500' },
   done: { label: 'Завершена', badge: 'bg-emerald-500 text-white border-emerald-600 shadow-sm', dot: 'bg-emerald-500' },
@@ -30,6 +32,7 @@ export const REQUEST_GROUP_META: Record<RequestGroup, { label: string; badge: st
 /** Группа реестра заявок для статуса заявки */
 export function requestGroupOf(status: string): RequestGroup {
   switch (status) {
+    case 'DRAFT': return 'draft'
     case 'PUBLISHED': return 'new'
     case 'AWARDED':
     case 'DOCS_REVIEW':
@@ -41,7 +44,7 @@ export function requestGroupOf(status: string): RequestGroup {
 }
 
 /** Статусы заявок, которые логист может удалить (Task 65): текущие, ещё не завершённые */
-export const DELETABLE_STATUSES: readonly string[] = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST']
+export const DELETABLE_STATUSES: readonly string[] = ['DRAFT', 'PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST']
 
 /** Метки статусов глазами агента-перевозчика — реальная линия рейса без служебных
  *  процессов АЭМЗ: выбор рейса → согласование ставки → подтверждено → документы →
@@ -51,8 +54,8 @@ export const AGENT_STATUS_LABEL: Record<string, string> = {
   AWARDED: 'Подтверждено',
   DOCS_REVIEW: 'Документы',
   AT_LOGIST: 'Подготовка к рейсу',
-  CONFIRMED: 'Готово',
-  CLOSED: 'Готово',
+  CONFIRMED: 'Рейс выполняется',
+  CLOSED: 'Рейс закрыт',
 }
 
 /** Режим приёма ставок: плоский локап (плитка-иконка + uppercase-название + пояснение).
@@ -123,11 +126,15 @@ export function timeLeft(deadline: string | null): { text: string; urgent: boole
   if (!deadline) return null
   const ms = new Date(deadline).getTime() - Date.now()
   if (ms <= 0) return { text: 'Срок истёк', urgent: true }
-  const h = Math.floor(ms / 3600_000)
+  const d = Math.floor(ms / 86_400_000)
+  const h = Math.floor((ms % 86_400_000) / 3600_000)
   const m = Math.floor((ms % 3600_000) / 60_000)
   const s = Math.floor((ms % 60_000) / 1000)
   const pad = (n: number) => String(n).padStart(2, '0')
-  return { text: h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`, urgent: ms < 3600_000 }
+  // длинные сроки — днями и часами («4 д 19 ч»), последние сутки — часами и минутами,
+  // последний час — секундомером «MM:SS»
+  const text = d > 0 ? `${d} д ${h} ч` : h > 0 ? `${h} ч ${pad(m)} мин` : `${pad(m)}:${pad(s)}`
+  return { text, urgent: ms < 3600_000 }
 }
 
 export const fmtDateTime = (iso: string): string =>

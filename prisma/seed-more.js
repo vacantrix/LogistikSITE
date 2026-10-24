@@ -28,6 +28,9 @@ async function main() {
   const C = Object.fromEntries(carriers.map((c) => [c.name.includes('А»') ? 'А' : c.name.includes('Б»') ? 'Б' : c.name.includes('В»') ? 'В' : 'Г', c]))
   const cargo = await db.cargoType.findMany()
   const CG = Object.fromEntries(cargo.map((c) => [c.name.split(' - ').pop().split(' ')[0], c]))
+  // «Перевозка металлолома» не делится по « - » — ключ задаём явно
+  const scrap = cargo.find((c) => c.name.includes('металлолом'))
+  if (scrap) CG['металлолом'] = scrap
 
   // ——— 1. Водители (+12) ———
   const driversSeed = [
@@ -89,18 +92,18 @@ async function main() {
   // ——— 4. Заявки (+14) ———
   // [number, from, to, cargoKey, tonnage, truckType, mode, status, start, best, winnerKey|null, crewKey|null, etrn, pass, loadDate, deadlineDay|0, createdDay]
   const reqSeed = [
-    ['Z-1050', 'Абинск', 'Новороссийск (порт)', 'проволока', 20, 'Тент', 'AUCTION', 'PUBLISHED', 8100, 7900, null, null, 'NONE', false, d(27), 25, 20],
+    ['Z-1050', 'Абинск', 'Новороссийск', 'проволока', 20, 'Тент', 'AUCTION', 'PUBLISHED', 8100, 7900, null, null, 'NONE', false, d(27), 25, 20],
     ['Z-1051', 'Абинск', 'Краснодар', 'арматура', 18, 'Тент', 'AUCTION', 'PUBLISHED', 5600, 5450, null, null, 'NONE', false, d(28), 26, 20],
     ['Z-1052', 'Абинск', 'Ростов-на-Дону', 'катанка', 22, 'Борт', 'CLOSED', 'PUBLISHED', 9400, null, null, null, 'NONE', false, d(29), 27, 20],
     ['Z-1053', 'Абинск', 'Туапсе', 'моток', 19, 'Тент', 'AUCTION', 'PUBLISHED', 7200, 7000, null, null, 'NONE', false, d(30), 28, 21],
     ['Z-1054', 'Абинск', 'Ставрополь', 'пруток', 15, 'Тент', 'AUCTION', 'PUBLISHED', 6300, null, null, null, 'NONE', false, d(31), 29, 21],
     ['Z-1055', 'Абинск', 'Волгоград', 'металлолом', 20, 'Борт', 'AUCTION', 'AWARDED', 8900, 8450, 'Б', null, 'NONE', false, d(4, 11), 0, 15],
     ['Z-1056', 'Абинск', 'Сочи', 'проволока', 12, 'Тент', 'AUCTION', 'AWARDED', 9800, 9250, 'Г', null, 'NONE', false, d(5, 11), 0, 15],
-    ['Z-1057', 'Абинск', 'Новороссийск (порт)', 'арматура', 20, 'Тент', 'AUCTION', 'DOCS_REVIEW', 8500, 7950, 'А', 'А', 'NONE', false, d(6, 11), 0, 14],
+    ['Z-1057', 'Абинск', 'Новороссийск', 'арматура', 20, 'Тент', 'AUCTION', 'DOCS_REVIEW', 8500, 7950, 'А', 'А', 'NONE', false, d(6, 11), 0, 14],
     ['Z-1058', 'Абинск', 'Краснодар', 'моток', 16, 'Тент', 'CLOSED', 'DOCS_REVIEW', 5900, 5750, 'В', 'В', 'NONE', false, d(7, 11), 0, 14],
     ['Z-1059', 'Абинск', 'Ростов-на-Дону', 'пруток', 21, 'Борт', 'AUCTION', 'AT_LOGIST', 9100, 8650, 'Б', 'Б', 'NONE', true, d(9, 11), 0, 12],
     ['Z-1060', 'Абинск', 'Тихорецк', 'арматура', 18, 'Тент', 'AUCTION', 'AT_LOGIST', 5400, 5150, 'В', 'В', 'SENT', true, d(10, 11), 0, 12],
-    ['Z-1061', 'Абинск', 'Новороссийск (порт)', 'катанка', 20, 'Тент', 'AUCTION', 'CONFIRMED', 8300, 7750, 'А', 'А', 'SIGNED', true, d(14, 10), 0, 9],
+    ['Z-1061', 'Абинск', 'Новороссийск', 'катанка', 20, 'Тент', 'AUCTION', 'CONFIRMED', 8300, 7750, 'А', 'А', 'SIGNED', true, d(14, 10), 0, 9],
     ['Z-1062', 'Абинск', 'Волгоград', 'проволока', 20, 'Борт', 'CLOSED', 'CONFIRMED', 11500, 11200, 'Г', 'Г', 'SENT', true, d(16, 10), 0, 8],
     ['Z-1063', 'Абинск', 'Краснодар', 'металлолом', 20, 'Борт', 'AUCTION', 'CLOSED', 4900, 4650, 'Б', 'Б', 'SIGNED', true, d(13, 10), 0, 7],
   ]
@@ -163,7 +166,7 @@ async function main() {
         if (passPackage) events.push([dt(createdDay + 3, 14), 'PASS_SENT', 'Пропуск на площадку оформлен'])
       }
       if (etrnStatus !== 'NONE') events.push([dt(createdDay + 4, 10), 'ETRN_SENT', 'Заявка отправлена в ЭТРАН'])
-      if (etrnStatus === 'SIGNED') events.push([dt(createdDay + 5, 12), 'CONFIRMED_1C', 'Заявка подтверждена в 1С'])
+      if (etrnStatus === 'SIGNED') events.push([dt(createdDay + 5, 12), 'CONFIRMED_1C', 'Документы сверены и подтверждены — рейс выполняется'])
     }
     if (status === 'CLOSED') events.push([dt(createdDay + 6, 16), 'REQUEST_CLOSED', 'Заявка закрыта: рейс выполнен'])
     for (const [at, type, message] of events) await db.event.create({ data: { requestId: req.id, type, message, createdAt: at } })

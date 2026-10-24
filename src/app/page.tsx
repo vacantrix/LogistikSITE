@@ -16,6 +16,7 @@ import { api, beginAddAccount, getSessionToken, UNAUTHORIZED_EVENT } from '@/lib
 import type { SessionUserDTO } from '@/lib/types'
 
 import BoardTab from '@/components/platform/board'
+import DraftsTab from '@/components/platform/drafts'
 import ApplyTab from '@/components/platform/apply'
 import MyRequestsTab from '@/components/platform/my-requests'
 import CrewTab from '@/components/platform/crew'
@@ -96,15 +97,20 @@ export default function Page() {
     }
   }, [])
 
-  // подключение к real-time шине ws-service через шлюз (Task 49) — только после входа:
-  // шина проверяет ту же куку сессии. Правила гейта: относительный путь и порт в query XTransformPort.
+  // подключение к real-time шине ws-service (Task 49) — только после входа: шина проверяет
+  // ту же сессию. На стенде — через шлюз Caddy (относительный путь и порт в query XTransformPort);
+  // локально без шлюза — напрямую по NEXT_PUBLIC_WS_URL (например, http://localhost:3003).
   const userId = user?.id ?? null
   useEffect(() => {
     if (!userId) return
     // Авторизация шины: кука сессии (основной способ) или токен в query — для окна
     // предпросмотра, где браузер не отдает сторонние куки (см. ws-service allowRequest).
     const token = getSessionToken()
-    const socket: Socket = io(`/?XTransformPort=3003${token ? `&token=${encodeURIComponent(token)}` : ''}`, {
+    const direct = process.env.NEXT_PUBLIC_WS_URL
+    const url = direct
+      ? `${direct.replace(/\/$/, '')}/${token ? `?token=${encodeURIComponent(token)}` : ''}`
+      : `/?XTransformPort=3003${token ? `&token=${encodeURIComponent(token)}` : ''}`
+    const socket: Socket = io(url, {
       transports: ['websocket', 'polling'],
       forceNew: true,
       withCredentials: true,
@@ -170,6 +176,7 @@ export default function Page() {
       ) : (
         <>
           {tab === 'board' && <BoardTab {...tabProps} />}
+          {tab === 'drafts' && <DraftsTab {...tabProps} />}
           {tab === 'apply' && <ApplyTab {...tabProps} />}
           {tab === 'my' && <MyRequestsTab {...tabProps} />}
           {tab === 'crew' && <CrewTab {...tabProps} />}

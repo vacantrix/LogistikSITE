@@ -5,8 +5,7 @@ import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { plog, plogError } from '@/lib/platform-log'
 import {
-  AEMZ_ORG, EDO_KIND_META, EDO_PARTY_ROLE, edoDocNumber, ensureEdoDocuments,
-  buildEdoPayload, type EdoKind,
+  EDO_KIND_META, EDO_PARTY_ROLE, edoTitle, ensureEdoDocuments, type EdoKind,
 } from '@/lib/edo'
 import { DiadocError } from '@/lib/diadoc/client'
 import { diadocEnabled } from '@/lib/diadoc/config'
@@ -16,12 +15,14 @@ import type { EtrnT1Input } from '@/lib/diadoc/waybill'
 export const dynamic = 'force-dynamic'
 
 const isEdoKind = (v: string): v is EdoKind => v === 'POA' || v === 'ORDER' || v === 'ETRN' || v === 'ACT'
+/** документы раздела: доверенность от АЭМЗ (POA) больше не используется — старые записи скрыты */
+const VISIBLE_KINDS = ['ORDER', 'ETRN', 'ACT']
 
 /**
  * GET /api/edo — пакеты документов ЭДО по рейсам (Task 76).
  * Логист видит все рейсы в работе и закрытые; перевозчик — только свои.
- * Базовые документы (ЭТрН, акт) добираются автоматически; комплект экспедитора
- * создаёт логист отдельно — это обязанность АЭМЗ.
+ * Документы добираются автоматически: заказ-заявка или поручение экспедитору
+ * (по роли исполнителя), ЭТрН и акт.
  */
 export async function GET() {
   const auth = await requireUser()
@@ -34,7 +35,7 @@ export async function GET() {
       ...(auth.role === 'carrier' ? { winnerId: me ?? '__none__' } : {}),
     },
     include: {
-      winner: { select: { name: true } },
+      winner: { select: { name: true, role: true } },
       edoDocuments: { orderBy: { createdAt: 'asc' } },
     },
     orderBy: { number: 'desc' },
@@ -50,7 +51,10 @@ export async function GET() {
   const trailerList = truckIds.length ? await db.trailer.findMany() : []
   // перечитываем документы после добора
   const fresh = await db.edoDocument.findMany({
-    where: { request: { status: { in: ['CONFIRMED', 'CLOSED'] }, ...(auth.role === 'carrier' ? { winnerId: me ?? '__none__' } : {}) } },
+    where: {
+      kind: { in: VISIBLE_KINDS },
+      request: { status: { in: ['CONFIRMED', 'CLOSED'] }, ...(auth.role === 'carrier' ? { winnerId: me ?? '__none__' } : {}) },
+    },
     orderBy: { createdAt: 'asc' },
   })
   const driverById = new Map(driverList.map((d) => [d.id, d]))
@@ -77,6 +81,7 @@ export async function GET() {
         loadDate: t.loadDate,
         status: t.status,
         winnerName: t.winner?.name ?? null,
+        executorRole: t.winner?.role === 'FORWARDER' ? 'FORWARDER' : 'CARRIER',
         driverName: driver?.fullName ?? null,
         truckLabel: truck ? `${truck.brand} · ${truck.plate}${trailer ? ` + ${trailer.plate}` : ''}` : null,
       },
@@ -84,7 +89,7 @@ export async function GET() {
         id: d.id,
         kind: d.kind,
         party: d.party,
-        title: isEdoKind(d.kind) ? EDO_KIND_META[d.kind].title : d.kind,
+        title: isEdoKind(d.kind) ? edoTitle(d.kind, d.party) : d.kind,
         partyRole: EDO_PARTY_ROLE[(d.party as 'EXPEDITOR' | 'CARRIER') ?? 'CARRIER'] ?? d.party,
         number: d.number,
         aemzSigned: d.aemzSigned,
@@ -145,10 +150,9 @@ function safePayload(raw: string): Record<string, unknown> {
 
 /**
  * POST /api/edo — действия ЭДО.
- *  create-expeditor-pack (логист): сформировать комплект экспедитору —
- *    Доверенность + Поручение (обязанность АЭМЗ перед экспедитором).
  *  sign (обе роли): подписать документ своей КЭП — логист за АЭМЗ,
- *    перевозчик-победитель за экспедитора/перевозчика.
+ *    исполнитель рейса — за перевозчика или экспедитора.
+ *  etrn-draft / etrn-send (логист): ЭТрН через Диадок; diadoc-sync — сверка статусов.
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
@@ -171,71 +175,13 @@ export async function POST(req: NextRequest) {
 
   const trip = await db.request.findUnique({
     where: { id: requestId },
-    include: { winner: { select: { name: true } } },
+    include: { winner: { select: { name: true, role: true } } },
   })
   if (!trip) return NextResponse.json({ error: 'Рейс не найден' }, { status: 404 })
   if (auth.role === 'carrier' && trip.winnerId !== auth.carrierId) {
     return NextResponse.json({ error: 'Документы этого рейса закреплены за другим перевозчиком' }, { status: 403 })
   }
-  // у Request экипаж хранится по ID — карточки добираем из справочников
-  const [crewDriver, crewTruck, crewTrailer] = await Promise.all([
-    trip.driverId ? db.driver.findUnique({ where: { id: trip.driverId }, select: { fullName: true } }) : Promise.resolve(null),
-    trip.truckId ? db.truck.findUnique({ where: { id: trip.truckId }, select: { brand: true, plate: true } }) : Promise.resolve(null),
-    trip.trailerId ? db.trailer.findUnique({ where: { id: trip.trailerId }, select: { plate: true } }) : Promise.resolve(null),
-  ])
-  const truckLabel = crewTruck ? `${crewTruck.brand} · ${crewTruck.plate}${crewTrailer ? ` + ${crewTrailer.plate}` : ''}` : '—'
-  const driverName = crewDriver?.fullName ?? '—'
   const carrierName = trip.winner?.name ?? '—'
-  const seq = trip.number.replace(/^Z-/, '')
-
-  // ——— формирование комплекта экспедитору (обязанность АЭМЗ) ———
-  if (action === 'create-expeditor-pack') {
-    if (auth.role !== 'logist') return NextResponse.json({ error: 'Комплект экспедитору формирует логист АЭМЗ' }, { status: 403 })
-    if (trip.status !== 'CONFIRMED') {
-      return NextResponse.json({ error: 'Комплект формируется по рейсу в работе — закрытый рейс уже в архиве' }, { status: 400 })
-    }
-    const existing = await db.edoDocument.findMany({ where: { requestId, kind: { in: ['POA', 'ORDER'] } }, select: { kind: true } })
-    if (existing.length >= 2) {
-      return NextResponse.json({ error: 'Комплект экспедитора уже сформирован' }, { status: 400 })
-    }
-    const now = new Date()
-    const payload = buildEdoPayload(
-      'POA',
-      trip,
-      { carrierName, driverName, truckLabel },
-      now,
-    )
-    const created: string[] = []
-    if (!existing.some((e) => e.kind === 'POA')) {
-      await db.edoDocument.create({
-        data: { requestId, kind: 'POA', party: 'EXPEDITOR', number: edoDocNumber('POA', trip.number), payload: JSON.stringify(payload) },
-      })
-      created.push('Доверенность')
-    }
-    if (!existing.some((e) => e.kind === 'ORDER')) {
-      await db.edoDocument.create({
-        data: { requestId, kind: 'ORDER', party: 'EXPEDITOR', number: edoDocNumber('ORDER', trip.number), payload: JSON.stringify({ ...payload, title: EDO_KIND_META.ORDER.title, accent: EDO_KIND_META.ORDER.accent }) },
-      })
-      created.push('Поручение экспедитору')
-    }
-    await db.event.create({
-      data: { requestId, type: 'EDO_PACK_CREATED', message: `Комплект экспедитору сформирован: доверенность ДОВ-${seq} и поручение ПОР-${seq} — ожидают подписания сторон` },
-    })
-    await plog({
-      type: 'EDO_PACK_CREATED', source: 'api/edo',
-      actor: { login: auth.login, name: auth.name, role: auth.role },
-      requestId, requestNumber: trip.number, carrierName: trip.winner?.name ?? null,
-      message: `Сформирован комплект экспедитору — №${trip.number} (${created.join(' + ')})`,
-    })
-    await notifyCarrier(trip.winnerId, {
-      type: 'EDO_READY',
-      title: `Комплект ЭДО сформирован · №${trip.number}`,
-      body: 'Доверенность и поручение экспедитору доступны к подписанию в разделе «Подписать ЭДО»',
-      requestId,
-    })
-    notifyLive({ type: 'EDO_PACK_CREATED', requestId })
-    return NextResponse.json({ ok: true })
-  }
 
   // ——— Диадок: черновик и отправка ЭТрН (титул Т1 за АЭМЗ) ———
   if (action === 'etrn-draft' || action === 'etrn-send') {
@@ -269,7 +215,8 @@ export async function POST(req: NextRequest) {
     if (doc.aemzSigned && doc.partySigned) return NextResponse.json({ error: 'Документ уже подписан обеими сторонами' }, { status: 400 })
 
     const now = new Date()
-    const kindMeta = EDO_KIND_META[doc.kind]
+    const kindMeta = { ...EDO_KIND_META[doc.kind], title: edoTitle(doc.kind, doc.party) }
+    const party = doc.party === 'EXPEDITOR' ? 'EXPEDITOR' : 'CARRIER'
     if (auth.role === 'logist') {
       if (doc.aemzSigned) return NextResponse.json({ error: 'Со стороны АЭМЗ документ уже подписан' }, { status: 400 })
       await db.edoDocument.update({
@@ -288,16 +235,13 @@ export async function POST(req: NextRequest) {
       await notifyCarrier(trip.winnerId, {
         type: 'EDO_SIGNED',
         title: `Документ подписан АЭМЗ · №${trip.number}`,
-        body: `${kindMeta.title} (${EDO_PARTY_ROLE[kindMeta.party]}) ждёт вашей подписи в разделе «Подписать ЭДО»`,
+        body: `${kindMeta.title} (${EDO_PARTY_ROLE[party]}) ждёт вашей подписи в разделе «Подписать ЭДО»`,
         requestId,
       })
     } else {
       if (doc.partySigned) return NextResponse.json({ error: 'Со стороны контрагента документ уже подписан' }, { status: 400 })
-      // экспедиторские документы подписывает представитель (водитель-экспедитор),
-      // транспортные — перевозчик (КЭП компании)
-      const partySigner = kindMeta.party === 'EXPEDITOR'
-        ? `${driverName} · водитель-экспедитор`
-        : `${carrierName} · КЭП перевозчика`
+      // исполнитель подписывает КЭП своей компании — перевозчик или экспедитор
+      const partySigner = `${carrierName} · КЭП ${party === 'EXPEDITOR' ? 'экспедитора' : 'перевозчика'}`
       await db.edoDocument.update({
         where: { id: doc.id },
         data: { partySigned: true, partySignedAt: now, partySigner },
@@ -309,12 +253,12 @@ export async function POST(req: NextRequest) {
         type: 'EDO_SIGNED', source: 'api/edo',
         actor: { login: auth.login, name: auth.name, role: auth.role },
         requestId, requestNumber: trip.number, carrierName: trip.winner?.name ?? null,
-        message: `${kindMeta.title} №${doc.number} подписано контрагентом (${EDO_PARTY_ROLE[kindMeta.party]}) — №${trip.number}`,
+        message: `${kindMeta.title} №${doc.number} подписано контрагентом (${EDO_PARTY_ROLE[party]}) — №${trip.number}`,
       })
       await notifyLogists({
         type: 'EDO_SIGNED',
         title: `Документ подписан · №${trip.number}`,
-        body: `${kindMeta.title} — подпись ${EDO_PARTY_ROLE[kindMeta.party].toLowerCase()} получена через ЭДО`,
+        body: `${kindMeta.title} — подпись ${party === 'EXPEDITOR' ? 'экспедитора' : 'перевозчика'} получена через ЭДО`,
         requestId,
       })
     }

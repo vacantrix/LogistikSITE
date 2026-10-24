@@ -130,7 +130,7 @@ createServer(async (req, res) => {
   if (!tokens.has(auth)) return json(res, 401, { error: 'unauthorized' })
 
   if (path === '/GetMyOrganizations') {
-    return json(res, 200, { Organizations: [{ OrgId: guidFrom('aemz'), Inn: '2323000000', Kpp: '232301001', ShortName: 'АО «АЭМЗ» (тестовый ящик)', Boxes: [{ BoxId: `${AEMZ_BOX.replace(/-/g, '')}@diadoc.ru`, BoxIdGuid: AEMZ_BOX, Title: 'АО «АЭМЗ» (тестовый ящик)' }] }] })
+    return json(res, 200, { Organizations: [{ OrgId: guidFrom('aemz'), Inn: '2323000000', Kpp: '232301001', ShortName: 'ООО «АЭМЗ» (тестовый ящик)', Boxes: [{ BoxId: `${AEMZ_BOX.replace(/-/g, '')}@diadoc.ru`, BoxIdGuid: AEMZ_BOX, Title: 'АО «АЭМЗ» (тестовый ящик)' }] }] })
   }
   if (path === '/GetOrganizationsByInnKpp') {
     if (!q.inn || q.inn.startsWith('0000')) return json(res, 200, { Organizations: [] })

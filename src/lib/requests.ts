@@ -21,11 +21,13 @@ type Tx = Prisma.TransactionClient
 /**
  * Какие заявки видит пользователь. Логист — все.
  * Перевозчик — открытые на площадке, свои выигранные и те, где он делал ставку.
+ * Черновики (в том числе торги, закончившиеся без ставок) перевозчику не видны.
  */
 export function requestWhereFor(viewer: Viewer): Prisma.RequestWhereInput {
   if (viewer.role === 'logist') return {}
   const me = viewer.carrierId ?? '__none__'
   return {
+    status: { not: 'DRAFT' },
     OR: [
       { status: 'PUBLISHED' },
       { winnerId: me },
@@ -68,13 +70,15 @@ export async function minActiveBid(tx: Tx, requestId: string): Promise<number | 
  * Подведение итогов по сроку (п. 9): если приём ставок закончился, заявка
  * автоматически уходит перевозчику с минимальной активной ставкой
  * (при равных суммах — тому, кто поставил раньше). Логист ничего не утверждает.
- * Без ставок заявка остаётся на площадке: логист продлевает срок или поднимает ставку.
+ * Без ставок заявка уходит с площадки в «Черновики заявок»: логист поправит
+ * ставку или срок и опубликует её снова (moveUnansweredToDrafts).
  *
  * Вызывается «лениво» — перед чтением и действиями с заявками, поэтому отдельный
  * планировщик не нужен. Повторный вызов безопасен: смена статуса идёт через
  * условие status = PUBLISHED.
  */
 export async function finalizeExpired(now = new Date()): Promise<void> {
+  await moveUnansweredToDrafts(now)
   const due = await db.request.findMany({
     where: { status: 'PUBLISHED', deadline: { lte: now }, bids: { some: { withdrawn: false } } },
     select: { id: true },
@@ -131,6 +135,50 @@ export async function finalizeExpired(now = new Date()): Promise<void> {
       await plogError('lib/requests/finalizeExpired', e, {
         type: 'FINALIZE_FAILED', source: 'lib/requests/finalizeExpired', requestId: id,
         message: 'Сбой автоподведения итогов торгов — победитель не определён, повтор на следующем запросе',
+      })
+    }
+  }
+}
+
+/**
+ * Торги без откликов: срок приёма ставок вышел, а активных ставок нет (или все
+ * участники потеряли доступ к площадке) — заявка уходит в «Черновики заявок».
+ * Перевозчики её больше не видят, логист получает уведомление.
+ */
+async function moveUnansweredToDrafts(now: Date): Promise<void> {
+  const due = await db.request.findMany({
+    where: {
+      status: 'PUBLISHED', deadline: { lte: now },
+      NOT: { bids: { some: { withdrawn: false, carrier: { access: true } } } },
+    },
+    select: { id: true, number: true, fromPoint: true, toPoint: true },
+  })
+  for (const r of due) {
+    try {
+      const moved = await inTx(async (tx) => {
+        const res = await tx.request.updateMany({
+          where: { id: r.id, status: 'PUBLISHED', deadline: { lte: now } },
+          data: { status: 'DRAFT', bestRate: null },
+        })
+        if (res.count === 0) return false
+        await tx.event.create({
+          data: { requestId: r.id, type: 'MOVED_TO_DRAFT', message: 'Приём ставок завершён без откликов — заявка перенесена в «Черновики заявок»' },
+        })
+        return true
+      })
+      if (!moved) continue
+      notifyLive({ type: 'MOVED_TO_DRAFT', requestId: r.id })
+      await notifyLogists({
+        type: 'MOVED_TO_DRAFT',
+        title: `Нет откликов · №${r.number}`,
+        body: `${r.fromPoint} → ${r.toPoint}: ставок не было — заявка в «Черновиках заявок», её можно поправить и опубликовать снова`,
+        requestId: r.id,
+      }).catch((e) => console.error('notification error MOVED_TO_DRAFT', e))
+    } catch (e) {
+      console.error('moveUnansweredToDrafts error', r.id, e)
+      await plogError('lib/requests/finalizeExpired', e, {
+        type: 'FINALIZE_FAILED', source: 'lib/requests/finalizeExpired', requestId: r.id,
+        message: 'Сбой переноса заявки без откликов в черновики — повтор на следующем запросе',
       })
     }
   }

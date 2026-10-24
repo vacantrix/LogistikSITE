@@ -45,11 +45,12 @@ export function diadocConfig(): DiadocConfig {
 
 export const diadocEnabled = (): boolean => Boolean(env('DIADOC_CLIENT_ID'))
 
-/** Площадка для подписи в интерфейсе: «тестовая» / «боевая» / адрес своего стенда */
+/** Площадка для подписи в интерфейсе — без технических адресов: тестовая, рабочая или имитация */
 export function diadocStandLabel(c = diadocConfig()): string {
   if (c.apiUrl.includes('diadoc-api-staging.kontur.ru')) return 'тестовая площадка Диадока'
   if (c.apiUrl.includes('diadoc-api.kontur.ru')) return 'Диадок'
-  return `стенд ${c.apiUrl}`
+  if (/\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(c.apiUrl)) return 'имитация Диадока'
+  return 'свой стенд Диадока'
 }
 
 /**

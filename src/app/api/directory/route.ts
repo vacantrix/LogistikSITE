@@ -127,6 +127,8 @@ export async function POST(req: NextRequest) {
         await db.carrier.create({
           data: {
             name, inn,
+            // роль исполнителя: перевозчик (заказ-заявка) или экспедитор (поручение экспедитору)
+            role: data.role === 'FORWARDER' ? 'FORWARDER' : 'CARRIER',
             contractNo: s(data.contractNo, 100) || '—', contractDate: s(data.contractDate, 20) || '—',
             access: data.access !== 'false' && data.access !== false,
           },
@@ -308,6 +310,7 @@ export async function PUT(req: NextRequest) {
           data: {
             name, inn, contractNo: s(data.contractNo, 100) || '—',
             contractDate: s(data.contractDate, 20) || '—',
+            ...(data.role === 'FORWARDER' || data.role === 'CARRIER' ? { role: data.role } : {}),
             ...(data.access !== undefined ? { access: data.access !== 'false' && data.access !== false } : {}),
           },
         })

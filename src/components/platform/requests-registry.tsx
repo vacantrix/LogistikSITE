@@ -32,39 +32,25 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
-import { PointAutocomplete } from '@/components/platform/point-autocomplete'
+import { RequestFormDialog } from '@/components/platform/request-form'
 import {
   DELETABLE_STATUSES, REQUEST_GROUP_META, REQUEST_STATUS_META,
-  fmtDateTime, num, rate, requestGroupOf,
+  fmtDateTime, num, rate, requestGroupOf, type RequestGroup,
 } from '@/lib/status'
 import type { RequestDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
 
-type GroupFilter = 'ALL' | 'new' | 'working' | 'done' | 'deleted'
+type GroupFilter = 'ALL' | RequestGroup
 type SortOrder = 'desc' | 'asc'
-
-/** ДД.ММ.ГГГГ (формат заявок) → YYYY-MM-DD (input type=date); «—»/мусор → '' */
-function ruToIsoDate(s: string): string {
-  const m = (s ?? '').trim().match(/^(\d{2})\.(\d{2})\.(\d{4})$/)
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : ''
-}
-
-/** YYYY-MM-DD → ДД.ММ.ГГГГ */
-function isoToRuDate(iso: string): string {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : iso
-}
 
 export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
@@ -116,7 +102,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
   }, [requests, group, q, order])
 
   const groupCounts = useMemo(() => {
-    const counts = { new: 0, working: 0, done: 0, deleted: 0 } as Record<string, number>
+    const counts = { draft: 0, new: 0, working: 0, done: 0, deleted: 0 } as Record<string, number>
     for (const r of requests ?? []) counts[requestGroupOf(r.status)] += 1
     return counts
   }, [requests])
@@ -232,7 +218,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                       {filtered.map((r) => {
                         const g = REQUEST_GROUP_META[requestGroupOf(r.status)]
                         const deletable = DELETABLE_STATUSES.includes(r.status)
-                        const editable = r.status === 'PUBLISHED'
+                        const editable = r.status === 'PUBLISHED' || r.status === 'DRAFT'
                         return (
                           <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setDetailId(r.id)}>
                             <TableCell className="whitespace-nowrap font-bold text-blue-700">№{r.number}</TableCell>
@@ -248,13 +234,13 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                               </div>
                             </TableCell>
                             <TableCell className="max-w-[260px] text-slate-700">
-                              <span className="block truncate" title={`${r.fromPoint} → ${r.toPoint}`}>
+                              <span className="block break-words">
                                 {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
                               </span>
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-slate-600">{r.createdBy || '—'}</TableCell>
                             <TableCell className="max-w-[200px] text-slate-600">
-                              <span className="block truncate" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
+                              <span className="line-clamp-2" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
                             </TableCell>
                             <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-1">
@@ -275,7 +261,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                                     className="h-8 w-8 text-slate-500 hover:bg-amber-50 hover:text-amber-700"
                                     onClick={() => setEditId(r.id)}
                                     aria-label={`Редактировать заявку ${r.number}`}
-                                    title="Редактировать (пока заявка на площадке)"
+                                    title={r.status === 'DRAFT' ? 'Редактировать черновик' : 'Редактировать (пока заявка на площадке)'}
                                   >
                                     <Pencil className="h-4 w-4" aria-hidden />
                                   </Button>
@@ -301,7 +287,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   </Table>
                 </div>
                 <div className="border-t border-slate-100 px-4 py-2 text-xs text-muted-foreground">
-                  Нажмите на строку или иконку «Просмотр», чтобы открыть карточку заявки. Редактирование — пока заявка на площадке; удаление — для текущих заявок.
+                  Нажмите на строку или иконку «Просмотр», чтобы открыть карточку заявки. Редактирование — у черновиков и заявок на площадке; удаление — для текущих заявок.
                 </div>
               </CardContent>
             </Card>
@@ -330,12 +316,12 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
               </DialogHeader>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {[
-                  { label: 'Наименование / суть', value: detail.cargo },
-                  { label: 'Точка А (погрузка)', value: detail.fromPoint },
-                  { label: 'Точка Б (выгрузка)', value: detail.toPoint },
+                  { label: 'Груз', value: `${detail.cargo}, ${num(detail.tonnage)} т` },
+                  { label: 'Точка А (погрузка)', value: `${pointInfo(detail.fromPoint).short} — ${pointInfo(detail.fromPoint).address}` },
+                  { label: 'Точка Б (выгрузка)', value: `${pointInfo(detail.toPoint).short} — ${pointInfo(detail.toPoint).address}` },
                   { label: 'Желаемые сроки', value: `${detail.loadDate}, ${detail.loadWindow}` },
                   { label: 'Перевозчик', value: detail.winnerName ?? '—' },
-                  { label: 'Стартовая ставка', value: rate(detail.startRate) },
+                  { label: 'Стартовая ставка', value: detail.startRate > 0 ? rate(detail.startRate) : 'не задана' },
                   { label: 'Лучшая ставка', value: detail.bestRate != null ? rate(detail.bestRate) : '—' },
                 ].map((f) => (
                   <div key={f.label} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
@@ -405,129 +391,24 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Редактирование — пока заявка на площадке. key — по id: при открытии
-          другой заявки форма пересоздаётся с её данными, без утечки значений */}
-      <EditDialog
-        key={editId ?? 'none'}
-        request={editTarget}
-        busy={busy === editTarget?.id}
-        onClose={() => setEditId(null)}
-        onSaved={async () => { setEditId(null); await load() }}
-      />
+      {/* Редактирование — черновика или заявки, пока она на площадке (общая форма заявки) */}
+      {editTarget && (
+        <RequestFormDialog
+          key={editTarget.id}
+          open
+          onOpenChange={(o) => { if (!o) setEditId(null) }}
+          request={editTarget}
+          onDone={(request) => {
+            toast({
+              title: 'Заявка обновлена',
+              description: request.status === 'DRAFT'
+                ? `№${request.number}: черновик сохранён`
+                : `№${request.number}: изменения сохранены и уже видны перевозчикам`,
+            })
+            void load()
+          }}
+        />
+      )}
     </div>
-  )
-}
-
-/** Диалог редактирования параметров заявки, которая ещё на площадке (Task 66).
- *  Монтируется с key={id заявки}: useState-инициализатор заполняет форму один раз. */
-function EditDialog({ request, busy, onClose, onSaved }: {
-  request: RequestDTO | null
-  busy: boolean
-  onClose: () => void
-  onSaved: () => Promise<void>
-}) {
-  const { toast } = useToast()
-  const [form, setForm] = useState(() => request ? {
-    title: request.cargo,
-    fromPoint: request.fromPoint,
-    toPoint: request.toPoint,
-    loadDate: ruToIsoDate(request.loadDate),
-    loadWindow: request.loadWindow === '—' ? '08:00–12:00' : request.loadWindow,
-    comment: request.comment ?? '',
-    tonnage: String(request.tonnage),
-    truckType: request.truckType,
-    startRate: String(request.startRate),
-  } : {
-    title: '', fromPoint: '', toPoint: '',
-    loadDate: '', loadWindow: '', comment: '', tonnage: '', truckType: 'Тент', startRate: '',
-  })
-
-  const save = async () => {
-    if (!request) return
-    try {
-      await api.action(request.id, 'edit', {
-        cargo: form.title,
-        fromPoint: form.fromPoint,
-        toPoint: form.toPoint,
-        loadDate: form.loadDate ? isoToRuDate(form.loadDate) : '—',
-        loadWindow: form.loadWindow,
-        comment: form.comment,
-        tonnage: Number(form.tonnage) || undefined,
-        truckType: form.truckType,
-        startRate: form.startRate ? Number(form.startRate) : undefined,
-      })
-      toast({ title: 'Заявка обновлена', description: `№${request.number}: изменения сохранены и уже видны перевозчикам` })
-      await onSaved()
-    } catch (e) {
-      toast({ title: 'Не удалось сохранить изменения', description: e instanceof Error ? e.message : 'Попробуйте ещё раз', variant: 'destructive' })
-    }
-  }
-
-  const canSave = form.title.trim() !== '' && form.fromPoint.trim() !== '' && form.toPoint.trim() !== ''
-
-  return (
-    <Dialog open={!!request} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className={`max-h-[88vh] overflow-y-auto sm:max-w-xl ${THIN_SCROLL}`}>
-        {request && (
-          <>
-            <DialogHeader>
-              <DialogTitle>Редактирование заявки {request.number}</DialogTitle>
-              <DialogDescription>
-                Редактировать можно заявку, пока она открыта для ставок; изменения сразу видны перевозчикам.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="er-title">Наименование груза / суть</Label>
-                <Input id="er-title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="er-from">Точка А (Откуда)</Label>
-                <PointAutocomplete id="er-from" value={form.fromPoint} onChange={(v) => setForm((f) => ({ ...f, fromPoint: v }))} ariaLabel="Точка А — адрес погрузки" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="er-to">Точка Б (Куда)</Label>
-                <PointAutocomplete id="er-to" value={form.toPoint} onChange={(v) => setForm((f) => ({ ...f, toPoint: v }))} ariaLabel="Точка Б — адрес выгрузки" />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="er-date">Дата погрузки</Label>
-                <Input id="er-date" type="date" value={form.loadDate} onChange={(e) => setForm((f) => ({ ...f, loadDate: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="er-window">Окно погрузки</Label>
-                <Input id="er-window" placeholder="08:00–12:00" value={form.loadWindow} onChange={(e) => setForm((f) => ({ ...f, loadWindow: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="er-tonnage">Тоннаж, т</Label>
-                <Input id="er-tonnage" type="number" min={1} max={200} value={form.tonnage} onChange={(e) => setForm((f) => ({ ...f, tonnage: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="er-truck">Тип ТС</Label>
-                <Select value={form.truckType} onValueChange={(v) => setForm((f) => ({ ...f, truckType: v }))}>
-                  <SelectTrigger id="er-truck"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="er-rate">Стартовая ставка, ₽/т</Label>
-                <Input id="er-rate" type="number" min={2500} step={100} value={form.startRate} onChange={(e) => setForm((f) => ({ ...f, startRate: e.target.value }))} />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="er-comment">Комментарий для исполнителя</Label>
-                <Textarea id="er-comment" rows={3} value={form.comment} onChange={(e) => setForm((f) => ({ ...f, comment: e.target.value }))} />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={onClose}>Отмена</Button>
-              <Button onClick={() => void save()} disabled={busy || !canSave}>
-                {busy ? 'Сохраняем…' : 'Сохранить'}
-              </Button>
-            </DialogFooter>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
   )
 }

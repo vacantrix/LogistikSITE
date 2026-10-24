@@ -12,8 +12,8 @@ import {
   Clock,
   ClockPlus,
   EyeOff,
+  FilePen,
   FileSpreadsheet,
-  FileText,
   Gavel,
   HandCoins,
   Handshake,
@@ -21,7 +21,6 @@ import {
   Lock,
   Map as MapIcon,
   MapPin,
-  Paperclip,
   Plus,
   ScanSearch,
   Search,
@@ -32,7 +31,6 @@ import {
   Trash2,
   Trophy,
   Undo2,
-  X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -54,7 +52,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Textarea } from '@/components/ui/textarea'
 import {
   AgentStatusBadge,
   EmptyState,
@@ -67,7 +64,7 @@ import {
   type TabProps,
 } from '@/components/platform/common'
 import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
-import { PointAutocomplete } from '@/components/platform/point-autocomplete'
+import { RequestFormDialog } from '@/components/platform/request-form'
 import { AnimatedRate } from '@/components/platform/animated-rate'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
@@ -75,44 +72,9 @@ import { pointInfo } from '@/lib/points'
 import { formatKm, haversineKm, pointCoords, routeDistanceKm } from '@/lib/geo'
 import type { MapPoint } from '@/components/platform/delivery-map'
 import { DOC_TYPE_LABEL, fmtDateTime, MODE_META, num, rate, REQUEST_STATUS_META, DELETABLE_STATUSES, timeLeft } from '@/lib/status'
-import { fileToCompressedDataUri } from '@/lib/demo-media'
 import type { BidDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
-
-// ——— создание заявки (Task 64, редизайн формы) ———
-
-/** Ключ черновика формы в localStorage: если экран случайно закрыли — данные не теряются */
-const CREATE_DRAFT_KEY = 'aemz_request_draft_v1'
-
-const EMPTY_CREATE_FORM = {
-  // 1 · основная информация
-  title: '', // наименование груза / суть заявки
-  // 2 · параметры логистики
-  fromPoint: '',
-  toPoint: '',
-  loadDate: '', // YYYY-MM-DD (input type=date); в заявку уходит ДД.ММ.ГГГГ
-  loadWindow: '08:00–12:00',
-  // 3 · дополнительно
-  comment: '',
-  // торговые параметры (секция по клику)
-  tonnage: '20',
-  truckType: 'Тент',
-  mode: 'AUCTION' as RequestMode,
-  startRate: '8400',
-  deadlineHours: '4',
-}
-type CreateFormState = typeof EMPTY_CREATE_FORM
-
-/** ISO-дата input[type=date] → ДД.ММ.ГГГГ (формат заявок платформы) */
-function isoToRuDate(iso: string): string {
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : iso
-}
-
-/** Максимальный размер вложения и число файлов (Task 64) */
-const MAX_FILE_SIZE = 8 * 1024 * 1024
-const MAX_FILES = 8
 
 /** Карта доставки: Leaflet работает только в браузере — подключаем без SSR */
 const DeliveryMap = dynamic(() => import('@/components/platform/delivery-map'), {
@@ -162,7 +124,8 @@ function RateCell({ request }: { request: RequestDTO }) {
 
 /** Обратный отсчёт до окончания приёма ставок (без hydration mismatch) */
 function DeadlineCell({ request, now }: { request: RequestDTO; now: number | null }) {
-  if (!request.deadline) return <span className="text-slate-400">—</span>
+  // срок есть только у заявки на торгах: у ушедших в работу «Срок истёк» не показываем
+  if (request.status !== 'PUBLISHED' || !request.deadline) return <span className="text-slate-400">—</span>
   if (now === null) return <span className="text-slate-400">—</span>
   const tl = timeLeft(request.deadline)
   if (!tl) return <span className="text-slate-400">—</span>
@@ -491,53 +454,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   const [mapOpen, setMapOpen] = useState(false)
   const [focusPointId, setFocusPointId] = useState<string | null>(null)
 
-  // ——— создание заявки — только логист (Task 64) ———
+  // ——— создание заявки — только логист (Task 64): общая форма request-form.tsx ———
   const [createOpen, setCreateOpen] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [form, setForm] = useState<CreateFormState>(EMPTY_CREATE_FORM)
-  const [files, setFiles] = useState<File[]>([])
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  // экран успеха (Task 64): «Заявка №XXXX успешно создана» — номер созданной заявки
-  const [createdNumber, setCreatedNumber] = useState<string | null>(null)
-
-  // открытие формы: восстанавливаем черновик из localStorage (если экран случайно закрыли)
-  const openCreate = useCallback(() => {
-    try {
-      const raw = localStorage.getItem(CREATE_DRAFT_KEY)
-      setForm(raw ? { ...EMPTY_CREATE_FORM, ...(JSON.parse(raw) as Partial<CreateFormState>) } : EMPTY_CREATE_FORM)
-    } catch {
-      setForm(EMPTY_CREATE_FORM)
-    }
-    setFiles([])
-    setCreateOpen(true)
-  }, [])
-
-  // автосохранение черновика (Task 64): каждое изменение формы пишется в localStorage
-  useEffect(() => {
-    if (!createOpen) return
-    try { localStorage.setItem(CREATE_DRAFT_KEY, JSON.stringify(form)) } catch { /* приватный режим */ }
-  }, [createOpen, form])
-
-  // валидация (Task 64): «Создать» заблокирована, пока не заполнены обязательные поля
-  const startRateNum = Number(form.startRate.replace(/\s/g, '').replace(',', '.'))
-  const canCreate =
-    form.title.trim() !== '' &&
-    form.fromPoint.trim() !== '' &&
-    form.toPoint.trim() !== '' &&
-    form.startRate.trim() !== '' &&
-    Number.isFinite(startRateNum) && startRateNum > 0
-
-  /** выбор вложений: ограничение по числу и размеру — тяжёлые файлы пропускаем с пояснением */
-  const onPickFiles = (list: FileList | null) => {
-    if (!list || list.length === 0) return
-    const picked = Array.from(list)
-    const tooBig = picked.filter((f) => f.size > MAX_FILE_SIZE)
-    const ok = picked.filter((f) => f.size <= MAX_FILE_SIZE)
-    if (tooBig.length > 0) {
-      toast({ title: 'Файлы пропущены', description: `Больше 8 МБ: ${tooBig.map((f) => f.name).join(', ')}`, variant: 'destructive' })
-    }
-    setFiles((prev) => [...prev, ...ok].slice(0, MAX_FILES))
-  }
+  // экран успеха (Task 64): «Заявка №XXXX успешно создана» — номер и куда попала заявка
+  const [created, setCreated] = useState<{ number: string; draft: boolean } | null>(null)
 
   // торговый стенд и решения логиста (вместо отдельной вкладки «Торги»)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -610,6 +530,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     const list = requests ?? []
     const needle = q.trim().toLowerCase()
     return list.filter((r) => {
+      // черновики живут в отдельном разделе «Черновики заявок» — на площадку не выходят
+      if (r.status === 'DRAFT') return false
       // Логист видит всю площадку целиком — ему нужен полный контроль над заявками
       if (isLogist) {
         if (mode !== 'ALL' && r.mode !== mode) return false
@@ -825,47 +747,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     if (ok) { setRaiseReq(null); setExpandedId(null) }
   }
 
-  // ——— публикация заявки (Task 64: новая структура формы + вложения + экран успеха) ———
-  const doCreate = async () => {
-    if (!canCreate) return
-    setCreating(true)
-    try {
-      const { request } = await api.createRequest({
-        cargo: form.title.trim(),
-        fromPoint: form.fromPoint.trim(),
-        toPoint: form.toPoint.trim(),
-        tonnage: Number(form.tonnage) || 20,
-        truckType: form.truckType,
-        mode: form.mode,
-        startRate: startRateNum,
-        loadDate: form.loadDate ? isoToRuDate(form.loadDate) : '—',
-        loadWindow: form.loadWindow.trim() || '08:00–12:00',
-        comment: form.comment.trim(),
-        deadlineHours: Number(form.deadlineHours || 4),
-      })
-      // вложения (Task 64): загружаются после создания заявки — каждый файл отдельно;
-      // сбой одного файла не отменяет заявку — сообщаем и продолжаем
-      for (const f of files) {
-        try {
-          const dataUri = await fileToCompressedDataUri(f)
-          await api.uploadDocument(request.id, { type: 'ATTACHMENT', fileName: f.name, dataUri })
-        } catch {
-          toast({ title: 'Файл не приложен', description: `${f.name}: заявку создали, но файл не загрузился — попробуйте позже в карточке заявки`, variant: 'destructive' })
-        }
-      }
-      setRequests((prev) => [request, ...(prev ?? [])])
-      setCreateOpen(false)
-      try { localStorage.removeItem(CREATE_DRAFT_KEY) } catch { /* ignore */ }
-      setFiles([])
-      setForm(EMPTY_CREATE_FORM)
-      setCreatedNumber(request.number) // экран успеха вместо тоста (Task 64)
-    } catch (e) {
-      toast({ title: 'Не удалось создать заявку', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
-    } finally {
-      setCreating(false)
-    }
-  }
-
   // ——— удаление текущей заявки логистом (Task 65, RBAC: delete_current_orders) ———
   const [deleteTarget, setDeleteTarget] = useState<RequestDTO | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -909,6 +790,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         onClick: () => setExpandedId(noBids[0].id),
       })
     }
+    const drafts = requests.filter((r) => r.status === 'DRAFT').length
+    if (drafts > 0) {
+      items.push({ key: 'drafts', icon: FilePen, text: `В черновиках — ${drafts}`, onClick: () => onNavigate('drafts') })
+    }
     const atLogist = requests.filter((r) => r.status === 'AT_LOGIST').length
     if (atLogist > 0) {
       items.push({ key: 'verify', icon: ScanSearch, text: `На сверке — ${atLogist}`, onClick: () => onNavigate('verify') })
@@ -924,7 +809,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     <section aria-label="Площадка заявок">
       <SectionHeader title="Площадка заявок">
         {isLogist && (
-          <Button onClick={openCreate} className="gap-1.5" aria-label="Создать и опубликовать заявку">
+          <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать заявку">
             <Plus className="h-4 w-4" aria-hidden />
             Создать заявку
           </Button>
@@ -1048,10 +933,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                       <col className="w-[15%]" />
                     </colgroup>
                     <thead>
-                      <tr className="whitespace-nowrap text-left text-xs uppercase tracking-wide text-slate-500">
+                      <tr className="whitespace-nowrap text-left text-xs text-slate-500">
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">№ заявки</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Маршрут</th>
-                        <SortableTh k="km" label="КМ" sort={sort} onSort={toggleSort} title="Расстояние от погрузки до назначения, по прямой" />
+                        <SortableTh k="km" label="Км" sort={sort} onSort={toggleSort} title="Расстояние от погрузки до назначения, по прямой" />
                         <SortableTh k="cargo" label="Груз" sort={sort} onSort={toggleSort} />
                         <SortableTh k="load" label="Погрузка" sort={sort} onSort={toggleSort} />
                         <SortableTh k="truck" label="Тип ТС" sort={sort} onSort={toggleSort} />
@@ -1236,229 +1121,41 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         </div>
       )}
 
-      {/* Диалог создания заявки (Task 64) — только логист */}
-      {isLogist && (
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-            <DialogHeader>
-              <DialogTitle>Новая заявка</DialogTitle>
-              <DialogDescription>
-                Заявка будет опубликована на площадке с присвоением сквозного номера Z-XXXX.
-                Черновик сохраняется автоматически — случайно закрытое окно не потеряет данные.
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-5">
-              {/* 1 · Основная информация */}
-              <section aria-label="Основная информация" className="space-y-3">
-                <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700" aria-hidden>1</span>
-                  Основная информация
-                </h4>
-                <div className="grid grid-cols-1 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-title">Наименование груза / суть заявки <span className="text-red-500" aria-hidden>*</span></Label>
-                    <Input
-                      id="cr-title"
-                      placeholder="Труба стальная 6 м, партия 20 т"
-                      value={form.title}
-                      onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* 2 · Параметры логистики */}
-              <section aria-label="Параметры логистики" className="space-y-3">
-                <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700" aria-hidden>2</span>
-                  Параметры логистики
-                </h4>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-from">Точка А (Откуда) — адрес погрузки <span className="text-red-500" aria-hidden>*</span></Label>
-                    <PointAutocomplete
-                      id="cr-from"
-                      value={form.fromPoint}
-                      onChange={(v) => setForm((f) => ({ ...f, fromPoint: v }))}
-                      placeholder="Абинск, АЭМЗ"
-                      ariaLabel="Точка А — адрес погрузки, с подсказками"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-to">Точка Б (Куда) — адрес выгрузки <span className="text-red-500" aria-hidden>*</span></Label>
-                    <PointAutocomplete
-                      id="cr-to"
-                      value={form.toPoint}
-                      onChange={(v) => setForm((f) => ({ ...f, toPoint: v }))}
-                      placeholder="Порт Санкт-Петербург"
-                      ariaLabel="Точка Б — адрес выгрузки, с подсказками"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-date">Дата — желаемый срок выполнения</Label>
-                    <Input
-                      id="cr-date"
-                      type="date"
-                      value={form.loadDate}
-                      onChange={(e) => setForm((f) => ({ ...f, loadDate: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-window">Время — окно погрузки</Label>
-                    <Input
-                      id="cr-window"
-                      placeholder="08:00–12:00"
-                      value={form.loadWindow}
-                      onChange={(e) => setForm((f) => ({ ...f, loadWindow: e.target.value }))}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* 3 · Дополнительно */}
-              <section aria-label="Дополнительно" className="space-y-3">
-                <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700" aria-hidden>3</span>
-                  Дополнительно
-                </h4>
-                <div className="space-y-1.5">
-                  <Label htmlFor="cr-comment">Комментарий для исполнителя</Label>
-                  <Textarea
-                    id="cr-comment"
-                    rows={3}
-                    placeholder="Особые условия погрузки, контакты на месте, требования к машине…"
-                    value={form.comment}
-                    onChange={(e) => setForm((f) => ({ ...f, comment: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="cr-files">Прикреплённые файлы / документы</Label>
-                  <input
-                    ref={fileInputRef}
-                    id="cr-files"
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    multiple
-                    className="sr-only"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    onChange={(e) => { onPickFiles(e.target.files); e.target.value = '' }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="gap-1.5"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={files.length >= MAX_FILES}
-                  >
-                    <Paperclip className="h-4 w-4 text-slate-500" aria-hidden />
-                    Прикрепить файлы
-                  </Button>
-                  {files.length > 0 && (
-                    <ul className="space-y-1.5" aria-label="Список выбранных файлов">
-                      {files.map((f, i) => (
-                        <li key={`${f.name}-${i}`} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
-                          <FileText className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                          <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700" title={f.name}>{f.name}</span>
-                          <span className="shrink-0 text-[10px] text-slate-400">{Math.max(1, Math.round(f.size / 1024))} КБ</span>
-                          <button
-                            type="button"
-                            onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
-                            aria-label={`Убрать файл ${f.name}`}
-                            className="shrink-0 rounded p-0.5 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-700"
-                          >
-                            <X className="h-3.5 w-3.5" aria-hidden />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Фото или сканы (JPG, PNG, WebP) до 8 МБ, до {MAX_FILES} файлов — например, ТТН или схема погрузки.
-                  </p>
-                </div>
-              </section>
-
-              {/* Торговые параметры: раскрыты по клику — необязательны, есть разумные значения по умолчанию */}
-              <details className="rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-3" aria-label="Параметры торгов">
-                <summary className="cursor-pointer select-none text-sm font-semibold text-slate-700">
-                  Параметры торгов (тоннаж, тип ТС, ставка, приём ставок)
-                </summary>
-                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-tonnage">Тоннаж, т</Label>
-                    <Input id="cr-tonnage" type="number" min={1} max={200} value={form.tonnage} onChange={(e) => setForm((f) => ({ ...f, tonnage: e.target.value }))} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-truck">Тип ТС</Label>
-                    <Select value={form.truckType} onValueChange={(v) => setForm((f) => ({ ...f, truckType: v }))}>
-                      <SelectTrigger id="cr-truck"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {['Тент', 'Реф', 'Изотерм', 'Борт'].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-mode">Вид тендера</Label>
-                    <Select value={form.mode} onValueChange={(v) => setForm((f) => ({ ...f, mode: v as RequestMode }))}>
-                      <SelectTrigger id="cr-mode"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="AUCTION">Торги (аукцион на понижение)</SelectItem>
-                        <SelectItem value="CLOSED">Закрытые ставки</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cr-rate">Стартовая ставка, ₽/т <span className="text-red-500" aria-hidden>*</span></Label>
-                    <Input id="cr-rate" type="number" min={2500} max={12000} step={100} placeholder="8400" value={form.startRate} onChange={(e) => setForm((f) => ({ ...f, startRate: e.target.value }))} />
-                  </div>
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label htmlFor="cr-deadline">Приём ставок ещё</Label>
-                    <Select value={form.deadlineHours} onValueChange={(v) => setForm((f) => ({ ...f, deadlineHours: v }))}>
-                      <SelectTrigger id="cr-deadline"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {[['2', '2 часа'], ['4', '4 часа'], ['8', '8 часов'], ['24', '24 часа']].map(([v, l]) => (
-                          <SelectItem key={v} value={v}>{l}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </details>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>Отмена</Button>
-              <Button onClick={() => void doCreate()} disabled={!canCreate || creating} aria-label="Создать заявку" title={canCreate ? 'Опубликовать заявку на площадке' : 'Заполните обязательные поля: наименование, точки А и Б, стартовая ставка'}>
-                {creating ? 'Создаём…' : 'Создать'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+      {/* Форма новой заявки (Task 64) — только логист: опубликовать или сохранить в черновики */}
+      {isLogist && createOpen && (
+        <RequestFormDialog
+          open
+          onOpenChange={setCreateOpen}
+          onDone={(request, result) => {
+            if (result === 'published') setRequests((prev) => [request, ...(prev ?? [])])
+            setCreated({ number: request.number, draft: result === 'draft' })
+          }}
+        />
       )}
 
       {/* Экран успеха (Task 64): лаконичное окно с переходом в реестр или созданием следующей */}
       {isLogist && (
-        <Dialog open={createdNumber !== null} onOpenChange={(o) => { if (!o) setCreatedNumber(null) }}>
+        <Dialog open={created !== null} onOpenChange={(o) => { if (!o) setCreated(null) }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader className="items-center text-center">
               <DialogTitle className="flex flex-col items-center gap-3 text-lg font-semibold text-slate-900">
                 <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700" aria-hidden>
                   <CheckCircle2 className="h-6 w-6" />
                 </span>
-                Заявка {createdNumber} успешно создана
+                {created?.draft ? `Черновик ${created.number} сохранён` : `Заявка ${created?.number} успешно создана`}
               </DialogTitle>
               <DialogDescription className="mx-auto max-w-xs">
-                Она уже на площадке — перевозчики видят её и могут подавать ставки.
+                {created?.draft
+                  ? 'Перевозчики её не видят. Опубликовать заявку можно в «Черновиках заявок».'
+                  : 'Она уже на площадке — перевозчики видят её и могут подавать ставки.'}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="sm:justify-center">
-              <Button variant="outline" onClick={() => { setCreatedNumber(null); openCreate() }}>
-                Создать еще одну
+              <Button variant="outline" onClick={() => { setCreated(null); setCreateOpen(true) }}>
+                Создать ещё одну
               </Button>
-              <Button onClick={() => { setCreatedNumber(null); onNavigate('requests') }}>
-                Перейти в реестр
+              <Button onClick={() => { const draft = created?.draft; setCreated(null); onNavigate(draft ? 'drafts' : 'requests') }}>
+                {created?.draft ? 'Перейти в черновики' : 'Перейти в реестр'}
               </Button>
             </DialogFooter>
           </DialogContent>

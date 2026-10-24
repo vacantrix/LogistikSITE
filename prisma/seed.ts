@@ -113,7 +113,8 @@ async function main() {
 
   const carrierV = await db.carrier.create({
     data: {
-      name: 'ООО «Перевозчик В»', inn: '2310045673', contractNo: '18-В', contractDate: '21.08.2025',
+      // демо-экспедитор: рейсы получают поручение экспедитору вместо заказ-заявки
+      name: 'ООО «Перевозчик В»', role: 'FORWARDER', inn: '2310045673', contractNo: '18-В', contractDate: '21.08.2025',
       drivers: {
         create: [
           { fullName: 'Морозов Игорь Павлович', birthDate: '09.07.1987', passport: '77 02 551209', license: '77 02 551209', licenseTill: '30.11.2029', categories: 'C, CE', createdAt: hoursAgo(24 * 21) },
@@ -187,7 +188,7 @@ async function main() {
   // ---------- Активные заявки на площадке ----------
   const z1042 = await db.request.create({
     data: {
-      number: 'Z-1042', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
+      number: 'Z-1042', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 8400, bestRate: 7900,
       status: 'PUBLISHED', loadDate: '20.10.2026', loadWindow: '08:00–12:00',
       deadline: inHours(2.25),
@@ -209,7 +210,7 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1043', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Перевозка готовой продукции - пруток', cargoTypeId: cargoBar.id,
+      number: 'Z-1043', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - пруток', cargoTypeId: cargoBar.id,
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 6800, bestRate: null,
       status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00',
       deadline: inHours(26),
@@ -219,7 +220,7 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1044', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
+      number: 'Z-1044', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 11500, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '08:00–11:00',
       deadline: inHours(28),
@@ -229,7 +230,7 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1045', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
+      number: 'Z-1045', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 9200, bestRate: null,
       status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '13:00–17:00',
       deadline: inHours(5.5),
@@ -239,7 +240,7 @@ async function main() {
 
   await db.request.create({
     data: {
-      number: 'Z-1046', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
+      number: 'Z-1046', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 3200, bestRate: null,
       status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00',
       deadline: inHours(20),
@@ -250,7 +251,7 @@ async function main() {
   // ---------- Выигранные перевозчиком Б: готовятся к подаче заявки ----------
   await db.request.create({
     data: {
-      number: 'Z-1047', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Перевозка готовой продукции - моток', cargoTypeId: cargoCoil.id,
+      number: 'Z-1047', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - моток', cargoTypeId: cargoCoil.id,
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 8800, bestRate: 8200,
       status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierB.id,
@@ -266,7 +267,7 @@ async function main() {
   })
   await db.request.create({
     data: {
-      number: 'Z-1048', fromPoint: 'Завод', toPoint: 'Склад', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
+      number: 'Z-1048', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 4100, bestRate: 3850,
       status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00',
       winnerId: carrierB.id,
@@ -288,7 +289,7 @@ async function main() {
 
   const z1039 = await db.request.create({
     data: {
-      number: 'Z-1039', fromPoint: 'Завод', toPoint: 'Порт', cargo: 'Перевозка готовой продукции - катанка', cargoTypeId: cargoWireRod.id,
+      number: 'Z-1039', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - катанка', cargoTypeId: cargoWireRod.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 10500, bestRate: 9800,
       status: 'AT_LOGIST', loadDate: '16.10.2026', loadWindow: '08:00–12:00',
       winnerId: carrierA.id, driverId: driverA?.id, truckId: truckA?.id, trailerId: trailerA?.id,
@@ -373,12 +374,12 @@ async function main() {
 
   // ---------- Реестр: подтверждённые и закрытые рейсы ----------
   const regRows = [
-    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 11200, best: 10400, load: '14.10.2026', cargo: 'Перевозка готовой продукции - катанка', cargoId: cargoWireRod.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SENT', h: 96 },
-    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 5400, best: 5150, load: '08.10.2026', cargo: 'Перевозка металлолома', cargoId: cargoScrap.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 190 },
-    { number: 'Z-1041', status: 'CLOSED', carrier: carrierB, start: 4600, best: 4350, load: '12.10.2026', cargo: 'Перевозка готовой продукции - пруток', cargoId: cargoBar.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 150 },
-    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 11800, best: 11250, load: '05.10.2026', cargo: 'Перевозка готовой продукции - пруток', cargoId: cargoBar.id, route: ['Завод', 'Порт'], pass: true, etrn: 'SIGNED', h: 280 },
-    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 2600, best: 2600, load: '02.10.2026', cargo: 'Автоуслуги для собственных подразделений', cargoId: cargoAuto.id, route: ['Завод', 'Склад'], pass: true, etrn: 'SIGNED', h: 330 },
-    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 7600, best: 7300, load: '29.09.2026', cargo: 'Перевозка готовой продукции - катанка', cargoId: cargoWireRod.id, route: ['Завод', 'Порт'], pass: false, etrn: 'SIGNED', h: 400 },
+    { number: 'Z-1038', status: 'CONFIRMED', carrier: carrierA, start: 11200, best: 10400, load: '14.10.2026', cargo: 'Перевозка готовой продукции - катанка', cargoId: cargoWireRod.id, route: ['Абинск', 'Санкт-Петербург'], pass: true, etrn: 'SENT', h: 96 },
+    { number: 'Z-1037', status: 'CLOSED', carrier: carrierB, start: 5400, best: 5150, load: '08.10.2026', cargo: 'Перевозка металлолома', cargoId: cargoScrap.id, route: ['Абинск', 'Санкт-Петербург, склад «Южный»'], pass: true, etrn: 'SIGNED', h: 190 },
+    { number: 'Z-1041', status: 'CLOSED', carrier: carrierB, start: 4600, best: 4350, load: '12.10.2026', cargo: 'Перевозка готовой продукции - пруток', cargoId: cargoBar.id, route: ['Абинск', 'Санкт-Петербург, склад «Южный»'], pass: true, etrn: 'SIGNED', h: 150 },
+    { number: 'Z-1036', status: 'CLOSED', carrier: carrierG, start: 11800, best: 11250, load: '05.10.2026', cargo: 'Перевозка готовой продукции - пруток', cargoId: cargoBar.id, route: ['Абинск', 'Санкт-Петербург'], pass: true, etrn: 'SIGNED', h: 280 },
+    { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 2600, best: 2600, load: '02.10.2026', cargo: 'Автоуслуги для собственных подразделений', cargoId: cargoAuto.id, route: ['Абинск', 'Санкт-Петербург, склад «Южный»'], pass: true, etrn: 'SIGNED', h: 330 },
+    { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 7600, best: 7300, load: '29.09.2026', cargo: 'Перевозка готовой продукции - катанка', cargoId: cargoWireRod.id, route: ['Абинск', 'Санкт-Петербург'], pass: false, etrn: 'SIGNED', h: 400 },
   ]
   for (const r of regRows) {
     await db.request.create({
@@ -390,7 +391,7 @@ async function main() {
         winnerId: r.carrier.id, passPackage: r.pass, etrnStatus: r.etrn,
         createdAt: hoursAgo(r.h + 24), updatedAt: hoursAgo(r.h),
         bids: { create: [{ carrierId: r.carrier.id, amount: r.best, isWinner: true, createdAt: hoursAgo(r.h + 12) }] },
-        events: { create: { type: 'CONFIRMED_1C', message: `Данные подтверждены и переданы в 1C:ERP — справочник и реестр`, createdAt: hoursAgo(r.h) } },
+        events: { create: { type: 'CONFIRMED_1C', message: 'Документы сверены и подтверждены — рейс выполняется', createdAt: hoursAgo(r.h) } },
       },
     })
   }

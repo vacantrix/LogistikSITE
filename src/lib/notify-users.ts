@@ -7,12 +7,13 @@
  *      CREW_ASSIGNED   — перевозчик указал/утвердил экипаж по выигранному рейсу;
  *      DOCS_READY      — комплект документов прошёл авто-проверку, заявка на сверке;
  *      AUCTION_FINISHED— итоги торгов подведены (по сроку или прямым назначением);
+ *      MOVED_TO_DRAFT  — торги закончились без ставок, заявка в «Черновиках заявок»;
  *      EDO_SIGNED      — контрагент подписал документ ЭДО (Task 76).
  *  — Перевозчик (пользователи его компании):
  *      WINNER_AWARDED  — заявка закреплена за компанией (торги/прямое назначение);
  *      BID_OUTBID      — в торгах кто-то перебил текущую лучшую ставку;
  *      DOCS_RETURNED   — логист вернул документы на доработку (с причиной);
- *      DOCS_CONFIRMED  — логист подтвердил сверку, данные переданы в 1С;
+ *      DOCS_CONFIRMED  — логист подтвердил сверку, рейс выполняется;
  *      TRIP_CLOSED     — рейс закрыт, заявка завершена;
  *      REQUEST_DELETED — логист удалил заявку (с площадки снята);
  *      EDO_READY       — сформирован комплект ЭДО, доступен к подписанию (Task 76);
@@ -28,7 +29,7 @@ import { notifyLive } from '@/lib/notify'
 export type NotifyType =
   | 'BID_PLACED' | 'BID_OUTBID' | 'AUCTION_FINISHED' | 'WINNER_AWARDED'
   | 'CREW_ASSIGNED' | 'DOCS_READY' | 'DOCS_RETURNED' | 'DOCS_CONFIRMED'
-  | 'TRIP_CLOSED' | 'REQUEST_DELETED'
+  | 'TRIP_CLOSED' | 'REQUEST_DELETED' | 'MOVED_TO_DRAFT'
   | 'EDO_READY' | 'EDO_SIGNED'
 
 export interface NotifyPayload {

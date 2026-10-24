@@ -385,7 +385,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
                 Загрузить из Excel
               </div>
               <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                Одна таблица — водитель, тягач и прицеп. Из строк создаются отдельные карточки: водители, ТС и прицепы (Task 51).
+                Одна таблица — водитель, тягач и прицеп. Из строк создаются отдельные карточки: водители, ТС и прицепы.
               </p>
               <div className="mt-3 space-y-2">
                 <Button variant="outline" className="w-full gap-1.5" onClick={downloadTemplate}>

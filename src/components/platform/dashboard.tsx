@@ -32,7 +32,7 @@ const QUICK_ACTIONS = [
   { key: 'board', title: 'Площадка заявок', desc: 'Ставки и заявки в работе', icon: Truck },
   { key: 'verify', title: 'Проверка документов', desc: 'Фото, поля, решение логиста', icon: ScanSearch },
   { key: 'reports', title: 'Отчёты', desc: 'Экономия и активность перевозчиков', icon: FileBarChart2 },
-  { key: 'registry', title: 'Реестр рейсов', desc: 'Единый реестр для 1С:ERP', icon: Warehouse },
+  { key: 'registry', title: 'Реестр рейсов', desc: 'Единый реестр рейсов', icon: Warehouse },
 ] as const
 
 export default function DashboardTab({ onNavigate }: TabProps) {
@@ -102,7 +102,7 @@ export default function DashboardTab({ onNavigate }: TabProps) {
               label="Документов принято автоматически"
               value={`${kpi.docsAutoShare}%`}
               tone="navy"
-              hint={`ЭТрН из 1С: ${kpi.etrnShare}%`}
+              hint={`Рейсы с ЭТрН: ${kpi.etrnShare}%`}
             />
           </div>
 

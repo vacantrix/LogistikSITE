@@ -60,11 +60,12 @@ export function onecMeta(count: number, extra: Record<string, unknown> = {}) {
 
 /** Человекочитаемые статусы заявок для 1С (дублируют REQUEST_STATUS_META) */
 export const ONEC_STATUS_RU: Record<RequestStatus, string> = {
+  DRAFT: 'Черновик',
   PUBLISHED: 'На площадке',
   AWARDED: 'Перевозчик выбран',
   DOCS_REVIEW: 'Документы проверяются',
   AT_LOGIST: 'Подготовка к рейсу',
-  CONFIRMED: 'Данные в 1С',
+  CONFIRMED: 'Рейс выполняется',
   CLOSED: 'Рейс закрыт',
   DELETED: 'Удалена',
 }

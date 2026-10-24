@@ -3,15 +3,13 @@
 /**
  * «Подписать ЭДО» (Task 76) — подписание электронных документов рейсов.
  *
- * Наш случай — цепочка АЭМЗ (грузоотправитель) → экспедитор → перевозчик:
- *  — комплект экспедитора: Доверенность + Поручение экспедитору. По правилам
- *    транспортно-экспедиционной деятельности эти документы создаёт грузоотправитель,
- *    поэтому у логиста есть кнопка «Сформировать для экспедитора»;
- *  — комплект перевозчика: Транспортная накладная (ЭТрН, создаётся автоматически
- *    при подтверждении рейса) и Акт оказанных услуг (после закрытия рейса).
- * Каждая сторона подписывает своей КЭП: логист — за АЭМЗ, перевозчик-победитель —
- * за экспедитора (подписант: водитель-экспедитор) и за перевозчика. Статусы
- * подписания, предосмотр сканов с факсимиле — в карточке каждого рейса.
+ * Документы зависят от роли исполнителя рейса (справочник перевозчиков):
+ *  — перевозчик: заказ (заявка) на перевозку груза;
+ *  — экспедитор: поручение экспедитору по договору транспортной экспедиции;
+ *  — у обоих: транспортная накладная (ЭТрН — через Диадок, если он подключён)
+ *    и акт оказанных услуг после закрытия рейса.
+ * Все документы появляются сами — логист и исполнитель только подписывают своей КЭП.
+ * Статусы подписания, предосмотр сканов с факсимиле — в карточке каждого рейса.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Building2, Eye, FileSignature, Info, PenLine, RefreshCw, ScrollText, Send, UserRound } from 'lucide-react'
@@ -91,7 +89,7 @@ function SignBadge({ signed, label }: { signed: boolean; label: string }) {
 }
 
 /** Порядок комплектов и документов в карточке рейса */
-const DOC_ORDER: EdoKind[] = ['POA', 'ORDER', 'ETRN', 'ACT']
+const DOC_ORDER: EdoKind[] = ['ORDER', 'ETRN', 'ACT']
 
 export default function EdoTab({ role, liveTick }: TabProps) {
   const { toast } = useToast()
@@ -134,19 +132,6 @@ export default function EdoTab({ role, liveTick }: TabProps) {
     return { awaiting, signed }
   }, [packages])
 
-  const createPack = async (pack: EdoPackageDTO) => {
-    setBusy(pack.request.id)
-    try {
-      await api.edoAction({ requestId: pack.request.id, action: 'create-expeditor-pack' })
-      toast({ title: 'Комплект сформирован', description: `№${pack.request.number}: доверенность и поручение экспедитору отправлены на подписание` })
-      await load()
-    } catch (e) {
-      toast({ title: 'Не удалось сформировать комплект', description: e instanceof Error ? e.message : 'Попробуйте ещё раз', variant: 'destructive' })
-    } finally {
-      setBusy(null)
-    }
-  }
-
   const sign = async (pack: EdoPackageDTO, doc: EdoDocDTO) => {
     setBusy(doc.id)
     try {
@@ -178,14 +163,14 @@ export default function EdoTab({ role, liveTick }: TabProps) {
       <SectionHeader
         eyebrow={isLogist ? 'Внутренний контур АЭМЗ' : 'Кабинет перевозчика'}
         title="Подписать ЭДО"
-        desc="Электронный документооборот рейсов: доверенность и поручение экспедитору, транспортная накладная и акт — каждая сторона подписывает своей КЭП через оператора ЭДО."
+        desc="Электронные документы рейса: заказ-заявка перевозчику или поручение экспедитору, транспортная накладная и акт. Документы появляются сами — каждая сторона подписывает своей КЭП."
       >
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Ожидают подписи: {counters.awaiting}</Badge>
           <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">Подписано: {counters.signed}</Badge>
           {diadoc?.enabled && (
             <>
-              <Badge variant="outline" className="border-blue-300 bg-blue-50 text-blue-800">Диадок · {diadoc.stand}</Badge>
+              <Badge variant="outline" className="border-blue-300 bg-blue-50 text-blue-800">{diadoc.stand.charAt(0).toUpperCase() + diadoc.stand.slice(1)}</Badge>
               <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
                 <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden />
                 Обновить статусы
@@ -215,10 +200,10 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                 Как устроен документооборот
               </div>
               <ul className="ml-5 list-disc space-y-1">
-                <li><span className="font-medium">Схема: АЭМЗ (грузоотправитель) → экспедитор → перевозчик.</span> Экспедитор организует доставку от имени завода, его представитель — водитель-экспедитор.</li>
-                <li><span className="font-medium">От нас экспедитору</span> — доверенность (ДОВ) и поручение экспедитору (ПОР): эти документы создаёт логист АЭМЗ.</li>
-                <li><span className="font-medium">Между АЭМЗ и перевозчиком</span> — транспортная накладная (ЭТрН, формируется при подтверждении рейса) и акт оказанных услуг (после выполнения).</li>
-                <li><span className="font-medium">Подписание</span> — КЭП каждой стороны через оператора ЭДО: АЭМЗ подписывает у себя, экспедитор и перевозчик — со своей стороны.</li>
+                <li><span className="font-medium">Исполнитель — перевозчик</span> (везёт сам): АЭМЗ и перевозчик подписывают заказ-заявку на перевозку.</li>
+                <li><span className="font-medium">Исполнитель — экспедитор</span> (организует перевозку): вместо заказ-заявки — поручение экспедитору. Перевозчика экспедитор нанимает сам, доверенность на водителя выдаёт тоже он — не АЭМЗ.</li>
+                <li><span className="font-medium">Транспортная накладная</span> появляется при подтверждении рейса{diadoc?.enabled ? ' и отправляется через Диадок: АЭМЗ подписывает титул грузоотправителя, остальные стороны — у себя, статусы приходят сами' : ''}. Акт оказанных услуг — после закрытия рейса.</li>
+                <li><span className="font-medium">Роль исполнителя</span> (перевозчик или экспедитор) хранится в карточке компании на платформе — от неё зависит, какой договорной документ получит рейс.</li>
               </ul>
             </CardContent>
           </Card>
@@ -231,14 +216,13 @@ export default function EdoTab({ role, liveTick }: TabProps) {
             />
           ) : (
             packages.map((pack) => {
-              const expeditorDocs = DOC_ORDER
-                .map((kind) => pack.docs.find((d) => d.kind === kind))
-                .filter((d): d is EdoDocDTO => Boolean(d) && ['POA', 'ORDER'].includes(d!.kind))
-              const carrierDocs = DOC_ORDER
+              const orderDocs = pack.docs.filter((d) => d.kind === 'ORDER')
+              const tripDocs = DOC_ORDER
                 .map((kind) => pack.docs.find((d) => d.kind === kind))
                 .filter((d): d is EdoDocDTO => Boolean(d) && ['ETRN', 'ACT'].includes(d!.kind))
               const r = pack.request
               const inWork = r.status === 'CONFIRMED'
+              const forwarder = r.executorRole === 'FORWARDER'
               return (
                 <Card key={pack.request.id} className="border-slate-200 shadow-sm">
                   <CardContent className="space-y-4 p-4 sm:p-5">
@@ -251,6 +235,9 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                       >
                         {inWork ? 'В работе' : 'Завершён'}
                       </Badge>
+                      <Badge variant="outline" className="border-slate-300 bg-white text-slate-700">
+                        {forwarder ? 'Экспедитор' : 'Перевозчик'}
+                      </Badge>
                       <span className="text-sm text-slate-700">{r.route}</span>
                       <span className="text-sm text-slate-500">· {r.cargo}, {new Intl.NumberFormat('ru-RU').format(r.tonnage)} т</span>
                       <span className="text-sm text-slate-500">· погрузка {r.loadDate}</span>
@@ -262,36 +249,26 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                      {/* комплект экспедитора */}
+                      {/* договорной документ — по роли исполнителя */}
                       <DocKit
-                        title="Комплект экспедитора"
-                        hint="Документы создаёт АЭМЗ (грузоотправитель) — обязанность перед экспедитором"
-                        docs={expeditorDocs}
+                        title={forwarder ? 'Поручение экспедитору' : 'Заказ-заявка на перевозку'}
+                        hint={forwarder
+                          ? 'Договор транспортной экспедиции: экспедитор организует перевозку и сам нанимает перевозчика'
+                          : 'Договорной документ АЭМЗ и перевозчика по этому рейсу'}
+                        docs={orderDocs}
                         pack={pack}
                         role={role}
                         busy={busy}
                         onSign={sign}
                         onPreview={setPreviewDoc}
-                        footer={expeditorDocs.length === 0 ? (
-                          isLogist ? (
-                            <Button size="sm" disabled={busy === pack.request.id || !inWork} onClick={() => void createPack(pack)}>
-                              <FileSignature className="mr-1.5 h-4 w-4" aria-hidden />
-                              Сформировать для экспедитора
-                            </Button>
-                          ) : (
-                            <p className="text-xs text-slate-500">Комплект ещё не сформирован — его готовит АЭМЗ и пришлёт в этот раздел.</p>
-                          )
-                        ) : undefined}
-                        emptyHint={isLogist
-                          ? 'Сформируйте комплект — без доверенности и поручения экспедитор не сможет принять груз'
-                          : undefined}
+                        emptyHint="Документ появится автоматически"
                       />
 
-                      {/* комплект перевозчика */}
+                      {/* перевозочные документы */}
                       <DocKit
-                        title="Комплект перевозчика"
-                        hint="ЭТрН формируется автоматически при подтверждении рейса, акт — после закрытия"
-                        docs={carrierDocs}
+                        title="Перевозочные документы"
+                        hint="ЭТрН — при подтверждении рейса, акт оказанных услуг — после закрытия"
+                        docs={tripDocs}
                         pack={pack}
                         role={role}
                         busy={busy}
@@ -359,7 +336,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
   )
 }
 
-/** Блок одного комплекта документов (экспедиторского или перевозчика) */
+/** Блок документов рейса: договорной документ или перевозочные документы */
 function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer, emptyHint, diadocEnabled = false, onEtrnSend }: {
   title: string
   hint: string
@@ -391,7 +368,9 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
         ) : (
           docs.map((doc) => {
             const mySideDone = isLogist ? doc.aemzSigned : doc.partySigned
-            const viaDiadoc = diadocEnabled && doc.kind === 'ETRN'
+            // через Диадок идёт накладная рейса в работе или уже отправленная; у закрытых
+            // до подключения Диадока рейсов накладная подписана в платформе — показываем её подписи
+            const viaDiadoc = diadocEnabled && doc.kind === 'ETRN' && (Boolean(doc.diadoc) || pack.request.status === 'CONFIRMED')
             const canSign = !viaDiadoc && !mySideDone && !(doc.aemzSigned && doc.partySigned)
             return (
               <div key={doc.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
@@ -406,16 +385,21 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                     {doc.title}
                     <span className="font-mono text-xs text-blue-700">№{doc.number}</span>
                   </button>
-                  <span className="ml-auto flex flex-wrap items-center gap-1.5">
-                    <SignBadge signed={doc.aemzSigned} label="КЭП АЭМЗ" />
-                    <SignBadge signed={doc.partySigned} label={doc.partyRole} />
-                  </span>
+                  {/* у ЭТрН через Диадок подписи показывает полоса титулов Т1–Т4 — без дублей */}
+                  {!viaDiadoc && (
+                    <span className="ml-auto flex flex-wrap items-center gap-1.5">
+                      <SignBadge signed={doc.aemzSigned} label="КЭП АЭМЗ" />
+                      <SignBadge signed={doc.partySigned} label={doc.partyRole} />
+                    </span>
+                  )}
                 </div>
                 {/* кто подписал — подписи со временем */}
-                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
-                  {doc.aemzSigner && <span>АЭМЗ: {doc.aemzSigner}{doc.aemzSignedAt ? ` · ${fmtDateTime(doc.aemzSignedAt)}` : ''}</span>}
-                  {doc.partySigner && <span>{doc.partyRole}: {doc.partySigner}{doc.partySignedAt ? ` · ${fmtDateTime(doc.partySignedAt)}` : ''}</span>}
-                </div>
+                {!viaDiadoc && (
+                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
+                    {doc.aemzSigner && <span>АЭМЗ: {doc.aemzSigner}{doc.aemzSignedAt ? ` · ${fmtDateTime(doc.aemzSignedAt)}` : ''}</span>}
+                    {doc.partySigner && <span>{doc.partyRole}: {doc.partySigner}{doc.partySignedAt ? ` · ${fmtDateTime(doc.partySignedAt)}` : ''}</span>}
+                  </div>
+                )}
                 {viaDiadoc && <EtrnStatus doc={doc} />}
                 {viaDiadoc && !doc.diadoc && isLogist && pack.request.status === 'CONFIRMED' && onEtrnSend && (
                   <div className="mt-2">
@@ -441,7 +425,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                     ) : (
                       <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
                         <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                        {doc.party === 'EXPEDITOR' ? 'Подписать за экспедитора' : 'Подписать за перевозчика'}
+                        {doc.party === 'EXPEDITOR' ? 'Подписать (КЭП экспедитора)' : 'Подписать (КЭП перевозчика)'}
                       </Button>
                     )}
                   </div>

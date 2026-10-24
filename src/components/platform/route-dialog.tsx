@@ -32,16 +32,16 @@ export function RoutePointsInline({ from, to, className }: { from: string; to: s
           <FromIcon className="h-3.5 w-3.5 shrink-0 text-slate-500" />
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium leading-tight text-slate-800">{a.short}</div>
-          <div className="truncate text-[11px] leading-snug text-muted-foreground">{a.address}</div>
+          <div className="break-words text-[13px] font-medium leading-tight text-slate-800">{a.short}</div>
+          <div className="line-clamp-2 text-[11px] leading-snug text-muted-foreground" title={a.address}>{a.address}</div>
         </div>
         {/* Выгрузка */}
         <span className="flex h-3.5 items-center" aria-hidden>
           <ToIcon className="h-3.5 w-3.5 shrink-0 text-slate-500" />
         </span>
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-medium leading-tight text-slate-800">{b.short}</div>
-          <div className="truncate text-[11px] leading-snug text-muted-foreground">{b.address}</div>
+          <div className="break-words text-[13px] font-medium leading-tight text-slate-800">{b.short}</div>
+          <div className="line-clamp-2 text-[11px] leading-snug text-muted-foreground" title={b.address}>{b.address}</div>
         </div>
       </div>
     </div>

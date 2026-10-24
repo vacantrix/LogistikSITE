@@ -92,7 +92,7 @@ async function create() {
   const truckLabel = `${truck.brand} · ${truck.plate}`
   // реквизиты для скана документа — как у накладной, которую платформа создаёт сама (src/lib/edo.ts)
   const payload = {
-    title: 'Транспортная накладная (ЭТрН)', dateRu: loadDate, org: 'АО «АЭМЗ» (грузоотправитель)',
+    title: 'Транспортная накладная (ЭТрН)', dateRu: loadDate, org: 'ООО «АЭМЗ» (грузоотправитель)',
     lines: [
       `Перевозчик: ${carrier.name}`, `Водитель: ${driver.fullName}`, `ТС: ${truckLabel}`,
       'Груз: Перевозка готовой продукции - арматура, 20 т', 'Маршрут: Абинск → Новороссийск', `Дата погрузки: ${loadDate}`,

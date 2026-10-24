@@ -13,6 +13,9 @@
  *  — в рассылке только «что изменилось» (тип и id заявки) — без текстов, сумм и ФИО:
  *    клиент перечитывает данные через API, где сервер сам решает, что показать;
  *  — /notify слушает только 127.0.0.1 и при заданном WS_NOTIFY_TOKEN требует его в заголовке.
+ *
+ * Запуск: `bun --hot index.ts` или без Bun — `npm run ws` из корня проекта (Node 23.6+
+ * исполняет TypeScript напрямую). Локально без шлюза платформе нужен NEXT_PUBLIC_WS_URL.
  */
 import { createHmac, timingSafeEqual } from 'crypto'
 import { createServer } from 'http'

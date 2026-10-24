@@ -2,9 +2,11 @@
   "name": "aemz-ws-service",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Real-time шина платформы АЭМЗ Логистика: socket.io для браузеров + /notify для Next.js API",
   "scripts": {
-    "dev": "bun --hot index.ts"
+    "dev": "bun --hot index.ts",
+    "start:node": "node --env-file-if-exists=../../.env.local index.ts"
   },
   "dependencies": {
     "socket.io": "^4.8.4"

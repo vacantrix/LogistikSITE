@@ -169,9 +169,24 @@ const SPOT_KEYS: Array<{ keys: string[]; idx: number }> = [
   { keys: ['тихорецк'], idx: 13 },
 ]
 
+/**
+ * Справочник точек маршрута. value — то, что хранится в заявке: город точки
+ * (у двух точек Петербурга — с уточнением), чтобы маршрут везде читался как
+ * «Абинск → Сочи», а не «Завод → Порт». Адрес и название берутся из info.
+ */
+export const POINT_DIRECTORY: { value: string; info: PointInfo }[] = [
+  { value: 'Абинск', info: FACTORY },
+  { value: 'Санкт-Петербург', info: TERMINAL_ST_PETER },
+  { value: 'Санкт-Петербург, склад «Южный»', info: WAREHOUSE_SPB },
+  ...SPOTS.map((info) => ({ value: info.short, info })),
+]
+
 /** Разворачивает точку маршрута из заявки в полное название и адрес */
 export function pointInfo(raw: string): PointInfo {
   const v = (raw ?? '').trim().toLowerCase()
+  const exact = POINT_DIRECTORY.find((p) => p.value.toLowerCase() === v)
+  if (exact) return exact.info
+  // старые значения заявок («Завод», «Порт», «Новороссийск (порт)») — по ключевым словам
   if (v.includes('завод') || v.includes('аэмз') || v.includes('абинск')) return FACTORY
   // Сначала конкретные города (иначе «Новороссийск (порт)» ложно матчится
   // как петербургский порт по слову «порт»)
@@ -208,17 +223,21 @@ export function routeMapUrl(from: string, to: string): string {
 }
 
 /**
- * Подсказки автокомплита адресов в форме создания заявки (Task 64).
- * value — то, что пишется в заявку: pointInfo(value) должен вернуть ту же точку
- * (проверено по ключам поиска выше), поэтому маршрут, карта и КМ считаются корректно.
+ * Значение точки для записи в заявку: город из справочника (POINT_DIRECTORY)
+ * или null, если точки в справочнике нет. Старые «Завод»/«Порт» приводятся к городу.
  */
-export const POINT_SUGGESTIONS: { value: string; label: string; sub: string }[] = [
-  { value: 'Абинск, АЭМЗ', label: 'Абинск — Абинский ЭМЗ (погрузка)', sub: FACTORY.address },
-  { value: 'Порт Санкт-Петербург', label: 'Санкт-Петербург — Терминал Святого Петра', sub: TERMINAL_ST_PETER.address },
-  { value: 'Склад Санкт-Петербург', label: 'Санкт-Петербург — Склад «Южный»', sub: WAREHOUSE_SPB.address },
-  ...SPOTS.map((s, i) => {
-    const first = SPOT_KEYS[i]?.keys[0] ?? s.short
-    const city = first.charAt(0).toUpperCase() + first.slice(1)
-    return { value: city, label: `${s.short} — ${s.name}`, sub: s.address }
-  }),
-]
+export function canonicalPoint(raw: string): string | null {
+  const info = pointInfo(raw)
+  if (!info.known) return null
+  return POINT_DIRECTORY.find((p) => p.info === info)?.value ?? null
+}
+
+/**
+ * Подсказки выбора точки в формах заявки (Task 64): только точки справочника —
+ * маршрут, карта и расстояние КМ считаются корректно.
+ */
+export const POINT_SUGGESTIONS: { value: string; label: string; sub: string }[] = POINT_DIRECTORY.map((p) => ({
+  value: p.value,
+  label: `${p.info.short} — ${p.info.name}`,
+  sub: p.info.address,
+}))

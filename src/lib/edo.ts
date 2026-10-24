@@ -1,26 +1,28 @@
 /**
  * ЭДО рейса (Task 76, раздел «Подписать ЭДО») — серверная сторона.
  *
- * Наш случай — цепочка АЭМЗ (грузоотправитель) → экспедитор → перевозчик.
- * Экспедитором выступает компания-победитель в роли организатора доставки,
- * её представитель (водитель-экспедитор) подписывает экспедиторские документы.
+ * Документы зависят от того, кто исполняет рейс (роль компании в справочнике):
+ *  — перевозчик (перевозит сам): «Заказ (заявка) на перевозку груза» — договорной
+ *    документ АЭМЗ и перевозчика;
+ *  — экспедитор (организует перевозку): «Поручение экспедитору» по договору
+ *    транспортной экспедиции. Перевозчика экспедитор нанимает сам; доверенность
+ *    на водителя выдаёт экспедитор или перевозчик — не АЭМЗ, поэтому платформа
+ *    доверенность не формирует.
+ * Дальше у обоих одинаково: транспортная накладная (ЭТрН — при подтверждении
+ * рейса, через Диадок, если он подключён) и акт оказанных услуг (после закрытия).
+ * Все документы добираются автоматически — логист только подписывает.
  *
- * Комплекты документов каждого рейса:
- *  — «Комплект экспедитора» — Доверенность (POA) + Поручение экспедитору (ORDER).
- *    По правилам транспортно-экспедиционной деятельности эти документы создаёт
- *    грузоотправитель (АЭМЗ) — в платформе это кнопка логиста «Сформировать».
- *  — «Комплект перевозчика» — Транспортная накладная / ЭТрН (ETRN, создаётся
- *    автоматически при подтверждении рейса) + Акт оказанных услуг (ACT,
- *    создаётся после закрытия рейса).
- *
- * Подписание: aemz* — КЭП логиста АЭМЗ, party* — подпись контрагента
- * (экспедитора или перевозчика) через ЭДО-оператора. Реквизиты для рендера
- * скана хранятся в payload (JSON), сам скан рисует клиент.
+ * Подписание: aemz* — КЭП АЭМЗ, party* — КЭП исполнителя (перевозчика или
+ * экспедитора) через оператора ЭДО. Реквизиты для рендера скана — в payload (JSON).
  */
 import { db } from '@/lib/db'
 
+/** POA — доверенность от АЭМЗ: больше не формируется, старые записи скрыты из раздела */
 export type EdoKind = 'POA' | 'ORDER' | 'ETRN' | 'ACT'
 export type EdoParty = 'EXPEDITOR' | 'CARRIER'
+
+/** Сторона договорного документа по роли исполнителя рейса */
+export const partyOfRole = (role: string | null | undefined): EdoParty => (role === 'FORWARDER' ? 'EXPEDITOR' : 'CARRIER')
 
 export interface EdoDocPayload {
   title: string
@@ -35,7 +37,7 @@ export interface EdoDocPayload {
 
 export const EDO_KIND_META: Record<EdoKind, { title: string; party: EdoParty; accent: string }> = {
   POA: { title: 'Доверенность экспедитору', party: 'EXPEDITOR', accent: '#3f6212' },
-  ORDER: { title: 'Поручение экспедитору', party: 'EXPEDITOR', accent: '#0e7490' },
+  ORDER: { title: 'Заказ (заявка) на перевозку груза', party: 'CARRIER', accent: '#0e7490' },
   ETRN: { title: 'Транспортная накладная (ЭТрН)', party: 'CARRIER', accent: '#9a3412' },
   ACT: { title: 'Акт оказанных услуг', party: 'CARRIER', accent: '#4c1d95' },
 }
@@ -45,7 +47,13 @@ export const EDO_PARTY_ROLE: Record<EdoParty, string> = {
   CARRIER: 'Перевозчик',
 }
 
-export const AEMZ_ORG = 'АО «АЭМЗ» (грузоотправитель)'
+/** Название документа: договорной документ зависит от стороны — заказ-заявка или поручение */
+export function edoTitle(kind: EdoKind, party: string): string {
+  if (kind === 'ORDER' && party === 'EXPEDITOR') return 'Поручение экспедитору'
+  return EDO_KIND_META[kind].title
+}
+
+export const AEMZ_ORG = 'ООО «АЭМЗ» (грузоотправитель)'
 
 const ruDate = (d: Date): string =>
   d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -57,7 +65,7 @@ export function edoDocNumber(kind: EdoKind, requestNumber: string): string {
   const seq = edoSeqOf(requestNumber)
   switch (kind) {
     case 'POA': return `ДОВ-${seq}`
-    case 'ORDER': return `ПОР-${seq}`
+    case 'ORDER': return `ЗАК-${seq}`
     case 'ETRN': return `ЭТрН ${seq}`
     case 'ACT': return `АКТ-${seq}`
   }
@@ -76,10 +84,11 @@ export function buildEdoPayload(
     startRate: number
     bestRate: number | null
   },
-  party: { carrierName: string; driverName: string; truckLabel: string },
+  party: { carrierName: string; driverName: string; truckLabel: string; role?: EdoParty },
   issuedAt: Date,
 ): EdoDocPayload {
   const meta = EDO_KIND_META[kind]
+  const fmtRate = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽/т`
   const rate = request.bestRate ?? request.startRate
   const common = [
     `Груз: ${request.cargo}, ${new Intl.NumberFormat('ru-RU').format(request.tonnage)} т`,
@@ -104,21 +113,38 @@ export function buildEdoPayload(
         accent: meta.accent,
       }
     case 'ORDER':
-      return {
-        title: meta.title,
-        dateRu: ruDate(issuedAt),
-        org: AEMZ_ORG,
-        lines: [
-          `Экспедитору: ${party.carrierName}`,
-          `По заявке №${request.number} — организация доставки`,
-          ...common,
-          'Услуги: приём груза, передача перевозчику, оформление транспортных документов',
-          `Вознаграждение: по договору транспортной экспедиции (ставка ${new Intl.NumberFormat('ru-RU').format(Math.round(rate))} ₽/т)`,
-        ],
-        driverName: party.driverName,
-        carrierName: party.carrierName,
-        accent: meta.accent,
-      }
+      return party.role === 'EXPEDITOR'
+        ? {
+          title: edoTitle('ORDER', 'EXPEDITOR'),
+          dateRu: ruDate(issuedAt),
+          org: AEMZ_ORG,
+          lines: [
+            `Экспедитору: ${party.carrierName}`,
+            `По заявке №${request.number} — организация перевозки груза`,
+            ...common,
+            'Услуги: подбор перевозчика, приём и доставка груза, оформление перевозочных документов',
+            `Вознаграждение: по договору транспортной экспедиции (ставка ${fmtRate(rate)})`,
+          ],
+          driverName: party.driverName,
+          carrierName: party.carrierName,
+          accent: meta.accent,
+        }
+        : {
+          title: edoTitle('ORDER', 'CARRIER'),
+          dateRu: ruDate(issuedAt),
+          org: AEMZ_ORG,
+          lines: [
+            `Перевозчику: ${party.carrierName}`,
+            `По заявке №${request.number} — перевозка груза`,
+            ...common,
+            `Водитель: ${party.driverName}`,
+            `ТС: ${party.truckLabel}`,
+            `Ставка: ${fmtRate(rate)} — по договору перевозки`,
+          ],
+          driverName: party.driverName,
+          carrierName: party.carrierName,
+          accent: meta.accent,
+        }
     case 'ETRN':
       return {
         title: meta.title,
@@ -144,7 +170,7 @@ export function buildEdoPayload(
           `По заявке №${request.number}`,
           `Перевозчик: ${party.carrierName}`,
           ...common,
-          `Ставка: ${new Intl.NumberFormat('ru-RU').format(Math.round(rate))} ₽/т`,
+          `Ставка: ${fmtRate(rate)}`,
           'Услуги выполнены в полном объёме, стороны претензий не имеют',
         ],
         driverName: party.driverName,
@@ -166,7 +192,7 @@ interface TripWithRels {
   startRate: number
   bestRate: number | null
   winnerId: string | null
-  winner: { name: string } | null
+  winner: { name: string; role: string } | null
   driverId: string | null
   truckId: string | null
   edoDocuments: {
@@ -185,13 +211,29 @@ interface TripWithRels {
 }
 
 /**
- * Добор недостающих базовых документов ЭДО (идемпотентно, при чтении):
+ * Добор недостающих документов ЭДО (идемпотентно, при чтении):
+ *  — договорной документ по роли исполнителя: заказ-заявка перевозчику или
+ *    поручение экспедитору (у закрытого рейса — подписан обеими сторонами);
  *  — ЭТрН у каждого рейса в работе/закрытого (у закрытого — подписана обеими сторонами);
- *  — Акт оказанных услуг у закрытого рейса.
- * Комплект экспедитора (POA/ORDER) НЕ создаётся автоматически: его формирует
- * логист — это обязанность АЭМЗ перед экспедитором.
+ *  — акт оказанных услуг у закрытого рейса.
  */
-export async function ensureEdoDocuments(trips: TripWithRels[]): Promise<void> {
+export function ensureEdoDocuments(trips: TripWithRels[]): Promise<void> {
+  // добор идёт строго по очереди: две одновременные загрузки раздела иначе обе
+  // увидят «документа нет» и создадут его дважды
+  const run = ensureQueue.then(() => ensureEdoDocumentsNow(trips))
+  ensureQueue = run.catch(() => undefined)
+  return run
+}
+
+let ensureQueue: Promise<void> = Promise.resolve()
+
+async function ensureEdoDocumentsNow(trips: TripWithRels[]): Promise<void> {
+  // список документов мог устареть, пока запрос ждал очереди — перечитываем
+  const fresh = await db.edoDocument.findMany({
+    where: { requestId: { in: trips.map((t) => t.id) } },
+    orderBy: { createdAt: 'asc' },
+  })
+  trips = trips.map((t) => ({ ...t, edoDocuments: fresh.filter((d) => d.requestId === t.id) }))
   const driverIds = trips.map((t) => t.driverId).filter((v): v is string => Boolean(v))
   const truckIds = trips.map((t) => t.truckId).filter((v): v is string => Boolean(v))
   const drivers = driverIds.length ? await db.driver.findMany({ where: { id: { in: driverIds } } }) : []
@@ -201,8 +243,22 @@ export async function ensureEdoDocuments(trips: TripWithRels[]): Promise<void> {
 
   const now = new Date()
   for (const trip of trips) {
+    const role = partyOfRole(trip.winner?.role)
+    // роль исполнителя сменили в справочнике, а договорной документ ещё не подписан —
+    // переоформляем его под новую роль (заказ-заявка ↔ поручение экспедитору)
+    const staleOrder = trip.edoDocuments.find((d) => d.kind === 'ORDER' && d.party !== role && !d.aemzSigned && !d.partySigned)
+    if (staleOrder) {
+      const driver = trip.driverId ? driverById.get(trip.driverId) : undefined
+      const truck = trip.truckId ? truckById.get(trip.truckId) : undefined
+      const payload = buildEdoPayload('ORDER', trip, {
+        carrierName: trip.winner?.name ?? '—', driverName: driver?.fullName ?? '—',
+        truckLabel: truck ? `${truck.brand} · ${truck.plate}` : '—', role,
+      }, now)
+      await db.edoDocument.update({ where: { id: staleOrder.id }, data: { party: role, payload: JSON.stringify(payload) } })
+    }
     const have = new Set(trip.edoDocuments.map((d) => d.kind))
     const missing: { kind: EdoKind; bothSigned?: boolean }[] = []
+    if (!have.has('ORDER')) missing.push({ kind: 'ORDER', bothSigned: trip.status === 'CLOSED' })
     if (!have.has('ETRN')) missing.push({ kind: 'ETRN', bothSigned: trip.status === 'CLOSED' })
     if (trip.status === 'CLOSED' && !have.has('ACT')) missing.push({ kind: 'ACT' })
     if (missing.length === 0) continue
@@ -214,18 +270,19 @@ export async function ensureEdoDocuments(trips: TripWithRels[]): Promise<void> {
     const truckLabel = truck ? `${truck.brand} · ${truck.plate}` : '—'
 
     for (const m of missing) {
-      const payload = buildEdoPayload(m.kind, trip, { carrierName, driverName, truckLabel }, now)
+      const party = m.kind === 'ORDER' ? role : EDO_KIND_META[m.kind].party
+      const payload = buildEdoPayload(m.kind, trip, { carrierName, driverName, truckLabel, role }, now)
       await db.edoDocument.create({
         data: {
           requestId: trip.id,
           kind: m.kind,
-          party: EDO_KIND_META[m.kind].party,
+          party,
           number: edoDocNumber(m.kind, trip.number),
           payload: JSON.stringify(payload),
           aemzSigned: m.bothSigned ?? false,
           partySigned: m.bothSigned ?? false,
           ...(m.bothSigned
-            ? { aemzSignedAt: now, partySignedAt: now, aemzSigner: 'КЭП АЭМЗ', partySigner: 'КЭП перевозчика' }
+            ? { aemzSignedAt: now, partySignedAt: now, aemzSigner: 'КЭП АЭМЗ', partySigner: party === 'EXPEDITOR' ? 'КЭП экспедитора' : 'КЭП перевозчика' }
             : {}),
         },
       })

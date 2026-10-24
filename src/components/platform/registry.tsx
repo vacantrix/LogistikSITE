@@ -366,7 +366,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                               </div>
                             </TableCell>
                             <TableCell className="max-w-[150px] text-slate-700">
-                              <span className="block truncate" title={`${r.fromPoint} → ${r.toPoint}`}>
+                              <span className="block break-words">
                                 {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
                               </span>
                             </TableCell>
@@ -374,12 +374,12 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                               <span className="block whitespace-nowrap font-medium" title={r.winnerName ?? ''}>{r.winnerName ?? '—'}</span>
                             </TableCell>
                             <TableCell className="max-w-[140px] text-slate-600">
-                              <span className="block truncate" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
+                              <span className="line-clamp-2" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
                             </TableCell>
-                            <TableCell className="whitespace-nowrap text-slate-600">
+                            <TableCell className="text-slate-600">
                               {/* водитель + ТС одной компактной ячейкой */}
                               <div className="flex max-w-[200px] flex-col items-start leading-tight">
-                                <span className="max-w-full truncate" title={driver?.fullName ?? ''}>{driver?.fullName ?? '—'}</span>
+                                <span className="max-w-full break-words">{driver?.fullName ?? '—'}</span>
                                 <span className="max-w-full truncate text-[11px] text-slate-500" title={truck ? `${truck.brand} · ${truck.plate}${trailer ? ` + ${trailer.plate}` : ''}` : ''}>
                                   {truck ? `${truck.brand} · ${truck.plate}` : '—'}
                                   {trailer && ` + ${trailer.plate}`}

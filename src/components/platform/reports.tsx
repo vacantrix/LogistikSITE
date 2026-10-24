@@ -1,7 +1,7 @@
 'use client'
 
 /** «Отчёты» (Task 72) — понятная структура из четырёх блоков:
- *  1) портфель заявок — воронка по шагам (в работе → проверка → логист → 1С);
+ *  1) портфель заявок — воронка по шагам (в работе → проверка → логист → подтверждено);
  *  2) ключевые показатели месяца; 3) ставки по направлениям; 4) экономия по заявкам и история перевозчиков. */
 import { useCallback, useEffect, useState, type ComponentType } from 'react'
 import {
@@ -141,7 +141,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
             tone="emerald"
             label="Подтверждено"
             value={kpi ? String(kpi.confirmed) : '—'}
-            hint="данные переданы в 1С"
+            hint="рейсы в работе и закрытые"
           />
         </CardContent>
       </Card>
@@ -171,7 +171,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
         />
         <KpiCard
           icon={<FileCheck className="h-5 w-5" aria-hidden />}
-          label="ЭТрН из 1С"
+          label="Рейсы с ЭТрН"
           value={kpi ? `${kpi.etrnShare}%` : '—'}
           hint="доля рейсов с электронной накладной"
           tone="violet"

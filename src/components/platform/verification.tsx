@@ -176,28 +176,24 @@ const STATE_ICON: Record<QueueState, ComponentType<{ className?: string }>> = {
   rejected: Undo2,
 }
 
-/** чип состояния очереди: иконка цвета состояния с подсказкой вместо текстового бейджа (Task 71) */
+/** чип состояния очереди: иконка и подпись — значки без текста читались плохо */
 function StateChip({ state }: { state: QueueState }) {
   const meta = STATE_META[state]
   const Icon = STATE_ICON[state]
   return (
-    <span
-      role="img"
-      aria-label={meta.label}
-      title={meta.label}
-      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${meta.badge}`}
-    >
+    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium ${meta.badge}`}>
       <Icon className="h-4 w-4" aria-hidden />
+      {meta.label}
     </span>
   )
 }
 
-/** статус заявки в шапке карточки — иконкой с подсказкой (Task 71):
- *  «У логиста — сверка», «Возвращено агенту», «Проверено» читаются по значку */
+/** статус заявки в шапке карточки — иконка с подписью:
+ *  «У логиста — сверка», «Возвращено агенту», «Проверено» */
 const STATUS_CHIP_META: Partial<Record<RequestStatus, { Icon: ComponentType<{ className?: string }>; label: string; cls: string }>> = {
   AT_LOGIST: { Icon: ScanSearch, label: 'У логиста — сверка', cls: 'border-blue-200 bg-blue-50 text-blue-600' },
   DOCS_REVIEW: { Icon: Undo2, label: 'Возвращено агенту на доработку', cls: 'border-amber-200 bg-amber-50 text-amber-600' },
-  CONFIRMED: { Icon: CheckCheck, label: 'Проверено — данные в 1С', cls: 'border-emerald-200 bg-emerald-50 text-emerald-600' },
+  CONFIRMED: { Icon: CheckCheck, label: 'Проверено — рейс выполняется', cls: 'border-emerald-200 bg-emerald-50 text-emerald-600' },
 }
 
 function StatusChip({ status }: { status: RequestStatus }) {
@@ -205,15 +201,22 @@ function StatusChip({ status }: { status: RequestStatus }) {
   if (!meta) return <StatusBadge status={status} />
   const { Icon, label, cls } = meta
   return (
-    <span
-      role="img"
-      aria-label={label}
-      title={label}
-      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${cls}`}
-    >
+    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium ${cls}`}>
       <Icon className="h-4 w-4" aria-hidden />
+      {label}
     </span>
   )
+}
+
+/** короткие названия вкладок документов — полное название в подсказке */
+const DOC_TAB_LABEL: Record<string, string> = {
+  PASSPORT_PHOTO: 'Паспорт',
+  PASSPORT_REG: 'Прописка',
+  LICENSE: 'ВУ',
+  STS: 'СТС',
+  REQUEST_DOC: 'Заявка',
+  POA: 'Доверенность',
+  ATTACHMENT: 'Вложение',
 }
 
 /** точка статуса документа во вкладке */
@@ -227,8 +230,7 @@ function docDot(status: DocStatus): string {
   }
 }
 
-/** иконки статусов документа — чип вместо текстового бейджа (Task 72):
- *  «Передать дальше» и др. читаются по значку с подсказкой */
+/** иконки статусов документа — чип с иконкой и подписью */
 const DOC_STATUS_ICON: Record<DocStatus, ComponentType<{ className?: string }>> = {
   PENDING: Hourglass,
   PASSED: CircleCheck,
@@ -241,13 +243,9 @@ function DocStatusChip({ status }: { status: DocStatus }) {
   const meta = DOC_STATUS_META[status]
   const Icon = DOC_STATUS_ICON[status]
   return (
-    <span
-      role="img"
-      aria-label={meta.label}
-      title={meta.label}
-      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${meta.badge}`}
-    >
+    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium ${meta.badge}`}>
       <Icon className="h-4 w-4" aria-hidden />
+      {meta.label}
     </span>
   )
 }
@@ -401,8 +399,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
     try {
       await api.action(r.id, 'confirm', { comment })
       toast({
-        title: 'Заявка утверждена — данные переданы в 1С',
-        description: `№${r.number} записана в реестр рейсов, пакет на пропуск и ЭТрН сформированы`,
+        title: 'Заявка утверждена — рейс выполняется',
+        description: `№${r.number} в реестре рейсов; транспортная накладная ждёт отправки в Диадок в разделе «Подписать ЭДО»`,
         action: (
           <ToastAction altText="Открыть реестр рейсов" onClick={() => onNavigate('registry')}>
             Открыть реестр
@@ -623,28 +621,28 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <h3 className="text-lg font-bold text-slate-900">Заявка №{selected.number}</h3>
                       <span className="text-sm font-medium text-slate-500">· {selected.winnerName ?? '—'}</span>
-                      {/* статусы шапки — иконками с подсказкой вместо текстовых бейджей (Task 71) */}
+                      {/* статусы шапки — иконка с подписью */}
                       <StatusChip status={selected.status} />
                       {selected.status === 'AT_LOGIST' && selectedState && <StateChip state={selectedState} />}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
                       <span className="inline-flex min-w-0 items-center gap-1.5" title={driver?.fullName ?? undefined}>
                         <UserRound className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                        <span className="truncate">{driver?.fullName ?? '—'}</span>
+                        <span className="break-words">{driver?.fullName ?? '—'}</span>
                       </span>
                       <span className="inline-flex min-w-0 items-center gap-1.5" title={truck ? `${truck.brand} (${truck.plate})` : undefined}>
                         <TruckIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                        <span className="truncate">
+                        <span className="break-words">
                           {truck ? `${truck.brand} (${truck.plate})` : '—'}{trailer ? ` + ${trailer.plate}` : ''}
                         </span>
                       </span>
                       <span className="inline-flex min-w-0 items-center gap-1.5" title={`${selected.fromPoint} → ${selected.toPoint}`}>
                         <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                        <span className="truncate">{selected.fromPoint} → {selected.toPoint}</span>
+                        <span className="break-words">{selected.fromPoint} → {selected.toPoint}</span>
                       </span>
                       <span className="inline-flex min-w-0 items-center gap-1.5" title={`${selected.cargo}, ${selected.tonnage} т`}>
                         <Package className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
-                        <span className="truncate">{selected.cargo}, {selected.tonnage} т</span>
+                        <span className="break-words">{selected.cargo}, {selected.tonnage} т</span>
                       </span>
                       <span className="font-semibold text-slate-900">{rate(selected.bestRate)}</span>
                     </div>
@@ -659,8 +657,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     </div>
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3 xl:grid-cols-4">
                       {[
-                        { label: 'Грузоотправитель', value: `АЭМЗ · ${selected.fromPoint}` },
-                        { label: 'Грузополучатель', value: selected.toPoint },
+                        { label: 'Грузоотправитель', value: `ООО «АЭМЗ» · ${selected.fromPoint}` },
+                        { label: 'Пункт выгрузки', value: selected.toPoint },
                         { label: 'Груз', value: `${selected.cargo}, ${selected.tonnage} т` },
                         {
                           label: 'Количество мест',
@@ -675,7 +673,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                       ].map((it) => (
                         <div key={it.label} className="min-w-0">
                           <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{it.label}</dt>
-                          <dd className="mt-0.5 truncate text-sm font-medium text-slate-800" title={it.value}>{it.value}</dd>
+                          <dd className="mt-0.5 break-words text-sm font-medium text-slate-800">{it.value}</dd>
                         </div>
                       ))}
                     </dl>
@@ -685,7 +683,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                   <div className="border-b border-slate-100 p-4 sm:p-5">
                     {selected.documents.length > 0 ? (
                       <Tabs value={activeDocType ?? ''} onValueChange={(v) => setDocTab(v as DocType)}>
-                        <TabsList className="h-auto flex-wrap justify-start gap-1 bg-slate-100 p-1">
+                        {/* вкладки в одну строку: короткие названия, при нехватке места — прокрутка */}
+                        <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto bg-slate-100 p-1 [scrollbar-width:thin]">
                           {DOC_ORDER.flatMap((t) => {
                             const doc = selected.documents.find((d) => d.type === t)
                             if (!doc) return []
@@ -694,10 +693,11 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                                 key={t}
                                 value={t}
                                 aria-label={`Документ: ${DOC_TYPE_LABEL[t]}`}
-                                className="gap-1.5 data-[state=active]:bg-white"
+                                title={DOC_TYPE_LABEL[t]}
+                                className="flex-none gap-1.5 data-[state=active]:bg-white"
                               >
                                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${docDot(doc.status)}`} aria-hidden />
-                                {DOC_TYPE_LABEL[t]}
+                                {DOC_TAB_LABEL[t] ?? DOC_TYPE_LABEL[t]}
                               </TabsTrigger>,
                             ]
                           })}
@@ -857,13 +857,13 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                               className="h-11 w-full bg-emerald-600 text-white shadow-sm hover:bg-emerald-700"
                               disabled={busy === selected.id}
                               onClick={() => void doConfirm(selected)}
-                              aria-label="Утвердить пакет — данные передаются в 1С"
+                              aria-label="Утвердить пакет — рейс уходит в работу"
                             >
                               <CheckCheck className="h-4 w-4" aria-hidden />
                               Утвердить
                             </Button>
                             <p className="px-1 text-[11px] leading-snug text-emerald-700">
-                              Данные уйдут в 1С, сформируются пропуск и ЭТрН
+                              Рейс уйдёт в работу: подготовим пропуск, ЭТрН — к отправке в Диадок
                             </p>
                             <Button
                               variant="outline"
@@ -891,13 +891,13 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                               <CheckCheck className="h-5 w-5" />
                             </span>
                             <div className="min-w-0">
-                              <div className="text-sm font-bold text-emerald-900">Утверждено — данные переданы в 1С</div>
+                              <div className="text-sm font-bold text-emerald-900">Утверждено — рейс выполняется</div>
                               {selected.verifyComment ? (
                                 <div className="mt-0.5 text-xs text-emerald-800">
                                   <span className="font-semibold">Комментарий логиста:</span> {selected.verifyComment}
                                 </div>
                               ) : (
-                                <div className="mt-0.5 text-xs text-emerald-700/90">Пропуск и ЭТрН сформированы</div>
+                                <div className="mt-0.5 text-xs text-emerald-700/90">Пропуск подготовлен, ЭТрН — в разделе «Подписать ЭДО»</div>
                               )}
                             </div>
                           </div>

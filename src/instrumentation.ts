@@ -14,6 +14,10 @@
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+  // старые «Завод → Порт» и грузы без справочника — к справочникам (идемпотентно)
+  await import('@/lib/data-fixes')
+    .then(({ normalizeLegacyData }) => normalizeLegacyData())
+    .catch((e) => console.error('[data-fixes] не удалось привести данные', e))
   const { diadocConfig, diadocEnabled } = await import('@/lib/diadoc/config')
   const interval = diadocConfig().syncIntervalSec
   if (!diadocEnabled() || interval <= 0) return

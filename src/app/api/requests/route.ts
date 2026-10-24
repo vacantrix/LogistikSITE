@@ -6,10 +6,11 @@ import { REQUEST_INCLUDE, toRequestDTO } from '@/lib/serialize'
 import { finalizeExpired, money, parseRuDate, requestWhereFor } from '@/lib/requests'
 import { notifyLive } from '@/lib/notify'
 import { plog, plogError } from '@/lib/platform-log'
+import { canonicalPoint } from '@/lib/points'
 
 export const dynamic = 'force-dynamic'
 
-const STATUSES = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED', 'DELETED']
+const STATUSES = ['DRAFT', 'PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED', 'DELETED']
 const MODES = ['AUCTION', 'CLOSED']
 const MAX_DEADLINE_HOURS = 30 * 24
 
@@ -59,7 +60,7 @@ async function nextNumber(): Promise<number> {
   return (Number.isFinite(max) ? Math.max(max, 1000) : 1000) + 1
 }
 
-/** POST /api/requests — логист публикует заявку */
+/** POST /api/requests — логист публикует заявку или сохраняет её в «Черновики заявок» (draft: true) */
 export async function POST(req: NextRequest) {
   const auth = await requireUser('logist')
   if (auth instanceof NextResponse) return auth
@@ -68,8 +69,11 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
   if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Некорректный JSON' }, { status: 400 })
 
-  const fromPoint = str(body.fromPoint, 300)
-  const toPoint = str(body.toPoint, 300)
+  // черновик: заявка хранится у логиста, на площадку не выходит — срок и ставка необязательны
+  const isDraft = body.draft === true
+  // точки — только из справочника: в заявку пишется город («Абинск → Сочи»)
+  const fromPoint = canonicalPoint(str(body.fromPoint, 300))
+  const toPoint = canonicalPoint(str(body.toPoint, 300))
   const cargoTypeId = str(body.cargoTypeId, 64) || null
   const truckType = str(body.truckType, 40) || 'Тент'
   const loadWindow = str(body.loadWindow, 40) || '08:00–12:00'
@@ -80,21 +84,18 @@ export async function POST(req: NextRequest) {
   // комментарий для исполнителя (Task 64)
   const comment = str(body.comment, 1000)
 
-  // груз берём из справочника (единое имя) — свободный текст больше не источник
-  let cargoName: string | null = null
-  if (cargoTypeId) {
-    const cargoType = await db.cargoType.findUnique({ where: { id: cargoTypeId } })
-    if (!cargoType) return NextResponse.json({ error: 'Выбранный груз не найден в справочнике' }, { status: 400 })
-    cargoName = cargoType.name
-  } else if (str(body.cargo, 200)) {
-    cargoName = str(body.cargo, 200) // обратная совместимость (старые клиенты)
-  }
+  // груз — только из справочника грузов (единое имя во всех разделах)
+  const cargoType = cargoTypeId ? await db.cargoType.findUnique({ where: { id: cargoTypeId } }) : null
+  if (!cargoType) return NextResponse.json({ error: 'Выберите груз из справочника грузов' }, { status: 400 })
+  const cargoName = cargoType.name
 
-  if (!fromPoint || !toPoint || !cargoName) {
-    return NextResponse.json({ error: 'Заполните направление, груз и стартовую ставку' }, { status: 400 })
+  if (!fromPoint || !toPoint) {
+    return NextResponse.json({ error: 'Выберите точки погрузки и выгрузки из справочника точек' }, { status: 400 })
   }
   if (!MODES.includes(mode)) return NextResponse.json({ error: 'Вид тендера: AUCTION или CLOSED' }, { status: 400 })
-  if (!Number.isFinite(startRate) || startRate <= 0 || startRate > 10_000_000) {
+  // у черновика ставку можно не указывать (0 — «не задана»), к публикации она обязательна
+  const rateOptional = isDraft && (body.startRate == null || body.startRate === '' || startRate === 0)
+  if (!rateOptional && (!Number.isFinite(startRate) || startRate <= 0 || startRate > 10_000_000)) {
     return NextResponse.json({ error: 'Стартовая ставка — положительное число, ₽/т' }, { status: 400 })
   }
   if (!Number.isFinite(tonnage) || tonnage <= 0 || tonnage > 200) {
@@ -128,7 +129,8 @@ export async function POST(req: NextRequest) {
     }
     deadline = d
   }
-  if (!deadline) return NextResponse.json({ error: 'Укажите срок приёма ставок' }, { status: 400 })
+  if (isDraft) deadline = null // срок приёма ставок задаётся при публикации черновика
+  else if (!deadline) return NextResponse.json({ error: 'Укажите срок приёма ставок' }, { status: 400 })
 
   // номер: максимум + 1; при одновременной публикации уникальный индекс не даст дубль — пробуем следующий
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -141,20 +143,26 @@ export async function POST(req: NextRequest) {
           comment,
           createdBy: auth.name || '—',
           tonnage, truckType, mode,
-          startRate: Math.round(startRate),
+          startRate: rateOptional ? 0 : Math.round(startRate),
           loadDate, loadWindow, deadline,
-          status: 'PUBLISHED',
-          events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована логистом: стартовая ставка ${money(startRate)}` } },
+          status: isDraft ? 'DRAFT' : 'PUBLISHED',
+          events: {
+            create: isDraft
+              ? { type: 'REQUEST_DRAFTED', message: 'Заявка сохранена в черновики — на площадку не опубликована' }
+              : { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована логистом: стартовая ставка ${money(startRate)}` },
+          },
         },
         include: REQUEST_INCLUDE,
       })
-      notifyLive({ type: 'REQUEST_PUBLISHED', requestId: request.id })
-      // журнал событий платформы (Task 76): опубликована заявка
+      notifyLive({ type: isDraft ? 'REQUEST_DRAFTED' : 'REQUEST_PUBLISHED', requestId: request.id })
+      // журнал событий платформы (Task 76): опубликована заявка или сохранён черновик
       await plog({
-        type: 'REQUEST_CREATED', source: 'api/requests',
+        type: isDraft ? 'REQUEST_DRAFTED' : 'REQUEST_CREATED', source: 'api/requests',
         actor: { login: auth.login, name: auth.name, role: auth.role },
         requestId: request.id, requestNumber: request.number,
-        message: `Опубликована заявка №${request.number}: ${request.fromPoint} → ${request.toPoint}, ${request.cargo}, стартовая ставка ${money(startRate)}`,
+        message: isDraft
+          ? `Черновик заявки №${request.number}: ${request.fromPoint} → ${request.toPoint}, ${request.cargo}`
+          : `Опубликована заявка №${request.number}: ${request.fromPoint} → ${request.toPoint}, ${request.cargo}, стартовая ставка ${money(startRate)}`,
       })
       return NextResponse.json({ request: toRequestDTO(request, viewer) }, { status: 201 })
     } catch (e) {

@@ -124,7 +124,7 @@ export const api = {
     return fetch(`/api/requests${qs.toString() ? `?${qs}` : ''}`, withAuth({ cache: 'no-store' })).then(json<{ requests: RequestDTO[] }>)
   },
   getRequest: (id: string) => fetch(`/api/requests/${id}`, withAuth({ cache: 'no-store' })).then(json<{ request: RequestDTO }>),
-  createRequest: (body: Partial<RequestDTO> & { deadlineHours?: number }) =>
+  createRequest: (body: Partial<RequestDTO> & { deadlineHours?: number; draft?: boolean }) =>
     fetch('/api/requests', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ request: RequestDTO }>),
   action: (id: string, action: string, payload: Record<string, unknown> = {}) =>
     fetch(`/api/requests/${id}/action`, withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...payload }) })).then(json<{ request: RequestDTO }>),
@@ -176,7 +176,7 @@ export const api = {
 
   /** ЭДО (Task 76): пакеты документов рейсов + действия (формирование/подписание) */
   edoList: () => fetch('/api/edo', withAuth({ cache: 'no-store' })).then(json<{ packages: EdoPackageDTO[]; diadoc: DiadocInfoDTO }>),
-  edoAction: (body: { requestId: string; action: 'create-expeditor-pack' | 'sign'; docId?: string }) =>
+  edoAction: (body: { requestId: string; action: 'sign'; docId?: string }) =>
     fetch('/api/edo', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ok: boolean }>),
   /** Диадок: черновик ЭТрН из данных рейса и отправка титула Т1 */
   etrnDraft: (requestId: string, docId: string) =>

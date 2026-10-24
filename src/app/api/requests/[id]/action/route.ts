@@ -4,6 +4,7 @@ import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
 import { plog, plogError } from '@/lib/platform-log'
+import { canonicalPoint } from '@/lib/points'
 import {
   applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
@@ -23,6 +24,7 @@ function actionLogMessage(action: string, actor: string, number: string, body: R
     case 'close': return `Рейс закрыт — №${number} (${actor})`
     case 'delete': return `Заявка удалена — №${number} (${actor})`
     case 'edit': return `Заявка отредактирована — №${number} (${actor})`
+    case 'publish': return `Черновик опубликован на площадке — №${number} (${actor})`
     default: return `Действие «${action}» — №${number} (${actor})`
   }
 }
@@ -41,6 +43,7 @@ const ACTION_LOG_TYPE: Record<string, string> = {
   close: 'TRIP_CLOSED',
   delete: 'REQUEST_DELETED',
   edit: 'REQUEST_UPDATED',
+  publish: 'REQUEST_PUBLISHED',
 }
 
 export const dynamic = 'force-dynamic'
@@ -61,6 +64,7 @@ const ACTION_ROLE: Record<string, Role> = {
   close: 'logist',
   delete: 'logist',
   edit: 'logist',
+  publish: 'logist',
 }
 
 class ActionError extends Error {
@@ -69,11 +73,19 @@ class ActionError extends Error {
 const fail = (message: string, status = 400): never => { throw new ActionError(message, status) }
 
 const MAX_RATE = 10_000_000
+const MAX_DEADLINE_HOURS = 30 * 24
+
+/** Названия полей заявки для события «Заявка отредактирована» */
+const EDIT_FIELD_LABEL: Record<string, string> = {
+  cargo: 'груз', cargoTypeId: 'груз', fromPoint: 'точка погрузки', toPoint: 'точка выгрузки',
+  loadDate: 'дата погрузки', loadWindow: 'окно погрузки', comment: 'комментарий', tonnage: 'тоннаж',
+  truckType: 'тип ТС', startRate: 'стартовая ставка', mode: 'вид тендера',
+}
 
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.
  * Перевозчик: bid | withdraw | assign | approve-crew.
- * Логист: extend | direct-offer | raise-rate | confirm | return | close | delete | edit.
+ * Логист: extend | direct-offer | raise-rate | confirm | return | close | delete | edit | publish.
  * Победителя торгов никто не выбирает вручную: по окончании срока заявка
  * автоматически уходит минимальной ставке (src/lib/requests.ts → finalizeExpired).
  */
@@ -270,15 +282,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               ...(typeof body.comment === 'string' && body.comment.trim() ? { verifyComment: body.comment.trim().slice(0, 500) } : { verifyComment: null }),
             },
           })
-          await event('CONFIRMED_1C', 'Документы сверены и подтверждены — данные переданы в 1C:ERP (справочник и реестр)')
+          await event('CONFIRMED_1C', 'Документы сверены и подтверждены — рейс выполняется')
           await event('PASS_SENT', 'Пакет на пропуск сформирован из заявки — логист загружает на платформу порта')
-          await event('ETRN_SENT', 'ЭТрН сформирована модулем «Логистика.Про», подпись — КЭП сотрудника и МЧД')
+          await event('ETRN_SENT', 'Транспортная накладная подготовлена — отправка в Диадок в разделе «Подписать ЭДО»')
           notes.push({
             carrierId: r.winnerId,
             payload: {
               type: 'DOCS_CONFIRMED',
               title: `Документы подтверждены · №${r.number}`,
-              body: 'Логист сверил пакет — данные переданы в 1С, рейс готовится (пропуск и ЭТрН)',
+              body: 'Логист сверил пакет — рейс выполняется: пропуск готовится, ЭТрН придёт на подпись в Диадок',
               requestId: id,
             },
           })
@@ -365,13 +377,52 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           break
         }
 
-        // ------- логист: редактирование черновых параметров заявки (реестр заявок, Task 66) -------
+        // ------- логист: публикация черновика на площадке -------
+        case 'publish': {
+          if (r.status !== 'DRAFT') fail('Опубликовать можно только черновик')
+          const h = Number(body.deadlineHours)
+          if (!Number.isFinite(h) || h <= 0 || h > MAX_DEADLINE_HOURS) fail(`Срок приёма ставок — от 1 часа до ${MAX_DEADLINE_HOURS / 24} дней`)
+          let startRate = r.startRate
+          if (body.startRate != null && body.startRate !== '') {
+            const s = Math.round(Number(body.startRate))
+            if (!Number.isFinite(s) || s <= 0 || s > MAX_RATE) fail('Стартовая ставка — положительное число, ₽/т')
+            startRate = s
+          }
+          if (!(startRate > 0)) fail('Укажите стартовую ставку — без неё заявку не опубликовать')
+          const load = parseRuDate(r.loadDate)
+          const today = new Date(now)
+          today.setHours(0, 0, 0, 0)
+          if (load && load < today) fail(`Дата погрузки ${r.loadDate} уже прошла — измените её в черновике`)
+          // старые ставки (отозванные) в новых торгах не участвуют
+          await tx.bid.updateMany({ where: { requestId: id }, data: { withdrawn: true, isWinner: false } })
+          await tx.request.update({
+            where: { id },
+            data: { status: 'PUBLISHED', startRate, bestRate: null, deadline: new Date(now.getTime() + h * 3600_000) },
+          })
+          await event('REQUEST_PUBLISHED', `Черновик опубликован на площадке: стартовая ставка ${money(startRate)}, приём ставок ${h} ч`)
+          liveType = 'REQUEST_PUBLISHED'
+          break
+        }
+
+        // ------- логист: редактирование заявки до начала работы (реестр заявок, черновики) -------
         case 'edit': {
-          if (r.status !== 'PUBLISHED') fail('Редактировать можно только заявки, ещё не ушедшие в работу')
+          if (r.status !== 'PUBLISHED' && r.status !== 'DRAFT') fail('Редактировать можно только черновики и заявки, ещё не ушедшие в работу')
           const patch: Record<string, unknown> = {}
-          if (typeof body.cargo === 'string' && body.cargo.trim()) patch.cargo = body.cargo.trim().slice(0, 200)
-          if (typeof body.fromPoint === 'string' && body.fromPoint.trim()) patch.fromPoint = body.fromPoint.trim().slice(0, 300)
-          if (typeof body.toPoint === 'string' && body.toPoint.trim()) patch.toPoint = body.toPoint.trim().slice(0, 300)
+          // груз и точки — только из справочников
+          if (typeof body.cargoTypeId === 'string' && body.cargoTypeId) {
+            const cargoType = await tx.cargoType.findUnique({ where: { id: body.cargoTypeId } })
+            if (!cargoType) fail('Выбранный груз не найден в справочнике грузов')
+            patch.cargoTypeId = cargoType!.id
+            patch.cargo = cargoType!.name
+          }
+          for (const key of ['fromPoint', 'toPoint'] as const) {
+            const raw = body[key]
+            if (typeof raw !== 'string' || !raw.trim()) continue
+            const point = canonicalPoint(raw)
+            if (!point) fail('Выберите точку из справочника точек')
+            patch[key] = point
+          }
+          if (r.status === 'DRAFT' && (body.mode === 'AUCTION' || body.mode === 'CLOSED')) patch.mode = body.mode
           if (typeof body.loadDate === 'string' && body.loadDate.trim()) {
             const d = parseRuDate(body.loadDate.trim())
             if (!d) fail('Дата погрузки — в формате ДД.ММ.ГГГГ')
@@ -392,7 +443,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           }
           if (Object.keys(patch).length === 0) fail('Нет изменений для сохранения')
           await tx.request.update({ where: { id }, data: patch })
-          await event('REQUEST_UPDATED', `Заявка отредактирована логистом ${auth.name}: ${Object.keys(patch).join(', ')}`)
+          const changed = [...new Set(Object.keys(patch).map((k) => EDIT_FIELD_LABEL[k] ?? k))].join(', ')
+          await event('REQUEST_UPDATED', `Заявка отредактирована логистом ${auth.name}: ${changed}`)
           break
         }
       }

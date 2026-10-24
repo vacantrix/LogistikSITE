@@ -22,7 +22,7 @@
  */
 import { useState, type ComponentType } from 'react'
 import {
-  BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, FileSignature, FileUp, FolderOpen,
+  BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, FilePen, FileSignature, FileUp, FolderOpen,
   History, LayoutGrid, ListChecks, LogOut, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
 } from 'lucide-react'
 import {
@@ -43,6 +43,7 @@ import { activateAccount, listAccounts } from '@/lib/api'
  *  по очереди — площадка → мои заявки → документы → экипаж → справочники. */
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier'] },
+  { key: 'drafts', label: 'Черновики заявок', roles: ['logist'] },
   { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
   { key: 'apply', label: 'Подать документы', roles: ['carrier'] },
   { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'] },
@@ -58,6 +59,7 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
 /** Иконка и короткая подпись раздела для нижнего Tab Bar (мобильные) */
 const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; short: string }> = {
   board: { Icon: LayoutGrid, short: 'Площадка' },
+  drafts: { Icon: FilePen, short: 'Черновики' },
   my: { Icon: ClipboardList, short: 'Заявки' },
   apply: { Icon: FileUp, short: 'Документы' },
   crew: { Icon: Users, short: 'Экипажи' },
@@ -332,7 +334,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             </div>
             <div>
               <div className="text-sm font-bold leading-tight sm:text-base">АЭМЗ Логистика</div>
-              <div className="text-[11px] uppercase tracking-widest text-slate-300">Отдел логистики</div>
+              <div className="text-[11px] uppercase tracking-widest text-slate-300">{isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}</div>
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -369,14 +371,12 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
       <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs">
           <div>
-            АЭМЗ · Отдел логистики
+            АЭМЗ · {isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}
             <span className="ml-2 rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
               V 1.01
             </span>
           </div>
-          <div className="text-blue-300">
-            {isLogist ? userName : 'Кабинет перевозчика'}
-          </div>
+          <div className="text-blue-300">{userName}</div>
         </div>
       </footer>
 

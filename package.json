@@ -11,7 +11,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "demo:etrn": "node --env-file-if-exists=.env.local scripts/demo-etrn.mjs"
+    "demo:etrn": "node --env-file-if-exists=.env.local scripts/demo-etrn.mjs",
+    "ws": "node --env-file-if-exists=.env.local mini-services/ws-service/index.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

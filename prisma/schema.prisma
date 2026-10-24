@@ -13,6 +13,9 @@ model Carrier {
   id           String    @id @default(cuid())
   name         String
   inn          String
+  // роль исполнителя рейса: CARRIER — перевозит сам (заказ-заявка на перевозку),
+  // FORWARDER — экспедитор, организует перевозку (поручение экспедитору)
+  role         String    @default("CARRIER")
   kpp          String    @default("") // КПП — для поиска ящика в Диадоке (ИНН + КПП)
   phone        String    @default("") // контактный телефон перевозчика — в ЭТрН
   diadocBoxId  String    @default("") // ящик перевозчика в Диадоке (находится по ИНН при отправке ЭТрН)
@@ -194,7 +197,7 @@ model Request {
   mode          String // AUCTION | CLOSED
   startRate     Float
   bestRate      Float?
-  status        String         @default("PUBLISHED") // PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED
+  status        String         @default("PUBLISHED") // DRAFT | PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED | DELETED
   loadDate      String
   loadWindow    String
   deadline      DateTime?

@@ -85,6 +85,7 @@ const DOC_SHORT: Record<DocType, string> = {
 }
 
 const STATUS_ORDER: Record<RequestDTO['status'], number> = {
+  DRAFT: 0, // черновики перевозчику не отдаются (requestWhereFor), тип требует полноты
   PUBLISHED: 0,
   AWARDED: 1,
   DOCS_REVIEW: 1,
@@ -121,7 +122,7 @@ function agentLine(r: RequestDTO, myBid: BidDTO | null): { text: string; cls: st
     case 'AT_LOGIST':
       return { text: 'Комплект у логиста — идёт сверка фото с полями заявки', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
     case 'CONFIRMED':
-      return { text: 'Данные переданы в 1С — водитель может выезжать на погрузку', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
+      return { text: 'Рейс выполняется — документы подтверждены, водитель может выезжать на погрузку', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
     case 'CLOSED':
       return { text: 'Рейс выполнен и закрыт — данные в реестре рейсов и бухгалтерии АЭМЗ', cls: 'border-emerald-300 bg-emerald-50 text-emerald-900' }
     default:

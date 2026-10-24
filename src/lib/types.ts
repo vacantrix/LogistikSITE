@@ -2,7 +2,7 @@
 
 /** Статусы заявки. DELETED (Task 65) — мягкое удаление: запись остаётся в реестре
  *  заявок со статусом «Удалена», но исчезает с площадки и из кабинетов перевозчиков */
-export type RequestStatus = 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'CONFIRMED' | 'CLOSED' | 'DELETED'
+export type RequestStatus = 'DRAFT' | 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'CONFIRMED' | 'CLOSED' | 'DELETED'
 export type RequestMode = 'AUCTION' | 'CLOSED'
 export type DocStatus = 'PENDING' | 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
 export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA' | 'ATTACHMENT'
@@ -78,10 +78,14 @@ export interface DirectoryPhotoDTO {
   status: 'LOADED' | 'NEEDS_REVIEW'
 }
 
+/** Роль исполнителя рейса: перевозчик (заказ-заявка) или экспедитор (поручение экспедитору) */
+export type ExecutorRole = 'CARRIER' | 'FORWARDER'
+
 export interface CarrierDTO {
   id: string
   name: string
   inn: string
+  role: ExecutorRole
   contractNo: string
   contractDate: string
   access: boolean
@@ -326,6 +330,8 @@ export interface EdoPackageDTO {
     loadDate: string
     status: RequestStatus
     winnerName: string | null
+    /** кто исполняет рейс: перевозчик (заказ-заявка) или экспедитор (поручение) */
+    executorRole: ExecutorRole
     driverName: string | null
     truckLabel: string | null
   }

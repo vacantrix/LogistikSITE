@@ -178,7 +178,7 @@ export function toCarrierDTO(
   c: Carrier & { drivers: Driver[]; trucks: Truck[]; trailers: Trailer[]; _count?: { wonRequests: number; bids: number } },
 ): CarrierDTO {
   return {
-    id: c.id, name: c.name, inn: c.inn, contractNo: c.contractNo, contractDate: c.contractDate, access: c.access,
+    id: c.id, name: c.name, inn: c.inn, role: c.role === 'FORWARDER' ? 'FORWARDER' : 'CARRIER', contractNo: c.contractNo, contractDate: c.contractDate, access: c.access,
     drivers: c.drivers.map(toDriverDTO),
     trucks: c.trucks.map(toTruckDTO),
     trailers: c.trailers.map(toTrailerDTO),
