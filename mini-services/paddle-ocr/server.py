@@ -89,16 +89,13 @@ def decode_image(data_uri):
 
 
 def warmup():
-    """Модели грузятся ~10–20 с: делаем это при старте, а не на первом документе
-    (точная нужна для полей паспорта и повторного прохода — грузим обе)."""
-    try:
-        with LOCK:
-            engine.get_ocr("fast")
-            engine.get_ocr("accurate")
-        STATE["ready"] = True
-        print("[paddle-ocr] модели загружены", flush=True)
-    except Exception as e:  # noqa: BLE001 — сервис должен жить и сообщать статус
-        print(f"[paddle-ocr] ошибка загрузки моделей: {e}", flush=True)
+    """Модели НЕ держим в памяти диспетчера (Task 83, стенд 4 ГБ): каждый запрос
+    обслуживает короткоживущий процесс (см. analyze_subprocess) — он грузит одну
+    модель, распознаёт ОДИН документ и возвращает память системе. Диспетчер лёгкий,
+    OOM-killer не страшен; цена — ~10–20 с на загрузку модели в каждом запросе
+    (на сервере с запасом RAM можно вернуть тёплые модели)."""
+    STATE["ready"] = True
+    print("[paddle-ocr] диспетчер готов: модели — по запросу, в отдельном процессе", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -160,13 +157,20 @@ class Handler(BaseHTTPRequestHandler):
         path = decode_image(data_uri)
         if not path:
             return self.send_json({"ok": False, "error": "нужно изображение JPG, PNG, WebP или PDF"}, 400)
+        # Task 83 — две нейросети по кнопкам платформы: "fast" (лёгкая, «Автозаполнение»),
+        # "accurate" (точная, «Проверить»); без mode — прежний автопободор режима
+        mode = body.get("mode")
+        if mode not in ("fast", "accurate"):
+            mode = None
         t0 = time.time()
         try:
             with LOCK:
-                res = engine.analyze(path)
+                # Task 83: все запросы — в короткоживущем процессе: одна модель на документ,
+                # память возвращается системе (на стенде 4 ГБ иначе OOM-killer).
+                res = engine.analyze_subprocess(path, mode)
             STATE["ready"] = True
         except Exception as e:  # noqa: BLE001
-            print(f"[paddle-ocr] ошибка распознавания: {type(e).__name__}", flush=True)
+            print(f"[paddle-ocr] ошибка распознавания: {type(e).__name__}: {e}", flush=True)
             return self.send_json({"ok": False, "error": "ошибка распознавания"}, 500)
         finally:
             try:
@@ -184,6 +188,7 @@ class Handler(BaseHTTPRequestHandler):
             "confidences": res["confidences"],
             "detectedType": res["docType"],
             "confirmations": res["confirmations"],
+            "engineMode": res.get("engineMode") or mode or "fast",
             **({"side": res["side"]} if res.get("side") else {}),
         }
         if platform:

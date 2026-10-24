@@ -3,11 +3,14 @@
  *
  * Пайплайн: качество фото → тип документа → распознавание → сверка с данными заявки → правила.
  *
- * Распознавание:
- *   1. локальный OCR-сервис на нашем сервере (PaddleOCR, mini-services/paddle-ocr) — основной путь;
- *   2. облачная VLM — только при явном OCR_CLOUD_FALLBACK=1 (иначе фото паспортов не покидают сервер);
- *   3. ничего не сработало → «Ручная проверка». Никаких подставленных значений: раньше при сбое
- *      нейросети код «читал» данные из заявки, и проходило любое фото.
+ * Распознавание — только локальный OCR-сервис на нашем сервере (PaddleOCR,
+ * mini-services/paddle-ocr): фото документов не покидают сервер. Две нейросети
+ * переключаются параметром mode (Task 83):
+ *   "fast"     — лёгкая модель PP-OCRv5_mobile_det — кнопка «Автозаполнение» карточки;
+ *   "accurate" — точная модель PP-OCRv5_server_det — кнопка «Проверить» перед попаданием в базу;
+ *   без mode   — автоподбор: быстрый проход + точный повтор, если поля не дочитаны.
+ *   Облачный резерв (GLM-4.6V) удалён (Task 79).
+ * Ничего не подставляется: при сбое нейросети код не «читает» данные из заявки.
  * Имитация распознавания осталась только для демо-образцов (SVG) и только при DEMO_SAMPLES=1.
  *
  * Итог — один из четырёх статусов:
@@ -16,9 +19,8 @@
  *   REJECTED — «Отказ с причиной»: явное несоответствие при высокой уверенности
  *   MANUAL   — «Ручная проверка»: результат неоднозначен, решает сотрудник
  */
-import ZAI from 'z-ai-web-dev-sdk'
 import { ocrServiceOcr } from '@/lib/ocr-service'
-import { cloudOcrEnabled, demoSamplesEnabled } from '@/lib/settings'
+import { demoSamplesEnabled } from '@/lib/settings'
 
 export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA'
 
@@ -138,6 +140,8 @@ export interface OcrOutput {
   detectedType?: DocType | 'UNKNOWN'
   /** сторона документа (у СТС — лицевая или оборот) */
   side?: 'front' | 'back'
+  /** какая нейросеть читала: fast (лёгкая) / accurate (точная) — Task 83 */
+  engineMode?: 'fast' | 'accurate'
   /** независимые подтверждения, найденные самим движком: копии номера на полях паспорта,
    *  латинская строка ВУ, повторное чтение категорий, срок ВУ = выдача + 10 лет */
   confirmations?: Record<string, string[]>
@@ -152,6 +156,8 @@ export interface VerifyVerdict {
   confidences: Record<string, number>
   issues: string[]
   message: string
+  /** какая нейросеть читала: fast (лёгкая) / accurate (точная) — Task 83 */
+  engineMode?: 'fast' | 'accurate'
   /** фактически распознанный вид документа (заполняется при первичном вводе) */
   detectedType?: DocType | 'UNKNOWN' | null
 }
@@ -264,92 +270,25 @@ export function simulateOcr(seedSource: string, type: DocType, expected: Expecte
   return { engine: 'Демо-образец (имитация)', quality: Math.round(quality), fields, confidences }
 }
 
-// ---------------- облачная VLM (резерв, только по явному флагу) ----------------
-
-function extractJson(text: string): Record<string, unknown> | null {
-  const m = text.match(/\{[\s\S]*\}/)
-  if (!m) return null
-  try {
-    return JSON.parse(m[0])
-  } catch {
-    return null
-  }
-}
-
-const DOC_TYPE_VALUES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
-
-/**
- * Облачная VLM. Ожидаемые значения из заявки в модель НЕ передаются: раньше они уходили
- * в подсказке и сами становились «прочитанным» ответом. Модель всегда определяет вид документа.
- */
-export async function vlmOcr(dataUri: string, type: DocType): Promise<OcrOutput | null> {
-  const fieldList = DOC_FIELDS[type].map((f) => `«${f.label}»`).join(', ')
-  const prompt = [
-    `Ты — OCR-модуль проверки транспортных документов. Ожидаемый тип документа: ${DOC_TYPE_LABEL[type]}.`,
-    `Прочитай изображение и верни СТРОГО JSON без пояснений:`,
-    `{"quality": <0..100, качество фото: резкость, свет, документ целиком в кадре>,`,
-    `"fields": {${fieldList}: <прочитанное значение, "" если не найдено>},`,
-    `"confidences": {<поле>: <0..1 уверенность в прочитанном>},`,
-    `"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | REQUEST_DOC | POA | UNKNOWN>}`,
-    `Заполняй ТОЛЬКО реально прочитанные с изображения значения, ничего не выдумывай и не дополняй.`,
-  ].join('\n')
-
-  try {
-    const zai = await Promise.race([
-      ZAI.create(),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('init-timeout')), 8000)),
-    ])
-    const response = await Promise.race([
-      zai.chat.completions.createVision({
-        model: 'glm-4.6v',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: dataUri } },
-            ],
-          },
-        ],
-        thinking: { type: 'disabled' },
-      }),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('vlm-timeout')), 30000)),
-    ])
-    const content = response.choices[0]?.message?.content
-    if (!content) return null
-    const json = extractJson(content)
-    if (!json || typeof json.quality !== 'number') return null
-    const rawType = typeof json.docType === 'string' ? json.docType.trim().toUpperCase() : ''
-    const detectedType: DocType | 'UNKNOWN' = DOC_TYPE_VALUES.includes(rawType as DocType) ? rawType as DocType : 'UNKNOWN'
-    return {
-      engine: 'GLM-Vision (облако)',
-      quality: Math.round(json.quality),
-      fields: (json.fields ?? {}) as Record<string, string>,
-      confidences: (json.confidences ?? {}) as Record<string, number>,
-      detectedType,
-    }
-  } catch {
-    return null
-  }
-}
-
 /** Сервис распознавания не ответил (занят или выключен): документ остаётся «на проверке», а не уходит в ручную */
 export class OcrUnavailableError extends Error {
   constructor() { super('Сервис распознавания недоступен или занят') }
 }
 
+/** Какую нейросеть просим читать документ (Task 83): fast — лёгкая, accurate — точная */
+export type OcrMode = 'fast' | 'accurate'
+
 /**
- * Распознавание настоящего фото: локальный сервис → облако (если явно разрешено).
- * 'unsupported' — у локального движка нет шаблона этого вида документа (проверка вручную);
+ * Распознавание настоящего фото: только локальный сервис на нашем сервере
+ * (облачный резерв удалён, Task 79 — фото документов не покидают сервер).
+ * mode — какая нейросеть читает: fast (лёгкая, «Автозаполнение») / accurate (точная, «Проверить»);
+ * без mode движок сам подбирает режим (быстрый проход + точный повтор при непрочитанных полях).
+ * 'unsupported' — у движка нет шаблона этого вида документа (проверка вручную);
  * OcrUnavailableError — сервис не ответил: проверку нужно повторить.
  */
-export async function recognize(dataUri: string, type: DocType, intake: boolean): Promise<OcrOutput | 'unsupported'> {
-  const local = await ocrServiceOcr(dataUri, type, intake)
+export async function recognize(dataUri: string, type: DocType, intake: boolean, mode?: OcrMode): Promise<OcrOutput | 'unsupported'> {
+  const local = await ocrServiceOcr(dataUri, type, intake, mode)
   if (local.kind === 'ok') return local.ocr
-  if (cloudOcrEnabled() && !dataUri.startsWith('data:application/pdf')) {   // облачная модель PDF не принимает
-    const cloud = await vlmOcr(dataUri, type)
-    if (cloud) return cloud
-  }
   if (local.kind === 'unsupported') return 'unsupported'
   throw new OcrUnavailableError()
 }
@@ -403,6 +342,7 @@ export function applyRules(
   const { fields, confidences } = ocr
   const verdict = (status: VerifyVerdict['status'], message: string): VerifyVerdict => ({
     status, quality: ocr.quality, engine: ocr.engine, fields, confidences, issues, message,
+    ...(ocr.engineMode ? { engineMode: ocr.engineMode } : {}),
   })
 
   // 1. Качество изображения
@@ -756,6 +696,7 @@ export async function analyzeIntakeDoc(
   type: DocType,
   dataUri: string,
   settings: VerifySettings,
+  mode?: OcrMode,
 ): Promise<VerifyVerdict> {
   if (dataUri.startsWith('data:image/svg')) {
     if (!demoSamplesEnabled()) return reuploadVerdict('Нужна фотография документа (JPG, PNG или WebP) — демо-образцы на этом стенде отключены')
@@ -772,7 +713,7 @@ export async function analyzeIntakeDoc(
 
   let ocr: OcrOutput | 'unsupported'
   try {
-    ocr = await recognize(dataUri, type, true)
+    ocr = await recognize(dataUri, type, true, mode)
   } catch (e) {
     if (!(e instanceof OcrUnavailableError)) throw e
     return {

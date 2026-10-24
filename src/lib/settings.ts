@@ -27,9 +27,6 @@ export async function loadVerifySettings(): Promise<VerifySettings> {
 /** Демо-образцы (SVG-заглушки) распознаются имитацией только при явном DEMO_SAMPLES=1 — на рабочем стенде выключено */
 export const demoSamplesEnabled = (): boolean => process.env.DEMO_SAMPLES === '1'
 
-/** Облачная VLM как резерв распознавания — только при явном OCR_CLOUD_FALLBACK=1 (паспорта уходят во внешний сервис) */
-export const cloudOcrEnabled = (): boolean => process.env.OCR_CLOUD_FALLBACK === '1'
-
 const PDF_PREFIX = 'data:application/pdf;base64,'
 
 /** dataUri — PDF-файл (проверяем и тип, и сигнатуру «%PDF-» в начале содержимого) */
