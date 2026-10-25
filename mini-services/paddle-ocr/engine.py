@@ -417,6 +417,44 @@ def mrz_date(yymmdd):
     return value if parse_date(value) else None
 
 
+# транслитерация ICAO 9303 (загранпаспорта и образцы бланков): «IVANOVICH», а не «IVANOVI3» как у МВД
+ICAO_RU = {"А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D", "Е": "E", "Ё": "E", "Ж": "ZH", "З": "Z", "И": "I",
+           "Й": "I", "К": "K", "Л": "L", "М": "M", "Н": "N", "О": "O", "П": "P", "Р": "R", "С": "S", "Т": "T",
+           "У": "U", "Ф": "F", "Х": "KH", "Ц": "TS", "Ч": "CH", "Ш": "SH", "Щ": "SHCH", "Ъ": "IE", "Ы": "Y",
+           "Ь": "", "Э": "E", "Ю": "IU", "Я": "IA", "-": "<", " ": "<"}
+MVD_RU = {**{c: l for l, c in MRZ_CYR.items()}, "-": "<", " ": "<"}
+RU_LETTERS = "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ"
+
+
+def mrz_forms(word):
+    """Как слово с бланка записывается в МЧЗ: по таблице МВД и по ICAO 9303."""
+    forms = set()
+    for table in (MVD_RU, ICAO_RU):
+        if all(ch in table for ch in word):
+            forms.add("".join(table[ch] for ch in word))
+    return forms
+
+
+def mrz_correct(visual, raw):
+    """Сверка ФИО бланка с МЧЗ: (значение, исправлено) или None.
+    Совпало точно — подтверждение; отличается ровно одной буквой, и исправленное слово
+    совпадает с МЧЗ точно и однозначно — исправление («ИБАН» + «IVAN» → «ИВАН»)."""
+    word = re.sub(r"\s+", " ", cyr(visual or "")).strip()
+    if not word or not raw:
+        return None
+    targets = {raw, raw.translate(MRZ_DIGIT_LETTERS)}
+    if mrz_forms(word) & targets:
+        return word, False
+    found = set()
+    for i in range(len(word) + 1):
+        variants = [word[:i] + ch + word[i:] for ch in RU_LETTERS]                    # пропущенная буква
+        if i < len(word):
+            variants += [word[:i] + ch + word[i + 1:] for ch in RU_LETTERS]           # неверная буква
+            variants.append(word[:i] + word[i + 1:])                                  # лишняя буква
+        found.update(v for v in variants if v and mrz_forms(v) & targets)
+    return (found.pop(), True) if len(found) == 1 else None
+
+
 def mrz_name(part):
     part = part.translate(MRZ_DIGIT_LETTERS)
     return "".join(MRZ_CYR[ch] for ch in part) if part and all(ch in MRZ_CYR for ch in part) else None
@@ -452,6 +490,7 @@ def read_mrz(lines):
         for key, part in (("surname", surname), ("name", given[0] if given else ""),
                           ("patronymic", given[1] if len(given) > 1 else "")):
             out[key] = (mrz_name(part), False, top["conf"])
+            out[key + "_raw"] = part   # латиницей — для сверки с бланком (mrz_correct)
     return out
 
 
@@ -1165,9 +1204,18 @@ def _analyze_lines(path, lines, quality, sharp):
                 bool(mrz.get("patronymic", (None,))[0]) or not f["patronymic"]["value"])
             for key, label in labels.items():
                 value, checked, conf = mrz.get(key, (None, False, 0))
+                cur = f[key]
+                raw = mrz.get(key + "_raw")
+                if raw and cur["value"]:
+                    # ФИО: бланк сверяется с МЧЗ (таблицы МВД и ICAO); одна неверная буква исправляется
+                    fixed = mrz_correct(cur["value"], raw)
+                    if fixed:
+                        word, changed = fixed
+                        f[key] = {"value": word, "conf": round(max(conf, cur["conf"] or 0), 3), "line": cur["line"]}
+                        confirm(label, "исправлено по машиночитаемой строке" if changed else "совпало с машиночитаемой строкой")
+                        continue
                 if not value:
                     continue
-                cur = f[key]
                 if cur["value"] and same(cur["value"], value):
                     confirm(label, "совпало с машиночитаемой строкой")
                 elif checked:
