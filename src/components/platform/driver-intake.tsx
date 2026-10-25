@@ -247,6 +247,16 @@ export default function DriverLine({
     )
     setVerdicts(Object.fromEntries(res.documents.map((doc) => [doc.type, doc])))
     setCrossChecks(res.crossChecks)
+    // страницы паспорта были в чужих слотах — нейросеть узнала их, перекладываем фото туда, где им место
+    const moved = res.documents.filter((doc) => doc.movedFrom)
+    let files = uploads
+    if (moved.length > 0) {
+      files = { ...uploads }
+      for (const doc of moved) delete files[doc.movedFrom!]
+      for (const doc of moved) files[doc.type] = uploads[doc.movedFrom!]
+      setUploads(files)
+    }
+    const movedNote = moved.length > 0 ? 'Страницы паспорта были перепутаны местами — фото переложены в свои слоты.' : ''
     const pick = (cur: string, next: string | undefined) => cur || next || ''
     // заполняем ТОЛЬКО пустые поля — вручную введённое не затирается
     const eff = {
@@ -261,7 +271,7 @@ export default function DriverLine({
     }
     setD(eff)
     setConf(res.driver.confidence ?? {})
-    return { effD: eff, latest: res.documents }
+    return { effD: eff, latest: res.documents, files, movedNote }
   }, [uploads, d])
 
   const check = useCallback(async (quiet = false): Promise<boolean> => {
@@ -299,13 +309,13 @@ export default function DriverLine({
     try {
       // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает фото
       // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
-      const { effD, latest } = await runOcr('accurate')
+      const { effD, latest, files, movedNote } = await runOcr('accurate')
 
       const bad = latest.filter((x) => x.status === 'REUPLOAD' || x.status === 'REJECTED')
       if (bad.length > 0) {
         toast({
           title: 'Часть документов не прошла проверку',
-          description: `${bad.map((x) => DOC_TYPE_LABEL[x.type] ?? x.type).join(', ')} — замените фото или введите данные вручную`,
+          description: `${movedNote ? `${movedNote} ` : ''}${bad.map((x) => DOC_TYPE_LABEL[x.type] ?? x.type).join(', ')} — замените фото или введите данные вручную`,
           variant: 'destructive',
         })
         return false
@@ -316,7 +326,7 @@ export default function DriverLine({
       if (stillMiss.length > 0) {
         toast({
           title: 'После проверки не заполнены поля',
-          description: `${stillMiss.join(', ')} — нейросеть не смогла прочитать, заполните вручную`,
+          description: `${movedNote ? `${movedNote} ` : ''}${stillMiss.join(', ')} — нейросеть не смогла прочитать, заполните вручную`,
           variant: 'destructive',
         })
         return false
@@ -325,8 +335,8 @@ export default function DriverLine({
       // ——— допуск: в базу записывается только водитель (Task 51); фото документов
       // сохраняются вместе с записью — для предосмотра в «Справочниках» (Task 54) ———
       const driverPhotos = DRIVER_DOC_TYPES
-        .filter((tp) => uploads[tp])
-        .map((tp) => ({ label: DOC_TYPE_LABEL[tp], fileName: uploads[tp]!.fileName, dataUri: uploads[tp]!.dataUri }))
+        .filter((tp) => files[tp])
+        .map((tp) => ({ label: DOC_TYPE_LABEL[tp], fileName: files[tp]!.fileName, dataUri: files[tp]!.dataUri }))
       const driverRes = await api.createDirectory('driver', {
         carrierId,
         fullName: effD.fullName.trim(),
@@ -345,7 +355,7 @@ export default function DriverLine({
       onAdmitted?.()
       toast({
         title: 'Водитель допущен в базу',
-        description: name,
+        description: movedNote ? `${name}. ${movedNote}` : name,
       })
       return true
     } catch (e) {
@@ -378,14 +388,15 @@ export default function DriverLine({
     }
     setBusy('fill')
     try {
-      const { effD } = await runOcr('fast')
+      const { effD, movedNote } = await runOcr('fast')
       const dKeys = Object.keys(DRIVER_LABELS) as (keyof typeof d)[]
       const stillEmpty = dKeys.filter((k) => effD[k].trim() === '').map((k) => DRIVER_LABELS[k])
+      const what = stillEmpty.length === 0
+        ? 'Лёгкая нейросеть прочитала фото — сверьте поля и нажмите «Проверить» для допуска в базу'
+        : `Не прочитано: ${stillEmpty.join(', ')} — заполните вручную и нажмите «Проверить»`
       toast({
         title: stillEmpty.length === 0 ? 'Карточка заполнена нейросетью' : 'Карточка заполнена частично',
-        description: stillEmpty.length === 0
-          ? 'Лёгкая нейросеть прочитала фото — сверьте поля и нажмите «Проверить» для допуска в базу'
-          : `Не прочитано: ${stillEmpty.join(', ')} — заполните вручную и нажмите «Проверить»`,
+        description: movedNote ? `${movedNote} ${what}` : what,
       })
       return true
     } catch (e) {

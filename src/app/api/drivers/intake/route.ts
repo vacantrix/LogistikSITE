@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
-import { analyzeIntakeDoc, buildIntakeDraft, type OcrMode } from '@/lib/verify'
+import { analyzeIntakeDoc, buildIntakeDraft, mismatchVerdict, type OcrMode } from '@/lib/verify'
 import type { DocType, VerifyVerdict } from '@/lib/verify'
 import type { IntakeDocVerdict, IntakeResult } from '@/lib/types'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
@@ -10,13 +10,15 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 600
 
 const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
+/** страницы паспорта: перепутанные слотами меняются местами */
+const PASSPORT_PAGES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG']
 
 /**
  * POST /api/drivers/intake — добавление водителя с распознаванием документов.
  * Принимает загруженные документы (паспорт, опционально регистрацию и СТС),
  * распознаёт их и возвращает черновик карточки водителя:
  * поля, уверенность по каждому полю, перекрёстные сверки и вердикты по документам.
- * Task 53: фото ВУ больше не требуется — данные ВУ агент заполняет вручную.
+ * Страницы паспорта, загруженные не в свои слоты, меняются местами (movedFrom в вердикте).
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
@@ -40,15 +42,28 @@ export async function POST(req: NextRequest) {
   const pairs = await Promise.all(
     provided.map(async (t) => {
       const doc = docs[t]!
-      const verdict = await analyzeIntakeDoc(String(doc.fileName ?? '').slice(0, 200), t, doc.dataUri!, settings, mode)
+      const retype = PASSPORT_PAGES.includes(t) ? PASSPORT_PAGES : undefined
+      const verdict = await analyzeIntakeDoc(String(doc.fileName ?? '').slice(0, 200), t, doc.dataUri!, settings, mode, retype)
       return [t, verdict] as const
     }),
   )
-  const map = Object.fromEntries(pairs) as Partial<Record<DocType, VerifyVerdict>>
+
+  // файл не в своём слоте переезжает в слот того, что на нём распознано; если тот слот
+  // уже занят своим документом — остаётся отказ «несоответствие вида»
+  const placed = new Map<DocType, { from: DocType; v: VerifyVerdict }>()
+  for (const [t, v] of pairs) if (!v.movedFrom) placed.set(t, { from: t, v })
+  for (const [t, v] of pairs) {
+    if (!v.movedFrom) continue
+    const target = v.detectedType as DocType
+    if (!placed.has(target)) placed.set(target, { from: t, v })
+    else placed.set(t, { from: t, v: mismatchVerdict(t, target, v.engine, v.quality) })
+  }
+  const map = Object.fromEntries([...placed].map(([t, x]) => [t, x.v])) as Partial<Record<DocType, VerifyVerdict>>
 
   const draft = buildIntakeDraft(map)
-  const documents: IntakeDocVerdict[] = pairs.map(([type, v]) => ({
+  const documents: IntakeDocVerdict[] = [...placed].map(([type, { from, v }]) => ({
     type,
+    movedFrom: from !== type ? from : null,
     status: v.status,
     quality: v.quality,
     engine: v.engine,

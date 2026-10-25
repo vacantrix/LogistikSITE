@@ -361,6 +361,8 @@ export interface IntakeDocVerdict {
   message: string
   /** какой вид документа фактически распознан (при несоответствии — не совпадает с type) */
   detectedType?: DocType | 'UNKNOWN' | null
+  /** файл был загружен в слот movedFrom, а на нём документ type — платформа переложила его */
+  movedFrom?: DocType | null
 }
 
 export interface IntakeCrossCheck {

@@ -146,6 +146,8 @@ export interface VerifyVerdict {
   engineMode?: 'fast' | 'accurate'
   /** фактически распознанный вид документа (заполняется при первичном вводе) */
   detectedType?: DocType | 'UNKNOWN' | null
+  /** файл загружен в слот movedFrom, а на нём другой документ комплекта — проверен как он */
+  movedFrom?: DocType
 }
 
 // ---------------- детерминированный псевдослучайный генератор (только демо) ----------------
@@ -619,7 +621,7 @@ export function mismatchMessage(declared: DocType, actual: DocType): string {
   return `Несоответствие вида документа: выбран слот «${DOC_TYPE_LABEL[declared]}», но на изображении распознан «${DOC_TYPE_LABEL[actual]}». Загрузите правильный документ.`
 }
 
-function mismatchVerdict(declared: DocType, actual: DocType, engine: string, quality: number): VerifyVerdict {
+export function mismatchVerdict(declared: DocType, actual: DocType, engine: string, quality: number): VerifyVerdict {
   const msg = mismatchMessage(declared, actual)
   return {
     status: 'REJECTED', quality, engine, fields: {}, confidences: {}, issues: [msg], message: msg,
@@ -631,6 +633,9 @@ function mismatchVerdict(declared: DocType, actual: DocType, engine: string, qua
  * Анализ одного документа при первичном вводе (intake / подача заявки):
  * сначала проверяется соответствие вида документа выбранному слоту,
  * затем — качество и распознанные поля (сверки с заявкой нет).
+ * retype — виды документов комплекта, в слот которых файл можно переложить: если на фото
+ * другой документ из этого набора (страницы паспорта перепутаны), он проверяется как то,
+ * что на нём, а в вердикте отмечается movedFrom — исходный слот.
  */
 export async function analyzeIntakeDoc(
   fileName: string,
@@ -638,13 +643,15 @@ export async function analyzeIntakeDoc(
   dataUri: string,
   settings: VerifySettings,
   mode?: OcrMode,
+  retype?: DocType[],
 ): Promise<VerifyVerdict> {
   if (dataUri.startsWith('data:image/svg')) {
     if (!demoSamplesEnabled()) return reuploadVerdict('Нужна фотография документа (JPG, PNG или WebP) — демо-образцы на этом стенде отключены')
     const actual = detectSvgType(dataUri)
-    if (actual && actual !== type) return mismatchVerdict(type, actual, 'Демо-образец (SVG)', 92)
-    const ocr = svgOcr(dataUri, type)
-    if (ocr) return applyRules(ocr, type, {}, settings)
+    if (actual && actual !== type && !retype?.includes(actual)) return mismatchVerdict(type, actual, 'Демо-образец (SVG)', 92)
+    const as = actual ?? type
+    const ocr = svgOcr(dataUri, as)
+    if (ocr) return { ...applyRules(ocr, as, {}, settings), ...(as !== type ? { detectedType: as, movedFrom: type } : {}) }
     return {
       status: 'REUPLOAD', quality: 30, engine: 'Демо-образец (SVG)', fields: {}, confidences: {},
       issues: ['Не удалось определить вид документа — загрузите чёткое изображение'],
@@ -671,6 +678,9 @@ export async function analyzeIntakeDoc(
     }
   }
   if (ocr.detectedType && ocr.detectedType !== 'UNKNOWN' && ocr.detectedType !== type) {
+    if (retype?.includes(ocr.detectedType)) {
+      return { ...applyRules(ocr, ocr.detectedType, {}, settings), detectedType: ocr.detectedType, movedFrom: type }
+    }
     return mismatchVerdict(type, ocr.detectedType, ocr.engine, ocr.quality)
   }
   return { ...applyRules(ocr, type, {}, settings), detectedType: ocr.detectedType ?? null }
