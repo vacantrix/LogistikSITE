@@ -61,11 +61,12 @@ const ruDate = (d: Date): string =>
 /** Порядковый номер заявки без префикса Z- — база номеров документов ЭДО */
 export const edoSeqOf = (requestNumber: string): string => requestNumber.replace(/^Z-/, '')
 
-export function edoDocNumber(kind: EdoKind, requestNumber: string): string {
+/** Номер документа ЭДО: договорной — ЗАК (заказ-заявка) или ПОР (поручение экспедитору) */
+export function edoDocNumber(kind: EdoKind, requestNumber: string, party: EdoParty = EDO_KIND_META[kind].party): string {
   const seq = edoSeqOf(requestNumber)
   switch (kind) {
     case 'POA': return `ДОВ-${seq}`
-    case 'ORDER': return `ЗАК-${seq}`
+    case 'ORDER': return party === 'EXPEDITOR' ? `ПОР-${seq}` : `ЗАК-${seq}`
     case 'ETRN': return `ЭТрН ${seq}`
     case 'ACT': return `АКТ-${seq}`
   }
@@ -254,7 +255,10 @@ async function ensureEdoDocumentsNow(trips: TripWithRels[]): Promise<void> {
         carrierName: trip.winner?.name ?? '—', driverName: driver?.fullName ?? '—',
         truckLabel: truck ? `${truck.brand} · ${truck.plate}` : '—', role,
       }, now)
-      await db.edoDocument.update({ where: { id: staleOrder.id }, data: { party: role, payload: JSON.stringify(payload) } })
+      await db.edoDocument.update({
+        where: { id: staleOrder.id },
+        data: { party: role, number: edoDocNumber('ORDER', trip.number, role), payload: JSON.stringify(payload) },
+      })
     }
     const have = new Set(trip.edoDocuments.map((d) => d.kind))
     const missing: { kind: EdoKind; bothSigned?: boolean }[] = []
@@ -277,7 +281,7 @@ async function ensureEdoDocumentsNow(trips: TripWithRels[]): Promise<void> {
           requestId: trip.id,
           kind: m.kind,
           party,
-          number: edoDocNumber(m.kind, trip.number),
+          number: edoDocNumber(m.kind, trip.number, party),
           payload: JSON.stringify(payload),
           aemzSigned: m.bothSigned ?? false,
           partySigned: m.bothSigned ?? false,

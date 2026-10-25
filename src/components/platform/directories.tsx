@@ -8,12 +8,15 @@
  * что истекает. Справочник грузов — внутренняя сущность платформы: в интерфейсе
  * не показывается, доступен только через API (для заявок). Отдельного раздела
  * «Перевозчики» больше нет — парк фильтруется по перевозчику внутри раздела.
+ * Логисту внизу — «Компании-исполнители»: роль компании (перевозчик или экспедитор)
+ * определяет договорной документ рейса в «Подписать ЭДО».
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Building2,
   CalendarClock,
   CheckCircle2,
   Database,
@@ -50,7 +53,7 @@ import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
 import { expiryInfo, rowTint, worseState, type ExpiryState } from '@/lib/expiry'
 import type {
-  CarrierDTO, DirectoryPhotoDTO, DriverDTO, OwnershipType, TrailerDTO, TruckDTO,
+  CarrierDTO, DirectoryPhotoDTO, DriverDTO, ExecutorRole, OwnershipType, TrailerDTO, TruckDTO,
 } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
@@ -488,6 +491,27 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
     }
   }
 
+  /** Роль компании-исполнителя: от неё зависит договорной документ рейса в ЭДО */
+  const [roleSaving, setRoleSaving] = useState<string | null>(null)
+  const changeRole = async (c: CarrierDTO, role: ExecutorRole) => {
+    if (c.role === role) return
+    setRoleSaving(c.id)
+    try {
+      await api.updateDirectory('carrier', c.id, {
+        name: c.name, inn: c.inn, contractNo: c.contractNo, contractDate: c.contractDate, role,
+      })
+      toast({
+        title: 'Роль компании изменена',
+        description: `${c.name}: ${role === 'FORWARDER' ? 'экспедитор — рейсы получают поручение экспедитору' : 'перевозчик — рейсы получают заказ-заявку на перевозку'}`,
+      })
+      await load()
+    } catch (e) {
+      toast({ title: 'Роль не сохранена', description: e instanceof Error ? e.message : 'Попробуйте ещё раз', variant: 'destructive' })
+    } finally {
+      setRoleSaving(null)
+    }
+  }
+
   const submitEdit = async () => {
     if (!editing) return
     setSaving(true)
@@ -651,6 +675,47 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
           )
         })}
       </div>
+
+      {/* Компании-исполнители (логист): роль определяет договорной документ рейса */}
+      {isLogist && (carriers ?? []).length > 0 && (
+        <Card className="mt-4 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Building2 className="h-4 w-4 text-blue-700" aria-hidden />
+                Компании-исполнители
+              </div>
+              <span className="text-[11px] text-slate-500">
+                перевозчик — заказ-заявка на перевозку · экспедитор — поручение экспедитору
+              </span>
+            </div>
+            <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {(carriers ?? []).map((c) => (
+                <li key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="break-words text-sm font-medium text-slate-900">{c.name}</div>
+                    <div className="text-xs text-slate-500">
+                      ИНН {c.inn}{c.contractNo && c.contractNo !== '—' ? ` · договор ${c.contractNo}${c.contractDate && c.contractDate !== '—' ? ` от ${c.contractDate}` : ''}` : ''}
+                    </div>
+                  </div>
+                  <Select value={c.role} onValueChange={(v) => void changeRole(c, v as ExecutorRole)} disabled={roleSaving === c.id}>
+                    <SelectTrigger className="h-9 w-[180px]" aria-label={`Роль компании ${c.name}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CARRIER">Перевозчик</SelectItem>
+                      <SelectItem value="FORWARDER">Экспедитор</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Смена роли меняет ещё не подписанные договорные документы рейсов этой компании; подписанные остаются как есть.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ——— раздел на весь экран ——— */}
       {open !== null && (() => {

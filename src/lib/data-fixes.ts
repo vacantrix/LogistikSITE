@@ -7,7 +7,7 @@
  *    узнаётся (например, «металлолом» → «Перевозка металлолома»);
  *  — старые тексты событий и уведомлений про передачу данных в 1С — к единым
  *    формулировкам «рейс выполняется» / Диадок (интеграция с 1С пока не используется);
- *  — «АО «АЭМЗ»» в реквизитах документов ЭДО → «ООО «АЭМЗ»»;
+ *  — «АО «АЭМЗ»» в реквизитах документов ЭДО → «ООО «АЭМЗ»»; поручение экспедитору — номер ПОР-…;
  *  — дубли документов ЭДО одного вида по рейсу (одновременный добор) — лишние
  *    копии удаляются, остаётся самая ранняя (отправленные в Диадок не трогаем).
  */
@@ -57,7 +57,9 @@ export async function normalizeLegacyData(): Promise<void> {
     data: { body: 'Логист сверил пакет — рейс выполняется: пропуск готовится, ЭТрН придёт на подпись в Диадок' },
   })
   const org = await db.$executeRaw`UPDATE "EdoDocument" SET payload = REPLACE(payload, 'АО «АЭМЗ»', 'ООО «АЭМЗ»') WHERE payload LIKE '%АО «АЭМЗ»%'`
-  const texts = events.count + etrn.count + notes.count + org
+  // поручение экспедитору нумеруется ПОР-…, а не ЗАК-… (как заказ-заявка перевозчику)
+  const orderNo = await db.$executeRaw`UPDATE "EdoDocument" SET number = 'ПОР-' || SUBSTR(number, 5) WHERE kind = 'ORDER' AND party = 'EXPEDITOR' AND number LIKE 'ЗАК-%'`
+  const texts = events.count + etrn.count + notes.count + org + orderNo
 
   const edoDocs = await db.edoDocument.findMany({
     select: { id: true, requestId: true, kind: true, aemzSigned: true, partySigned: true, diadocMessageId: true },
