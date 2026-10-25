@@ -18,8 +18,13 @@ export const metadata: Metadata = {
   description: "Закрытая площадка для агентов-перевозчиков: торги по заявкам, документы, проверка нейросетью, единый реестр рейсов в 1С:ERP.",
   keywords: ["логистика", "АЭМЗ", "перевозки", "торги", "1С:ERP", "платформа"],
   authors: [{ name: "Z.ai Team" }],
+  // знак LogistikSITE: SVG для современных браузеров, ICO/PNG — для старых и закладок
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: [
+      { url: "/logo-mark.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
+    ],
+    apple: "/apple-touch-icon.png",
   },
   openGraph: {
     title: "Z.ai Code Scaffold",

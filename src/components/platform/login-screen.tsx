@@ -10,9 +10,10 @@
  * новый вход добавляется в реестр и не выбрасывает другие аккаунты.
  */
 import { useState } from 'react'
-import { Building2, ChevronRight, CircleAlert, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
+import { Building2, ChevronRight, CircleAlert, Eye, EyeOff, KeyRound, Loader2, LogIn, UserCog } from 'lucide-react'
 import { activateAccount, listAccounts, saveSessionToken } from '@/lib/api'
 import type { SavedAccount } from '@/lib/accounts'
+import { LogoMark } from '@/components/platform/logo-mark'
 
 /** Демо-доступы (демо-контур): пароль один, логины разные */
 export const DEMO_ACCOUNTS: { login: string; name: string; role: 'logist' | 'carrier' }[] = [
@@ -73,9 +74,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
         <div className="w-full max-w-md">
           {/* логотип */}
           <div className="mb-6 flex flex-col items-center text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0E1B2C] shadow-lg">
-              <ShieldCheck className="h-7 w-7 text-blue-400" aria-hidden />
-            </div>
+            <LogoMark className="h-14 w-14 drop-shadow-lg" />
             <h1 className="mt-4 text-2xl font-bold text-slate-900">АЭМЗ Логистика</h1>
             <p className="mt-1 text-sm text-slate-500">Платформа работы с привлечённым транспортом</p>
           </div>

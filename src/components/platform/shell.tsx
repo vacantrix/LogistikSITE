@@ -23,7 +23,7 @@
 import { useState, type ComponentType } from 'react'
 import {
   BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, FilePen, FileSignature, FileUp, FolderOpen,
-  History, LayoutGrid, ListChecks, LogOut, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
+  History, LayoutGrid, ListChecks, LogOut, MoreHorizontal, ScanSearch, Truck, UserCog, UserPlus, Users,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -32,6 +32,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { NotificationBell } from '@/components/platform/notification-bell'
+import { LogoMark } from '@/components/platform/logo-mark'
 import type { RoleKind, TabKey } from '@/components/platform/common'
 import type { SessionUserDTO } from '@/lib/types'
 import { activateAccount, listAccounts } from '@/lib/api'
@@ -315,9 +316,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
         {/* Мобильная шапка (ТЗ Task 67): один ряд, минимальная высота, только критичные
             элементы — логотип, название, профиль и выход. Меню ушло в нижний Tab Bar. */}
         <div className="flex h-12 items-center gap-2 px-3 md:hidden">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-blue-600">
-            <ShieldCheck className="h-4 w-4" aria-hidden />
-          </div>
+          <LogoMark variant="inverse" className="h-7 w-7" />
           <div className="truncate text-sm font-bold leading-none">АЭМЗ Логистика</div>
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
@@ -329,9 +328,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
         {/* Десктопная шапка: полный блок с бейджем контура, именем и горизонтальным меню */}
         <div className="hidden w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6 md:flex">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600">
-              <ShieldCheck className="h-5 w-5" aria-hidden />
-            </div>
+            <LogoMark variant="inverse" className="h-9 w-9" />
             <div>
               <div className="text-sm font-bold leading-tight sm:text-base">АЭМЗ Логистика</div>
               <div className="text-[11px] uppercase tracking-widest text-slate-300">{isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}</div>
