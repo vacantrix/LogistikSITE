@@ -61,6 +61,12 @@ export async function POST(req: NextRequest) {
   const map = Object.fromEntries([...placed].map(([t, x]) => [t, x.v])) as Partial<Record<DocType, VerifyVerdict>>
 
   const draft = buildIntakeDraft(map)
+  // страницы от разных паспортов: регистрацию не принимаем, пока не заменят фото
+  const reg = placed.get('PASSPORT_REG')
+  if (reg && draft.crossChecks.some((c) => !c.ok)) {
+    const msg = 'Серия и номер не совпадают со страницей с фото — загрузите регистрацию из того же паспорта'
+    reg.v = { ...reg.v, status: 'REJECTED', issues: [msg, ...reg.v.issues], message: msg }
+  }
   const documents: IntakeDocVerdict[] = [...placed].map(([type, { from, v }]) => ({
     type,
     movedFrom: from !== type ? from : null,

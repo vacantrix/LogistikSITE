@@ -378,6 +378,10 @@ export interface IntakeDriverDraft {
   passport: string
   /** дата выдачи паспорта — со страницы с фото */
   passportIssuedDate: string
+  /** «Кем выдан» — напечатанная строка со страницы с фото (рукописная не подставляется) */
+  passportIssuedBy: string
+  /** «РФ», если распознана страница с фото внутреннего паспорта РФ */
+  citizenship: string
   /** место рождения — со страницы паспорта с фото */
   birthPlace: string
   /** адрес регистрации — со страницы регистрации */

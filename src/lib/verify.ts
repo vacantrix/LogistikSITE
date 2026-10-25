@@ -50,9 +50,13 @@ export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
     { label: 'Дата выдачи', kind: 'date' },
     { label: 'Код подразделения', kind: 'code' },
     { label: 'Место рождения', kind: 'text', optional: true },
+    // напечатанное «Паспорт выдан»; вписанное от руки нейросеть не читает — тогда пусто
+    { label: 'Кем выдан', kind: 'text', optional: true },
   ],
   PASSPORT_REG: [
     { label: 'Дата регистрации', kind: 'date' },
+    // номер паспорта внизу страницы, на полях или перфорацией — для сверки со страницей с фото
+    { label: 'Серия и номер', kind: 'passport', optional: true },
     { label: 'Код подразделения', kind: 'code' },
     { label: 'Адрес регистрации', kind: 'text' },
   ],
@@ -691,6 +695,9 @@ export interface IntakeDriverDraft {
   birthDate: string
   passport: string
   passportIssuedDate: string
+  passportIssuedBy: string
+  /** «РФ», если распознана страница с фото внутреннего паспорта РФ */
+  citizenship: string
   birthPlace: string
   address: string
   confidence: Record<string, number>
@@ -734,7 +741,26 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
   const pPass = pick('PASSPORT_PHOTO', 'Серия и номер')
   const pPlace = pick('PASSPORT_PHOTO', 'Место рождения')
   const pIssued = pick('PASSPORT_PHOTO', 'Дата выдачи')
+  const pIssuedBy = pick('PASSPORT_PHOTO', 'Кем выдан')
   const rAddr = pick('PASSPORT_REG', 'Адрес регистрации')
+  const rPass = pick('PASSPORT_REG', 'Серия и номер')
+  // обе страницы — от одного паспорта: серия и номер на странице регистрации
+  // (внизу, на полях или перфорацией) должны совпасть с номером на странице с фото
+  const crossChecks: IntakeCrossCheck[] = []
+  const digits = (s: string) => s.replace(/\D/g, '')
+  if (digits(pPass.v).length === 10 && digits(rPass.v).length === 10) {
+    const ok = digits(pPass.v) === digits(rPass.v)
+    crossChecks.push({
+      label: 'Серия и номер на обеих страницах',
+      ok,
+      detail: ok ? `совпадают: ${pPass.v}` : `страница с фото — ${pPass.v}, регистрация — ${rPass.v}: страницы от разных паспортов`,
+    })
+  }
+  const samePassport = crossChecks.every((c) => c.ok)
+  // «Кем выдан» — свободный текст: неуверенное чтение (рукопись) лучше не подставлять вовсе
+  const issuedBy = pIssuedBy.c >= 0.6 ? pIssuedBy : { v: '', c: 0 }
+  // страница с фото внутреннего паспорта РФ распознана — гражданство известно
+  const russian = docs.PASSPORT_PHOTO?.detectedType === 'PASSPORT_PHOTO'
 
   const fullName = [pFam.v, pIm.v, pOt.v].filter(Boolean).join(' ')
 
@@ -743,15 +769,19 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
     birthDate: pBirth.v,
     passport: pPass.v,
     passportIssuedDate: pIssued.v,
+    passportIssuedBy: issuedBy.v,
+    citizenship: russian ? 'РФ' : '',
     birthPlace: pPlace.v,
-    address: rAddr.v,
+    // регистрация от другого паспорта — её адрес в карточку не идёт
+    address: samePassport ? rAddr.v : '',
     confidence: {
       fullName: fullName ? Math.min(...[pFam, pIm, pOt].filter((x) => x.v).map((x) => x.c)) : 0,
       birthDate: pBirth.c,
       passport: pPass.c,
       passportIssuedDate: pIssued.c,
+      passportIssuedBy: issuedBy.c,
       birthPlace: pPlace.c,
-      address: rAddr.c,
+      address: samePassport ? rAddr.c : 0,
     },
   }
 
@@ -774,7 +804,5 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
     }
   }
 
-  // перекрёстные сверки были между паспортом и ВУ — ВУ больше не запрашивается
-  const crossChecks: IntakeCrossCheck[] = []
   return { driver, truck, crossChecks }
 }

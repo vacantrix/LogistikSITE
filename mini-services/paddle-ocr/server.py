@@ -61,7 +61,8 @@ def pdf_first_page(raw):
 
 
 def decode_image(data_uri):
-    """dataUri → путь к временному JPG (или None). Чужие форматы (SVG и пр.) не принимаются."""
+    """dataUri → путь к временному PNG (или None). Чужие форматы (SVG и пр.) не принимаются.
+    PNG — без потерь: повторное JPEG-сжатие размывало мелкие подписи паспорта на небольших фото."""
     m = DATA_URI_RE.match(data_uri or "")
     if not m:
         return None
@@ -79,10 +80,10 @@ def decode_image(data_uri):
     if max(h, w) > MAX_SIDE:
         k = MAX_SIDE / max(h, w)
         img = cv2.resize(img, (int(w * k), int(h * k)), interpolation=cv2.INTER_AREA)
-    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    ok, buf = cv2.imencode(".png", img)
     if not ok:
         return None
-    fd, path = tempfile.mkstemp(suffix=".jpg", prefix="aemz-ocr-")
+    fd, path = tempfile.mkstemp(suffix=".png", prefix="aemz-ocr-")
     with os.fdopen(fd, "wb") as fh:
         fh.write(buf.tobytes())
     return path

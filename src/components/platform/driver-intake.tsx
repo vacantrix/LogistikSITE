@@ -308,7 +308,8 @@ export default function DriverLine({
       birthDate: pick(d.birthDate, res.driver.birthDate),
       passport: pick(d.passport, res.driver.passport),
       passportIssuedDate: pick(d.passportIssuedDate, res.driver.passportIssuedDate),
-      citizenship: pick(d.citizenship, (res.driver as unknown as { citizenship?: string }).citizenship),
+      citizenship: pick(d.citizenship, res.driver.citizenship),
+      passportIssuedBy: pick(d.passportIssuedBy, res.driver.passportIssuedBy),
       birthPlace: pick(d.birthPlace, res.driver.birthPlace),
       address: pick(d.address, res.driver.address),
     }
@@ -553,7 +554,7 @@ export default function DriverLine({
             <FieldInput id={`${id}-pass`} label="Паспорт" placeholder="52 10 884610" value={d.passport} conf={conf.passport} mono invalid={miss(d.passport)} disabled={lock} onChange={(v) => setField('passport', v)} />
             <IssuedByField
               id={`${id}-pby`} label="Кем выдан" placeholder="ГУ МВД России по …" className="sm:col-span-2"
-              value={d.passportIssuedBy} invalid={miss(d.passportIssuedBy)} disabled={lock}
+              value={d.passportIssuedBy} conf={conf.passportIssuedBy} invalid={miss(d.passportIssuedBy)} disabled={lock}
               region={addrGeo.region} county={addrGeo.county} address={d.address}
               onChange={(v) => setField('passportIssuedBy', v)}
             />
