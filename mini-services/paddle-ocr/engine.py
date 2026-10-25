@@ -17,6 +17,7 @@ PaddleOCR (три нейросети: поиск строк, ориентаци�
 это 6–17 с на документ вместо 30–90 с.
 """
 import os
+import gc
 import re
 from datetime import date
 
@@ -50,6 +51,39 @@ UPSCALE_BELOW = int(os.environ.get("OCR_UPSCALE_BELOW", "1300"))   # мелки�
 # точная модель ищет строки на кадре не больше этого размера: на фото паспорта 1500×2000 — 38 с вместо 70,
 # поля те же (сами строки читаются с исходного кадра)
 ACCURATE_MAX_SIDE = int(os.environ.get("OCR_ACCURATE_MAX_SIDE", "1600"))
+
+
+def available_mb():
+    """Свободная оперативная память, МБ: Linux — /proc/meminfo, Windows — GlobalMemoryStatusEx."""
+    try:
+        with open("/proc/meminfo") as fh:
+            info = {l.split(":")[0]: int(l.split()[1]) for l in fh if ":" in l}
+        return info.get("MemAvailable", 0) // 1024
+    except OSError:
+        pass
+    try:
+        import ctypes
+
+        class MemStatus(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        st = MemStatus()
+        st.dwLength = ctypes.sizeof(MemStatus)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return st.ullAvailPhys // (1024 * 1024)
+    except Exception:  # noqa: BLE001 — не Windows и нет /proc: считаем памяти впритык
+        pass
+    return 4096
+
+
+# Режим экономии памяти (Task 83, стенд 4 ГБ): одна нейросеть в памяти, документ — в отдельном
+# процессе, мелкий кадр для точной модели. При запасе памяти обе модели держатся тёплыми.
+# OCR_LOW_MEMORY=1/0 — включить или выключить явно; иначе по свободной памяти при старте.
+_low = os.environ.get("OCR_LOW_MEMORY", "").strip()
+LOW_MEMORY = _low == "1" if _low in ("0", "1") else available_mb() < 6000
 MARGIN_MAX_SIDE = 2000   # полоса с номером на полях паспорта (см. read_margin_number)
 
 
@@ -153,12 +187,20 @@ def greedy(probs, chars, allowed=None):
 
 
 def get_ocr(mode=None):
-    """mode: fast — быстрая модель поиска текста, accurate — точная (медленнее в 3–5 раз)."""
+    """mode: fast — быстрая модель поиска текста, accurate — точная (медленнее в 3–5 раз).
+
+    Экономия памяти на стенде 4 ГБ (Task 83): в памяти держим ТОЛЬКО одну нейросеть —
+    при загрузке другой другая выгружается (server_det + mobile_det вместе ~3.2 ГБ → OOM-killer;
+    по одной ~0.6–1.2 ГБ). Переключение режима перезагружает модель (~10–20 с)."""
     mode = mode or _mode
     if mode not in _ocr:
         from paddleocr import PaddleOCR
         if RUSSIAN_ONLY:
             _hook_decoder()
+        # мало памяти — выгружаем другую нейросеть, если она загружена
+        for other in [m for m in _ocr if m != mode and LOW_MEMORY]:
+            del _ocr[other]
+            gc.collect()
         # enable_mkldnn=False: в PaddlePaddle 3.3 ускоритель oneDNN падает на этих моделях
         _ocr[mode] = PaddleOCR(
             text_detection_model_name=FAST_DET if mode == "fast" else ACCURATE_DET,
@@ -579,6 +621,9 @@ def extract_vehicle_registration(lines):
             if not m:
                 continue
             val = l["text"][len(l["text"]) - len(m.group(1)):].strip() if m.group(1) else ""
+            if val[:1] in ",.;:-–—":
+                # «Марка, модель» — хвост подписи, а не значение: ищем значение правее (Task 83, живой тест)
+                val = ""
             if len(val) >= 2:
                 brand = field(val, l)
             else:
@@ -743,9 +788,16 @@ def prepare(path):
     return out
 
 
-def analyze(path, accurate_retry=True):
+def analyze(path, accurate_retry=True, mode=None):
     """Фото → {quality, sharpness, docType, side, fields, confidences, confirmations, engineMode}.
-    Поля называются так же, как в DOC_FIELDS (src/lib/verify.ts)."""
+    Поля называются так же, как в DOC_FIELDS (src/lib/verify.ts).
+
+    mode (Task 83 — две нейросети по кнопкам платформы):
+      "fast"     — только лёгкая модель (PP-OCRv5_mobile_det), без точного повтора —
+                   кнопка «Автозаполнение» (быстро заполнить карточку);
+      "accurate" — только точная модель (PP-OCRv5_server_det) — кнопка «Проверить»
+                   (реальная проверка перед попаданием в базу);
+      None       — прежнее поведение: быстрый проход + точный повтор, если поля не дочитаны."""
     global _mode
     from pathlib import Path
     path = Path(path)
@@ -753,15 +805,29 @@ def analyze(path, accurate_retry=True):
     quality = int(round(min(100.0, 60.0 * sharp / SHARPNESS_MIN)))
     work = prepare(path)
     try:
-        _mode = "fast"
-        lines = read_lines(work)
-        out = _analyze_lines(work, lines, quality, sharp)
-        hinted = any(h in flat_text(lines) for h in DOC_HINTS)
-        if accurate_retry and _needs_retry(out) and (out["docType"] != "UNKNOWN" or hinted):
+        if mode == "accurate":
+            # сразу точная модель, быстрый проход не нужен: две модели вместе
+            # + пул инференса — OOM на стенде 4 ГБ (Task 83, живые тесты)
             _mode = "accurate"
-            second = _analyze_lines(work, read_lines(work), quality, sharp)
-            if _score(second) > _score(out):
-                out = second
+            lines = read_lines(work)
+            out = _analyze_lines(work, lines, quality, sharp)
+            # памяти хватает на обе модели: что точная не дочитала, добираем лёгкой
+            # (на реальном паспорте лёгкая находит дату выдачи и код подразделения, точная — нет)
+            if not LOW_MEMORY and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
+                _mode = "fast"
+                out = _fill_gaps(out, _analyze_lines(work, read_lines(work), quality, sharp))
+        else:
+            _mode = "fast"
+            lines = read_lines(work)
+            out = _analyze_lines(work, lines, quality, sharp)
+            hinted = any(h in flat_text(lines) for h in DOC_HINTS)
+            if mode == "fast":
+                pass                       # лёгкая модель: один проход, без точного повтора
+            elif accurate_retry and _needs_retry(out) and (out["docType"] != "UNKNOWN" or hinted):
+                _mode = "accurate"
+                second = _analyze_lines(work, read_lines(work), quality, sharp)
+                if _score(second) > _score(out):
+                    out = second
     finally:
         _mode = "fast"
         if work != path:
@@ -770,6 +836,21 @@ def analyze(path, accurate_retry=True):
             except OSError:
                 pass
     return out
+
+
+def _fill_gaps(main, extra):
+    """Пустые поля основного прохода — из второго прохода того же документа (той же стороны)."""
+    if main["docType"] == "UNKNOWN":
+        return extra if extra["docType"] != "UNKNOWN" else main
+    if extra["docType"] != main["docType"] or extra.get("side") != main.get("side"):
+        return main
+    for k, v in extra["fields"].items():
+        if v and not main["fields"].get(k):
+            main["fields"][k] = v
+            main["confidences"][k] = extra["confidences"].get(k, 0)
+            if k in extra.get("confirmations", {}):
+                main.setdefault("confirmations", {})[k] = extra["confirmations"][k]
+    return main
 
 
 def _filled(out):
@@ -891,3 +972,66 @@ def _analyze_lines(path, lines, quality, sharp):
         put("Адрес регистрации", f["address"])
 
     return out
+
+def drop_models():
+    """Выгрузить нейросети из памяти этого процесса (Task 83).
+    Перед запуском ребёнка с точной моделью: её веса не должны делить RAM
+    с быстрой моделью родителя — на стенде 4 ГБ каждая сотня мегабайт решает."""
+    _ocr.clear()
+    gc.collect()
+
+
+def analyze_subprocess(path, mode=None):
+    """analyze() в отдельном короткоживущем процессе (Task 83, стенд 4 ГБ).
+
+    Точная нейросеть (PP-OCRv5_server_det) вместе с быстрой и пулом инференса
+    не влезает в память: OOM-killer убивает сервис. Отдельный процесс загружает
+    только нужную модель, распознаёт ОДИН документ и возвращает память системе.
+    Вызывается для mode='accurate' (кнопка «Проверить») и для авто-повтора.
+
+    Лимит стороны детекции выбирается по свободной памяти (точной модели нужно
+    ~2 ГБ на 736px): если памяти мало, сразу стартуем с мелкого кадра; если
+    ребёнка всё же убило (OOM, exit 137) — повторяем с меньшим лимитом."""
+    import json as _json
+    import os as _os
+    import subprocess as _sp
+    import sys as _sys
+
+    def run_child(limit):
+        env = dict(_os.environ)
+        if limit:
+            env["OCR_ACCURATE_MAX_SIDE"] = str(limit)
+        # __file__ — сам engine.py (sys.argv[0] у сервера — server.py, он займет порт)
+        args = [_sys.executable, _os.path.abspath(__file__), str(path), mode or "auto"]
+        return _sp.run(args, capture_output=True, text=True, timeout=290, env=env)
+
+    avail_mb = available_mb()
+    if avail_mb >= 6000:
+        attempts = [ACCURATE_MAX_SIDE, 736, 560]
+    elif avail_mb >= 2600:
+        attempts = [736, 560, 448]
+    elif avail_mb >= 1900:
+        attempts = [560, 448]
+    else:
+        attempts = [448, 384]
+    last_err = "subprocess не вернул результат"
+    for limit in attempts:
+        run = run_child(limit)
+        if run.returncode == 0:
+            lines = [l for l in run.stdout.splitlines() if l.startswith("###JSON###")]
+            if lines:
+                return _json.loads(lines[-1][len("###JSON###"):])
+        if run.stderr:
+            last_err = run.stderr.strip().splitlines()[-1][:300]
+    raise RuntimeError(last_err)
+
+
+if __name__ == "__main__":
+    # CLI для analyze_subprocess: python3 engine.py <image> [fast|accurate|auto]
+    import json as _json
+    import sys as _sys
+    _argv_mode = _sys.argv[2] if len(_sys.argv) > 2 else None
+    _mode_arg = _argv_mode if _argv_mode in ("fast", "accurate") else None
+    _res = analyze(_sys.argv[1], mode=_mode_arg)
+    _out = {k: _res.get(k) for k in ("quality", "sharpness", "docType", "side", "fields", "confidences", "confirmations", "engineMode")}
+    print("###JSON###" + _json.dumps(_out, ensure_ascii=False))

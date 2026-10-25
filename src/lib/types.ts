@@ -374,6 +374,8 @@ export interface IntakeDriverDraft {
   fullName: string
   birthDate: string
   passport: string
+  /** дата выдачи паспорта — со страницы с фото */
+  passportIssuedDate: string
   /** место рождения — со страницы паспорта с фото */
   birthPlace: string
   /** адрес регистрации — со страницы регистрации */
@@ -397,6 +399,21 @@ export interface IntakeResult {
   truck: IntakeTruckDraft | null
   crossChecks: IntakeCrossCheck[]
   documents: IntakeDocVerdict[]
+}
+
+/** Результат распознавания СТС для карточек «Добавить ТС»/«Добавить прицеп» (Task 83) */
+export interface VehicleIntakeResult {
+  /** статус вердикта документа — как в IntakeDocVerdict */
+  status: 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL' | 'PENDING'
+  quality: number
+  engine: string
+  /** какая нейросеть читала: fast (лёгкая) / accurate (точная) */
+  engineMode?: 'fast' | 'accurate'
+  message: string
+  fields: { brand: string; plate: string; sts: string; owner: string }
+  confidence: Partial<Record<'brand' | 'plate' | 'sts' | 'owner', number>>
+  /** проблемы: вердикт движка + форматные правила «Авто в порт» */
+  issues: string[]
 }
 
 /** Итог сохранения нового водителя */

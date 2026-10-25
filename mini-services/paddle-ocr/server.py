@@ -89,14 +89,20 @@ def decode_image(data_uri):
 
 
 def warmup():
-    """Модели грузятся ~10–20 с: делаем это при старте, а не на первом документе
-    (точная нужна для полей паспорта и повторного прохода — грузим обе)."""
+    """Мало памяти (Task 83, стенд 4 ГБ): модели НЕ держим в диспетчере — каждый запрос
+    обслуживает короткоживущий процесс (см. analyze_subprocess): одна модель, ОДИН документ,
+    память возвращается системе; цена — ~10–20 с на загрузку модели в каждом запросе.
+    Память есть: обе модели грузятся при старте и остаются тёплыми — документ за секунды."""
+    if engine.LOW_MEMORY:
+        STATE["ready"] = True
+        print("[paddle-ocr] режим экономии памяти: модели — по запросу, в отдельном процессе", flush=True)
+        return
     try:
         with LOCK:
             engine.get_ocr("fast")
             engine.get_ocr("accurate")
         STATE["ready"] = True
-        print("[paddle-ocr] модели загружены", flush=True)
+        print("[paddle-ocr] модели загружены (лёгкая и точная)", flush=True)
     except Exception as e:  # noqa: BLE001 — сервис должен жить и сообщать статус
         print(f"[paddle-ocr] ошибка загрузки моделей: {e}", flush=True)
 
@@ -160,13 +166,20 @@ class Handler(BaseHTTPRequestHandler):
         path = decode_image(data_uri)
         if not path:
             return self.send_json({"ok": False, "error": "нужно изображение JPG, PNG, WebP или PDF"}, 400)
+        # Task 83 — две нейросети по кнопкам платформы: "fast" (лёгкая, «Автозаполнение»),
+        # "accurate" (точная, «Проверить»); без mode — прежний автопободор режима
+        mode = body.get("mode")
+        if mode not in ("fast", "accurate"):
+            mode = None
         t0 = time.time()
         try:
             with LOCK:
-                res = engine.analyze(path)
+                # Task 83: при нехватке памяти — короткоживущий процесс на документ
+                # (на стенде 4 ГБ иначе OOM-killer), иначе тёплые модели этого процесса
+                res = engine.analyze_subprocess(path, mode) if engine.LOW_MEMORY else engine.analyze(path, mode=mode)
             STATE["ready"] = True
         except Exception as e:  # noqa: BLE001
-            print(f"[paddle-ocr] ошибка распознавания: {type(e).__name__}", flush=True)
+            print(f"[paddle-ocr] ошибка распознавания: {type(e).__name__}: {e}", flush=True)
             return self.send_json({"ok": False, "error": "ошибка распознавания"}, 500)
         finally:
             try:
@@ -184,6 +197,7 @@ class Handler(BaseHTTPRequestHandler):
             "confidences": res["confidences"],
             "detectedType": res["docType"],
             "confirmations": res["confirmations"],
+            "engineMode": res.get("engineMode") or mode or "fast",
             **({"side": res["side"]} if res.get("side") else {}),
         }
         if platform:

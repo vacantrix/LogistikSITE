@@ -21,7 +21,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  BadgeCheck, CarFront, CircleAlert, IdCard, ScanLine, Truck, Trash2, X,
+  BadgeCheck, CarFront, CircleAlert, IdCard, ScanLine, Sparkles, Truck, Trash2, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,11 +31,13 @@ import { DocStatusBadge, InfoTip } from '@/components/platform/common'
 import {
   DateField, FieldLabel, GeoField, IssuedByField, PositionField, fieldCls,
 } from '@/components/platform/proforma-fields'
+import ScanOverlay from '@/components/platform/scan-overlay'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { DOC_TYPE_LABEL } from '@/lib/status'
 import { fileToCompressedDataUri } from '@/lib/demo-media'
-import type { DocType, IntakeResult } from '@/lib/types'
+import { validatePortField, type PortFieldKind } from '@/lib/port-fields'
+import type { DocType, IntakeResult, VehicleIntakeResult } from '@/lib/types'
 import type { Suggestion } from '@/lib/suggest'
 
 /** Ровно два типа прицепа (утверждено пользователем, Task 32) */
@@ -57,6 +59,9 @@ export const TRAILER_LABELS: Record<string, string> = {
 /** Черновики полей техники — общие для линии водителя и одиночных карточек (Task 48) */
 export type TruckDraft = { brand: string; plate: string; sts: string; color: string; owner: string }
 export type TrailerDraft = { type: string; plate: string; sts: string; color: string; owner: string }
+
+/** Чем карточка занята: нейросеть заполняет (fast), проверяет (accurate) или тихо — из «Проверить все» (Task 83) */
+type CardBusy = 'fill' | 'check' | 'check-quiet' | null
 
 type Upload = { fileName: string; dataUri: string }
 /** Фото документов водителя: паспорт и регистрация (водительское удостоверение не запрашивается) */
@@ -103,31 +108,38 @@ function FieldInput({
   )
 }
 
-/** Поля тягача — общий блок линии водителя и одиночной карточки «Добавить ТС» (Task 48) */
+/** Поля тягача — общий блок линии водителя и одиночной карточки «Добавить ТС» (Task 48).
+ * conf — уверенность нейросети (Task 83); bad — поля, не прошедшие форматные правила (Task 80/83) */
 function TruckFields({
-  prefix, value, miss, lock, onChange, className = 'space-y-2',
+  prefix, value, miss, lock, conf, bad, onChange, className = 'space-y-2',
 }: {
   prefix: string
   value: TruckDraft
   miss: (v: string) => boolean
   lock: boolean
   onChange: (k: keyof TruckDraft, v: string) => void
+  /** уверенность нейросети по полям (Task 83) */
+  conf?: Record<string, number>
+  /** поля, не прошедшие форматные правила «Авто в порт»: ключ → сообщение (Task 80/83) */
+  bad?: Record<string, string>
   className?: string
 }) {
+  const badF = (k: string) => Boolean(bad?.[k])
   return (
     <div className={className}>
-      <FieldInput id={`${prefix}-tb`} label="Марка, модель" placeholder="КАМАЗ 54901-CA" value={value.brand} invalid={miss(value.brand)} disabled={lock} onChange={(v) => onChange('brand', v)} />
-      <FieldInput id={`${prefix}-tp`} label="Госномер" placeholder="У783АХ152" value={value.plate} mono invalid={miss(value.plate)} disabled={lock} onChange={(v) => onChange('plate', v)} />
-      <FieldInput id={`${prefix}-ts`} label="СТС" placeholder="99 17 454545" value={value.sts} mono invalid={miss(value.sts)} disabled={lock} onChange={(v) => onChange('sts', v)} />
-      <FieldInput id={`${prefix}-tc`} label="Цвет" placeholder="зелёный" value={value.color} invalid={miss(value.color)} disabled={lock} onChange={(v) => onChange('color', v)} />
-      <FieldInput id={`${prefix}-to`} label="Собственник" placeholder="ООО «Перевозчик Б»" value={value.owner} invalid={miss(value.owner)} disabled={lock} onChange={(v) => onChange('owner', v)} />
+      <FieldInput id={`${prefix}-tb`} label="Марка, модель" placeholder="КАМАЗ 54901-CA" value={value.brand} conf={conf?.brand} invalid={miss(value.brand) || badF('brand')} disabled={lock} onChange={(v) => onChange('brand', v)} />
+      <FieldInput id={`${prefix}-tp`} label="Госномер" placeholder="У783АХ152" value={value.plate} mono conf={conf?.plate} invalid={miss(value.plate) || badF('plate')} disabled={lock} onChange={(v) => onChange('plate', v)} />
+      <FieldInput id={`${prefix}-ts`} label="СТС" placeholder="99 17 454545" value={value.sts} mono conf={conf?.sts} invalid={miss(value.sts) || badF('sts')} disabled={lock} onChange={(v) => onChange('sts', v)} />
+      <FieldInput id={`${prefix}-tc`} label="Цвет" placeholder="зелёный" value={value.color} conf={conf?.color} invalid={miss(value.color) || badF('color')} disabled={lock} onChange={(v) => onChange('color', v)} />
+      <FieldInput id={`${prefix}-to`} label="Собственник" placeholder="ООО «Перевозчик Б»" value={value.owner} conf={conf?.owner} invalid={miss(value.owner) || badF('owner')} disabled={lock} onChange={(v) => onChange('owner', v)} />
     </div>
   )
 }
 
-/** Поля прицепа — общий блок линии водителя и одиночной карточки «Добавить прицеп» (Task 48) */
+/** Поля прицепа — общий блок линии водителя и одиночной карточки «Добавить прицеп» (Task 48).
+ * conf — уверенность нейросети (Task 83); bad — поля, не прошедшие форматные правила (Task 80/83) */
 function TrailerFields({
-  prefix, value, types, miss, lock, onChange, className = 'space-y-2',
+  prefix, value, types, miss, lock, conf, bad, onChange, className = 'space-y-2',
 }: {
   prefix: string
   value: TrailerDraft
@@ -135,8 +147,13 @@ function TrailerFields({
   miss: (v: string) => boolean
   lock: boolean
   onChange: (k: keyof TrailerDraft, v: string) => void
+  /** уверенность нейросети по полям (Task 83) */
+  conf?: Record<string, number>
+  /** поля, не прошедшие форматные правила «Авто в порт»: ключ → сообщение (Task 80/83) */
+  bad?: Record<string, string>
   className?: string
 }) {
+  const badF = (k: string) => Boolean(bad?.[k])
   return (
     <div className={className}>
       <div className="min-w-0">
@@ -155,10 +172,10 @@ function TrailerFields({
           </SelectContent>
         </Select>
       </div>
-      <FieldInput id={`${prefix}-trp`} label="Госномер" placeholder="АТ5546152" value={value.plate} mono invalid={miss(value.plate)} disabled={lock} onChange={(v) => onChange('plate', v)} />
-      <FieldInput id={`${prefix}-trs`} label="СТС" placeholder="52 19 777777" value={value.sts} mono invalid={miss(value.sts)} disabled={lock} onChange={(v) => onChange('sts', v)} />
-      <FieldInput id={`${prefix}-trc`} label="Цвет" placeholder="серый" value={value.color} invalid={miss(value.color)} disabled={lock} onChange={(v) => onChange('color', v)} />
-      <FieldInput id={`${prefix}-tro`} label="Собственник прицепа" placeholder="ООО «Перевозчик Б»" value={value.owner} invalid={miss(value.owner)} disabled={lock} onChange={(v) => onChange('owner', v)} />
+      <FieldInput id={`${prefix}-trp`} label="Госномер" placeholder="АТ5546152" value={value.plate} mono conf={conf?.plate} invalid={miss(value.plate) || badF('plate')} disabled={lock} onChange={(v) => onChange('plate', v)} />
+      <FieldInput id={`${prefix}-trs`} label="СТС" placeholder="52 19 777777" value={value.sts} mono conf={conf?.sts} invalid={miss(value.sts) || badF('sts')} disabled={lock} onChange={(v) => onChange('sts', v)} />
+      <FieldInput id={`${prefix}-trc`} label="Цвет" placeholder="серый" value={value.color} conf={conf?.color} invalid={miss(value.color) || badF('color')} disabled={lock} onChange={(v) => onChange('color', v)} />
+      <FieldInput id={`${prefix}-tro`} label="Собственник прицепа" placeholder="ООО «Перевозчик Б»" value={value.owner} conf={conf?.owner} invalid={miss(value.owner) || badF('owner')} disabled={lock} onChange={(v) => onChange('owner', v)} />
     </div>
   )
 }
@@ -200,7 +217,8 @@ export default function DriverLine({
   const [verdicts, setVerdicts] = useState<Partial<Record<DocType, IntakeResult['documents'][number]>>>(EMPTY_VERDICTS)
   const [crossChecks, setCrossChecks] = useState<IntakeResult['crossChecks']>([])
   const [conf, setConf] = useState<Record<string, number>>({})
-  const [checking, setChecking] = useState(false)
+  /** чем занята карточка (Task 83): fill — «Автозаполнение» (лёгкая модель), check — «Проверить» (точная) */
+  const [busy, setBusy] = useState<CardBusy>(null)
   /** подсветка незаполненного включается только после первого нажатия «Проверить» (Task 44) */
   const [showErrors, setShowErrors] = useState(false)
   const [admitted, setAdmitted] = useState<string | null>(null)
@@ -220,9 +238,35 @@ export default function DriverLine({
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
   const miss = (v: string) => showErrors && v.trim() === ''
 
+  /** Нейросеть читает фото и возвращает обновлённые поля (заполняются ТОЛЬКО пустые).
+   * mode — какая нейросеть: fast (лёгкая, «Автозаполнение») / accurate (точная, «Проверить») */
+  const runOcr = useCallback(async (mode: 'fast' | 'accurate') => {
+    const res = await api.intakeDriver(
+      Object.fromEntries(Object.entries(uploads).filter(([, v]) => v)) as Partial<Record<string, Upload>>,
+      mode,
+    )
+    setVerdicts(Object.fromEntries(res.documents.map((doc) => [doc.type, doc])))
+    setCrossChecks(res.crossChecks)
+    const pick = (cur: string, next: string | undefined) => cur || next || ''
+    // заполняем ТОЛЬКО пустые поля — вручную введённое не затирается
+    const eff = {
+      ...d,
+      fullName: pick(d.fullName, res.driver.fullName),
+      birthDate: pick(d.birthDate, res.driver.birthDate),
+      passport: pick(d.passport, res.driver.passport),
+      passportIssuedDate: pick(d.passportIssuedDate, res.driver.passportIssuedDate),
+      citizenship: pick(d.citizenship, (res.driver as unknown as { citizenship?: string }).citizenship),
+      birthPlace: pick(d.birthPlace, res.driver.birthPlace),
+      address: pick(d.address, res.driver.address),
+    }
+    setD(eff)
+    setConf(res.driver.confidence ?? {})
+    return { effD: eff, latest: res.documents }
+  }, [uploads, d])
+
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
-    if (checking) return false
+    if (busy) return false
 
     // ——— валидация «все поля обязательны»: подсветка появляется только здесь (Task 44) ———
     setShowErrors(true)
@@ -233,45 +277,29 @@ export default function DriverLine({
     if (missingLabels.length > 0 || missingPhotos.length > 0) {
       if (!quiet) {
         const cap = (arr: string[]) => (arr.length > 6 ? `${arr.slice(0, 6).join(', ')} + ещё ${arr.length - 6}` : arr.join(', '))
-        const parts = [
-          missingLabels.length > 0 ? `Поля: ${cap(missingLabels)}` : null,
-          missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')}` : null,
-        ].filter(Boolean)
-        toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
+        if (missingLabels.length === 0) {
+          // заполнено всё, кроме фотографий — тот самый случай из «проформы перевозчика» (Task 83)
+          toast({
+            title: 'Требуется загрузить фото',
+            description: `Добавьте: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')}`,
+            variant: 'destructive',
+          })
+        } else {
+          const parts = [
+            `Поля: ${cap(missingLabels)}`,
+            missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')}` : null,
+          ].filter(Boolean)
+          toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
+        }
       }
       return false
     }
 
-    setChecking(true)
+    setBusy(quiet ? 'check-quiet' : 'check')
     try {
-      // ——— нейросеть читает фото и заполняет ТОЛЬКО пустые поля.
-      // Повторный прогон не нужен, пока все 3 документа имеют вердикты ———
-      let effD = { ...d }
-      let latest: IntakeResult['documents'] = []
-      const aiDone = DRIVER_DOC_TYPES.every((tp) => verdicts[tp])
-      if (!aiDone) {
-        const res = await api.intakeDriver(
-          Object.fromEntries(Object.entries(uploads).filter(([, v]) => v)) as Partial<Record<string, Upload>>,
-        )
-        latest = res.documents
-        setVerdicts(Object.fromEntries(res.documents.map((doc) => [doc.type, doc])))
-        setCrossChecks(res.crossChecks)
-        const pick = (cur: string, next: string | undefined) => cur || next || ''
-        // заполняем ТОЛЬКО пустые поля — вручную введённое не затирается
-        effD = {
-          ...d,
-          fullName: pick(d.fullName, res.driver.fullName),
-          birthDate: pick(d.birthDate, res.driver.birthDate),
-          passport: pick(d.passport, res.driver.passport),
-          citizenship: pick(d.citizenship, (res.driver as unknown as { citizenship?: string }).citizenship),
-          birthPlace: pick(d.birthPlace, res.driver.birthPlace),
-          address: pick(d.address, res.driver.address),
-        }
-        setD(effD)
-        setConf(res.driver.confidence ?? {})
-      } else {
-        latest = DRIVER_DOC_TYPES.flatMap((tp) => (verdicts[tp] ? [verdicts[tp]] : []))
-      }
+      // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает фото
+      // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
+      const { effD, latest } = await runOcr('accurate')
 
       const bad = latest.filter((x) => x.status === 'REUPLOAD' || x.status === 'REJECTED')
       if (bad.length > 0) {
@@ -328,9 +356,49 @@ export default function DriverLine({
       })
       return false
     } finally {
-      setChecking(false)
+      setBusy(null)
     }
-  }, [admitted, checking, uploads, verdicts, d, carrierId, onAdmitted, toast])
+  }, [admitted, busy, uploads, d, carrierId, runOcr, onAdmitted, toast])
+
+
+  /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает фото и заполняет
+   * пустые поля; в базу ничего не пишется — допуск только через «Проверить». Без фото —
+   * красные слоты и тост «Требуется загрузить фото». */
+  const autofill = useCallback(async (): Promise<boolean> => {
+    if (admitted || busy) return false
+    setShowErrors(true)
+    const missingPhotos = DRIVER_DOC_TYPES.filter((tp) => !uploads[tp])
+    if (missingPhotos.length > 0) {
+      toast({
+        title: 'Требуется загрузить фото',
+        description: `Добавьте: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')} — нейросеть заполнит карточку по ним`,
+        variant: 'destructive',
+      })
+      return false
+    }
+    setBusy('fill')
+    try {
+      const { effD } = await runOcr('fast')
+      const dKeys = Object.keys(DRIVER_LABELS) as (keyof typeof d)[]
+      const stillEmpty = dKeys.filter((k) => effD[k].trim() === '').map((k) => DRIVER_LABELS[k])
+      toast({
+        title: stillEmpty.length === 0 ? 'Карточка заполнена нейросетью' : 'Карточка заполнена частично',
+        description: stillEmpty.length === 0
+          ? 'Лёгкая нейросеть прочитала фото — сверьте поля и нажмите «Проверить» для допуска в базу'
+          : `Не прочитано: ${stillEmpty.join(', ')} — заполните вручную и нажмите «Проверить»`,
+      })
+      return true
+    } catch (e) {
+      toast({
+        title: 'Автозаполнение не удалось',
+        description: e instanceof Error ? e.message : 'Неизвестная ошибка',
+        variant: 'destructive',
+      })
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }, [admitted, busy, uploads, runOcr, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -346,7 +414,7 @@ export default function DriverLine({
     setUploads((cur) => { const n = { ...cur }; delete n[type]; return n })
   }
 
-  const lock = admitted !== null || checking
+  const lock = admitted !== null || busy !== null
 
   return (
     <section
@@ -374,12 +442,24 @@ export default function DriverLine({
         {!admitted && (
           <Button
             size="sm"
+            variant="outline"
+            onClick={() => void autofill()}
+            disabled={busy !== null}
+            className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
+          >
+            <Sparkles className="h-4 w-4" aria-hidden />
+            {busy === 'fill' ? 'Заполняем…' : 'Автозаполнение'}
+          </Button>
+        )}
+        {!admitted && (
+          <Button
+            size="sm"
             onClick={() => void check()}
-            disabled={checking}
+            disabled={busy !== null}
             className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
           >
             <ScanLine className="h-4 w-4" aria-hidden />
-            {checking ? 'Проверяем…' : 'Проверить'}
+            {busy === 'check' ? 'Проверяем…' : 'Проверить'}
           </Button>
         )}
         <Button size="icon" variant="ghost" onClick={() => onRemove(id)} aria-label={`Убрать карточку водителя ${index + 1}`} className="h-8 w-8 text-slate-400 hover:text-red-600">
@@ -426,7 +506,7 @@ export default function DriverLine({
               region={addrGeo.region} county={addrGeo.county} address={d.address}
               onChange={(v) => setField('passportIssuedBy', v)}
             />
-            <DateField id={`${id}-pdate`} label="Дата выдачи" value={d.passportIssuedDate} invalid={miss(d.passportIssuedDate)} disabled={lock} fromYear={1997} onChange={(v) => setField('passportIssuedDate', v)} />
+            <DateField id={`${id}-pdate`} label="Дата выдачи" value={d.passportIssuedDate} conf={conf.passportIssuedDate} invalid={miss(d.passportIssuedDate)} disabled={lock} fromYear={1997} onChange={(v) => setField('passportIssuedDate', v)} />
             <PositionField id={`${id}-pos`} label="Должность" value={d.position} invalid={miss(d.position)} disabled={lock} onChange={(v) => setField('position', v)} />
           </div>
         </div>
@@ -512,6 +592,15 @@ export default function DriverLine({
           </ul>
         </div>
       )}
+
+      {/* ——— «замыливание» экрана с лупой, пока нейросеть работает над карточкой (Task 83) ——— */}
+      <ScanOverlay
+        open={busy === 'fill' || busy === 'check'}
+        title={busy === 'fill' ? 'Автозаполнение' : 'Проверка карточки'}
+        steps={busy === 'fill'
+          ? ['Читаем фото документов…', 'Распознаём поля…', 'Заполняем карточку…']
+          : undefined}
+      />
     </section>
   )
 }
@@ -534,9 +623,9 @@ export interface SoloLineProps {
   onRemove: (id: string) => void
 }
 
-/** Шапка одиночной карточки: иконка, заголовок, метка, кнопка проверки и удаления */
+/** Шапка одиночной карточки: иконка, заголовок, метка, кнопки «Автозаполнение»/«Проверить» и удаления */
 function SoloHeader({
-  icon, title, index, kind, tag, checking, admitted, onCheck, onRemove,
+  icon, title, index, kind, tag, busy, admitted, onAutofill, onCheck, onRemove,
 }: {
   icon: ReactNode
   title: string
@@ -544,8 +633,10 @@ function SoloHeader({
   kind: string
   /** метка источника данных, например «Из Excel» (Task 51) */
   tag?: string
-  checking: boolean
+  busy: CardBusy
   admitted: boolean
+  /** если задана — в шапке появляется кнопка «Автозаполнение» (Task 83) */
+  onAutofill?: () => void
   onCheck: () => void
   onRemove: () => void
 }) {
@@ -567,15 +658,27 @@ function SoloHeader({
         </span>
       )}
       <span className="flex-1" />
+      {!admitted && onAutofill && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onAutofill}
+          disabled={busy !== null}
+          className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
+        >
+          <Sparkles className="h-4 w-4" aria-hidden />
+          {busy === 'fill' ? 'Заполняем…' : 'Автозаполнение'}
+        </Button>
+      )}
       {!admitted && (
         <Button
           size="sm"
           onClick={onCheck}
-          disabled={checking}
+          disabled={busy !== null}
           className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
         >
           <ScanLine className="h-4 w-4" aria-hidden />
-          {checking ? 'Проверяем…' : 'Проверить'}
+          {busy === 'check' ? 'Проверяем…' : 'Проверить'}
         </Button>
       )}
       <Button size="icon" variant="ghost" onClick={onRemove} aria-label={`Убрать карточку ${kind} ${index + 1}`} className="h-8 w-8 text-slate-400 hover:text-red-600">
@@ -758,19 +861,99 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     owner: initial?.owner ?? '',
   })
   const [showErrors, setShowErrors] = useState(false)
-  const [checking, setChecking] = useState(false)
   const [admitted, setAdmitted] = useState<string | null>(null)
+  /** чем занята карточка (Task 83): fill — «Автозаполнение» (лёгкая модель), check — «Проверить» (точная) */
+  const [busy, setBusy] = useState<CardBusy>(null)
+  /** уверенность нейросети по полям (Task 83) */
+  const [conf, setConf] = useState<Record<string, number>>({})
+  /** поля, не прошедшие форматные правила «Авто в порт» (Task 80/83): ключ → сообщение */
+  const [formatBad, setFormatBad] = useState<Record<string, string>>({})
   // фото ТС (Task 53): файл или Ctrl+V — оба слота обязательны
   const { photos, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRUCK_PHOTO_LABELS, admitted !== null, toast)
 
-  const setField = useCallback((k: keyof TruckDraft, v: string) => setT((cur) => ({ ...cur, [k]: v })), [])
+  const setField = useCallback((k: keyof TruckDraft, v: string) => {
+    setT((cur) => ({ ...cur, [k]: v }))
+    setFormatBad((cur) => {
+      if (!(k in cur)) return cur // правка поля гасит подсветку формата
+      const n = { ...cur }; delete n[k]; return n
+    })
+  }, [])
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
   const miss = useCallback((v: string) => showErrors && v.trim() === '', [showErrors])
-  const lock = admitted !== null || checking
+  const lock = admitted !== null || busy !== null
+
+  /** Правила «Авто в порт» по полям карточки тягача (Task 80/83) */
+  const fieldKinds: Record<keyof TruckDraft, PortFieldKind> = { brand: 'text', plate: 'plate', sts: 'sts', color: 'color', owner: 'text' }
+
+  /** Слить результат нейросети с ручным вводом: заполняются только пустые поля;
+   * вернуть слитые значения и подсветить поля, нарушающие формат (Task 83) */
+  const mergeVehicle = useCallback((res: VehicleIntakeResult) => {
+    const pick = (cur: string, next: string | undefined) => cur.trim() || next || ''
+    const merged: TruckDraft = {
+      brand: pick(t.brand, res.fields.brand),
+      plate: pick(t.plate, res.fields.plate),
+      sts: pick(t.sts, res.fields.sts),
+      color: t.color,
+      owner: pick(t.owner, res.fields.owner),
+    }
+    setT(merged)
+    setConf(res.confidence as Record<string, number>)
+    const bad: Record<string, string> = {}
+    for (const k of Object.keys(fieldKinds) as (keyof TruckDraft)[]) {
+      const val = merged[k]
+      if (!val.trim()) continue // пустое — не нарушение: заполнит человек
+      const r = validatePortField(fieldKinds[k], val)
+      if (!r.ok && r.message) bad[k] = r.message
+    }
+    setFormatBad(bad)
+    return { merged, bad }
+  }, [t])
+
+  /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает СТС и заполняет
+   * пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
+  const autofill = useCallback(async (): Promise<boolean> => {
+    if (admitted || busy) return false
+    setShowErrors(true)
+    if (!photos.sts) {
+      toast({
+        title: 'Требуется загрузить фото',
+        description: 'Добавьте фото: СТС тягача — нейросеть заполнит карточку по нему',
+        variant: 'destructive',
+      })
+      return false
+    }
+    setBusy('fill')
+    try {
+      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, mode: 'fast' })
+      if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
+        toast({ title: 'СТС не распознано', description: res.message, variant: 'destructive' })
+        return false
+      }
+      const { merged, bad } = mergeVehicle(res)
+      const filled = (['brand', 'plate', 'sts', 'owner'] as const).filter((k) => !t[k].trim() && merged[k].trim())
+      const badList = Object.values(bad)
+      toast({
+        title: filled.length === 0
+          ? 'Нового прочитать не удалось'
+          : badList.length > 0 ? 'Заполнено, но есть нарушения формата' : 'Карточка заполнена нейросетью',
+        description: [
+          filled.length > 0 ? `Заполнено: ${filled.map((k) => TRUCK_LABELS[k]).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — лёгкая модель ничего не добавила',
+          badList.length > 0 ? badList.join(' · ') : null,
+        ].filter(Boolean).join(' · '),
+        ...(badList.length > 0 ? { variant: 'destructive' as const } : {}),
+      })
+      return true
+    } catch (e) {
+      toast({ title: 'Автозаполнение не удалось', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }, [admitted, busy, photos.sts, mergeVehicle, t, toast])
 
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
-    if (checking) return false
+    if (busy) return false
 
     // ——— валидация «все поля и фото обязательны»: подсветка появляется только здесь ———
     setShowErrors(true)
@@ -778,30 +961,60 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     const missingPhotos = SOLO_PHOTO_KEYS.filter((k) => !photos[k])
     if (missing.length > 0 || missingPhotos.length > 0) {
       if (!quiet) {
-        const parts = [
-          missing.length > 0 ? `Поля: ${missing.map((k) => TRUCK_LABELS[k]).join(', ')}` : null,
-          missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRUCK_PHOTO_LABELS[k]).join(', ')}` : null,
-        ].filter(Boolean)
-        toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
+        if (missing.length === 0 && missingPhotos.length > 0) {
+          // заполнено всё, кроме фото — тот самый случай из «проформы перевозчика» (Task 83)
+          toast({
+            title: 'Требуется загрузить фото',
+            description: `Добавьте: ${missingPhotos.map((k) => TRUCK_PHOTO_LABELS[k]).join(', ')}`,
+            variant: 'destructive',
+          })
+        } else {
+          const parts = [
+            missing.length > 0 ? `Поля: ${missing.map((k) => TRUCK_LABELS[k]).join(', ')}` : null,
+            missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRUCK_PHOTO_LABELS[k]).join(', ')}` : null,
+          ].filter(Boolean)
+          toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
+        }
       }
       return false
     }
 
-    setChecking(true)
+    setBusy(quiet ? 'check-quiet' : 'check')
     try {
+      // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает СТС
+      // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
+      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts!, mode: 'accurate' })
+      const { merged, bad } = mergeVehicle(res)
+
+      if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
+        if (!quiet) {
+          toast({ title: 'СТС не прошло проверку', description: `${res.message} — замените фото или введите данные вручную`, variant: 'destructive' })
+        }
+        return false
+      }
+
+      // ——— форматные правила «Авто в порт»: мусор вида «22о2/гвкгк» не попадает в базу (Task 80/83) ———
+      const badList = Object.values(bad)
+      if (badList.length > 0) {
+        if (!quiet) {
+          toast({ title: 'Формат полей не прошёл правила «Авто в порт»', description: badList.join(' · '), variant: 'destructive' })
+        }
+        return false
+      }
+
       // фото ТС сохраняются вместе с записью — предосмотр в «Справочниках» (Task 54)
       const truckPhotos = SOLO_PHOTO_KEYS
         .filter((k) => photos[k])
         .map((k) => ({ label: TRUCK_PHOTO_LABELS[k], fileName: photos[k]!.fileName, dataUri: photos[k]!.dataUri }))
-      const res = await api.createDirectory('truck', {
+      const post = await api.createDirectory('truck', {
         carrierId,
-        brand: t.brand.trim(),
-        plate: t.plate.trim(),
-        sts: t.sts.trim(),
-        color: t.color.trim(),
-        owner: t.owner.trim(),
+        brand: merged.brand.trim(),
+        plate: merged.plate.trim(),
+        sts: merged.sts.trim(),
+        color: merged.color.trim(),
+        owner: merged.owner.trim(),
       }, truckPhotos)
-      const label = res.truck ? `${res.truck.brand} ${res.truck.plate}` : `${t.brand.trim()} ${t.plate.trim()}`
+      const label = post.truck ? `${post.truck.brand} ${post.truck.plate}` : `${merged.brand.trim()} ${merged.plate.trim()}`
       setAdmitted(label)
       toast({ title: 'ТС допущено в базу', description: label })
       return true
@@ -813,9 +1026,9 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       })
       return false
     } finally {
-      setChecking(false)
+      setBusy(null)
     }
-  }, [admitted, checking, t, photos, carrierId, toast])
+  }, [admitted, busy, t, photos, carrierId, mergeVehicle, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -838,8 +1051,9 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         index={index}
         kind="ТС"
         tag={initial ? 'Из Excel' : undefined}
-        checking={checking}
+        busy={busy}
         admitted={admitted !== null}
+        onAutofill={() => void autofill()}
         onCheck={() => void check()}
         onRemove={() => onRemove(id)}
       />
@@ -852,6 +1066,8 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
             value={t}
             miss={miss}
             lock={lock}
+            conf={conf}
+            bad={formatBad}
             onChange={setField}
             className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5"
           />
@@ -866,6 +1082,14 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
           />
         </div>
       )}
+      {/* ——— «замыливание» экрана с лупой, пока нейросеть работает над карточкой (Task 83) ——— */}
+      <ScanOverlay
+        open={busy === 'fill' || busy === 'check'}
+        title={busy === 'fill' ? 'Автозаполнение' : 'Проверка карточки'}
+        steps={busy === 'fill'
+          ? ['Читаем СТС…', 'Распознаём поля…', 'Заполняем карточку…']
+          : undefined}
+      />
     </section>
   )
 }
@@ -887,19 +1111,99 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     owner: initial?.owner ?? '',
   })
   const [showErrors, setShowErrors] = useState(false)
-  const [checking, setChecking] = useState(false)
   const [admitted, setAdmitted] = useState<string | null>(null)
+  /** чем занята карточка (Task 83): fill — «Автозаполнение» (лёгкая модель), check — «Проверить» (точная) */
+  const [busy, setBusy] = useState<CardBusy>(null)
+  /** уверенность нейросети по полям (Task 83) */
+  const [conf, setConf] = useState<Record<string, number>>({})
+  /** поля, не прошедшие форматные правила «Авто в порт» (Task 80/83): ключ → сообщение */
+  const [formatBad, setFormatBad] = useState<Record<string, string>>({})
   // фото прицепа (Task 53): файл или Ctrl+V — оба слота обязательны
   const { photos, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRAILER_PHOTO_LABELS, admitted !== null, toast)
 
-  const setField = useCallback((k: keyof TrailerDraft, v: string) => setTr((cur) => ({ ...cur, [k]: v })), [])
+  const setField = useCallback((k: keyof TrailerDraft, v: string) => {
+    setTr((cur) => ({ ...cur, [k]: v }))
+    setFormatBad((cur) => {
+      if (!(k in cur)) return cur // правка поля гасит подсветку формата
+      const n = { ...cur }; delete n[k]; return n
+    })
+  }, [])
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
   const miss = useCallback((v: string) => showErrors && v.trim() === '', [showErrors])
-  const lock = admitted !== null || checking
+  const lock = admitted !== null || busy !== null
+
+  /** Правила «Авто в порт» по полям карточки прицепа: госномер — по шаблону прицепа (Task 80/83) */
+  const fieldKinds: Record<keyof TrailerDraft, PortFieldKind> = { type: 'text', plate: 'plateTrailer', sts: 'sts', color: 'color', owner: 'text' }
+
+  /** Слить результат нейросети с ручным вводом: заполняются только пустые поля;
+   * вернуть слитые значения и подсветить поля, нарушающие формат (Task 83) */
+  const mergeVehicle = useCallback((res: VehicleIntakeResult) => {
+    const pick = (cur: string, next: string | undefined) => cur.trim() || next || ''
+    const merged: TrailerDraft = {
+      type: tr.type,
+      plate: pick(tr.plate, res.fields.plate),
+      sts: pick(tr.sts, res.fields.sts),
+      color: tr.color,
+      owner: pick(tr.owner, res.fields.owner),
+    }
+    setTr(merged)
+    setConf(res.confidence as Record<string, number>)
+    const bad: Record<string, string> = {}
+    for (const k of Object.keys(fieldKinds) as (keyof TrailerDraft)[]) {
+      const val = merged[k]
+      if (!val.trim()) continue // пустое — не нарушение: заполнит человек
+      const r = validatePortField(fieldKinds[k], val)
+      if (!r.ok && r.message) bad[k] = r.message
+    }
+    setFormatBad(bad)
+    return { merged, bad }
+  }, [tr])
+
+  /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает СТС и заполняет
+   * пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
+  const autofill = useCallback(async (): Promise<boolean> => {
+    if (admitted || busy) return false
+    setShowErrors(true)
+    if (!photos.sts) {
+      toast({
+        title: 'Требуется загрузить фото',
+        description: 'Добавьте фото: СТС прицепа — нейросеть заполнит карточку по нему',
+        variant: 'destructive',
+      })
+      return false
+    }
+    setBusy('fill')
+    try {
+      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, mode: 'fast' })
+      if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
+        toast({ title: 'СТС не распознано', description: res.message, variant: 'destructive' })
+        return false
+      }
+      const { merged, bad } = mergeVehicle(res)
+      const filled = (['plate', 'sts', 'owner'] as const).filter((k) => !tr[k].trim() && merged[k].trim())
+      const badList = Object.values(bad)
+      toast({
+        title: filled.length === 0
+          ? 'Нового прочитать не удалось'
+          : badList.length > 0 ? 'Заполнено, но есть нарушения формата' : 'Карточка заполнена нейросетью',
+        description: [
+          filled.length > 0 ? `Заполнено: ${filled.map((k) => TRAILER_LABELS[k]).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — лёгкая модель ничего не добавила',
+          badList.length > 0 ? badList.join(' · ') : null,
+        ].filter(Boolean).join(' · '),
+        ...(badList.length > 0 ? { variant: 'destructive' as const } : {}),
+      })
+      return true
+    } catch (e) {
+      toast({ title: 'Автозаполнение не удалось', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }, [admitted, busy, photos.sts, mergeVehicle, tr, toast])
 
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
-    if (checking) return false
+    if (busy) return false
 
     // ——— валидация «все поля и фото обязательны»: подсветка появляется только здесь ———
     setShowErrors(true)
@@ -907,30 +1211,60 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     const missingPhotos = SOLO_PHOTO_KEYS.filter((k) => !photos[k])
     if (missing.length > 0 || missingPhotos.length > 0) {
       if (!quiet) {
-        const parts = [
-          missing.length > 0 ? `Поля: ${missing.map((k) => TRAILER_LABELS[k]).join(', ')}` : null,
-          missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRAILER_PHOTO_LABELS[k]).join(', ')}` : null,
-        ].filter(Boolean)
-        toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
+        if (missing.length === 0 && missingPhotos.length > 0) {
+          // заполнено всё, кроме фото — тот самый случай из «проформы перевозчика» (Task 83)
+          toast({
+            title: 'Требуется загрузить фото',
+            description: `Добавьте: ${missingPhotos.map((k) => TRAILER_PHOTO_LABELS[k]).join(', ')}`,
+            variant: 'destructive',
+          })
+        } else {
+          const parts = [
+            missing.length > 0 ? `Поля: ${missing.map((k) => TRAILER_LABELS[k]).join(', ')}` : null,
+            missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRAILER_PHOTO_LABELS[k]).join(', ')}` : null,
+          ].filter(Boolean)
+          toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
+        }
       }
       return false
     }
 
-    setChecking(true)
+    setBusy(quiet ? 'check-quiet' : 'check')
     try {
+      // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает СТС
+      // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
+      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts!, mode: 'accurate' })
+      const { merged, bad } = mergeVehicle(res)
+
+      if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
+        if (!quiet) {
+          toast({ title: 'СТС не прошло проверку', description: `${res.message} — замените фото или введите данные вручную`, variant: 'destructive' })
+        }
+        return false
+      }
+
+      // ——— форматные правила «Авто в порт»: мусор не попадает в базу (Task 80/83) ———
+      const badList = Object.values(bad)
+      if (badList.length > 0) {
+        if (!quiet) {
+          toast({ title: 'Формат полей не прошёл правила «Авто в порт»', description: badList.join(' · '), variant: 'destructive' })
+        }
+        return false
+      }
+
       // фото прицепа сохраняются вместе с записью — предосмотр в «Справочниках» (Task 54)
       const trailerPhotos = SOLO_PHOTO_KEYS
         .filter((k) => photos[k])
         .map((k) => ({ label: TRAILER_PHOTO_LABELS[k], fileName: photos[k]!.fileName, dataUri: photos[k]!.dataUri }))
-      const res = await api.createDirectory('trailer', {
+      const post = await api.createDirectory('trailer', {
         carrierId,
-        type: tr.type || TRAILER_TYPES[0],
-        plate: tr.plate.trim(),
-        sts: tr.sts.trim(),
-        color: tr.color.trim(),
-        owner: tr.owner.trim(),
+        type: merged.type || TRAILER_TYPES[0],
+        plate: merged.plate.trim(),
+        sts: merged.sts.trim(),
+        color: merged.color.trim(),
+        owner: merged.owner.trim(),
       }, trailerPhotos)
-      const label = res.trailer ? `${res.trailer.type} ${res.trailer.plate}` : `${tr.type} ${tr.plate.trim()}`
+      const label = post.trailer ? `${post.trailer.type} ${post.trailer.plate}` : `${merged.type} ${merged.plate.trim()}`
       setAdmitted(label)
       toast({ title: 'Прицеп допущен в базу', description: label })
       return true
@@ -942,9 +1276,9 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       })
       return false
     } finally {
-      setChecking(false)
+      setBusy(null)
     }
-  }, [admitted, checking, tr, photos, carrierId, toast])
+  }, [admitted, busy, tr, photos, carrierId, mergeVehicle, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -967,8 +1301,9 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
         index={index}
         kind="прицепа"
         tag={initial ? 'Из Excel' : undefined}
-        checking={checking}
+        busy={busy}
         admitted={admitted !== null}
+        onAutofill={() => void autofill()}
         onCheck={() => void check()}
         onRemove={() => onRemove(id)}
       />
@@ -982,6 +1317,8 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
             types={TRAILER_TYPES}
             miss={miss}
             lock={lock}
+            conf={conf}
+            bad={formatBad}
             onChange={setField}
             className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5"
           />
@@ -996,6 +1333,14 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
           />
         </div>
       )}
+      {/* ——— «замыливание» экрана с лупой, пока нейросеть работает над карточкой (Task 83) ——— */}
+      <ScanOverlay
+        open={busy === 'fill' || busy === 'check'}
+        title={busy === 'fill' ? 'Автозаполнение' : 'Проверка карточки'}
+        steps={busy === 'fill'
+          ? ['Читаем СТС…', 'Распознаём поля…', 'Заполняем карточку…']
+          : undefined}
+      />
     </section>
   )
 }

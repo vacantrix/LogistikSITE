@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
 import type { SuggestKind, Suggestion } from '@/lib/suggest'
@@ -135,8 +135,13 @@ export const api = {
     fetch(`/api/requests/${id}/verify`, withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).then(json<{ request: RequestDTO }>),
 
   /** Нейросеть распознаёт документы нового водителя и возвращает черновик карточки */
-  intakeDriver: (docs: Partial<Record<string, { fileName: string; dataUri: string }>>) =>
-    fetch('/api/drivers/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs }) })).then(json<IntakeResult>),
+  intakeDriver: (docs: Partial<Record<string, { fileName: string; dataUri: string }>>, mode?: 'fast' | 'accurate') =>
+    fetch('/api/drivers/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs, mode }) })).then(json<IntakeResult>),
+
+  /** Распознавание СТС для карточек «Добавить ТС»/«Добавить прицеп» (Task 83):
+   * mode "fast" — лёгкая нейросеть («Автозаполнение»), "accurate" — точная («Проверить») */
+  intakeVehicle: (body: { kind: 'truck' | 'trailer'; sts: { fileName: string; dataUri: string }; mode?: 'fast' | 'accurate' }) =>
+    fetch('/api/vehicles/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<VehicleIntakeResult>),
 
   /** Подсказки проформы водителя: адрес и место рождения — из карты, «Кем выдан» — по региону и базе */
   suggest: (body: { kind: SuggestKind; q?: string; region?: string; county?: string; address?: string; lat?: number; lon?: number; level?: 'place' }) =>

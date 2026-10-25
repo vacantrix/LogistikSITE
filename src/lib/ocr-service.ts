@@ -90,15 +90,19 @@ function enqueue<T>(job: () => Promise<T>): Promise<T> {
   return run
 }
 
-/** Распознавание через локальный сервис (изображение или PDF — сервис читает первую страницу) */
-export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): Promise<OcrServiceResult> {
+/**
+ * Распознавание через локальный сервис (изображение или PDF — сервис читает первую страницу).
+ * mode (Task 83) — какая нейросеть читает: "fast" (лёгкая, кнопка «Автозаполнение»),
+ * "accurate" (точная, кнопка «Проверить»); без mode — сервис сам подбирает режим.
+ */
+export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean, mode?: 'fast' | 'accurate'): Promise<OcrServiceResult> {
   if (!ocrServiceEnabled()) return Promise.resolve({ kind: 'unavailable' })
   return enqueue(async (): Promise<OcrServiceResult> => {
     try {
       const res = await fetch(`${BASE}/ocr`, {
         method: 'POST',
         headers: headers(),
-        body: JSON.stringify({ type, dataUri, intake }),
+        body: JSON.stringify({ type, dataUri, intake, ...(mode ? { mode } : {}) }),
         signal: AbortSignal.timeout(OCR_TIMEOUT_MS),
       })
       if (res.status === 422) return { kind: 'unsupported' }
@@ -112,11 +116,13 @@ export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): 
           confidences?: Record<string, number>
           detectedType?: DocType | 'UNKNOWN'
           side?: string
+          engineMode?: string
           confirmations?: Record<string, string[]>
         }
       }
       const ocr = j.ocr
       if (!j.ok || !ocr || typeof ocr.quality !== 'number' || !ocr.engine) return { kind: 'unavailable' }
+      const engineMode = ocr.engineMode === 'accurate' ? 'accurate' as const : ocr.engineMode === 'fast' ? 'fast' as const : undefined
       return {
         kind: 'ok',
         ocr: {
@@ -130,6 +136,7 @@ export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): 
             ? { detectedType: KNOWN_TYPES.has(ocr.detectedType as DocType) ? ocr.detectedType : 'UNKNOWN' }
             : {}),
           ...(ocr.side === 'front' || ocr.side === 'back' ? { side: ocr.side } : {}),
+          ...(engineMode ? { engineMode } : {}),
           ...(ocr.confirmations ? { confirmations: ocr.confirmations } : {}),
         },
       }

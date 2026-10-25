@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { InfoTip, SectionHeader, type TabProps } from '@/components/platform/common'
+import ScanOverlay from '@/components/platform/scan-overlay'
 import { useToast } from '@/hooks/use-toast'
 import DriverLine, {
   TrailerLine, TruckLine, TRAILER_TYPES, type DriverLineInitial, type TrailerDraft, type TruckDraft,
@@ -134,6 +135,8 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   const [trucks, setTrucks] = useState<TruckSoloState[]>([])
   const [trailers, setTrailers] = useState<TrailerSoloState[]>([])
   const [checkingAll, setCheckingAll] = useState(false)
+  /** прогресс «Проверить все» для оверлея с лупой (Task 83): Карточка k из N */
+  const [allProgress, setAllProgress] = useState<{ done: number; total: number } | null>(null)
   const [excelName, setExcelName] = useState<string | null>(null)
 
   // актуальные функции проверки линий (для «Проверить все»)
@@ -174,11 +177,14 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
     setCheckingAll(true)
     let ran = 0
     let ok = 0
+    const fns = [...checksRef.current.values()]
+    setAllProgress({ done: 0, total: fns.length })
     try {
-      for (const [, fn] of checksRef.current) {
+      for (const fn of fns) {
         const res = await fn(true)
         ran += 1
         if (res) ok += 1
+        setAllProgress((p) => (p ? { ...p, done: p.done + 1 } : p))
         if (!res) setLines((cur) => [...cur]) // перерисовать после ответа линии
       }
       if (ran === 0) {
@@ -194,6 +200,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
       }
     } finally {
       setCheckingAll(false)
+      setAllProgress(null)
     }
   }
 
@@ -260,6 +267,15 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   return (
     <section aria-labelledby="apply-title" className="space-y-4">
       <SectionHeader title="Подать документы" />
+
+      {/* ——— «замыливание» экрана с лупой, пока идёт «Проверить все» (Task 83) ——— */}
+      <ScanOverlay
+        open={checkingAll}
+        title="Проверка карточек"
+        sub={allProgress && allProgress.total > 0
+          ? `Карточка ${Math.min(allProgress.done + 1, allProgress.total)} из ${allProgress.total}`
+          : undefined}
+      />
 
       {/* база кадров и техники теперь живёт в Справочниках — чтобы повторно не создавать */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">

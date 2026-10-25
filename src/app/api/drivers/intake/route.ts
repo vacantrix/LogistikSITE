@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
-import { analyzeIntakeDoc, buildIntakeDraft } from '@/lib/verify'
+import { analyzeIntakeDoc, buildIntakeDraft, type OcrMode } from '@/lib/verify'
 import type { DocType, VerifyVerdict } from '@/lib/verify'
 import type { IntakeDocVerdict, IntakeResult } from '@/lib/types'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => null)
   const docs = (body?.docs ?? {}) as Partial<Record<DocType, { fileName?: string; dataUri?: string }>>
+  // Task 83 — две нейросети: "fast" (лёгкая, «Автозаполнение») / "accurate" (точная, «Проверить»)
+  const mode: OcrMode | undefined = body?.mode === 'fast' || body?.mode === 'accurate' ? body.mode : undefined
   const provided = (Object.keys(docs) as DocType[]).filter((t) => DOC_TYPES.includes(t) && docs[t]?.dataUri)
 
   if (!provided.includes('PASSPORT_PHOTO')) {
@@ -38,7 +40,7 @@ export async function POST(req: NextRequest) {
   const pairs = await Promise.all(
     provided.map(async (t) => {
       const doc = docs[t]!
-      const verdict = await analyzeIntakeDoc(String(doc.fileName ?? '').slice(0, 200), t, doc.dataUri!, settings)
+      const verdict = await analyzeIntakeDoc(String(doc.fileName ?? '').slice(0, 200), t, doc.dataUri!, settings, mode)
       return [t, verdict] as const
     }),
   )
