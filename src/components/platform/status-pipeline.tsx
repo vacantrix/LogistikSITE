@@ -23,7 +23,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
-import { AgentStatusBadge } from '@/components/platform/common'
+import { AgentStatusBadge, InfoTip } from '@/components/platform/common'
 import type { RequestDTO, RequestStatus } from '@/lib/types'
 
 interface PipelineStage {
@@ -150,22 +150,20 @@ export function StatusPipeline({
   return (
     <Card className="border-slate-200 shadow-sm">
       <CardContent className="px-3 py-4 sm:px-6">
-        {request === null ? (
-          <div className="mb-3 text-xs text-slate-400">Выберите заявку — и здесь отразится, на каком этапе она находится</div>
-        ) : outbid ? (
+        {request === null ? null : outbid ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-100 text-red-800">
               <CircleAlert className="mr-1 h-3 w-3" aria-hidden />
               Ставка перебита
             </Badge>
-            <span>{frozenNote}</span>
+            {frozenNote && <InfoTip label="Что это значит">{frozenNote.replace(/^· /, '')}</InfoTip>}
           </div>
         ) : frozen ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
               Согласование ставки
             </Badge>
-            <span>{frozenNote}</span>
+            {frozenNote && <InfoTip label="Что это значит">{frozenNote.replace(/^· /, '')}</InfoTip>}
           </div>
         ) : (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">

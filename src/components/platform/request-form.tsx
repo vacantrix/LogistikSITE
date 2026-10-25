@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { InfoTip } from '@/components/platform/common'
 import { PointSelect } from '@/components/platform/point-autocomplete'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
@@ -205,20 +206,21 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
   )
   const req = <span className="text-red-500" aria-hidden>*</span>
 
+  const formHint = !request
+    ? '«Опубликовать» — заявка сразу выходит на площадку с номером Z-XXXX. «Сохранить в черновики» — заявка остаётся в «Черновиках заявок», перевозчики её не видят.'
+    : isDraft
+      ? 'Черновик не виден перевозчикам. Опубликовать его можно в «Черновиках заявок».'
+      : 'Заявка открыта для ставок — изменения сразу видны перевозчикам.'
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
             {!request ? 'Новая заявка' : isDraft ? `Черновик ${request.number}` : `Редактирование заявки ${request.number}`}
+            <InfoTip label="Как сохраняется заявка">{formHint}</InfoTip>
           </DialogTitle>
-          <DialogDescription>
-            {!request
-              ? '«Опубликовать» — заявка сразу выходит на площадку с номером Z-XXXX. «Сохранить в черновики» — заявка остаётся в «Черновиках заявок», перевозчики её не видят.'
-              : isDraft
-                ? 'Черновик не виден перевозчикам. Опубликовать его можно в «Черновиках заявок».'
-                : 'Заявка открыта для ставок — изменения сразу видны перевозчикам.'}
-          </DialogDescription>
+          <DialogDescription className="sr-only">{formHint}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
@@ -292,16 +294,16 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
               </div>
               {!editing && (
                 <div className="space-y-1.5 sm:col-span-2">
-                  <Label htmlFor="rf-deadline">Приём ставок после публикации</Label>
+                  <Label htmlFor="rf-deadline" className="flex items-center gap-1.5">
+                    Приём ставок после публикации
+                    <InfoTip label="Срок приёма ставок">Если за это время ставок не будет, заявка сама уйдёт в «Черновики заявок».</InfoTip>
+                  </Label>
                   <Select value={form.deadlineHours} onValueChange={(v) => set('deadlineHours', v)}>
                     <SelectTrigger id="rf-deadline" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {DEADLINE_OPTIONS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Если за это время ставок не будет, заявка сама уйдёт в «Черновики заявок».
-                  </p>
                 </div>
               )}
             </div>
@@ -321,7 +323,10 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
             </div>
             {!editing && (
               <div className="space-y-1.5">
-                <Label htmlFor="rf-files">Прикреплённые файлы</Label>
+                <Label htmlFor="rf-files" className="flex items-center gap-1.5">
+                  Прикреплённые файлы
+                  <InfoTip label="Какие файлы можно прикрепить">Фото или сканы (JPG, PNG, WebP) до 8 МБ, до {MAX_FILES} файлов — например, схема погрузки.</InfoTip>
+                </Label>
                 <input
                   ref={fileInputRef}
                   id="rf-files"
@@ -356,7 +361,6 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
                     ))}
                   </ul>
                 )}
-                <p className="text-xs text-muted-foreground">Фото или сканы (JPG, PNG, WebP) до 8 МБ, до {MAX_FILES} файлов — например, схема погрузки.</p>
               </div>
             )}
           </section>

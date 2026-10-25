@@ -12,9 +12,9 @@
  * Статусы подписания, предосмотр сканов с факсимиле — в карточке каждого рейса.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Building2, Eye, FileSignature, Info, PenLine, RefreshCw, ScrollText, Send, UserRound } from 'lucide-react'
+import { Building2, Eye, FileSignature, PenLine, RefreshCw, ScrollText, Send, UserRound } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, WithTip, type TabProps,
 } from '@/components/platform/common'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -163,7 +163,14 @@ export default function EdoTab({ role, liveTick }: TabProps) {
       <SectionHeader
         eyebrow={isLogist ? 'Внутренний контур АЭМЗ' : 'Кабинет перевозчика'}
         title="Подписать ЭДО"
-        desc="Электронные документы рейса: заказ-заявка перевозчику или поручение экспедитору, транспортная накладная и акт. Документы появляются сами — каждая сторона подписывает своей КЭП."
+        desc={
+          <ul className="list-disc space-y-1 pl-4">
+            <li><b>Перевозчик</b> (везёт сам): АЭМЗ и перевозчик подписывают заказ-заявку на перевозку.</li>
+            <li><b>Экспедитор</b> (организует перевозку): вместо заказ-заявки — поручение экспедитору; перевозчика и доверенность на водителя оформляет он, а не АЭМЗ.</li>
+            <li><b>Транспортная накладная</b> появляется при подтверждении рейса{diadoc?.enabled ? ' и идёт через Диадок: АЭМЗ подписывает титул грузоотправителя, остальные — у себя, статусы приходят сами' : ''}. Акт — после закрытия рейса.</li>
+            <li><b>Роль компании</b> задаётся в «Справочниках» — от неё зависит договорной документ.</li>
+          </ul>
+        }
       >
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Ожидают подписи: {counters.awaiting}</Badge>
@@ -171,20 +178,20 @@ export default function EdoTab({ role, liveTick }: TabProps) {
           {diadoc?.enabled && (
             <>
               <Badge variant="outline" className="border-blue-300 bg-blue-50 text-blue-800">{diadoc.stand.charAt(0).toUpperCase() + diadoc.stand.slice(1)}</Badge>
-              <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
-                <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden />
-                Обновить статусы
-              </Button>
+              {/* время последней сверки — по наведению на кнопку */}
+              <WithTip tip={diadoc.lastSyncAt ? `Статусы ЭТрН сверены с Диадоком ${fmtDateTime(diadoc.lastSyncAt)}` : 'Сверить статусы ЭТрН с Диадоком'}>
+                <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
+                  <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden />
+                  Обновить статусы
+                </Button>
+              </WithTip>
             </>
           )}
         </div>
       </SectionHeader>
-      {diadoc?.enabled && (diadoc.lastError || diadoc.lastSyncAt) && (
-        <p className={`-mt-3 mb-4 text-xs ${diadoc.lastError ? 'text-red-600' : 'text-slate-500'}`}>
-          {diadoc.lastError
-            ? `Последняя сверка с Диадоком не удалась: ${diadoc.lastError}`
-            : `Статусы ЭТрН сверены с Диадоком ${fmtDateTime(diadoc.lastSyncAt!)}`}
-        </p>
+      {/* ошибка сверки — не пояснение, её видно сразу */}
+      {diadoc?.enabled && diadoc.lastError && (
+        <p className="-mt-3 mb-4 text-xs text-red-600">Последняя сверка с Диадоком не удалась: {diadoc.lastError}</p>
       )}
 
       {packages === null && !error && <LoadingBlock label="Загружаем документы ЭДО…" />}
@@ -192,22 +199,6 @@ export default function EdoTab({ role, liveTick }: TabProps) {
 
       {packages !== null && !error && (
         <div className="space-y-4">
-          {/* Схема документооборота — наш случай */}
-          <Card className="border-slate-200 bg-slate-50/60 shadow-sm">
-            <CardContent className="flex flex-col gap-2 p-4 text-sm text-slate-700">
-              <div className="flex items-center gap-2 font-semibold text-slate-900">
-                <Info className="h-4 w-4 text-slate-500" aria-hidden />
-                Как устроен документооборот
-              </div>
-              <ul className="ml-5 list-disc space-y-1">
-                <li><span className="font-medium">Исполнитель — перевозчик</span> (везёт сам): АЭМЗ и перевозчик подписывают заказ-заявку на перевозку.</li>
-                <li><span className="font-medium">Исполнитель — экспедитор</span> (организует перевозку): вместо заказ-заявки — поручение экспедитору. Перевозчика экспедитор нанимает сам, доверенность на водителя выдаёт тоже он — не АЭМЗ.</li>
-                <li><span className="font-medium">Транспортная накладная</span> появляется при подтверждении рейса{diadoc?.enabled ? ' и отправляется через Диадок: АЭМЗ подписывает титул грузоотправителя, остальные стороны — у себя, статусы приходят сами' : ''}. Акт оказанных услуг — после закрытия рейса.</li>
-                <li><span className="font-medium">Роль исполнителя</span> (перевозчик или экспедитор) хранится в карточке компании на платформе — от неё зависит, какой договорной документ получит рейс.</li>
-              </ul>
-            </CardContent>
-          </Card>
-
           {packages.length === 0 ? (
             <EmptyState
               icon={<FileSignature className="h-10 w-10" aria-hidden />}
@@ -261,7 +252,6 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                         busy={busy}
                         onSign={sign}
                         onPreview={setPreviewDoc}
-                        emptyHint="Документ появится автоматически"
                       />
 
                       {/* перевозочные документы */}
@@ -276,9 +266,6 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                         onPreview={setPreviewDoc}
                         diadocEnabled={Boolean(diadoc?.enabled)}
                         onEtrnSend={(doc) => setEtrnFor({ requestId: pack.request.id, requestNumber: pack.request.number, doc })}
-                        emptyHint={isLogist
-                          ? 'Накладная появится после подтверждения заявки, акт — после закрытия рейса'
-                          : 'Накладная появится, когда АЭМЗ подтвердит рейс'}
                       />
                     </div>
                   </CardContent>
@@ -312,7 +299,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                   <span className="text-blue-700">№{previewDoc.doc.number}</span>
                 </DialogTitle>
                 <DialogDescription>
-                  Рейс №{previewDoc.pack.request.number} · {previewDoc.doc.partyRole}. Подписи сторон — с факсимиле КЭП через оператора ЭДО.
+                  Рейс №{previewDoc.pack.request.number} · {previewDoc.doc.partyRole}
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
@@ -337,7 +324,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
 }
 
 /** Блок документов рейса: договорной документ или перевозочные документы */
-function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer, emptyHint, diadocEnabled = false, onEtrnSend }: {
+function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer, diadocEnabled = false, onEtrnSend }: {
   title: string
   hint: string
   docs: EdoDocDTO[]
@@ -347,7 +334,6 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
   onSign: (pack: EdoPackageDTO, doc: EdoDocDTO) => Promise<void>
   onPreview: (v: { doc: EdoDocDTO; pack: EdoPackageDTO }) => void
   footer?: React.ReactNode
-  emptyHint?: string
   /** ЭТрН идёт через Диадок: подпись — у оператора ЭДО, в карточке — статусы Т1–Т4 */
   diadocEnabled?: boolean
   onEtrnSend?: (doc: EdoDocDTO) => void
@@ -359,12 +345,12 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
           <ScrollText className="h-4 w-4 text-slate-400" aria-hidden />
           {title}
+          <InfoTip label={title}>{hint}</InfoTip>
         </div>
-        <div className="mt-0.5 text-xs text-slate-500">{hint}</div>
       </div>
       <div className="space-y-2 px-4 py-3">
         {docs.length === 0 ? (
-          <div className="py-2 text-sm text-slate-400">{emptyHint ?? 'Документов пока нет'}</div>
+          <div className="py-2 text-sm text-slate-400">Документов пока нет</div>
         ) : (
           docs.map((doc) => {
             const mySideDone = isLogist ? doc.aemzSigned : doc.partySigned
@@ -410,10 +396,9 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                   </div>
                 )}
                 {viaDiadoc && doc.diadoc && !doc.partySigned && !isLogist && (
-                  <p className="mt-2 text-xs text-blue-800">Подпишите титул перевозчика Т2 в своём Диадоке — платформа увидит подпись автоматически.</p>
-                )}
-                {viaDiadoc && !doc.diadoc && !isLogist && (
-                  <p className="mt-2 text-xs text-slate-500">АЭМЗ ещё не отправило накладную — она придёт в ваш Диадок.</p>
+                  <WithTip tip="Подпишите титул перевозчика Т2 в своём Диадоке — платформа увидит подпись автоматически">
+                    <Badge variant="outline" className="mt-2 border-blue-300 bg-blue-50 text-blue-800" tabIndex={0}>Ждёт вашей подписи Т2 в Диадоке</Badge>
+                  </WithTip>
                 )}
                 {canSign && (
                   <div className="mt-2">

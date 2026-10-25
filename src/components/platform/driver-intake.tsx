@@ -27,7 +27,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { DocStatusBadge } from '@/components/platform/common'
+import { DocStatusBadge, InfoTip } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { DOC_TYPE_LABEL } from '@/lib/status'
@@ -498,9 +498,11 @@ export default function DriverLine({
                     )}
                   </>
                 ) : (
-                  <label className={`mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/60 text-center ${photoMiss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-blue-400'}`}>
+                  <label
+                    title="JPG/PNG — нейросеть прочитает"
+                    className={`mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/60 text-center ${photoMiss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-blue-400'}`}
+                  >
                     <span className={`text-[10px] font-medium ${photoMiss ? 'text-red-600' : 'text-blue-700'}`}>Загрузить фото</span>
-                    <span className="px-1 text-[9px] leading-tight text-muted-foreground">JPG/PNG — нейросеть прочитает</span>
                     <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) void setUpload(type, f) }} />
                   </label>
                 )}
@@ -701,8 +703,9 @@ function SoloPhotos({
 }) {
   return (
     <div className="mt-3">
-      <div className="mb-1.5 text-xs font-semibold text-muted-foreground">
-        Фотографии — загрузите файлом или вставьте скриншот (Ctrl+V)
+      <div className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
+        Фотографии
+        <InfoTip label="Как добавить фото">Загрузите файлом (JPG/PNG) или вставьте скриншот через Ctrl+V.</InfoTip>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {SOLO_PHOTO_KEYS.map((k) => {
@@ -735,9 +738,11 @@ function SoloPhotos({
                   </div>
                 </>
               ) : (
-                <label className={`mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/60 text-center ${photoMiss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-blue-400'}`}>
+                <label
+                  title="JPG/PNG или вставить Ctrl+V"
+                  className={`mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/60 text-center ${photoMiss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-blue-400'}`}
+                >
                   <span className={`text-[10px] font-medium ${photoMiss ? 'text-red-600' : 'text-blue-700'}`}>Загрузить фото</span>
-                  <span className="px-1 text-[9px] leading-tight text-muted-foreground">JPG/PNG или вставить Ctrl+V</span>
                   <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(k, f) }} />
                 </label>
               )}

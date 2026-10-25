@@ -8,7 +8,7 @@ import {
   Banknote, CheckCheck, FileCheck, FolderOpen, Hourglass, ScanSearch, ShieldCheck, TrendingDown, Users,
 } from 'lucide-react'
 import {
-  ErrorBlock, KpiCard, LoadingBlock, SectionHeader, type TabProps,
+  ErrorBlock, InfoTip, KpiCard, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -49,8 +49,10 @@ function FunnelTile({ icon: Icon, label, value, hint, tone }: {
       </span>
       <div className="min-w-0">
         <div className="text-xl font-bold leading-tight tabular-nums text-slate-900">{value}</div>
-        <div className="truncate text-sm font-medium text-slate-700">{label}</div>
-        <div className="truncate text-xs text-slate-400">{hint}</div>
+        <div className="flex items-center gap-1 text-sm font-medium text-slate-700">
+          {label}
+          <InfoTip label={label}>{hint}</InfoTip>
+        </div>
       </div>
     </div>
   )
@@ -111,8 +113,10 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       {/* 1. Портфель заявок — воронка по шагам */}
       <Card className="border-slate-200 shadow-sm">
         <CardHeader className="pb-4">
-          <CardTitle className="text-base text-slate-900">Портфель заявок</CardTitle>
-          <CardDescription>Сколько заявок сейчас находится на каждом шаге цикла</CardDescription>
+          <CardTitle className="flex items-center gap-1.5 text-base text-slate-900">
+            Портфель заявок
+            <InfoTip label="Портфель заявок">Сколько заявок сейчас находится на каждом шаге цикла.</InfoTip>
+          </CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <FunnelTile
@@ -181,8 +185,10 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       {/* 3. Ставки по направлениям */}
       <Card className="mt-6 border-slate-200 shadow-sm">
         <CardHeader>
-          <CardTitle className="text-base text-slate-900">Ставки по направлениям</CardTitle>
-          <CardDescription>Средняя и минимальная итоговая ставка по каждому маршруту, сверху — самые дорогие</CardDescription>
+          <CardTitle className="flex items-center gap-1.5 text-base text-slate-900">
+            Ставки по направлениям
+            <InfoTip label="Ставки по направлениям">Средняя и минимальная итоговая ставка по каждому маршруту, сверху — самые дорогие.</InfoTip>
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {directions.length === 0 && (
@@ -219,13 +225,15 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="border-slate-200 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base text-slate-900">Экономия по заявкам</CardTitle>
-            <CardDescription>
-              Стартовая ставка → итоговая, сортировка по эффекту
-              {bestSavings && bestSavings.savings > 0 && (
-                <> · лучшая — <b className="text-emerald-700">№{bestSavings.number}</b> ({rate(bestSavings.savings)})</>
-              )}
-            </CardDescription>
+            <CardTitle className="flex items-center gap-1.5 text-base text-slate-900">
+              Экономия по заявкам
+              <InfoTip label="Экономия по заявкам">Стартовая ставка → итоговая, сортировка по эффекту.</InfoTip>
+            </CardTitle>
+            {bestSavings && bestSavings.savings > 0 && (
+              <CardDescription>
+                Лучшая — <b className="text-emerald-700">№{bestSavings.number}</b> ({rate(bestSavings.savings)})
+              </CardDescription>
+            )}
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
@@ -265,8 +273,10 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
 
         <Card className="border-slate-200 shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base text-slate-900">История перевозчиков</CardTitle>
-            <CardDescription>Кто сколько рейсов взял, по каким ставкам работает и сколько раз отказался</CardDescription>
+            <CardTitle className="flex items-center gap-1.5 text-base text-slate-900">
+              История перевозчиков
+              <InfoTip label="История перевозчиков">Кто сколько рейсов взял, по каким ставкам работает и сколько раз отказался.</InfoTip>
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="overflow-x-auto">

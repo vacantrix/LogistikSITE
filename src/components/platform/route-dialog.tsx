@@ -94,7 +94,7 @@ export function RouteButton({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Маршрут рейса{number ? ` ${number}` : ''}</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="sr-only">
             {b.known
               ? 'Полные адреса погрузки и выгрузки — маршрут строится в Яндекс.Картах.'
               : 'Адрес погрузки указан точно — маршрут можно продолжить в Яндекс.Картах.'}

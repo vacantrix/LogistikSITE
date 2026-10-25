@@ -8,11 +8,11 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
 import {
   AlertTriangle, ArrowRight, Ban, Check, CheckCheck, CircleAlert, CircleCheck, ClipboardCheck, Hourglass,
-  Inbox, Info, ListChecks, MapPin, Package, RefreshCw, ScanSearch, Search, Truck as TruckIcon,
+  Inbox, ListChecks, MapPin, Package, RefreshCw, ScanSearch, Search, Truck as TruckIcon,
   Undo2, UserCog, UserRound, X,
 } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusBadge, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusBadge, WithTip, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
 import { Badge } from '@/components/ui/badge'
@@ -569,7 +569,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
               </div>
               {visible.length === 0 && (
                 <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                  Ничего не найдено — измените фильтр или поисковый запрос.
+                  Ничего не найдено
                 </div>
               )}
               <div className={`hidden max-h-56 space-y-2 overflow-y-auto pr-1 sm:max-h-72 lg:max-h-[calc(100vh-14rem)] lg:block ${THIN_SCROLL}`}>
@@ -653,7 +653,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
                       <ListChecks className="h-4 w-4 text-blue-600" aria-hidden />
                       Данные рейса из системы
-                      <span className="text-xs font-normal text-slate-400">— сверяются со сканами</span>
+                      <InfoTip label="Данные рейса">Сверяются со сканами документов.</InfoTip>
                     </div>
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3 xl:grid-cols-4">
                       {[
@@ -705,20 +705,13 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                       </Tabs>
                     ) : (
                       <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                        Документы не загружены.
+                        Документы не загружены
                       </div>
                     )}
 
                     {/* содержимое вкладки */}
                     {activeDoc && (
                       <div className="mt-3 space-y-3">
-                        {activeDoc.status === 'MANUAL' && (
-                          <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                            <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                            Ручная проверка: результат неоднозначен, решение за сотрудником.
-                          </div>
-                        )}
-
                         <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_minmax(0,1fr)]">
                           {/* просмотр скана */}
                           <div className="self-start rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -743,7 +736,6 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                                 предосмотр (зум/поворот/скачивание), статус документа — иконкой */}
                             <div className="mt-2 flex items-center justify-between gap-2">
                               <DocStatusChip status={activeDoc.status} />
-                              <span className="truncate text-[11px] text-slate-400">Клик по скану — просмотр и скачивание</span>
                             </div>
                           </div>
 
@@ -795,11 +787,6 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                                 })}
                               </TableBody>
                             </Table>
-                            {activeDoc.type === 'PASSPORT_REG' && (
-                              <div className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
-                                Сверка с заявкой не требуется — данные со штампа фиксируются в справочнике.
-                              </div>
-                            )}
                           </div>
                         </div>
 
@@ -830,14 +817,19 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                             <ClipboardCheck className="h-5 w-5" />
                           </span>
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold text-slate-900">Решение по пакету</div>
-                            <div className="text-xs text-slate-500">Сверьте сканы и поля, затем выберите одно из действий</div>
+                            <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                              Решение по пакету
+                              <InfoTip label="Решение по пакету">Сверьте сканы и поля, затем выберите одно из действий.</InfoTip>
+                            </div>
                           </div>
                         </div>
                         <div className="grid items-start gap-5 bg-white px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_340px]">
                           {/* комментарий к решению */}
                           <div className="space-y-1.5">
-                            <Label htmlFor="verify-comment">Комментарий к решению (необязательно)</Label>
+                            <Label htmlFor="verify-comment" className="flex items-center gap-1.5">
+                              Комментарий к решению (необязательно)
+                              <InfoTip label="Кто увидит комментарий">Пояснение увидят перевозчик и агент — например, что именно нужно исправить.</InfoTip>
+                            </Label>
                             <Textarea
                               id="verify-comment"
                               rows={3}
@@ -846,38 +838,34 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                               onChange={(e) => setComment(e.target.value)}
                               aria-label="Комментарий к проверке документов"
                             />
-                            <p className="text-xs text-muted-foreground">
-                              Пояснение увидят перевозчик и агент — например, что именно нужно исправить.
-                            </p>
                           </div>
 
                           {/* кнопки решения */}
                           <div className="space-y-1.5">
-                            <Button
-                              className="h-11 w-full bg-emerald-600 text-white shadow-sm hover:bg-emerald-700"
-                              disabled={busy === selected.id}
-                              onClick={() => void doConfirm(selected)}
-                              aria-label="Утвердить пакет — рейс уходит в работу"
-                            >
-                              <CheckCheck className="h-4 w-4" aria-hidden />
-                              Утвердить
-                            </Button>
-                            <p className="px-1 text-[11px] leading-snug text-emerald-700">
-                              Рейс уйдёт в работу: подготовим пропуск, ЭТрН — к отправке в Диадок
-                            </p>
-                            <Button
-                              variant="outline"
-                              className="mt-2 h-11 w-full border-amber-300 bg-white text-amber-800 hover:bg-amber-50"
-                              disabled={busy === selected.id}
-                              onClick={() => { setReturnReason(''); setReturnComment(''); setReturnOpen(true) }}
-                              aria-label="Отправить документы на доработку — вернуть агенту"
-                            >
-                              <Undo2 className="h-4 w-4" aria-hidden />
-                              На доработку агенту
-                            </Button>
-                            <p className="px-1 text-[11px] leading-snug text-slate-500">
-                              Пакет вернётся агенту с выбранной причиной
-                            </p>
+                            {/* что произойдёт — по наведению на кнопку */}
+                            <WithTip tip="Рейс уйдёт в работу: подготовим пропуск, ЭТрН — к отправке в Диадок">
+                              <Button
+                                className="h-11 w-full bg-emerald-600 text-white shadow-sm hover:bg-emerald-700"
+                                disabled={busy === selected.id}
+                                onClick={() => void doConfirm(selected)}
+                                aria-label="Утвердить пакет — рейс уходит в работу"
+                              >
+                                <CheckCheck className="h-4 w-4" aria-hidden />
+                                Утвердить
+                              </Button>
+                            </WithTip>
+                            <WithTip tip="Пакет вернётся агенту с выбранной причиной">
+                              <Button
+                                variant="outline"
+                                className="mt-2 h-11 w-full border-amber-300 bg-white text-amber-800 hover:bg-amber-50"
+                                disabled={busy === selected.id}
+                                onClick={() => { setReturnReason(''); setReturnComment(''); setReturnOpen(true) }}
+                                aria-label="Отправить документы на доработку — вернуть агенту"
+                              >
+                                <Undo2 className="h-4 w-4" aria-hidden />
+                                На доработку агенту
+                              </Button>
+                            </WithTip>
                             {busy === selected.id && <div className="text-xs text-slate-400">Выполняется…</div>}
                           </div>
                         </div>
@@ -947,7 +935,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
           <DialogHeader>
             <DialogTitle>Отправить на доработку / Отклонить</DialogTitle>
             <DialogDescription>
-              {selected && <>№{selected.number} · {selected.winnerName ?? '—'}. Агент получит причину и догрузит документы в ту же заявку.</>}
+              {selected && <>№{selected.number} · {selected.winnerName ?? '—'}</>}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -962,7 +950,6 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                 ))}
               </SelectContent>
             </Select>
-            {!returnReason && <div className="text-xs text-slate-500">Выберите причину — без неё вернуть нельзя.</div>}
             <Label htmlFor="return-comment">Комментарий для водителя / менеджера (необязательно)</Label>
             <Textarea
               id="return-comment"

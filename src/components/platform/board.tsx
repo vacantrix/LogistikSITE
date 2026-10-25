@@ -58,8 +58,10 @@ import {
   ErrorBlock,
   LoadingBlock,
   ModeBadge,
+  InfoTip,
   SectionHeader,
   StatusBadge,
+  WithTip,
   DocStatusBadge,
   type TabProps,
 } from '@/components/platform/common'
@@ -260,13 +262,15 @@ function AuctionDesk({ request, now, busy, onExtend, onOffer, onRaise }: {
 
       {/* ставки: для AUCTION — таблица, для CLOSED — пояснение */}
       {request.mode === 'CLOSED' ? (
-        <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-          <EyeOff className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-          Закрытые ставки: цены участников скрыты от перевозчиков до подведения итогов. Победитель — минимальная ставка, определится автоматически по окончании приёма ставок.
-        </div>
+        <WithTip tip="Цены участников скрыты от перевозчиков до подведения итогов. Победитель — минимальная ставка, определится автоматически по окончании приёма ставок.">
+          <div className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+            <EyeOff className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+            Закрытые ставки
+          </div>
+        </WithTip>
       ) : sortedBids.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-          Ставок пока нет — заявка видна перевозчикам на площадке.
+          Ставок пока нет
         </div>
       ) : (
         <div className={`max-h-64 overflow-y-auto overflow-x-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
@@ -313,10 +317,12 @@ function AuctionDesk({ request, now, busy, onExtend, onOffer, onRaise }: {
       {/* действия над торгом */}
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
         {minBid ? (
-          <span className="flex items-center gap-1.5 text-xs text-slate-600">
-            <Trophy className="h-4 w-4 text-emerald-600" aria-hidden />
-            Победитель определится автоматически: минимальная ставка на момент окончания приёма
-          </span>
+          <WithTip tip="Победитель определится автоматически: минимальная ставка на момент окончания приёма">
+            <span className="flex items-center gap-1.5 text-xs font-medium text-slate-700" tabIndex={0}>
+              <Trophy className="h-4 w-4 text-emerald-600" aria-hidden />
+              Автовыбор победителя
+            </span>
+          </WithTip>
         ) : (
           <Button size="sm" disabled={busy} onClick={onRaise}>
             <TrendingUp className="h-4 w-4" aria-hidden />
@@ -363,7 +369,7 @@ interface MapGroup {
  * Группирует заявки текущей выборки по координатам точек погрузки и выгрузки.
  * Точки без координат в справочнике на карту не попадают.
  */
-function buildMapPoints(list: RequestDTO[]): MapPoint[] {
+function buildMapPoints(list: RequestDTO[], canBid: (r: RequestDTO) => boolean): MapPoint[] {
   const groups = new Map<string, MapGroup>()
   for (const r of list) {
     for (const [raw, kind] of [
@@ -403,10 +409,12 @@ function buildMapPoints(list: RequestDTO[]): MapPoint[] {
       kind: g.kind,
       distanceKm: g.kind === 'delivery' && loading ? Math.round(haversineKm(loading, g)) : null,
       requests: g.requests.map((r) => ({
+        id: r.id,
         number: r.number,
         cargo: r.cargo,
         tonnage: r.tonnage,
         loadDate: r.loadDate,
+        canBid: canBid(r),
       })),
     }))
     .sort((a, b) =>
@@ -573,8 +581,14 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     })
   }, [filtered, sort])
 
-  /** Точки для карты доставки — по текущей (отфильтрованной и отсортированной) выборке заявок */
-  const mapPoints = useMemo(() => buildMapPoints(sorted), [sorted])
+  /** Точки для карты доставки — по текущей (отфильтрованной и отсортированной) выборке заявок.
+   *  Перевозчик откликается прямо с карты: заявка на торгах, срок не вышел, его отклика ещё нет */
+  const mapPoints = useMemo(
+    () => buildMapPoints(sorted, (r) =>
+      !isLogist && r.status === 'PUBLISHED' && !myBidOf(r)
+      && r.deadline !== null && new Date(r.deadline).getTime() > Date.now()),
+    [sorted, isLogist, myBidOf],
+  )
   const deliveryCount = mapPoints.filter((p) => p.kind === 'delivery').length
 
   /** Выгрузка текущей выборки в Excel: то, что видно в таблице с учётом фильтров и поиска */
@@ -877,31 +891,22 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 В Excel
               </Button>
 
-              {/* Карта доставки — под поисковой строкой: точки выгрузки текущей выборки */}
-              <div className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-3.5 py-2.5">
-                <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white" aria-hidden>
-                    <MapPin className="h-4 w-4" />
-                  </span>
-                  <p className="min-w-0 text-sm text-slate-600">
-                    <span className="font-semibold text-slate-800">Карта доставки</span>{' '}
-                    — точки, куда нужно доставить груз: {deliveryCount}{' '}
-                    {pluralRu(deliveryCount, ['точка', 'точки', 'точек'])} · {filtered.length}{' '}
-                    {pluralRu(filtered.length, ['заявка', 'заявки', 'заявок'])} в выборке
-                  </p>
-                </div>
+              {/* Карта доставки — кнопкой в строке фильтров; что на ней — по наведению */}
+              <WithTip
+                tip={`Точки выгрузки текущей выборки: ${deliveryCount} ${pluralRu(deliveryCount, ['точка', 'точки', 'точек'])} · ${filtered.length} ${pluralRu(filtered.length, ['заявка', 'заявки', 'заявок'])}`}
+              >
                 <Button
-                  size="sm"
                   variant="outline"
-                  className="shrink-0 gap-1.5 border-blue-200 bg-white hover:bg-blue-50"
+                  className="gap-2"
                   onClick={() => { setFocusPointId(null); setMapOpen(true) }}
                   disabled={filtered.length === 0}
                   aria-label="Открыть карту доставки"
                 >
                   <MapIcon className="h-4 w-4 text-blue-600" aria-hidden />
-                  Открыть карту
+                  Карта доставки
+                  <Badge variant="outline" className="h-5 border-blue-200 bg-blue-50 px-1.5 text-[11px] text-blue-700">{deliveryCount}</Badge>
                 </Button>
-              </div>
+              </WithTip>
             </CardContent>
           </Card>
 
@@ -1100,7 +1105,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
               </CardHeader>
               <CardContent>
                 {events.length === 0 ? (
-                  <p className="text-sm text-slate-500">Событий пока нет — они появятся, как только начнётся работа с заявками</p>
+                  <p className="text-sm text-slate-500">Событий пока нет</p>
                 ) : (
                   <ul
                     className="max-h-64 space-y-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
@@ -1144,10 +1149,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 </span>
                 {created?.draft ? `Черновик ${created.number} сохранён` : `Заявка ${created?.number} успешно создана`}
               </DialogTitle>
-              <DialogDescription className="mx-auto max-w-xs">
-                {created?.draft
-                  ? 'Перевозчики её не видят. Опубликовать заявку можно в «Черновиках заявок».'
-                  : 'Она уже на площадке — перевозчики видят её и могут подавать ставки.'}
+              <DialogDescription className="sr-only">
+                {created?.draft ? 'Черновик сохранён' : 'Заявка опубликована на площадке'}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="sm:justify-center">
@@ -1185,14 +1188,15 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                       {bidReq.bestRate == null && <span className="ml-1 text-muted-foreground">— ставок ещё нет</span>}
                     </div>
                   )}
-                  {bidReq.mode === 'CLOSED' && (
-                    <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                      <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-                      Участники не видят цены друг друга — защита от сговора. Победителя определит логист по итогам.
-                    </div>
-                  )}
                   <div className="space-y-1.5">
-                    <Label htmlFor="bid-amount">Ваша ставка, ₽/т</Label>
+                    <Label htmlFor="bid-amount" className="flex items-center gap-1.5">
+                      Ваша ставка, ₽/т
+                      <InfoTip label="Правило ставки">
+                        {bidReq.mode === 'CLOSED'
+                          ? 'Закрытые ставки: участники не видят цены друг друга, ставку увидит только логист. Побеждает минимальная.'
+                          : 'Ставка должна быть ниже текущей лучшей.'}
+                      </InfoTip>
+                    </Label>
                     <Input
                       id="bid-amount"
                       type="number"
@@ -1205,9 +1209,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                       onChange={(e) => setBidAmount(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') confirmBid() }}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      {bidReq.mode === 'CLOSED' ? 'Ставку увидит только логист при подведении итогов' : 'Должна быть ниже лучшей'}
-                    </p>
                   </div>
                 </div>
               )}
@@ -1240,9 +1241,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                         )}
                       </div>
                     )}
-                    {bidReq.mode === 'CLOSED' && (
-                      <div className="mt-0.5 text-xs text-blue-800">цену увидит только логист</div>
-                    )}
                   </div>
                 </div>
               )}
@@ -1254,9 +1252,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                   <div>
                     <div className="text-lg font-semibold text-slate-900">Ставка принята</div>
                     {bidFinal !== null && <div className="mt-0.5 text-sm text-slate-600">Новая ставка: <span className="font-semibold text-slate-900">{rate(bidFinal)}</span></div>}
-                    <p className="mx-auto mt-2 max-w-xs text-sm text-muted-foreground">
-                      Можете посмотреть заявку в разделе «Мои заявки» — она уже отображается там со статусом вашей ставки.
-                    </p>
                   </div>
                 </div>
               )}
@@ -1336,7 +1331,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                   <h4 className="mb-2 text-sm font-semibold text-slate-900">Комплект документов ({detailReq.documents.length})</h4>
                   {detailReq.documents.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-slate-300 px-3 py-3 text-center text-sm text-muted-foreground">
-                      Документы пока не загружены — агент подаст их через «Подать документы».
+                      Документы не загружены
                     </p>
                   ) : (
                     <div className="flex flex-wrap gap-2">
@@ -1364,7 +1359,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                   </h4>
                   {activeBids.length === 0 ? (
                     <p className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-sm text-muted-foreground">
-                      Ставок пока нет — будьте первым.
+                      Ставок пока нет
                     </p>
                   ) : (
                     <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -1403,16 +1398,12 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
               })()}
 
               {detailReq.mode === 'CLOSED' && (
-                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-                  <Lock className="h-4 w-4 shrink-0" aria-hidden />
-                  Ставки скрыты до подведения итогов — участники не видят цены друг друга.
-                </div>
-              )}
-
-              {detailReq.status !== 'PUBLISHED' && detailReq.mode === 'AUCTION' && sortedBids(detailReq.bids).length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Торги завершены — победитель согласован логистом.
-                </p>
+                <WithTip tip="Участники не видят цены друг друга до подведения итогов">
+                  <div className="flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600" tabIndex={0}>
+                    <Lock className="h-4 w-4 shrink-0" aria-hidden />
+                    Ставки скрыты
+                  </div>
+                </WithTip>
               )}
             </>
           )}
@@ -1462,7 +1453,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
             <DialogTitle>Поднять стартовую ставку</DialogTitle>
             <DialogDescription>
               {raiseReq && (
-                <>№{raiseReq.number}: ставок нет. Повысьте стартовую ставку, чтобы привлечь перевозчиков.</>
+                <>№{raiseReq.number} · ставок нет</>
               )}
             </DialogDescription>
           </DialogHeader>
@@ -1497,9 +1488,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
               <MapPin className="h-5 w-5 text-blue-600" aria-hidden />
               Карта доставки
             </DialogTitle>
-            <DialogDescription>
-              Пункт погрузки и точки, куда нужно доставить груз по текущей выборке — {filtered.length}{' '}
-              {pluralRu(filtered.length, ['заявка', 'заявки', 'заявок'])}. Нажмите на маркер или точку в списке, чтобы увидеть заявки.
+            {/* описание — только для экранного диктора, на экране его нет */}
+            <DialogDescription className="sr-only">
+              Пункт погрузки и точки выгрузки по текущей выборке: {filtered.length}{' '}
+              {pluralRu(filtered.length, ['заявка', 'заявки', 'заявок'])}
             </DialogDescription>
           </DialogHeader>
           <div className="flex min-h-0 flex-col gap-3 md:flex-row">
@@ -1536,7 +1528,18 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
             </aside>
             {/* Карта */}
             <div className="relative min-h-[280px] flex-1 overflow-hidden rounded-xl border border-slate-200">
-              <DeliveryMap points={mapPoints} focusId={focusPointId} />
+              <DeliveryMap
+                points={mapPoints}
+                focusId={focusPointId}
+                onBid={isLogist ? undefined : (id) => {
+                  // карта закрывается, поверх открывается обычное окно ставки по заявке
+                  setMapOpen(false)
+                  setFocusPointId(null)
+                  setBidAmount('')
+                  setBidStep('form')
+                  setBidId(id)
+                }}
+              />
             </div>
           </div>
         </DialogContent>

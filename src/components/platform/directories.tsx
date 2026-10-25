@@ -32,7 +32,7 @@ import {
   X,
 } from 'lucide-react'
 import {
-  ErrorBlock, ExpiryBadge, LoadingBlock, SectionHeader, type TabProps,
+  ErrorBlock, ExpiryBadge, InfoTip, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
 import { Badge } from '@/components/ui/badge'
@@ -554,17 +554,17 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <Database className="h-4 w-4 text-blue-700" aria-hidden />
               Кадры и техника
+              <InfoTip label="Кадры и техника">
+                {isLogist
+                  ? 'Водители и техника, добавленные перевозчиками — агентами АЭМЗ.'
+                  : 'Добавляется через «Подать документы» после допуска или кнопкой «Добавить вручную» в разделах ниже.'}
+              </InfoTip>
             </div>
-            <span className="text-[11px] text-slate-500">
-              {isLogist ? 'добавлено перевозчиками — агентами АЭМЗ' : 'добавлено через «Подать документы» и вручную'}
-            </span>
           </div>
           <div className="mt-3">
             <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Последние добавления</div>
             {recentAdditions.length === 0 ? (
-              <p className="text-xs text-slate-500">
-                Пока ничего: персонал и техника появятся здесь после допуска в «Подать документы» или кнопкой «Добавить вручную» в разделах ниже.
-              </p>
+              <p className="text-xs text-slate-500">Пока ничего</p>
             ) : (
               <ul className="flex flex-wrap gap-1.5">
                 {recentAdditions.map((r) => {
@@ -606,14 +606,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                   {expiryItems.length > expiredCount ? ` · истекают: ${expiryItems.length - expiredCount}` : ''}
                 </Badge>
               )}
+              <InfoTip label="Цвета сроков">Подсветка: красный — срок истёк, янтарный — осталось до 30 дней, серый — до 90 дней.</InfoTip>
             </div>
-            <span className="text-[11px] text-slate-500">подсветка: красный — истёк · янтарный — ≤ 30 дней · серый — ≤ 90 дней</span>
           </div>
 
           {expiryItems.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-600">
-              Все документы базы действительны — истекающих сроков нет.
-            </p>
+            <p className="mt-2 text-sm text-slate-600">Истекающих сроков нет</p>
           ) : (
             <ul className={`mt-3 max-h-56 space-y-1.5 overflow-y-auto pr-1 ${THIN_SCROLL}`}>
               {expiryItems.map((item) => {
@@ -648,6 +646,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
             <button
               key={s.key}
               type="button"
+              title={s.hint}
               onClick={() => setOpen(s.key)}
               className="group rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-blue-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
               aria-label={`Открыть раздел «${KIND_TITLES[s.kind]}» на весь экран`}
@@ -670,7 +669,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                   <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" aria-hidden />
                 </span>
               </div>
-              <div className="mt-1 text-[11px] text-slate-400">{s.hint}</div>
             </button>
           )
         })}
@@ -684,10 +682,10 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                 <Building2 className="h-4 w-4 text-blue-700" aria-hidden />
                 Компании-исполнители
+                <InfoTip label="Роль компании">
+                  Перевозчик — рейсы получают заказ-заявку на перевозку, экспедитор — поручение экспедитору. Смена роли меняет ещё не подписанные документы; подписанные остаются как есть.
+                </InfoTip>
               </div>
-              <span className="text-[11px] text-slate-500">
-                перевозчик — заказ-заявка на перевозку · экспедитор — поручение экспедитору
-              </span>
             </div>
             <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
               {(carriers ?? []).map((c) => (
@@ -710,9 +708,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                 </li>
               ))}
             </ul>
-            <p className="mt-2 text-[11px] text-slate-500">
-              Смена роли меняет ещё не подписанные договорные документы рейсов этой компании; подписанные остаются как есть.
-            </p>
           </CardContent>
         </Card>
       )}
@@ -899,10 +894,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{addKind ? 'Добавить запись' : 'Изменить запись'} — {addLabel}</DialogTitle>
-            <DialogDescription>
-              {addKind
-                ? 'Запись появится в справочнике и станет доступна при назначении экипажа.'
-                : 'Обновите данные и сроки действия документов — подсветка сроков пересчитается автоматически.'}
+            <DialogDescription className="sr-only">
+              {addKind ? 'Новая запись справочника' : 'Изменение записи справочника'}
             </DialogDescription>
           </DialogHeader>
 
@@ -999,7 +992,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
             <>
               <DialogHeader>
                 <DialogTitle>Прикрепленные документы — {photoView.title}</DialogTitle>
-                <DialogDescription>
+                <DialogDescription className="sr-only">
                   Клик по миниатюре открывает полноразмерный просмотр с поворотом и зумом.
                 </DialogDescription>
               </DialogHeader>

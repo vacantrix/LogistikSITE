@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, ModeBadge, SectionHeader, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { RoutePointsInline } from '@/components/platform/route-dialog'
 import { DEADLINE_OPTIONS, RequestFormDialog } from '@/components/platform/request-form'
@@ -245,17 +245,18 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
               <DialogHeader>
                 <DialogTitle>Опубликовать {publishTarget.number}</DialogTitle>
                 <DialogDescription>
-                  {pointInfo(publishTarget.fromPoint).short} → {pointInfo(publishTarget.toPoint).short} · {publishTarget.cargo}, {num(publishTarget.tonnage)} т.
-                  Заявка выйдет на площадку, перевозчики смогут подавать ставки.
+                  {pointInfo(publishTarget.fromPoint).short} → {pointInfo(publishTarget.toPoint).short} · {publishTarget.cargo}, {num(publishTarget.tonnage)} т
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="dp-rate">Стартовая ставка, ₽/т</Label>
+                  <Label htmlFor="dp-rate" className="flex items-center gap-1.5">
+                    Стартовая ставка, ₽/т
+                    {draftOrigin(publishTarget).unanswered && (
+                      <InfoTip label="Ставок не было">В прошлый раз ставок не было — возможно, стоит поднять стартовую ставку.</InfoTip>
+                    )}
+                  </Label>
                   <Input id="dp-rate" type="number" min={1} step={100} value={publishRate} onChange={(e) => setPublishRate(e.target.value)} />
-                  {draftOrigin(publishTarget).unanswered && (
-                    <p className="text-xs text-amber-700">В прошлый раз ставок не было — возможно, стоит поднять стартовую ставку.</p>
-                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="dp-hours">Приём ставок</Label>

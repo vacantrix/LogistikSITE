@@ -432,9 +432,6 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     </TableBody>
                   </Table>
                 </div>
-                <div className="border-t border-slate-100 px-4 py-2 text-xs text-muted-foreground">
-                  Нажмите на строку или иконку «Просмотр», чтобы открыть карточку рейса с этапами и журналом событий. Колонка «Документы» ведёт в раздел «Подписать ЭДО»; «Закрыть рейс» — для рейсов в работе.
-                </div>
               </CardContent>
             </Card>
           )}
@@ -456,8 +453,8 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     {TRIP_STATUS_SUB[detail.status] ?? detail.status}
                   </Badge>
                 </DialogTitle>
-                <DialogDescription>
-                  Этапы рейса, документы и журнал событий — статусы синхронно совпадают с реестром заявок
+                <DialogDescription className="sr-only">
+                  Этапы рейса, документы и журнал событий
                 </DialogDescription>
               </DialogHeader>
 

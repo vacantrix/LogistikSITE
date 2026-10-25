@@ -17,11 +17,11 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { InfoTip } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { etrnStageLabel, etrnTitlesDone } from '@/lib/diadoc/stages'
 import type { EtrnT1Input, EtrnVehicle } from '@/lib/diadoc/waybill'
-import { fmtDateTime } from '@/lib/status'
 import type { DiadocInfoDTO, EdoDocDTO } from '@/lib/types'
 
 /** ТипВлад по формату ФНС */
@@ -59,7 +59,6 @@ export function EtrnStatus({ doc }: { doc: EdoDocDTO }) {
       <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
         <span>УИД ТрН: {d.uid ? <span className="font-mono text-slate-700">{d.uid}</span> : 'ещё не присвоен ГИС ЭПД'}</span>
         {d.gisStatus && <span>ГИС ЭПД: {d.gisStatus}</span>}
-        {d.syncedAt && <span>сверено {fmtDateTime(d.syncedAt)}</span>}
       </div>
       {d.gisError && (
         <div className="flex items-start gap-1.5 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
@@ -85,9 +84,12 @@ function F({ label, value, onChange, hint, mono, className, placeholder }: {
 }) {
   return (
     <label className={`flex flex-col gap-1 ${className ?? ''}`}>
-      <span className="text-[11px] font-medium text-slate-600">{label}</span>
+      <span className="flex items-center gap-1 text-[11px] font-medium text-slate-600">
+        {label}
+        {/* пояснение к полю — по наведению */}
+        {hint && <InfoTip label={label} className="h-4 w-4">{hint}</InfoTip>}
+      </span>
       <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className={`h-8 text-sm ${mono ? 'font-mono' : ''}`} />
-      {hint && <span className="text-[10px] leading-tight text-slate-400">{hint}</span>}
     </label>
   )
 }
@@ -169,14 +171,17 @@ export function EtrnSendDialog({ open, onOpenChange, target, diadoc, onSent }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Отправить ЭТрН в Диадок · №{target?.requestNumber}</DialogTitle>
-          <DialogDescription>
-            Титул грузоотправителя Т1 — {diadoc.stand}.{' '}
-            {diadoc.signMode === 'test'
-              ? 'Подпись тестовая: подходит только для тестовых ящиков.'
-              : 'Т1 появится в исходящих Диадока — подпишите его своей КЭП в веб-интерфейсе Диадока.'}
-            {' '}Реквизиты организаций Диадок подставит сам по ИНН.
-          </DialogDescription>
+          <DialogTitle className="flex items-center gap-2">
+            Отправить ЭТрН в Диадок · №{target?.requestNumber}
+            <InfoTip label="Как отправляется накладная">
+              Титул грузоотправителя Т1 — {diadoc.stand}.{' '}
+              {diadoc.signMode === 'test'
+                ? 'Подпись тестовая: подходит только для тестовых ящиков.'
+                : 'Т1 появится в исходящих Диадока — подпишите его своей КЭП в веб-интерфейсе Диадока.'}
+              {' '}Реквизиты организаций Диадок подставит сам по ИНН.
+            </InfoTip>
+          </DialogTitle>
+          <DialogDescription className="sr-only">Титул грузоотправителя Т1 — {diadoc.stand}</DialogDescription>
         </DialogHeader>
 
         {loadError && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{loadError}</p>}

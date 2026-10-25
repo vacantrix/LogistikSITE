@@ -25,7 +25,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { SectionHeader, type TabProps } from '@/components/platform/common'
+import { InfoTip, SectionHeader, type TabProps } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import DriverLine, {
   TrailerLine, TruckLine, TRAILER_TYPES, type DriverLineInitial, type TrailerDraft, type TruckDraft,
@@ -253,7 +253,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
         <SectionHeader title="Подать документы" desc="Раздел доступен агентам-перевозчикам: база водителей и техники пополняется по документам с нейропроверкой" />
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground">
-            Внутренний контур АЭМЗ работает со Сверкой документов — раздел «Подать документы» принадлежит агентам.
+            Раздел доступен перевозчикам
           </CardContent>
         </Card>
       </section>
@@ -383,10 +383,10 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
               <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                 <FileSpreadsheet className="h-4 w-4 text-emerald-700" aria-hidden />
                 Загрузить из Excel
+                <InfoTip label="Загрузка из Excel">
+                  Одна таблица — водитель, тягач и прицеп. Из строк создаются отдельные карточки: водители, ТС и прицепы.
+                </InfoTip>
               </div>
-              <p className="mt-1 text-xs leading-snug text-muted-foreground">
-                Одна таблица — водитель, тягач и прицеп. Из строк создаются отдельные карточки: водители, ТС и прицепы.
-              </p>
               <div className="mt-3 space-y-2">
                 <Button variant="outline" className="w-full gap-1.5" onClick={downloadTemplate}>
                   <FileSpreadsheet className="h-4 w-4" aria-hidden />

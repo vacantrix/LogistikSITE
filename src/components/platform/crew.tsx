@@ -16,14 +16,13 @@ import {
   CheckCircle2,
   Download,
   FileSpreadsheet,
-  Info,
   Loader2,
   Send,
   Upload,
   Users,
 } from 'lucide-react'
 import {
-  AgentStatusBadge, EmptyState, ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
+  AgentStatusBadge, EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -679,14 +678,6 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                       </p>
                     )}
 
-                    {/* Лёгкая подсказка о правиле занятости (Task 50) */}
-                    <p className="flex items-start gap-1.5 text-[11px] leading-snug text-slate-500">
-                      <Info className="mt-0.5 h-3 w-3 shrink-0 text-slate-400" aria-hidden />
-                      <span>
-                        Водители, ТС и прицепы, которые уже в рейсе, помечены как занятые. Попытка выбрать занятого не применит выбор — появится сообщение «водитель / ТС / прицеп — занят».
-                      </span>
-                    </p>
-
                     <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
                       <Button
                         disabled={!canAssign}
@@ -696,10 +687,10 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                         {busy === r.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : assigned ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
                         {assigned ? 'Утвердить' : 'Передать экипаж логисту'}
                       </Button>
-                      {assigned ? null : (
-                        <span className="text-xs text-muted-foreground">
-                          выберите водителя, тягач и прицеп — готовый комплект уйдёт логисту
-                        </span>
+                      {!assigned && (
+                        <InfoTip label="Как передать экипаж">
+                          Выберите водителя, тягач и прицеп — готовый комплект уйдёт логисту. Занятые в другом рейсе помечены в списках и не выбираются.
+                        </InfoTip>
                       )}
                     </div>
                   </CardContent>
@@ -747,7 +738,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                         {onPlatform.length === 0 && (
                           <TableRow>
                             <TableCell colSpan={6} className="text-center text-slate-400">
-                              Пока нет экипажей, переданных логисту, — назначьте состав по заявкам выше
+                              Экипажей пока нет
                             </TableCell>
                           </TableRow>
                         )}
@@ -766,6 +757,10 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                   <FileSpreadsheet className="h-4 w-4 text-emerald-700" aria-hidden />
                   Массовое назначение из Excel
+                  <InfoTip label="Массовое назначение">
+                    Скачайте шаблон: в нём ваши выигранные рейсы без экипажа. Впишите водителя, тягач и прицеп из базы и загрузите файл — экипажи встанут на все рейсы сразу.
+                    {needCrew.length === 0 && ' Сейчас рейсов без экипажа нет.'}
+                  </InfoTip>
                 </div>
                 <div className="mt-3 flex flex-col gap-2">
                   <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={downloadTemplate}>
@@ -789,11 +784,6 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                     if (f) void parseExcel(f)
                   }}
                 />
-                {needCrew.length === 0 && (
-                  <p className="mt-2 text-[11px] text-amber-700">
-                    Нет выигранных заявок без экипажа — шаблон заполнится, когда появятся рейсы.
-                  </p>
-                )}
               </CardContent>
             </Card>
           </div>
@@ -804,10 +794,13 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
       <Dialog open={excelOpen} onOpenChange={(o) => { setExcelOpen(o); if (!o) setImportRows(null) }}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Массовое назначение из Excel</DialogTitle>
-            <DialogDescription>
-              Проверьте строки: заявка должна быть вашей выигранной, водитель, тягач и прицеп — из базы аккаунта. Подтвердите — и экипажи встанут на все рейсы сразу.
-            </DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              Массовое назначение из Excel
+              <InfoTip label="Проверка строк">
+                Заявка должна быть вашей выигранной, водитель, тягач и прицеп — из базы аккаунта. После назначения загрузите документы по каждой заявке в «Мои заявки».
+              </InfoTip>
+            </DialogTitle>
+            <DialogDescription className="sr-only">Проверка строк файла перед назначением экипажей</DialogDescription>
           </DialogHeader>
           <div className={`max-h-[50vh] overflow-auto rounded-xl border border-slate-200 ${THIN_SCROLL}`}>
             <table className="w-full min-w-[720px] text-left text-xs">
@@ -847,9 +840,6 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
               </tbody>
             </table>
           </div>
-          <p className="text-[11px] text-slate-400">
-            Документы — одиночные: после назначения откройте каждую заявку во вкладке «Мои заявки» и загрузите по одному снимку на документ.
-          </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setExcelOpen(false); setImportRows(null) }}>Отмена</Button>
             <Button onClick={() => void runImport()} disabled={importOkCount === 0 || importing}>

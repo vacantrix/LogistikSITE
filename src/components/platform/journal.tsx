@@ -277,9 +277,6 @@ export default function JournalTab({ liveTick }: TabProps) {
                     )
                   })}
                 </ul>
-                <div className="border-t border-slate-100 px-4 py-2 text-xs text-muted-foreground">
-                  Лента обновляется автоматически каждые 15 секунд и при изменениях на платформе. Нажмите на запись, чтобы увидеть подробности и стек ошибки.
-                </div>
               </CardContent>
             </Card>
           )}

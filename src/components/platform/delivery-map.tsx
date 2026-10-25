@@ -6,6 +6,8 @@
  *
  * Модуль подключается через next/dynamic с ssr:false: Leaflet работает
  * только в браузере и обращается к window при инициализации.
+ * На карте нет подписей: вместо строки «Leaflet | © OpenStreetMap» — маленький
+ * значок «©», полный текст по наведению (лицензия OpenStreetMap требует указания источника).
  */
 
 import { useEffect, useRef } from 'react'
@@ -14,10 +16,13 @@ import 'leaflet/dist/leaflet.css'
 import { formatKm } from '@/lib/geo'
 
 export interface MapPointRequest {
+  id: string
   number: string
   cargo: string
   tonnage: number
   loadDate: string
+  /** перевозчик может откликнуться прямо с карты (заявка на торгах, отклика ещё нет) */
+  canBid: boolean
 }
 
 export interface MapPoint {
@@ -44,14 +49,22 @@ function esc(v: string): string {
   )
 }
 
-/** Содержимое всплывающей подсказки маркера */
-function popupHtml(p: MapPoint): string {
+/** Кнопка «Откликнуться» в карточке точки: обработчик вешается при открытии карточки */
+const BID_BUTTON_STYLE =
+  'margin-top:4px;align-self:flex-start;border:0;border-radius:8px;background:#0f172a;color:#fff;' +
+  'font-size:12px;font-weight:600;padding:5px 12px;cursor:pointer'
+
+/** Содержимое всплывающей карточки маркера */
+function popupHtml(p: MapPoint, withBid: boolean): string {
   const shown = p.requests.slice(0, 5)
   const rest = p.requests.length - shown.length
   const rows = shown
     .map(
       (r) =>
-        `<li style="font-size:12px;color:#0f172a"><b>${esc(r.number)}</b> · ${esc(r.cargo)}, ${r.tonnage} т · ${esc(r.loadDate)}</li>`,
+        `<li style="display:flex;flex-direction:column;font-size:12px;color:#0f172a">` +
+        `<span><b>${esc(r.number)}</b> · ${esc(r.cargo)}, ${r.tonnage} т · ${esc(r.loadDate)}</span>` +
+        (withBid && r.canBid ? `<button type="button" data-bid="${esc(r.id)}" style="${BID_BUTTON_STYLE}">Откликнуться</button>` : '') +
+        `</li>`,
     )
     .join('')
   const more = rest > 0 ? `<li style="font-size:11px;color:#64748b">и ещё ${rest}…</li>` : ''
@@ -67,31 +80,64 @@ function popupHtml(p: MapPoint): string {
     `<div style="font-size:11px;color:#64748b">${esc(p.address)}</div>` +
     dist +
     (p.requests.length > 0
-      ? `<ul style="list-style:none;display:flex;flex-direction:column;gap:3px;margin:6px 0 0;padding:6px 0 0;border-top:1px solid #e2e8f0">${rows}${more}</ul>`
+      ? `<ul style="list-style:none;display:flex;flex-direction:column;gap:${withBid ? 8 : 3}px;margin:6px 0 0;padding:6px 0 0;border-top:1px solid #e2e8f0">${rows}${more}</ul>`
       : '') +
     `</div>`
   )
 }
 
-export default function DeliveryMap({ points, focusId }: { points: MapPoint[]; focusId: string | null }) {
+/** Источник данных карты: значок «©», полный текст — по наведению */
+const MapCredit = L.Control.extend({
+  onAdd() {
+    const a = L.DomUtil.create('a') as HTMLAnchorElement
+    a.href = 'https://www.openstreetmap.org/copyright'
+    a.target = '_blank'
+    a.rel = 'noreferrer'
+    a.title = 'Данные карты: © участники OpenStreetMap'
+    a.setAttribute('aria-label', a.title)
+    a.textContent = '©'
+    a.style.cssText =
+      'display:flex;align-items:center;justify-content:center;width:18px;height:18px;margin:0 6px 6px 0;' +
+      'border-radius:9999px;background:rgba(255,255,255,.8);color:#94a3b8;font-size:11px;text-decoration:none'
+    return a
+  },
+})
+
+export default function DeliveryMap({ points, focusId, onBid }: {
+  points: MapPoint[]
+  focusId: string | null
+  /** «Откликнуться» из карточки точки; без обработчика кнопки не показываются (логист) */
+  onBid?: (requestId: string) => void
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const layerRef = useRef<L.LayerGroup | null>(null)
   const markersRef = useRef<Map<string, L.Marker>>(new Map())
+  const onBidRef = useRef(onBid)
+  useEffect(() => { onBidRef.current = onBid }, [onBid])
+  const withBid = Boolean(onBid)
 
   // стабильная подпись набора точек: не перерисовываем маркеры и не
   // сбрасываем зум при фоновом обновлении данных без изменений
-  const signature = points.map((p) => p.id).join('|')
+  const signature = points.map((p) => `${p.id}:${p.requests.map((r) => `${r.id}${r.canBid ? '+' : ''}`).join(',')}`).join('|')
 
   // инициализация карты — один раз на монтирование
   useEffect(() => {
     const el = containerRef.current
     if (!el || mapRef.current) return
-    const map = L.map(el, { center: [48.5, 38.0], zoom: 4 })
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map)
+    // стандартная строка «Leaflet | © OpenStreetMap» отключена — вместо неё значок «©»
+    const map = L.map(el, { center: [48.5, 38.0], zoom: 4, attributionControl: false })
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map)
+    new MapCredit({ position: 'bottomright' }).addTo(map)
+    // Leaflet гасит всплытие кликов из карточки — обработчик «Откликнуться» вешаем при открытии
+    map.on('popupopen', (e: L.PopupEvent) => {
+      e.popup.getElement()?.querySelectorAll<HTMLButtonElement>('[data-bid]').forEach((btn) => {
+        btn.onclick = () => {
+          const id = btn.dataset.bid
+          if (id) onBidRef.current?.(id)
+        }
+      })
+    })
     layerRef.current = L.layerGroup().addTo(map)
     mapRef.current = map
     // контейнер может менять размер (анимация диалога, раскрытие списка) —
@@ -129,12 +175,13 @@ export default function DeliveryMap({ points, focusId }: { points: MapPoint[]; f
         popupAnchor: [0, -16],
       })
       const marker = L.marker([p.lat, p.lng], { icon, title: p.short }).addTo(layer)
-      marker.bindPopup(popupHtml(p), { maxWidth: 300 })
+      marker.bindPopup(popupHtml(p, withBid), { maxWidth: 300 })
       markersRef.current.set(p.id, marker)
       bounds.extend([p.lat, p.lng])
     }
     if (bounds.isValid()) map.fitBounds(bounds.pad(0.2), { maxZoom: 8 })
-  }, [signature])
+    // points читаются по подписи signature — при смене состава или откликов карточки перестраиваются
+  }, [signature, withBid])
 
   // фокус на точке из бокового списка: перелёт + открытие подсказки
   useEffect(() => {

@@ -48,6 +48,7 @@ import {
   DocStatusBadge,
   EmptyState,
   ErrorBlock,
+  InfoTip,
   LoadingBlock,
   SectionHeader,
   type TabProps,
@@ -574,13 +575,15 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
       {!loading && !error && requests && activeCarrierId && mine.length > 0 && visible.length === 0 && (
         <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center" role="status">
           <SearchX className="mx-auto h-8 w-8 text-slate-300" aria-hidden />
-          <p className="mt-2 text-sm font-semibold text-slate-700">Ничего не найдено</p>
-          <p className="mt-1 text-xs text-slate-500">
-            {q
-              ? `По запросу «${query.trim()}» заявок нет — измените условия или сбросьте фильтр`
-              : statusFilter !== 'ALL'
-                ? 'По выбранному этапу заявок нет — измените условия или сбросьте фильтр'
-                : 'Все ваши заявки сейчас «Доступны для отклика» и скрыты — выберите этап «Выбор рейса» в фильтре выше, чтобы увидеть их'}
+          <p className="mt-2 flex items-center justify-center gap-1.5 text-sm font-semibold text-slate-700">
+            Ничего не найдено
+            <InfoTip label="Почему пусто">
+              {q
+                ? `По запросу «${query.trim()}» заявок нет — измените условия или сбросьте фильтр`
+                : statusFilter !== 'ALL'
+                  ? 'По выбранному этапу заявок нет — измените условия или сбросьте фильтр'
+                  : 'Все ваши заявки сейчас «Доступны для отклика» и скрыты — выберите этап «Выбор рейса» в фильтре выше, чтобы увидеть их'}
+            </InfoTip>
           </p>
           <Button variant="outline" size="sm" onClick={resetFilters} className="mt-3" aria-label="Сбросить поиск и фильтр">
             Сбросить поиск и фильтр
@@ -1047,10 +1050,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           )}
                         </div>
                       )}
-                      <p className="text-xs leading-snug text-slate-600">
-                        Когда приём ставок закончится, заявка автоматически уйдёт минимальной ставке — если это ваша, здесь появятся водитель, ТС и документы. До этого можно подать новую, пониженную ставку.
-                      </p>
-                      <div>
+                      <div className="flex items-center gap-2">
                         <Button
                           size="sm"
                           variant="outline"
@@ -1062,6 +1062,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           <TrendingDown className="h-4 w-4" aria-hidden />
                           Подать новую ставку
                         </Button>
+                        <InfoTip label="Что будет дальше">
+                          Когда приём ставок закончится, заявка автоматически уйдёт минимальной ставке — если это ваша, здесь появятся водитель, ТС и документы. До этого можно подать новую, пониженную ставку.
+                        </InfoTip>
                       </div>
                     </div>
                   )}
@@ -1108,10 +1111,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           )}
                         </div>
                       )}
-                      <p className="text-xs leading-snug text-slate-600">
-                        Подайте ставку — заявка останется в вашем кабинете: здесь видно торги, перебитие ставки и победу.
-                      </p>
-                      <div>
+                      <div className="flex items-center gap-2">
                         <Button
                           size="sm"
                           disabled={!r.deadline || (now !== null && Date.parse(r.deadline) <= now)}
@@ -1121,6 +1121,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           <TrendingDown className="h-4 w-4" aria-hidden />
                           Сделать ставку
                         </Button>
+                        <InfoTip label="Что будет после ставки">
+                          Заявка останется в вашем кабинете: здесь видно торги, перебитие ставки и победу.
+                        </InfoTip>
                       </div>
                     </div>
                   )}
@@ -1150,19 +1153,12 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           {r.driverId && r.truckId ? (
                             <CrewChips r={r} carrier={carrier} />
                           ) : (
-                            <p className="text-sm text-slate-600">Ещё не назначен — выберите состав, чтобы подготовить рейс.</p>
+                            <p className="text-sm text-slate-600">Ещё не назначен</p>
                           )}
                         </div>
                       </div>
 
-                      <p className="text-sm leading-relaxed text-slate-700">
-                        Перейдите к{' '}
-                        <span className="font-semibold text-slate-900">«Подать документы»</span>, если требуется
-                        загрузить новые данные по новым водителям, ТС или прицепу, или выберите уже имеющегося
-                        из раздела{' '}
-                        <span className="font-semibold text-slate-900">«Назначение экипажей»</span>.
-                      </p>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Button
                           onClick={() => onNavigate('apply')}
                           className="gap-1.5"
@@ -1180,6 +1176,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           <Users className="h-4 w-4" aria-hidden />
                           Назначение экипажей
                         </Button>
+                        <InfoTip label="Что делать дальше">
+                          «Подать документы» — если нужно загрузить данные новых водителей, ТС или прицепа; «Назначение экипажей» — выбрать уже имеющихся.
+                        </InfoTip>
                       </div>
 
                       {/* Документы: свёрнутый загрузчик — раскрывается, когда пора подавать комплект */}
@@ -1284,14 +1283,15 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     {bidReq.bestRate == null && <span className="ml-1 text-muted-foreground">— ставок ещё нет</span>}
                   </div>
                 )}
-                {bidReq.mode === 'CLOSED' && (
-                  <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                    <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-                    Участники не видят цены друг друга — победителя определит логист по итогам.
-                  </div>
-                )}
                 <div className="space-y-1.5">
-                  <Label htmlFor="my-bid-amount">Новая ставка, ₽/т</Label>
+                  <Label htmlFor="my-bid-amount" className="flex items-center gap-1.5">
+                    Новая ставка, ₽/т
+                    <InfoTip label="Правило ставки">
+                      {bidReq.mode === 'CLOSED'
+                        ? 'Закрытые ставки: участники не видят цены друг друга, ставку увидит только логист. Побеждает минимальная.'
+                        : 'Ставка должна быть ниже текущей лучшей.'}
+                    </InfoTip>
+                  </Label>
                   <Input
                     id="my-bid-amount"
                     type="number"
@@ -1304,9 +1304,6 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     onChange={(e) => setBidAmount(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter' && validateBidAmount() != null) setBidStep('confirm') }}
                   />
-                  <p className="text-xs text-muted-foreground">
-                    {bidReq.mode === 'CLOSED' ? 'Ставку увидит только логист при подведении итогов' : 'Должна быть ниже текущей лучшей'}
-                  </p>
                 </div>
               </div>
               <DialogFooter>
@@ -1325,7 +1322,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
               <>
                 <DialogHeader>
                   <DialogTitle>Подтверждение ставки</DialogTitle>
-                  <DialogDescription>
+                  <DialogDescription className="sr-only">
                     Проверьте итоговые условия — после подтверждения ставка уйдёт организатору
                   </DialogDescription>
                 </DialogHeader>
@@ -1350,9 +1347,6 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       <div className="mt-1 text-xs text-blue-800">
                         текущая лучшая {rate(floor)} · экономия для АЭМЗ {rate(floor - amount)}
                       </div>
-                    )}
-                    {bidReq.mode === 'CLOSED' && (
-                      <div className="mt-1 text-xs text-blue-800">цену увидит только логист при подведении итогов</div>
                     )}
                   </div>
                 </div>
@@ -1379,9 +1373,6 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                 <p className="text-sm font-semibold text-slate-900">
                   {lastBid != null ? <>Новая ставка: <span className="text-emerald-700">{rate(lastBid)}</span></> : 'Новая ставка принята'}
                   {bidReq.mode === 'CLOSED' && ' (закрытая)'}
-                </p>
-                <p className="text-sm text-slate-600">
-                  Заявка остаётся на согласовании ставки — следите за этапом в списке слева
                 </p>
               </div>
               <DialogFooter>

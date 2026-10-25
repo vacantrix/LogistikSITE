@@ -286,9 +286,6 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                     </TableBody>
                   </Table>
                 </div>
-                <div className="border-t border-slate-100 px-4 py-2 text-xs text-muted-foreground">
-                  Нажмите на строку или иконку «Просмотр», чтобы открыть карточку заявки. Редактирование — у черновиков и заявок на площадке; удаление — для текущих заявок.
-                </div>
               </CardContent>
             </Card>
           )}
