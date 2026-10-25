@@ -149,10 +149,10 @@ export function PhotoSteps<K extends string>({
         const locked = !file && !isLoading && i > current
         const miss = showMiss && !file && !isLoading
         const t = file ? tone?.(s.key) ?? null : null
-        const frame = file
-          ? t === 'ok' ? 'border-emerald-200 bg-emerald-50/40' : t === 'bad' ? 'border-red-200 bg-red-50/40' : 'border-slate-200 bg-slate-50/40'
-          : isLoading
-            ? 'border-blue-300 bg-blue-50/40'
+        const frame = isLoading
+          ? 'border-blue-300 bg-blue-50/40'
+          : file
+            ? t === 'ok' ? 'border-emerald-200 bg-emerald-50/40' : t === 'bad' ? 'border-red-200 bg-red-50/40' : 'border-slate-200 bg-slate-50/40'
             : miss && !locked
               ? 'border-dashed border-red-400 bg-red-50/40'
               : active
@@ -162,18 +162,31 @@ export function PhotoSteps<K extends string>({
           <li key={s.key} className={`rounded-lg border p-2 ${frame}`} aria-current={active || isLoading ? 'step' : undefined}>
             <div className="flex items-center justify-between gap-1">
               <span className={`flex min-w-0 items-center gap-1.5 text-[11px] font-semibold ${miss && !locked ? 'text-red-600' : locked ? 'text-slate-400' : 'text-slate-700'}`}>
-                <StepNumber n={i + 1} state={file ? 'done' : locked ? 'locked' : 'active'} />
+                <StepNumber n={i + 1} state={isLoading ? 'active' : file ? 'done' : locked ? 'locked' : 'active'} />
                 <span className="truncate">
                   {s.label}
                   {miss && !locked && <span aria-hidden> — добавьте фото</span>}
                 </span>
               </span>
-              {file && badge?.(s.key)}
+              {file && !isLoading && badge?.(s.key)}
             </div>
 
-            {file ? (
+            {/* замена фото идёт с тем же кружком, что и первая загрузка */}
+            {isLoading ? (
+              <div className="mt-1 flex h-16 items-center justify-center gap-2 rounded border border-blue-200 bg-white/70">
+                <UploadRing progress={loading.progress} />
+                <span className="text-[10px] font-medium text-blue-700">{file ? 'Заменяем…' : 'Загружаем…'}</span>
+              </div>
+            ) : file ? (
               <>
-                <img src={file.dataUri} alt={`Фото: ${s.label}`} className="mt-1.5 h-16 w-full rounded border border-slate-200 bg-white object-contain" />
+                {lock ? (
+                  <img src={file.dataUri} alt={`Фото: ${s.label}`} className="mt-1.5 h-16 w-full rounded border border-slate-200 bg-white object-contain" />
+                ) : (
+                  <label title="Заменить фото" className={`mt-1.5 block ${blocked ? 'pointer-events-none' : 'cursor-pointer'}`}>
+                    <img src={file.dataUri} alt={`Фото: ${s.label}`} className="h-16 w-full rounded border border-slate-200 bg-white object-contain transition-colors hover:border-blue-400" />
+                    {input(s.key)}
+                  </label>
+                )}
                 <div className="mt-1 flex items-center justify-between gap-1">
                   <span className="truncate text-[10px] text-muted-foreground" title={file.fileName}>{file.fileName}</span>
                   {!lock && (
@@ -190,11 +203,6 @@ export function PhotoSteps<K extends string>({
                 </div>
                 {extra?.(s.key)}
               </>
-            ) : isLoading ? (
-              <div className="mt-1 flex h-16 items-center justify-center gap-2 rounded border border-blue-200 bg-white/70">
-                <UploadRing progress={loading.progress} />
-                <span className="text-[10px] font-medium text-blue-700">Загружаем…</span>
-              </div>
             ) : locked ? (
               <div
                 title={`Сначала загрузите шаг ${current + 1}`}

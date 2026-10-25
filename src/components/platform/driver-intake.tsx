@@ -179,6 +179,41 @@ function TrailerFields({
   )
 }
 
+/**
+ * Поля, заполненные нейросетью, и шаг-фото, с которого они прочитаны. Когда в шаг загружают
+ * другое фото, такие поля — если их не правили вручную — очищаются: иначе карточка осталась бы
+ * с данными старого снимка, а «Автозаполнение» заполняет только пустые поля.
+ */
+function useAiFields<F extends string, S extends string>() {
+  const ref = useRef<Partial<Record<F, { value: string; source: S }>>>({})
+
+  /** запомнить поля, которые нейросеть заполнила (были пустыми — стали заполненными) */
+  const note = useCallback((before: Record<F, string>, after: Record<F, string>, sourceOf: (f: F) => S) => {
+    for (const f of Object.keys(after) as F[]) {
+      if (!before[f]?.trim() && after[f]?.trim()) ref.current[f] = { value: after[f], source: sourceOf(f) }
+    }
+  }, [])
+
+  /** поля шага source, всё ещё равные прочитанному нейросетью; больше не отслеживаются */
+  const takeStale = useCallback((source: S, current: Record<F, string>): F[] => {
+    const stale = (Object.keys(ref.current) as F[]).filter((f) => ref.current[f]?.source === source && current[f] === ref.current[f]?.value)
+    for (const f of stale) delete ref.current[f]
+    return stale
+  }, [])
+
+  return { note, takeStale }
+}
+
+/** копия объекта без перечисленных ключей */
+function omit<T extends Record<string, unknown>>(obj: T, keys: string[]): T {
+  const next = { ...obj }
+  for (const k of keys) delete next[k]
+  return next
+}
+
+/** С какой страницы паспорта нейросеть читает поле карточки водителя */
+const DRIVER_FIELD_SOURCE = (f: string): DocType => (f === 'address' ? 'PASSPORT_REG' : 'PASSPORT_PHOTO')
+
 export interface DriverLineProps {
   id: string
   index: number
@@ -225,11 +260,23 @@ export default function DriverLine({
   const [admitted, setAdmitted] = useState<string | null>(null)
 
   const setField = useCallback((k: keyof typeof d, v: string) => setD((cur) => ({ ...cur, [k]: v })), [])
+  const dRef = useRef(d)
+  useEffect(() => {
+    dRef.current = d
+  })
+  const ai = useAiFields<keyof typeof d, DocType>()
 
   const setUpload = useCallback(async (type: DocType, file: File) => {
-    // новое фото — прежний вердикт по этому шагу больше не действует
-    if (await loadUpload(type, file)) setVerdicts((cur) => { const n = { ...cur }; delete n[type]; return n })
-  }, [loadUpload])
+    if (!(await loadUpload(type, file))) return
+    // новое фото — прежний вердикт по этому шагу больше не действует,
+    // а поля, прочитанные со старого фото, нейросеть прочитает заново
+    setVerdicts((cur) => omit(cur, [type]))
+    const stale = ai.takeStale(type, dRef.current)
+    if (stale.length > 0) {
+      setD((cur) => ({ ...cur, ...Object.fromEntries(stale.map((k) => [k, ''])) }))
+      setConf((cur) => omit(cur, stale))
+    }
+  }, [loadUpload, ai])
 
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
   const miss = (v: string) => showErrors && v.trim() === ''
@@ -265,10 +312,11 @@ export default function DriverLine({
       birthPlace: pick(d.birthPlace, res.driver.birthPlace),
       address: pick(d.address, res.driver.address),
     }
+    ai.note(d, eff, DRIVER_FIELD_SOURCE)
     setD(eff)
     setConf(res.driver.confidence ?? {})
     return { effD: eff, latest: res.documents, files, movedNote }
-  }, [uploads, d])
+  }, [uploads, d, ai])
 
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
@@ -797,6 +845,21 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   // фото ТС (Task 53): файл или Ctrl+V — оба слота обязательны
   const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRUCK_PHOTO_LABELS, admitted !== null, toast)
 
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  })
+  const ai = useAiFields<keyof TruckDraft, SoloPhotoKey>()
+  /** новое фото в шаге: поля, прочитанные нейросетью со старого СТС, очищаются */
+  const pickAndReset = useCallback(async (k: SoloPhotoKey, file: File) => {
+    if (!(await pickPhoto(k, file))) return
+    const stale = ai.takeStale(k, tRef.current)
+    if (stale.length === 0) return
+    setT((cur) => ({ ...cur, ...Object.fromEntries(stale.map((f) => [f, ''])) }))
+    setConf((cur) => omit(cur, stale))
+    setFormatBad((cur) => omit(cur, stale))
+  }, [pickPhoto, ai])
+
   const setField = useCallback((k: keyof TruckDraft, v: string) => {
     setT((cur) => ({ ...cur, [k]: v }))
     setFormatBad((cur) => {
@@ -822,6 +885,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       color: t.color,
       owner: pick(t.owner, res.fields.owner),
     }
+    ai.note(t, merged, () => 'sts')
     setT(merged)
     setConf(res.confidence as Record<string, number>)
     const bad: Record<string, string> = {}
@@ -833,7 +897,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     }
     setFormatBad(bad)
     return { merged, bad }
-  }, [t])
+  }, [t, ai])
 
   /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает СТС и заполняет
    * пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
@@ -1005,7 +1069,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
             labels={TRUCK_PHOTO_LABELS}
             showMiss={showErrors}
             lock={lock}
-            onPick={(k, f) => void pickPhoto(k, f)}
+            onPick={(k, f) => void pickAndReset(k, f)}
             onRemove={removePhoto}
           />
         </div>
@@ -1049,6 +1113,21 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
   // фото прицепа (Task 53): файл или Ctrl+V — оба слота обязательны
   const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRAILER_PHOTO_LABELS, admitted !== null, toast)
 
+  const trRef = useRef(tr)
+  useEffect(() => {
+    trRef.current = tr
+  })
+  const ai = useAiFields<keyof TrailerDraft, SoloPhotoKey>()
+  /** новое фото в шаге: поля, прочитанные нейросетью со старого СТС, очищаются */
+  const pickAndReset = useCallback(async (k: SoloPhotoKey, file: File) => {
+    if (!(await pickPhoto(k, file))) return
+    const stale = ai.takeStale(k, trRef.current)
+    if (stale.length === 0) return
+    setTr((cur) => ({ ...cur, ...Object.fromEntries(stale.map((f) => [f, ''])) }))
+    setConf((cur) => omit(cur, stale))
+    setFormatBad((cur) => omit(cur, stale))
+  }, [pickPhoto, ai])
+
   const setField = useCallback((k: keyof TrailerDraft, v: string) => {
     setTr((cur) => ({ ...cur, [k]: v }))
     setFormatBad((cur) => {
@@ -1074,6 +1153,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       color: tr.color,
       owner: pick(tr.owner, res.fields.owner),
     }
+    ai.note(tr, merged, () => 'sts')
     setTr(merged)
     setConf(res.confidence as Record<string, number>)
     const bad: Record<string, string> = {}
@@ -1085,7 +1165,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     }
     setFormatBad(bad)
     return { merged, bad }
-  }, [tr])
+  }, [tr, ai])
 
   /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает СТС и заполняет
    * пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
@@ -1258,7 +1338,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
             labels={TRAILER_PHOTO_LABELS}
             showMiss={showErrors}
             lock={lock}
-            onPick={(k, f) => void pickPhoto(k, f)}
+            onPick={(k, f) => void pickAndReset(k, f)}
             onRemove={removePhoto}
           />
         </div>
