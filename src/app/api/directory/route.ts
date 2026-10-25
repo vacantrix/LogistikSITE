@@ -67,7 +67,7 @@ export async function GET() {
  * POST /api/directory — создать запись справочника { kind, data }.
  * Грузы и перевозчиков создаёт логист; водителей, тягачи и прицепы — перевозчик (себе) или логист.
  * Для водителя и тягача работает идемпотентно: повторное добавление с тем же
- * ВУ/госномером обновляет существующую запись и возвращает её.
+ * паспортом/госномером обновляет существующую запись и возвращает её.
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
@@ -140,15 +140,14 @@ export async function POST(req: NextRequest) {
         if (carrierId instanceof NextResponse) return carrierId
         const fullName = s(data.fullName, 200)
         if (!fullName) return NextResponse.json({ error: 'ФИО обязательно' }, { status: 400 })
-        const license = s(data.license, 40)
-        const existing = license && license !== '—'
-          ? (await db.driver.findMany({ where: { carrierId } })).find((d) => norm(d.license) === norm(license))
+        // тот же водитель — по серии и номеру паспорта
+        const passport = s(data.passport, 40)
+        const existing = passport && passport !== '—'
+          ? (await db.driver.findMany({ where: { carrierId } })).find((d) => norm(d.passport) === norm(passport))
           : null
         const payload = {
           fullName,
-          birthDate: s(data.birthDate, 20) || '—', passport: s(data.passport, 40) || '—',
-          license: license || '—', licenseTill: s(data.licenseTill, 20) || '—',
-          categories: s(data.categories, 60) || '—',
+          birthDate: s(data.birthDate, 20) || '—', passport: passport || '—',
           // кадровые поля проформы (Task 29)
           phone: s(data.phone, 40) || '—', birthPlace: s(data.birthPlace) || '—', address: s(data.address) || '—',
           citizenship: s(data.citizenship, 60) || '—', position: s(data.position, 100) || '—',
@@ -215,7 +214,7 @@ export async function POST(req: NextRequest) {
 
 /**
  * PUT /api/directory — обновить запись { kind, id, data }.
- * Перевозчик обновляет только свои записи (сроки ВУ и техосмотра, поля карточки);
+ * Перевозчик обновляет только свои записи (срок техосмотра, поля карточки);
  * грузы, данные перевозчика и его доступ к площадке меняет только логист.
  */
 export async function PUT(req: NextRequest) {
@@ -264,8 +263,6 @@ export async function PUT(req: NextRequest) {
           where: { id },
           data: {
             fullName, birthDate: s(data.birthDate, 20) || '—', passport: s(data.passport, 40) || '—',
-            license: s(data.license, 40) || '—', licenseTill: s(data.licenseTill, 20) || '—',
-            categories: s(data.categories, 60) || '—',
             ownershipType: ownershipType(data.ownershipType),
             ownerName: s(data.ownerName, 200) || '—', leaseContract: s(data.leaseContract, 200) || '—',
           },

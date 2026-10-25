@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
       carrier: r.winner ? { name: r.winner.name, inn: r.winner.inn } : null,
       driver: (() => {
         const d = r.driverId ? driverById.get(r.driverId) : undefined
-        return d ? { fullName: d.fullName, license: d.license, phone: d.phone } : null
+        return d ? { fullName: d.fullName, phone: d.phone } : null
       })(),
       vehicle: (() => {
         const t = r.truckId ? truckById.get(r.truckId) : undefined

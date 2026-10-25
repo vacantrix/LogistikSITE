@@ -61,8 +61,6 @@ export interface EtrnT1Input {
     lastName: string
     firstName: string
     middleName: string
-    licenseSeries: string
-    licenseNumber: string
     phone: string
   }
   vehicle: EtrnVehicle
@@ -142,7 +140,6 @@ export function buildT1UserXml(input: EtrnT1Input, ctx: EtrnT1Context): string {
     `<Carrier><OrganizationReference${attrs({ BoxId: ctx.carrierBoxId })}>${phones(d.carrierPhone)}</OrganizationReference></Carrier>`,
     `<Drivers><DriverInfo${attrs({
       LastName: d.driver.lastName, FirstName: d.driver.firstName, MiddleName: d.driver.middleName,
-      LicenseNumber: d.driver.licenseNumber, LicenseSeries: d.driver.licenseSeries,
     })}>${phones(d.driver.phone)}</DriverInfo></Drivers>`,
     `<VehicleInfo>${transport('Vehicle', d.vehicle)}${d.trailer ? `<Trailers>${transport('Trailer', d.trailer)}</Trailers>` : ''}</VehicleInfo>`,
     `<LoadingInfo${attrs({
@@ -240,13 +237,6 @@ export function parseRuAddress(raw: string): EtrnAddress {
 export function splitFio(fullName: string): { lastName: string; firstName: string; middleName: string } {
   const [lastName = '', firstName = '', ...rest] = fullName.trim().split(/\s+/)
   return { lastName, firstName, middleName: rest.join(' ') }
-}
-
-/** «99 10 384181» → серия «9910», номер «384181» */
-export function splitLicense(license: string): { series: string; number: string } {
-  const s = license.replace(/\s+/g, '').toUpperCase()
-  const m = s.match(/^(\d{2}[\dА-ЯA-Z]{2})(\d{6})$/)
-  return m ? { series: m[1], number: m[2] } : { series: '', number: s }
 }
 
 /** Принадлежность ТС в платформе → ТипВлад */

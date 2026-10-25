@@ -151,7 +151,6 @@ const ownership = (v: string) => (OWNERSHIP.has(v) ? (v as 'OWNED' | 'HIRED' | '
 export function toDriverDTO(d: Driver): DriverDTO {
   return {
     id: d.id, carrierId: d.carrierId, fullName: d.fullName, birthDate: d.birthDate, passport: d.passport,
-    license: d.license, licenseTill: d.licenseTill, categories: d.categories,
     phone: d.phone, birthPlace: d.birthPlace, address: d.address, citizenship: d.citizenship,
     passportIssuedBy: d.passportIssuedBy, passportIssuedDate: d.passportIssuedDate, position: d.position,
     ownershipType: ownership(d.ownershipType), ownerName: d.ownerName, leaseContract: d.leaseContract,

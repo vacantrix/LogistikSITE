@@ -15,6 +15,9 @@
  */
 import type { DocType, OcrOutput } from '@/lib/verify'
 
+/** Виды документов, которые проверяет платформа */
+const KNOWN_TYPES = new Set<DocType>(['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA'])
+
 const BASE = process.env.OCR_SERVICE_URL ?? 'http://127.0.0.1:3020'
 const TOKEN = process.env.OCR_SERVICE_TOKEN
 
@@ -121,7 +124,11 @@ export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): 
           quality: Math.round(ocr.quality),
           fields: ocr.fields ?? {},
           confidences: ocr.confidences ?? {},
-          ...(ocr.detectedType ? { detectedType: ocr.detectedType } : {}),
+          // распознаватель умеет больше видов (например, ВУ), чем запрашивает платформа —
+          // незнакомый ей вид = «не удалось распознать документ»
+          ...(ocr.detectedType
+            ? { detectedType: KNOWN_TYPES.has(ocr.detectedType as DocType) ? ocr.detectedType : 'UNKNOWN' }
+            : {}),
           ...(ocr.side === 'front' || ocr.side === 'back' ? { side: ocr.side } : {}),
           ...(ocr.confirmations ? { confirmations: ocr.confirmations } : {}),
         },

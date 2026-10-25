@@ -41,7 +41,7 @@ import type {
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
 
 /** причины возврата агенту — выбор из списка, не свободный текст */
 const RETURN_REASONS = ['Нет печати', 'Расхождение по весу', 'Нечитаемый скан', 'Не тот документ', 'Другое'] as const
@@ -92,14 +92,6 @@ function buildRows(
     return ['Дата регистрации', 'Код подразделения', 'Адрес регистрации'].map((k) => ({
       label: k, expected: null, actual: f(k), conf: c(k), kind: 'text' as const,
     }))
-  }
-  if (type === 'LICENSE') {
-    return [
-      { label: 'ФИО', expected: driver?.fullName ?? null, actual: f('ФИО'), conf: c('ФИО'), kind: 'fio' },
-      { label: 'Дата рождения', expected: driver?.birthDate ?? null, actual: f('Дата рождения'), conf: c('Дата рождения'), kind: 'text' },
-      { label: 'Номер ВУ', expected: driver?.license ?? null, actual: f('Номер ВУ'), conf: c('Номер ВУ'), kind: 'digits' },
-      { label: 'Действует до', expected: driver?.licenseTill ?? null, actual: f('Действует до'), conf: c('Действует до'), kind: 'text' },
-    ]
   }
   if (type === 'REQUEST_DOC') {
     return [
@@ -212,7 +204,6 @@ function StatusChip({ status }: { status: RequestStatus }) {
 const DOC_TAB_LABEL: Record<string, string> = {
   PASSPORT_PHOTO: 'Паспорт',
   PASSPORT_REG: 'Прописка',
-  LICENSE: 'ВУ',
   STS: 'СТС',
   REQUEST_DOC: 'Заявка',
   POA: 'Доверенность',

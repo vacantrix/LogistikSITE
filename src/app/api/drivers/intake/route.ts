@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 // документы распознаются по одному (5–40 с каждый) — несколько файлов могут занять минуты
 export const maxDuration = 600
 
-const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
 
 /**
  * POST /api/drivers/intake — добавление водителя с распознаванием документов.

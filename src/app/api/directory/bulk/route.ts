@@ -10,7 +10,7 @@ const norm = (s: string) => s.replace(/\s/g, '').toUpperCase()
  * POST /api/directory/bulk — массовое пополнение базы аккаунта (импорт из Excel).
  * Тело: { carrierId?, drivers?: [...], trucks?: [...], trailers?: [...] }
  * Перевозчик пополняет только свою базу (carrierId берётся из сессии), логист указывает carrierId.
- * Идемпотентно: водитель сопоставляется по номеру ВУ, ТС и прицеп — по госномеру
+ * Идемпотентно: водитель сопоставляется по паспорту, ТС и прицеп — по госномеру
  * (повторный импорт обновляет существующие карточки, дублей не создаёт).
  */
 export async function POST(req: NextRequest) {
@@ -45,8 +45,8 @@ export async function POST(req: NextRequest) {
     let driversUpdated = 0
     for (const d of driverRows) {
       if (!d.fullName) continue
-      const license = d.license && d.license !== '—' ? d.license : ''
-      const existing = license ? existingDrivers.find((x) => norm(x.license) === norm(license)) : undefined
+      const passport = d.passport && d.passport !== '—' ? d.passport : ''
+      const existing = passport ? existingDrivers.find((x) => norm(x.passport) === norm(passport)) : undefined
       const payload = {
         fullName: d.fullName,
         birthDate: d.birthDate || '—',
@@ -58,9 +58,6 @@ export async function POST(req: NextRequest) {
         passportIssuedDate: d.passportIssuedDate || '—',
         phone: d.phone || '—',
         position: d.position || 'Водитель',
-        license: d.license || '—',
-        licenseTill: d.licenseTill || '—',
-        categories: d.categories || '—',
       }
       if (existing) {
         await db.driver.update({ where: { id: existing.id }, data: payload })

@@ -63,12 +63,11 @@ import { DOC_TYPE_LABEL, fmtDateTime, rate, timeLeft } from '@/lib/status'
 import { pointInfo } from '@/lib/points'
 import type { BidDTO, CarrierDTO, DocStatus, DocType, RequestDTO } from '@/lib/types'
 
-const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
 
 const DOC_ICONS: Record<DocType, typeof IdCard> = {
   PASSPORT_PHOTO: IdCard,
   PASSPORT_REG: MapPin,
-  LICENSE: Car,
   STS: FileText,
   REQUEST_DOC: ClipboardList,
   POA: FileSignature,
@@ -78,7 +77,6 @@ const DOC_ICONS: Record<DocType, typeof IdCard> = {
 const DOC_SHORT: Record<DocType, string> = {
   PASSPORT_PHOTO: 'Паспорт (стр. с фото)',
   PASSPORT_REG: 'Паспорт: регистрация',
-  LICENSE: 'Водительское удостоверение',
   STS: 'СТС',
   REQUEST_DOC: 'Заявка (скан)',
   POA: 'Доверенность',
@@ -142,7 +140,6 @@ function issueClass(status: DocStatus): string {
 const DEMO_NAMES: Record<DocType, string> = {
   PASSPORT_PHOTO: 'passport_photo_demo.jpg',
   PASSPORT_REG: 'passport_reg_demo.jpg',
-  LICENSE: 'license_demo.jpg',
   STS: 'sts_demo.jpg',
   REQUEST_DOC: 'zayavka_scan_demo.jpg',
   POA: 'doverennost_demo.jpg',
@@ -322,14 +319,13 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
     }
   }
 
-  // ——— демо: комплект из 6 образцов ———
+  // ——— демо: комплект из 5 образцов ———
   const runDemo = async (r: RequestDTO) => {
     setBusy(`${r.id}:demo`)
     try {
       const samples: [DocType, string][] = [
         ['PASSPORT_PHOTO', sampleSvg('ПАСПОРТ РФ · СТР. С ФОТО', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678'], '#0f3b66')],
         ['PASSPORT_REG', sampleSvg('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', ['01.02.2020  770-001', 'Г. МОСКВА, УЛ. ПРИМЕРНАЯ', 'Д. 1'], '#0f3b66')],
-        ['LICENSE', sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')],
         ['STS', sampleSvg('СТС ТЯГАЧА', ['А123ВС777', 'X9622277XKG123456', '99 00 123456'], '#14532d')],
         ['REQUEST_DOC', sampleSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', [`№ ${r.number}`, '18.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'СТАВКА: 8 200 РУБ/Т'], '#9a3412')],
         ['POA', sampleSvg('ДОВЕРЕННОСТЬ № 47', ['№ 47', '18.10.2026', 'ООО «ПЕРЕВОЗЧИК А»', 'ИВАНОВ ИВАН ИВАНОВИЧ', '31.12.2026'], '#3f6212')],
@@ -354,22 +350,22 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
     }
   }
 
-  // ——— демо: заведомо размытое ВУ ———
+  // ——— демо: заведомо размытое СТС ———
   const runBlurDemo = async (r: RequestDTO) => {
     setBusy(`${r.id}:blur`)
     try {
-      const dataUri = sampleSvg('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', ['ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678', 'C, CE'], '#5b3413')
-      const up = await api.uploadDocument(r.id, { type: 'LICENSE', fileName: 'license_blur_demo.jpg', dataUri })
+      const dataUri = sampleSvg('СТС ТЯГАЧА', ['А123ВС777', 'X9622277XKG123456', '99 00 123456'], '#14532d')
+      const up = await api.uploadDocument(r.id, { type: 'STS', fileName: 'sts_blur_demo.jpg', dataUri })
       applyRequest(up.request)
       setVerifyingId(r.id)
       try {
         const v = await api.verifyDocuments(r.id)
         applyRequest(v.request)
-        const doc = v.request.documents.find((d) => d.type === 'LICENSE')
+        const doc = v.request.documents.find((d) => d.type === 'STS')
         if (doc?.status === 'REUPLOAD') {
-          toast({ title: 'Брак обнаружен', description: `ВУ получил статус «Перезагрузить документ». ${doc.issues[0] ?? ''}`.trim() })
+          toast({ title: 'Брак обнаружен', description: `СТС получило статус «Перезагрузить документ». ${doc.issues[0] ?? ''}`.trim() })
         } else {
-          toastDocVerdict('LICENSE', doc?.status, doc?.issues ?? [], doc?.message ?? null)
+          toastDocVerdict('STS', doc?.status, doc?.issues ?? [], doc?.message ?? null)
         }
       } finally {
         setVerifyingId(null)
@@ -784,7 +780,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
               aria-label={`Загрузить демо-образец с браком по заявке ${r.number}`}
             >
               {busy === `${r.id}:blur` ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileX className="h-4 w-4" aria-hidden />}
-              Брак: размытое ВУ (демо)
+              Брак: размытое СТС (демо)
             </Button>
             {verifyingId === r.id && (
               <span className="flex items-center gap-1.5 text-sm font-medium text-blue-700" role="status">

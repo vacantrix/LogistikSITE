@@ -1,6 +1,15 @@
 /** Клиентские хелперы работы с изображениями и демо-образцами документов */
 
-/** Читает файл и сжимает до dataUri JPEG (max 1280px, качество 0.8); PDF передаётся как есть */
+/** Снимок до этого размера и веса уходит без пересжатия */
+const KEEP_AS_IS_SIDE = 2400
+const KEEP_AS_IS_BYTES = 4_500_000
+
+/**
+ * Читает файл в dataUri для распознавания и хранения; PDF передаётся как есть.
+ * Обычное фото документа (JPEG/PNG/WebP до 2400 px и 4,5 МБ) не пересжимается:
+ * прежнее сжатие до 1280 px и JPEG 80 % стирало мелкий шрифт паспорта, и нейросеть
+ * переставала узнавать документ. Крупные снимки уменьшаются до 2400 px, JPEG 92 %.
+ */
 export async function fileToCompressedDataUri(file: File): Promise<string> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
@@ -17,15 +26,18 @@ export async function fileToCompressedDataUri(file: File): Promise<string> {
       img.onerror = () => reject(new Error('image'))
       img.src = dataUrl
     })
-    const max = 1280
-    const scale = Math.min(1, max / Math.max(img.width, img.height, 1))
+    const side = Math.max(img.width, img.height, 1)
+    if (side <= KEEP_AS_IS_SIDE && file.size <= KEEP_AS_IS_BYTES && /^data:image\/(jpeg|png|webp);/i.test(dataUrl)) {
+      return dataUrl
+    }
+    const scale = Math.min(1, KEEP_AS_IS_SIDE / side)
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(img.width * scale))
     canvas.height = Math.max(1, Math.round(img.height * scale))
     const ctx = canvas.getContext('2d')
     if (!ctx) return dataUrl
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-    return canvas.toDataURL('image/jpeg', 0.8)
+    return canvas.toDataURL('image/jpeg', 0.92)
   } catch {
     return dataUrl
   }
@@ -45,7 +57,7 @@ export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 // ---------------- Демо-образцы документов (SVG с читаемым текстом) ----------------
 
 export interface DemoDocSample {
-  type: 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA'
+  type: 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'STS' | 'REQUEST_DOC' | 'POA'
   fileName: string
   title: string
   lines: string[]
@@ -56,9 +68,8 @@ export interface DemoDocSample {
 export const DEMO_DOC_SAMPLES: DemoDocSample[] = [
   { type: 'PASSPORT_PHOTO', fileName: 'passport_demo.jpg', title: 'ПАСПОРТ РФ · СТР. С ФОТО', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 07 987654', '01.02.2020', '770-003'], accent: '#0f3b66' },
   { type: 'PASSPORT_REG', fileName: 'passport_reg_demo.jpg', title: 'ПАСПОРТ РФ · РЕГИСТРАЦИЯ', lines: ['11.11.2023  230-014', 'Г. КРАСНОДАР, УЛ. СЕВЕРНАЯ', 'Д. 45, КВ. 12'], accent: '#0f3b66' },
-  { type: 'LICENSE', fileName: 'license_demo.jpg', title: 'ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', lines: ['ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '02.02.1988', '52 10 555444', 'C, CE', '14.02.2022', '14.02.2032'], accent: '#5b3413' },
   { type: 'STS', fileName: 'sts_demo.jpg', title: 'СТС ТЯГАЧА', lines: ['Е456КХ123', 'Z942AB76HKB220001', '99 00 654321', 'SCANIA R450', 'ООО «Перевозчик Б»'], accent: '#14532d' },
-  { type: 'REQUEST_DOC', fileName: 'zayavka_demo.jpg', title: 'ЗАЯВКА НА ПЕРЕВОЗКУ', lines: ['№ Z-1042', '21.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 7 900 РУБ/Т'], accent: '#9a3412' },
+  { type: 'REQUEST_DOC', fileName: 'zayavka_demo.jpg', title: 'ЗАЯВКА НА ПЕРЕВОЗКУ', lines: ['№ Z-1042', '21.10.2026', 'ГРУЗ: МЕТАЛЛОКОНСТРУКЦИИ, 20 Т', 'МАРШРУТ: АБИНСК → САНКТ-ПЕТЕРБУРГ', 'СТАВКА: 7 900 РУБ/Т'], accent: '#9a3412' },
   { type: 'POA', fileName: 'doverennost_demo.jpg', title: 'ДОВЕРЕННОСТЬ № 47', lines: ['№ 47', '20.10.2026', 'ООО «ПЕРЕВОЗЧИК Б»', 'ПЕТРОВ ПЕТР СЕРГЕЕВИЧ', '31.12.2026'], accent: '#3f6212' },
 ]
 

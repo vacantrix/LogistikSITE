@@ -77,17 +77,11 @@ async function main() {
             label: 'Паспорт: регистрация', fileName: 'passport_reg.jpg', status: 'LOADED',
             dataUri: uri('ПАСПОРТ РФ · РЕГИСТРАЦИЯ', [short, 'РЕГИСТРАЦИЯ ПО МЕСТУ ЖИТЕЛЬСТВА', 'Г. КРАСНОДАР'], '#0f3b66'),
           },
-          {
-            label: 'Водительское удостоверение', fileName: 'license.jpg',
-            // каждый 5-й комплект требует проверки (демо индикатора «Требует проверки»)
-            status: n % 5 === 4 ? 'NEEDS_REVIEW' : 'LOADED',
-            dataUri: uri('ВОДИТЕЛЬСКОЕ УДОСТОВЕРЕНИЕ', [short, d.license, `КАТ. ${d.categories}`, `ДО ${d.licenseTill}`], '#5b3413'),
-          },
         ]
         await db.directoryPhoto.createMany({
           data: docs.map((x) => ({ kind: 'driver', refId: d.id, label: x.label, fileName: x.fileName, dataUri: x.dataUri, status: x.status })),
         })
-        photos += 3
+        photos += 2
         if (n % 5 === 4) review++
       }
     }

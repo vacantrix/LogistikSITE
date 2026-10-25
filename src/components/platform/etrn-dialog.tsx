@@ -225,8 +225,6 @@ export function EtrnSendDialog({ open, onOpenChange, target, diadoc, onSent }: {
               <F label="Фамилия" value={v.driver.lastName} onChange={set('driver.lastName')} />
               <F label="Имя" value={v.driver.firstName} onChange={set('driver.firstName')} />
               <F label="Отчество" value={v.driver.middleName} onChange={set('driver.middleName')} />
-              <F label="Серия ВУ" value={v.driver.licenseSeries} onChange={set('driver.licenseSeries')} mono />
-              <F label="Номер ВУ" value={v.driver.licenseNumber} onChange={set('driver.licenseNumber')} mono />
               <F label="Телефон водителя" value={v.driver.phone} onChange={set('driver.phone')} />
             </Section>
 

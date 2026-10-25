@@ -8,7 +8,7 @@ import { imageDataUriError, isPdfDataUri } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
-const DOC_TYPES = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA', 'ATTACHMENT']
+const DOC_TYPES = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA', 'ATTACHMENT']
 
 /** POST /api/requests/[id]/documents — перевозчик-победитель (или логист) загружает документ рейса.
  *  ATTACHMENT (Task 64) — вложения к заявке при создании: логист может приложить их и к заявке

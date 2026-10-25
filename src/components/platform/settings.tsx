@@ -20,8 +20,6 @@ import type { SettingsDTO } from '@/lib/types'
 /** человекочитаемые названия правил проверки */
 const RULE_LABELS: Record<string, string> = {
   passport: 'Паспорт РФ',
-  license: 'ВУ',
-  categories: 'Категория ВУ',
   plate: 'Госномер',
   vin: 'VIN',
   fio: 'ФИО и дата рождения',

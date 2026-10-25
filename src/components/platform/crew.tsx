@@ -108,12 +108,8 @@ function DriverCell({ d }: { d: DriverDTO }) {
   return (
     <div className="min-w-0 space-y-0.5 text-[11px] leading-snug text-slate-600" aria-label="Данные водителя из базы">
       <div className="break-words text-xs font-semibold text-slate-900">{d.fullName}</div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        <span className="whitespace-nowrap">ВУ: <span className="font-mono">{d.license}</span></span>
-        <ExpiryText info={expiryInfo(d.licenseTill)} />
-      </div>
       <div className="flex flex-wrap gap-x-3 gap-y-0.5">
-        <span className="whitespace-nowrap">Категории: {d.categories}</span>
+        {d.passport && d.passport !== '—' && <span className="whitespace-nowrap">Паспорт: <span className="font-mono">{d.passport}</span></span>}
         {d.birthDate && d.birthDate !== '—' && <span className="whitespace-nowrap">Дата рожд.: {d.birthDate}</span>}
         {d.phone && d.phone !== '—' && <span className="whitespace-nowrap">{d.phone}</span>}
       </div>

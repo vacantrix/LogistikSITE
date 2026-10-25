@@ -23,7 +23,7 @@ import {
 } from '@/lib/diadoc/client'
 import { etrnStageFinal, etrnStageLabel } from '@/lib/diadoc/stages'
 import {
-  ETRN_TYPE, OWNERSHIP_CODE, buildT1UserXml, mskDateTime, parseRuAddress, ruDate, splitFio, splitLicense,
+  ETRN_TYPE, OWNERSHIP_CODE, buildT1UserXml, mskDateTime, parseRuAddress, ruDate, splitFio,
   statedArrival, validateT1Input, type EtrnT1Input, type EtrnVehicle,
 } from '@/lib/diadoc/waybill'
 
@@ -56,7 +56,6 @@ export async function etrnDraft(docId: string): Promise<EtrnT1Input> {
     trip.trailerId ? db.trailer.findUnique({ where: { id: trip.trailerId } }) : null,
   ])
   const fio = splitFio(dash(driver?.fullName))
-  const lic = splitLicense(dash(driver?.license))
   const stated = statedArrival(trip.loadDate, trip.loadWindow)
   const vehicle = (v: { plate: string; sts: string; ownershipType: string } | null, type: string, model: string, vin: string): EtrnVehicle | null =>
     v ? {
@@ -81,7 +80,7 @@ export async function etrnDraft(docId: string): Promise<EtrnT1Input> {
       marks: '',
     },
     carrierPhone: dash(trip.winner?.phone),
-    driver: { ...fio, licenseSeries: lic.series, licenseNumber: lic.number, phone: dash(driver?.phone) },
+    driver: { ...fio, phone: dash(driver?.phone) },
     vehicle: vehicle(truck, 'Тягач седельный', dash(truck?.brand), dash(truck?.vin)) ?? {
       number: '', ownership: '1', type: 'Тягач седельный', model: '', maxWeight: '', capacity: '', sts: '', vin: '',
     },

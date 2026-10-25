@@ -20,12 +20,12 @@ import ZAI from 'z-ai-web-dev-sdk'
 import { ocrServiceOcr } from '@/lib/ocr-service'
 import { cloudOcrEnabled, demoSamplesEnabled } from '@/lib/settings'
 
-export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA'
+/** Виды документов рейса. Водительское удостоверение платформа не запрашивает и не проверяет */
+export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'STS' | 'REQUEST_DOC' | 'POA'
 
 export const DOC_TYPE_LABEL: Record<DocType, string> = {
   PASSPORT_PHOTO: 'Паспорт: страница с фото',
   PASSPORT_REG: 'Паспорт: страница регистрации',
-  LICENSE: 'Водительское удостоверение',
   STS: 'СТС (лицевая сторона)',
   REQUEST_DOC: 'Заявка на перевозку (скан)',
   POA: 'Доверенность',
@@ -33,7 +33,7 @@ export const DOC_TYPE_LABEL: Record<DocType, string> = {
 
 export interface FieldSpec {
   label: string
-  kind: 'fio' | 'date' | 'passport' | 'license' | 'plate' | 'vin' | 'code' | 'text'
+  kind: 'fio' | 'date' | 'passport' | 'plate' | 'vin' | 'code' | 'text'
   /** необязательное поле: если не найдено — не повод для ручной проверки (нет на этой стороне/версии документа) */
   optional?: boolean
 }
@@ -53,14 +53,6 @@ export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
     { label: 'Дата регистрации', kind: 'date' },
     { label: 'Код подразделения', kind: 'code' },
     { label: 'Адрес регистрации', kind: 'text' },
-  ],
-  LICENSE: [
-    { label: 'ФИО', kind: 'fio' },
-    { label: 'Дата рождения', kind: 'date' },
-    { label: 'Номер ВУ', kind: 'license' },
-    { label: 'Категории', kind: 'text' },
-    { label: 'Дата выдачи', kind: 'date' },
-    { label: 'Действует до', kind: 'date' },
   ],
   STS: [
     { label: 'Госномер', kind: 'plate' },
@@ -94,9 +86,8 @@ export const STS_BACK_FIELDS: FieldSpec[] = [
   { label: 'Временный учёт до', kind: 'date', optional: true },
 ]
 
-/** Поле «срок действия» у документов, где он есть (у ВУ и доверенности подписи разные) */
+/** Поле «срок действия» у документов, где он есть */
 const EXPIRY_LABEL: Partial<Record<DocType, string>> = {
-  LICENSE: 'Действует до',
   POA: 'Действительна до',
 }
 
@@ -104,8 +95,6 @@ export interface ExpectedData {
   fullName?: string
   birthDate?: string
   passport?: string
-  license?: string
-  licenseTill?: string
   plate?: string
   vin?: string
   sts?: string
@@ -113,10 +102,8 @@ export interface ExpectedData {
   truckBrand?: string
   requestNumber?: string
   cargo?: string
-  /** дата погрузки (ДД.ММ.ГГГГ): на неё ВУ и доверенность должны действовать */
+  /** дата погрузки (ДД.ММ.ГГГГ): на неё доверенность и временный учёт ТС должны действовать */
   loadDate?: string
-  /** в рейсе есть прицеп → у водителя нужна категория CE (берётся из заявки, а не из карточки водителя) */
-  needCE?: boolean
 }
 
 export interface VerifySettings {
@@ -138,8 +125,7 @@ export interface OcrOutput {
   detectedType?: DocType | 'UNKNOWN'
   /** сторона документа (у СТС — лицевая или оборот) */
   side?: 'front' | 'back'
-  /** независимые подтверждения, найденные самим движком: копии номера на полях паспорта,
-   *  латинская строка ВУ, повторное чтение категорий, срок ВУ = выдача + 10 лет */
+  /** независимые подтверждения, найденные самим движком: копии номера на полях паспорта и т. п. */
   confirmations?: Record<string, string[]>
 }
 
@@ -195,22 +181,12 @@ function fioEquals(a: string, b: string): boolean {
   return fioKey(a) === fioKey(b)
 }
 
-/** Госномер/серия ВУ: латиница и кириллица одного вида считаются одной буквой, пробелы не важны */
+/** Госномер: латиница и кириллица одного вида считаются одной буквой, пробелы не важны */
 function plateLetters(s: string): string {
   return s.toUpperCase().replace(/\s/g, '').split('').map((c) => CYR2LAT[c] ?? c).join('')
 }
 
 const looseText = (s: string): string => s.toUpperCase().replace(/Ё/g, 'Е').replace(/[^А-ЯA-Z0-9]/g, '')
-
-/** Категории ВУ как набор обозначений: «C1» не засчитывается как «C» (раньше искалось подстрокой) */
-const CATEGORY_SET = new Set(['A', 'A1', 'B', 'B1', 'BE', 'C', 'C1', 'CE', 'C1E', 'D', 'D1', 'DE', 'D1E', 'M', 'TM', 'TB'])
-export function parseCategories(s: string): Set<string> {
-  const tokens = s.toUpperCase()
-    .split('').map((c) => CYR2LAT[c] ?? c).join('')
-    .split(/[^A-Z0-9]+/)
-    .filter((t) => CATEGORY_SET.has(t))
-  return new Set(tokens)
-}
 
 // ---------------- имитация распознавания (только демо-образцы) ----------------
 
@@ -237,9 +213,6 @@ export function simulateOcr(seedSource: string, type: DocType, expected: Expecte
     'Код подразделения': '770-001',
     'Дата регистрации': '01.02.2020',
     'Адрес регистрации': 'г. Москва, ул. Примерная, д. 1',
-    'Номер ВУ': expected.license ?? '',
-    'Категории': expected.needCE === false ? 'B, C' : 'B, C, CE',
-    'Действует до': expected.licenseTill ?? '',
     'Госномер': expected.plate ?? '',
     'VIN': expected.vin ?? '',
     'Номер СТС': expected.sts ?? '',
@@ -276,7 +249,7 @@ function extractJson(text: string): Record<string, unknown> | null {
   }
 }
 
-const DOC_TYPE_VALUES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+const DOC_TYPE_VALUES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
 
 /**
  * Облачная VLM. Ожидаемые значения из заявки в модель НЕ передаются: раньше они уходили
@@ -290,7 +263,7 @@ export async function vlmOcr(dataUri: string, type: DocType): Promise<OcrOutput 
     `{"quality": <0..100, качество фото: резкость, свет, документ целиком в кадре>,`,
     `"fields": {${fieldList}: <прочитанное значение, "" если не найдено>},`,
     `"confidences": {<поле>: <0..1 уверенность в прочитанном>},`,
-    `"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | LICENSE | STS | REQUEST_DOC | POA | UNKNOWN>}`,
+    `"docType": <фактический вид документа на фото — один из PASSPORT_PHOTO | PASSPORT_REG | STS | REQUEST_DOC | POA | UNKNOWN>}`,
     `Заполняй ТОЛЬКО реально прочитанные с изображения значения, ничего не выдумывай и не дополняй.`,
   ].join('\n')
 
@@ -358,7 +331,6 @@ export async function recognize(dataUri: string, type: DocType, intake: boolean)
 
 const DATE_RE = /^\d{2}\.\d{2}\.\d{4}$/
 const PASSPORT_RE = /^\d{2}\s?\d{2}\s?\d{6}$/
-const LICENSE_RE = /^\d{2}\s?[\dА-ЯA-Z]{2}\s?\d{6}$/i
 const CODE_RE = /^\d{3}-\d{3}$/
 // госномер автомобиля (А123ВС777) или прицепа (АВ1234 23)
 const PLATE_RE = /^(?:[АВЕКМНОРСТУХABEKMHOPCTYX]\d{3}[АВЕКМНОРСТУХABEKMHOPCTYX]{2}|[АВЕКМНОРСТУХABEKMHOPCTYX]{2}\d{4})\s?\d{2,3}$/i
@@ -381,7 +353,6 @@ const startOfToday = (): Date => {
 function formatOk(kind: FieldSpec['kind'], value: string): boolean | null {
   switch (kind) {
     case 'passport': return PASSPORT_RE.test(value)
-    case 'license': return LICENSE_RE.test(value)
     case 'code': return CODE_RE.test(value)
     case 'plate': return PLATE_RE.test(value)
     case 'vin': return VIN_RE.test(value)
@@ -391,7 +362,7 @@ function formatOk(kind: FieldSpec['kind'], value: string): boolean | null {
 }
 
 /** Форматы, которые считаются независимым подтверждением (структурные номера; даты и ФИО — нет) */
-const FORMAT_CONFIRMS = new Set<FieldSpec['kind']>(['passport', 'license', 'code', 'plate', 'vin'])
+const FORMAT_CONFIRMS = new Set<FieldSpec['kind']>(['passport', 'code', 'plate', 'vin'])
 
 export function applyRules(
   ocr: OcrOutput,
@@ -470,9 +441,6 @@ export function applyRules(
     if (f.label === 'Серия и номер' && expected.passport) {
       matched(value.replace(/\s/g, '') === expected.passport.replace(/\s/g, ''), `Серия и номер паспорта («${value}») не совпадают с заявкой («${expected.passport}»)`)
     }
-    if (f.kind === 'license' && expected.license) {
-      matched(plateLetters(value) === plateLetters(expected.license), `Номер ВУ («${value}») не совпадает с заявкой («${expected.license}»)`)
-    }
     if (f.kind === 'plate' && expected.plate) {
       matched(plateLetters(value) === plateLetters(expected.plate), `Госномер («${value}») не совпадает с заявкой («${expected.plate}»)`)
     }
@@ -504,24 +472,9 @@ export function applyRules(
     if (EXPIRY_LABEL[type] === f.label) {
       const till = parseDateRu(value)
       if (till && till < checkOn) {
-        const on = checkOn.toLocaleDateString('ru-RU')
-        mismatch = type === 'POA'
-          ? `Доверенность действует до ${value} — на ${on} уже недействительна`
-          : `ВУ действует до ${value} — на ${on} уже недействительно`
+        mismatch = `Доверенность действует до ${value} — на ${checkOn.toLocaleDateString('ru-RU')} уже недействительна`
       }
     }
-    // категории: из заявки (есть прицеп → CE), обозначения целиком; без нужной — не «передать дальше»
-    if (f.label === 'Категории' && expected.needCE !== undefined) {
-      const has = parseCategories(value)
-      const need = ['C', ...(expected.needCE ? ['CE'] : [])]
-      const missing = need.filter((c) => !has.has(c))
-      if (missing.length) {
-        issues.push(`Категории: прочитано «${value}» — для рейса нужны ${need.join(' и ')}, нет ${missing.join(', ')}; решает человек`)
-        lowCount++
-        continue
-      }
-    }
-
     if (mismatch) {
       if (conf >= settings.confReject) {
         // расхождение при достаточной уверенности → отказ с причиной
@@ -588,7 +541,7 @@ export async function verifyDocument(
 }
 
 export function expectedFor(
-  driver: { fullName: string; birthDate: string; passport: string; license: string; licenseTill: string } | null,
+  driver: { fullName: string; birthDate: string; passport: string } | null,
   truck: { brand: string; plate: string; vin: string; sts: string; owner: string } | null,
   request?: { number: string; cargo: string; loadDate?: string; trailerId?: string | null } | null,
 ): ExpectedData {
@@ -596,8 +549,6 @@ export function expectedFor(
     fullName: driver?.fullName,
     birthDate: driver?.birthDate,
     passport: driver?.passport,
-    license: driver?.license,
-    licenseTill: driver?.licenseTill,
     plate: truck?.plate,
     vin: truck?.vin,
     sts: truck?.sts,
@@ -606,7 +557,6 @@ export function expectedFor(
     requestNumber: request?.number,
     cargo: request?.cargo,
     loadDate: request?.loadDate,
-    needCE: request ? Boolean(request.trailerId) : undefined,
   }
 }
 
@@ -636,7 +586,6 @@ function decodeSvgLines(dataUri: string): string[] | null {
 const TITLE_HINTS: Record<DocType, RegExp> = {
   PASSPORT_PHOTO: /ПАСПОРТ/i,
   PASSPORT_REG: /РЕГИСТРАЦИЯ/i,
-  LICENSE: /ВОДИТЕЛЬСКОЕ/i,
   STS: /СТС/i,
   REQUEST_DOC: /ЗАЯВКА/i,
   POA: /ДОВЕРЕННОСТЬ/i,
@@ -687,13 +636,6 @@ export function svgOcr(dataUri: string, type: DocType): OcrOutput | null {
     put('Код подразделения', head.find((l) => CODE_RE.test(l)) ?? '')
     const addr = body.slice(head.some((l) => CODE_RE.test(l)) || dates.some((d) => body[0]?.startsWith(d)) ? 1 : 0).join(', ')
     put('Адрес регистрации', addr)
-  } else if (type === 'LICENSE') {
-    put('ФИО', body.find((l) => FIO_RE.test(l)) ?? '')
-    put('Дата рождения', dates[0] ?? '')
-    put('Дата выдачи', dates[1] ?? '')
-    put('Действует до', dates[2] ?? dates[1] ?? '')
-    put('Номер ВУ', body.find((l) => LICENSE_RE.test(l)) ?? '')
-    put('Категории', body.find((l) => !FIO_RE.test(l) && !DATE_RE.test(l) && !LICENSE_RE.test(l) && /^[A-Za-zА-Яа-я][A-Za-zА-Яа-я,\s]{0,14}$/.test(l)) ?? '')
   } else if (type === 'STS') {
     put('Госномер', body.find((l) => PLATE_RE.test(l)) ?? '')
     put('VIN', body.find((l) => VIN_RE.test(l)) ?? '')
@@ -728,7 +670,6 @@ export function detectSvgType(dataUri: string): DocType | null {
   if (TITLE_HINTS.POA.test(title)) return 'POA'
   if (TITLE_HINTS.PASSPORT_REG.test(title)) return 'PASSPORT_REG'
   if (TITLE_HINTS.PASSPORT_PHOTO.test(title)) return 'PASSPORT_PHOTO'
-  if (TITLE_HINTS.LICENSE.test(title)) return 'LICENSE'
   if (TITLE_HINTS.STS.test(title)) return 'STS'
   return null
 }
@@ -798,9 +739,6 @@ export interface IntakeDriverDraft {
   fullName: string
   birthDate: string
   passport: string
-  license: string
-  licenseTill: string
-  categories: string
   birthPlace: string
   address: string
   confidence: Record<string, number>
@@ -844,34 +782,19 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
   const pPass = pick('PASSPORT_PHOTO', 'Серия и номер')
   const pPlace = pick('PASSPORT_PHOTO', 'Место рождения')
   const rAddr = pick('PASSPORT_REG', 'Адрес регистрации')
-  const lFio = pick('LICENSE', 'ФИО')
-  const lBirth = pick('LICENSE', 'Дата рождения')
-  const lNum = pick('LICENSE', 'Номер ВУ')
-  const lTill = pick('LICENSE', 'Действует до')
-  const lCats = pick('LICENSE', 'Категории')
 
-  const fullName =
-    pFam.v || lFio.v
-      ? best({ v: [pFam.v, pIm.v, pOt.v].filter(Boolean).join(' '), c: Math.min(...[pFam, pIm, pOt].filter((x) => x.v).map((x) => x.c)) }, lFio).v
-      : ''
-  const birth = best(pBirth, lBirth).v
+  const fullName = [pFam.v, pIm.v, pOt.v].filter(Boolean).join(' ')
 
   const driver: IntakeDriverDraft = {
     fullName,
-    birthDate: birth,
+    birthDate: pBirth.v,
     passport: pPass.v,
-    license: lNum.v,
-    licenseTill: lTill.v,
-    categories: lCats.v,
     birthPlace: pPlace.v,
     address: rAddr.v,
     confidence: {
-      fullName: best({ v: fullName, c: Math.min(pFam.c, pIm.c) || pFam.c }, lFio).c,
-      birthDate: best(pBirth, lBirth).c,
+      fullName: fullName ? Math.min(...[pFam, pIm, pOt].filter((x) => x.v).map((x) => x.c)) : 0,
+      birthDate: pBirth.c,
       passport: pPass.c,
-      license: lNum.c,
-      licenseTill: lTill.c,
-      categories: lCats.c,
       birthPlace: pPlace.c,
       address: rAddr.c,
     },
@@ -896,24 +819,7 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
     }
   }
 
+  // перекрёстные сверки были между паспортом и ВУ — ВУ больше не запрашивается
   const crossChecks: IntakeCrossCheck[] = []
-  if (pFam.v && lFio.v) {
-    const ok = fioEquals([pFam.v, pIm.v, pOt.v].filter(Boolean).join(' '), lFio.v)
-    crossChecks.push({ label: 'ФИО: паспорт ↔ ВУ', ok, detail: ok ? 'совпадают' : `«${[pFam.v, pIm.v, pOt.v].filter(Boolean).join(' ')}» ↔ «${lFio.v}»` })
-  }
-  if (pBirth.v && lBirth.v) {
-    const ok = pBirth.v === lBirth.v
-    crossChecks.push({ label: 'Дата рождения: паспорт ↔ ВУ', ok, detail: ok ? 'совпадают' : `«${pBirth.v}» ↔ «${lBirth.v}»` })
-  }
-  if (lCats.v) {
-    const has = parseCategories(lCats.v)
-    const need = ['C', 'CE'].filter((c) => !has.has(c))
-    crossChecks.push({ label: 'Категории для тягача (C, CE)', ok: need.length === 0, detail: need.length ? `прочитано «${lCats.v}», нет ${need.join(', ')}` : `прочитано «${lCats.v}»` })
-  }
-  if (lTill.v) {
-    const till = parseDateRu(lTill.v)
-    const ok = till ? till >= new Date() : false
-    crossChecks.push({ label: 'Срок действия ВУ', ok, detail: ok ? `действительно до ${lTill.v}` : till ? `истёк ${lTill.v}` : `не распознана дата` })
-  }
   return { driver, truck, crossChecks }
 }

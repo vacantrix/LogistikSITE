@@ -73,9 +73,6 @@ const FORM_FIELDS: Record<Kind, FieldDef[]> = {
     { key: 'fullName', label: 'ФИО', placeholder: 'Смирнов Олег Викторович' },
     { key: 'birthDate', label: 'Дата рождения', placeholder: '11.03.1993' },
     { key: 'passport', label: 'Паспорт (серия и номер)', placeholder: '52 07 123456' },
-    { key: 'license', label: 'Номер ВУ', placeholder: '52 07 123456' },
-    { key: 'licenseTill', label: 'ВУ действует до', placeholder: 'ДД.ММ.ГГГГ' },
-    { key: 'categories', label: 'Категории', placeholder: 'C, CE' },
   ],
   truck: [
     { key: 'brand', label: 'Марка', placeholder: 'MAN TGX' },
@@ -102,7 +99,7 @@ const KIND_TITLES: Record<Kind, string> = {
 
 /** Плитки разделов на странице «Справочники» */
 const SECTIONS: { key: SectionKind; kind: Kind; icon: typeof User; hint: string }[] = [
-  { key: 'drivers', kind: 'driver', icon: User, hint: 'ФИО, паспорта, ВУ' },
+  { key: 'drivers', kind: 'driver', icon: User, hint: 'ФИО и паспорта' },
   { key: 'trucks', kind: 'truck', icon: Truck, hint: 'Марки, госномера, СТС, техосмотр' },
   { key: 'trailers', kind: 'trailer', icon: Wrench, hint: 'Типы, госномера, СТС, собственник' },
 ]
@@ -144,14 +141,13 @@ function OwnershipCell({ type, owner, contract, hideOwner = false }: { type: Own
 /** Ожидаемый скан записи: подпись + ключ даты срока (для статуса без загруженного файла) */
 interface PhotoSlot {
   label: string
-  expiryKey?: 'licenseTill' | 'techTill'
+  expiryKey?: 'techTill'
 }
 
 const PHOTO_SLOTS: Record<Kind, PhotoSlot[]> = {
   driver: [
     { label: 'Паспорт: стр. с фото' },
     { label: 'Паспорт: регистрация' },
-    { label: 'Водительское удостоверение', expiryKey: 'licenseTill' },
   ],
   truck: [
     { label: 'СТС тягача' },
@@ -293,7 +289,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   const [dirOwnership, setDirOwnership] = useState<'all' | OwnershipType>('all')
   // ——— модальное окно «Прикрепленные документы» (Task 54 + статусы Task 62) ———
   const [photoView, setPhotoView] = useState<{
-    kind: Kind; id: string; title: string; expiry?: { licenseTill?: string; techTill?: string }
+    kind: Kind; id: string; title: string; expiry?: { techTill?: string }
   } | null>(null)
   const [photoList, setPhotoList] = useState<DirectoryPhotoDTO[] | null>(null)
   const [photoLoading, setPhotoLoading] = useState(false)
@@ -400,7 +396,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   const driversFlat = useMemo(
     () => allDrivers
       .filter(({ d, carrierId }) => dirByCarrier(carrierId) && dirByOwnership(d.ownershipType)
-        && dirByQuery(d.fullName, d.passport, d.license, d.phone, d.ownerName) && dirByExpiry([d.licenseTill])),
+        && dirByQuery(d.fullName, d.passport, d.phone, d.ownerName) && dirByExpiry([])),
     [allDrivers, dirByQuery, dirByExpiry, dirByCarrier, dirByOwnership],
   )
   const driversTotal = allDrivers.length
@@ -434,10 +430,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
     const items: ExpiryItem[] = []
     const bad = (i: ReturnType<typeof expiryInfo>) => i.state === 'expired' || i.state === 'warn'
     for (const c of visibleCarriers) {
-      for (const d of c.drivers) {
-        const v = expiryInfo(d.licenseTill)
-        if (bad(v)) items.push({ key: `${d.id}-lic`, tab: 'drivers', icon: User, title: d.fullName, docLabel: 'Водительское удостоверение', info: v, carrierName: c.name })
-      }
       for (const t of c.trucks) {
         const v = expiryInfo(t.techTill)
         if (bad(v)) items.push({ key: t.id, tab: 'trucks', icon: Truck, title: `${t.brand} · ${t.plate}`, docLabel: 'Техосмотр', info: v, carrierName: c.name })
@@ -793,9 +785,6 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             {isLogist && <TableHead>Перевозчик</TableHead>}
                             <TableHead>Дата рождения</TableHead>
                             <TableHead>Паспорт</TableHead>
-                            <TableHead>ВУ (номер)</TableHead>
-                            <TableHead>ВУ действует до</TableHead>
-                            <TableHead>Категории</TableHead>
                             <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
@@ -805,16 +794,14 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                         <TableBody>
                           {driversFlat.map(({ d, carrierName }) => (
                             <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('driver', d.id, {
-                              fullName: d.fullName, birthDate: d.birthDate, passport: d.passport, license: d.license,
-                              licenseTill: d.licenseTill === '—' ? '' : d.licenseTill,
-                              categories: d.categories,
+                              fullName: d.fullName, birthDate: d.birthDate, passport: d.passport,
                               ownershipType: d.ownershipType,
                               ownerName: d.ownerName === '—' ? '' : d.ownerName,
                               leaseContract: d.leaseContract === '—' ? '' : d.leaseContract,
-                            })} onPhotos={() => setPhotoView({ kind: 'driver', id: d.id, title: d.fullName, expiry: { licenseTill: d.licenseTill } })} />
+                            })} onPhotos={() => setPhotoView({ kind: 'driver', id: d.id, title: d.fullName })} />
                           ))}
                           {driversFlat.length === 0 && (
-                            <TableRow><TableCell colSpan={isLogist ? 10 : 11} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={7} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                           )}
                         </TableBody>
                       </>
@@ -1102,23 +1089,12 @@ function PhotosButton({ title, onOpen }: { title: string; onOpen: () => void }) 
 }
 
 function DriverRow({ d, carrierName, showCarrier, onEdit, onPhotos }: { d: DriverDTO; carrierName: string; showCarrier: boolean; onEdit: () => void; onPhotos: () => void }) {
-  const lic = expiryInfo(d.licenseTill)
-  const tint = rowTint([lic.state] as ExpiryState[])
   return (
-    <TableRow className={tint}>
+    <TableRow>
       <TableCell className="font-medium text-slate-800">{d.fullName}</TableCell>
       {showCarrier && <TableCell className="whitespace-nowrap text-slate-600">{carrierName}</TableCell>}
       <TableCell className="whitespace-nowrap text-slate-600">{d.birthDate}</TableCell>
       <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{d.passport}</TableCell>
-      <TableCell className="whitespace-nowrap font-mono text-xs text-slate-600">{d.license}</TableCell>
-      <TableCell><ExpiryBadge date={d.licenseTill} /></TableCell>
-      <TableCell>
-        <div className="flex flex-wrap gap-1">
-          {d.categories.split(',').map((cat) => cat.trim()).filter(Boolean).map((cat) => (
-            <Badge key={cat} variant="outline" className="border-slate-300 bg-slate-50 text-slate-700">{cat}</Badge>
-          ))}
-        </div>
-      </TableCell>
       <OwnershipCell type={d.ownershipType} owner={d.ownerName} contract={d.leaseContract} />
       <TableCell className="whitespace-nowrap text-xs text-slate-400">{fmtCreated(d.createdAt)}</TableCell>
       <TableCell>

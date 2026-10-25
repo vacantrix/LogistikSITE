@@ -90,9 +90,6 @@ export async function GET(req: NextRequest) {
         return {
           driver: {
             fullName: d.fullName,
-            license: d.license,
-            licenseTill: d.licenseTill,
-            categories: d.categories,
             phone: d.phone,
           },
           truck: t

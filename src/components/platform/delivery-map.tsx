@@ -87,7 +87,7 @@ function popupHtml(p: MapPoint, withBid: boolean): string {
 }
 
 /** Источник данных карты: значок «©», полный текст — по наведению */
-const MapCredit = L.Control.extend({
+export const MapCredit = L.Control.extend({
   onAdd() {
     const a = L.DomUtil.create('a') as HTMLAnchorElement
     a.href = 'https://www.openstreetmap.org/copyright'

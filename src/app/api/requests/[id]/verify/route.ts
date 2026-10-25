@@ -14,8 +14,8 @@ export const dynamic = 'force-dynamic'
 // документы распознаются по одному (5–40 с каждый): комплект из 6–10 файлов — несколько минут
 export const maxDuration = 600
 
-/** Комплект рейса: паспорт, регистрация, ВУ, СТС, заявка, доверенность */
-const ALL_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+/** Комплект рейса: паспорт, регистрация, СТС, заявка, доверенность */
+const ALL_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
 
 /**
  * POST /api/requests/[id]/verify — проверка загруженных документов.

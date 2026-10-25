@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 // распознавание одного документа — до ~90 с плюс ожидание в очереди OCR
 export const maxDuration = 300
 
-const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'LICENSE', 'STS', 'REQUEST_DOC', 'POA']
+const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
 
 /**
  * POST /api/documents/check — мгновенная проверка одного документа при загрузке.

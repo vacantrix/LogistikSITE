@@ -88,7 +88,6 @@ export interface PortLine {
   driver: {
     fullName: string; birthDate: string; birthPlace: string; citizenship: string; phone: string; position: string
     passport: string; passportIssuedBy: string; passportIssuedDate: string; address: string
-    license: string; licenseTill: string; categories: string
   }
   truck?: { brand: string; plate: string; sts: string; color: string; owner: string }
   trailer?: { type: string; plate: string; sts: string; color: string; owner: string }
@@ -123,8 +122,6 @@ export function parsePortRows(rows: unknown[][]): PortLine[] {
         passportIssuedBy: cell(at(row, idx.issuedBy)),
         passportIssuedDate: excelDateToRu(at(row, idx.issuedDate)),
         address: cell(at(row, idx.address)),
-        // ВУ в форме порта нет — агент дозаполнит по фото ВУ
-        license: '', licenseTill: '', categories: '',
       },
     }
     const plate = cell(at(row, idx.plate)).replace(/\s/g, '').toUpperCase()

@@ -47,11 +47,11 @@ async function create() {
   if (!carrier.phone) await db.carrier.update({ where: { id: carrier.id }, data: { phone: '+78610000001' } })
 
   // вымышленный экипаж — создаётся один раз и переиспользуется
-  const driver = await db.driver.findFirst({ where: { carrierId: carrier.id, license: '99 00 000001' } })
+  const driver = await db.driver.findFirst({ where: { carrierId: carrier.id, passport: '03 00 000001' } })
     ?? await db.driver.create({
       data: {
         carrierId: carrier.id, fullName: 'Петров Алексей Сергеевич', birthDate: '12.05.1985', passport: '03 00 000001',
-        license: '99 00 000001', licenseTill: '15.06.2031', categories: 'B, C, CE', phone: '+79000000001',
+        phone: '+79000000001',
         citizenship: 'РФ', position: 'Водитель-экспедитор', ownershipType: 'OWNED',
       },
     })
@@ -110,7 +110,7 @@ async function create() {
       places: '10', grossWeightKg: '20000', marks: 'Бирки завода на каждой пачке',
     },
     carrierPhone: '+78610000001',
-    driver: { lastName: 'Петров', firstName: 'Алексей', middleName: 'Сергеевич', licenseSeries: '9900', licenseNumber: '000001', phone: '+79000000001' },
+    driver: { lastName: 'Петров', firstName: 'Алексей', middleName: 'Сергеевич', phone: '+79000000001' },
     vehicle: { number: 'А001АА23', ownership: '4', type: 'Тягач седельный', model: 'SITRAK C7H', maxWeight: '20', capacity: '82', sts: '9900000001', vin: 'LZZ7CCWD0PC000001' },
     trailer: { number: 'АА000123', ownership: '4', type: 'Полуприцеп тентованный', model: 'KRONE SD', maxWeight: '25', capacity: '90', sts: '9900000002', vin: '' },
     loading: {

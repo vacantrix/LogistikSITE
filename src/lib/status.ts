@@ -88,7 +88,6 @@ export const DOC_STATUS_META: Record<DocStatus, { label: string; badge: string }
 export const DOC_TYPE_LABEL: Record<string, string> = {
   PASSPORT_PHOTO: 'Паспорт: стр. с фото',
   PASSPORT_REG: 'Паспорт: регистрация',
-  LICENSE: 'Водительское удостоверение',
   STS: 'СТС, лицевая сторона',
   REQUEST_DOC: 'Заявка на перевозку (скан)',
   POA: 'Доверенность',

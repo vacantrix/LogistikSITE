@@ -41,11 +41,10 @@ const newLineId = () => {
   return `line-${Date.now()}-${lineSeq}`
 }
 
-// ——— единый Excel-шаблон: 15 водитель + 5 «Тягач: …» + 5 «Прицеп: …» ———
+// ——— единый Excel-шаблон: 10 водитель + 5 «Тягач: …» + 5 «Прицеп: …» ———
 const DRIVER_COLS = [
   'ФИО', 'Дата рождения', 'Место рождения', 'Гражданство', 'Телефон', 'Адрес регистрации',
   'Паспорт', 'Кем выдан', 'Дата выдачи паспорта', 'Должность',
-  'ВУ номер', 'ВУ действует до', 'Категории',
 ]
 const TRUCK_COLS = ['Тягач: марка', 'Тягач: госномер', 'Тягач: СТС', 'Тягач: цвет', 'Тягач: собственник']
 const TRAILER_COLS = ['Прицеп: тип', 'Прицеп: госномер', 'Прицеп: СТС', 'Прицеп: цвет', 'Прицеп: собственник']
@@ -53,8 +52,8 @@ const TRAILER_COLS = ['Прицеп: тип', 'Прицеп: госномер', 
 const HEADER_ROW = [...DRIVER_COLS, ...TRUCK_COLS, ...TRAILER_COLS]
 
 const SAMPLE_ROWS = [
-  ['Дорошенко Игорь Валерьевич', '03.08.1987', 'г. Краснодар', 'РФ', '+7 903 415-22-08', 'г. Краснодар, ул. Дзержинского, д. 100', '52 07 223344', 'ОВМ УМВД России по г. Краснодару', '12.03.2010', 'Водитель-экспедитор', '52 12 909090', '15.08.2032', 'C, CE', 'MAN TGX 18.470', 'В344ТН152', '99 15 121212', 'белый', 'ООО «Перевозчик Б»', TRAILER_TYPES[0], 'АТ5546152', '52 19 777777', 'серый', 'ООО «Перевозчик Б»'],
-  ['Захарова Ольга Ивановна', '17.11.1990', 'г. Абинск', 'РФ', '+7 918 220-11-45', 'г. Абинск, ул. Мира, д. 12', '52 11 556677', 'ОВМ УМВД России по Краснодарскому краю', '05.09.2012', 'Водитель', '52 16 343434', '01.10.2033', 'C', '', '', '', '', '', '', '', '', '', ''],
+  ['Дорошенко Игорь Валерьевич', '03.08.1987', 'г. Краснодар', 'РФ', '+7 903 415-22-08', 'г. Краснодар, ул. Дзержинского, д. 100', '52 07 223344', 'ОВМ УМВД России по г. Краснодару', '12.03.2010', 'Водитель-экспедитор', 'MAN TGX 18.470', 'В344ТН152', '99 15 121212', 'белый', 'ООО «Перевозчик Б»', TRAILER_TYPES[0], 'АТ5546152', '52 19 777777', 'серый', 'ООО «Перевозчик Б»'],
+  ['Захарова Ольга Ивановна', '17.11.1990', 'г. Абинск', 'РФ', '+7 918 220-11-45', 'г. Абинск, ул. Мира, д. 12', '52 11 556677', 'ОВМ УМВД России по Краснодарскому краю', '05.09.2012', 'Водитель', '', '', '', '', '', '', '', '', '', ''],
 ]
 
 const cellStr = (v: unknown): string => String(v ?? '').replace(/\s+/g, ' ').trim()
@@ -85,8 +84,7 @@ export function parseLineRows(rows: unknown[][]): DriverLineInitial[] {
     phone: findCol('Телефон'), address: findCol('Адрес регистрации'), birthPlace: findCol('Место рождения'),
     passport: findCol('Паспорт'),
     passportIssuedBy: findCol('Кем выдан'), passportIssuedDate: findCol('Дата выдачи паспорта'),
-    position: findCol('Должность'), license: findCol('ВУ номер'), licenseTill: findCol('ВУ действует до'),
-    categories: findCol('Категории'),
+    position: findCol('Должность'),
     tBrand: findCol('Тягач: марка'), tPlate: findCol('Тягач: госномер'), tSts: findCol('Тягач: СТС'),
     tColor: findCol('Тягач: цвет'), tOwner: findCol('Тягач: собственник'),
     trType: findCol('Прицеп: тип'), trPlate: findCol('Прицеп: госномер'), trSts: findCol('Прицеп: СТС'),
@@ -97,15 +95,14 @@ export function parseLineRows(rows: unknown[][]): DriverLineInitial[] {
   for (const row of rows.slice(1)) {
     if (row.every((c) => cellStr(c) === '')) continue // пустые строки пропускаются
     const fullName = at(row, idx.fullName)
-    const license = at(row, idx.license)
-    if (!fullName && !license) continue
+    if (!fullName) continue
     const line: DriverLineInitial = {
       driver: {
-        fullName, license,
+        fullName,
         birthDate: at(row, idx.birthDate), citizenship: at(row, idx.citizenship), phone: at(row, idx.phone),
         birthPlace: at(row, idx.birthPlace), address: at(row, idx.address), passport: at(row, idx.passport),
         passportIssuedBy: at(row, idx.passportIssuedBy), passportIssuedDate: at(row, idx.passportIssuedDate),
-        position: at(row, idx.position), licenseTill: at(row, idx.licenseTill), categories: at(row, idx.categories),
+        position: at(row, idx.position),
       },
     }
     const tPlate = at(row, idx.tPlate)
@@ -215,7 +212,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
       const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' })
       const parsed = parseLineRows(rows)
       if (parsed.length === 0) {
-        toast({ title: 'В файле нет строк с ФИО или ВУ', description: 'Проверьте шаблон — первая строка должна быть заголовками', variant: 'destructive' })
+        toast({ title: 'В файле нет строк с ФИО', description: 'Проверьте шаблон — первая строка должна быть заголовками', variant: 'destructive' })
         return
       }
       setLines((cur) => {

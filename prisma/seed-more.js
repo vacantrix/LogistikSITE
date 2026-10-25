@@ -48,11 +48,12 @@ async function main() {
     ['Г', 'Калинин Егор Станиславович', '07.08.1995', '52 12 110467', '52 12 110467', d(13, 8, 2028), 'C', '+7 (909) 715-62-38', 'г. Краснодар', 'РФ', 'ОУФМС по Краснодарскому краю', '19.09.2018', 'Водитель'],
   ]
   const createdDrivers = {}
-  for (const [key, fullName, birthDate, passport, license, licenseTill, categories, phone, birthPlace, citizenship, passportIssuedBy, passportIssuedDate, position] of driversSeed) {
+  // номер ВУ, срок и категории в строках остались от прежней версии — платформа их не хранит
+  for (const [key, fullName, birthDate, passport, , , , phone, birthPlace, citizenship, passportIssuedBy, passportIssuedDate, position] of driversSeed) {
     const existing = await db.driver.findFirst({ where: { carrierId: C[key].id, fullName } })
     if (existing) { (createdDrivers[key] ||= []).push(existing); continue }
     const order = (createdDrivers[key] || []).length
-    const created = await db.driver.create({ data: { carrierId: C[key].id, fullName, birthDate, passport, license, licenseTill, categories, phone, birthPlace, citizenship, passportIssuedBy, passportIssuedDate, position, createdAt: dt(6 + order) } })
+    const created = await db.driver.create({ data: { carrierId: C[key].id, fullName, birthDate, passport, phone, birthPlace, citizenship, passportIssuedBy, passportIssuedDate, position, createdAt: dt(6 + order) } })
     ;(createdDrivers[key] ||= []).push(created)
   }
 
@@ -183,28 +184,23 @@ async function main() {
       if (status === 'DOCS_REVIEW' && number === 'Z-1057') {
         await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 96, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.99, 'Имя': 0.996, 'Отчество': 0.984, 'Дата рождения': 0.999, 'Серия и номер': 0.998 }, ['Все оценки от 0,95 — поля приняты по уверенности; ФИО и дата совпали с заявкой'], null)
         await put('PASSPORT_REG', 'passport_reg.jpg', 'REUPLOAD', 52, { 'Дата регистрации': '10.06.2019', 'Код подразделения': '770-002', 'Адрес регистрации': 'г. МОСКВА, ул. ОБРАЗЦОВАЯ д. 14' }, { 'Дата регистрации': 0.93, 'Код подразделения': 0.91, 'Адрес регистрации': 0.45 }, ['Штамп регистрации смазан — адрес прочитан с ошибкой (0,45), требуется повторная загрузка'], null)
-        await put('LICENSE', 'license.jpg', 'PENDING', null, null, null, null, 'Ожидает нейропроверки')
         await put('STS', 'sts.jpg', 'PENDING', null, null, null, null, 'Ожидает нейропроверки')
       } else if (status === 'DOCS_REVIEW' && number === 'Z-1058') {
         await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 94, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.98, 'Имя': 0.99, 'Отчество': 0.97, 'Дата рождения': 0.995, 'Серия и номер': 0.99 }, [], null)
-        await put('LICENSE', 'license.jpg', 'REJECTED', 88, { 'ФИО': drv.fullName, 'Дата рождения': drv.birthDate, 'Номер ВУ': '52 11 209999', 'Действует до': drv.licenseTill }, { 'ФИО': 0.99, 'Дата рождения': 0.99, 'Номер ВУ': 0.993, 'Действует до': 0.98 }, ['Номер ВУ на фото не совпал с карточкой водителя (52 11 209999 ≠ ' + drv.license + ')'], 'Нейросеть: документ отклонён — сверка номера ВУ не прошла')
         await put('STS', 'sts.jpg', 'PASSED', 97, { 'Госномер': trk.plate, 'VIN': trk.vin, 'Номер СТС': trk.sts }, { 'Госномер': 0.999, 'VIN': 0.998, 'Номер СТС': 0.996 }, [], null)
         await put('POA', 'poa.jpg', 'MANUAL', 84, { 'Номер доверенности': 'Д-44/26', 'Дата выдачи': d(1, 10), 'Действительна до': d(31, 12), 'Кем выдана (перевозчик)': C[crewKey].name, 'Представитель (ФИО)': drv.fullName }, { 'Номер доверенности': 0.97, 'Дата выдачи': 0.98, 'Действительна до': 0.98, 'Кем выдана (перевозчик)': 0.6, 'Представитель (ФИО)': 0.99 }, ['Наименование перевозчика прочитано частично (0,6) — смотрит оператор'], null)
       } else if (status === 'AT_LOGIST' && number === 'Z-1059') {
         await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 97, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.995, 'Имя': 0.997, 'Отчество': 0.99, 'Дата рождения': 0.999, 'Серия и номер': 0.999 }, ['Все поля распознаны с оценкой от 0,95 — автодопуск'], null)
         await put('PASSPORT_REG', 'passport_reg.jpg', 'PASSED', 93, { 'Дата регистрации': '17.05.2021', 'Код подразделения': '612-044', 'Адрес регистрации': 'г. БАТАЙСК, ул. ЛЕНИНА д. 88' }, { 'Дата регистрации': 0.96, 'Код подразделения': 0.96, 'Адрес регистрации': 0.95 }, [], null)
-        await put('LICENSE', 'license.jpg', 'PASSED', 98, { 'ФИО': drv.fullName, 'Дата рождения': drv.birthDate, 'Номер ВУ': drv.license, 'Действует до': drv.licenseTill }, { 'ФИО': 0.999, 'Дата рождения': 0.999, 'Номер ВУ': 0.998, 'Действует до': 0.999 }, [], null)
         await put('STS', 'sts.jpg', 'PASSED', 98, { 'Госномер': trk.plate, 'VIN': trk.vin, 'Номер СТС': trk.sts }, { 'Госномер': 0.999, 'VIN': 0.998, 'Номер СТС': 0.997 }, [], null)
         await put('REQUEST_DOC', 'request_doc.pdf', 'PASSED', 96, { 'Номер заявки': number, 'Дата заявки': d(createdDay), 'Груз': 'Перевозка металлолома', 'Ставка': `${fmt(bestRate)} ₽/т` }, { 'Номер заявки': 0.99, 'Дата заявки': 0.98, 'Груз': 0.97, 'Ставка': 0.98 }, [], null)
         await put('POA', 'poa.jpg', 'PASSED', 95, { 'Номер доверенности': 'Д-51/26', 'Дата выдачи': d(5, 10), 'Действительна до': d(31, 12), 'Кем выдана (перевозчик)': C[crewKey].name, 'Представитель (ФИО)': drv.fullName }, { 'Номер доверенности': 0.98, 'Дата выдачи': 0.98, 'Действительна до': 0.99, 'Кем выдана (перевозчик)': 0.95, 'Представитель (ФИО)': 0.99 }, [], null)
       } else if (status === 'AT_LOGIST' && number === 'Z-1060') {
         await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 95, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.99, 'Имя': 0.995, 'Отчество': 0.99, 'Дата рождения': 0.998, 'Серия и номер': 0.997 }, [], null)
-        await put('LICENSE', 'license.jpg', 'PASSED', 96, { 'ФИО': drv.fullName, 'Дата рождения': drv.birthDate, 'Номер ВУ': drv.license, 'Действует до': drv.licenseTill }, { 'ФИО': 0.996, 'Дата рождения': 0.998, 'Номер ВУ': 0.995, 'Действует до': 0.997 }, [], null)
         await put('STS', 'sts.jpg', 'REUPLOAD', 58, { 'Госномер': trk.plate, 'VIN': trk.vin.slice(0, 8), 'Номер СТС': trk.sts }, { 'Госномер': 0.94, 'VIN': 0.52, 'Номер СТС': 0.9 }, ['Фото СТС с бликом — VIN прочитан не полностью (0,52), загрузите более чёткий снимок'], null)
         await put('POA', 'poa.jpg', 'PASSED', 92, { 'Номер доверенности': 'Д-63/26', 'Дата выдачи': d(6, 10), 'Действительна до': d(31, 12), 'Кем выдана (перевозчик)': C[crewKey].name, 'Представитель (ФИО)': drv.fullName }, { 'Номер доверенности': 0.96, 'Дата выдачи': 0.97, 'Действительна до': 0.97, 'Кем выдана (перевозчик)': 0.93, 'Представитель (ФИО)': 0.98 }, [], null)
       } else if (status === 'CONFIRMED' || status === 'CLOSED') {
         await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 97, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.995, 'Имя': 0.996, 'Отчество': 0.99, 'Дата рождения': 0.999, 'Серия и номер': 0.998 }, [], null)
-        await put('LICENSE', 'license.jpg', 'PASSED', 97, { 'ФИО': drv.fullName, 'Дата рождения': drv.birthDate, 'Номер ВУ': drv.license, 'Действует до': drv.licenseTill }, { 'ФИО': 0.998, 'Дата рождения': 0.999, 'Номер ВУ': 0.997, 'Действует до': 0.998 }, [], null)
         await put('STS', 'sts.jpg', 'PASSED', 98, { 'Госномер': trk.plate, 'VIN': trk.vin, 'Номер СТС': trk.sts }, { 'Госномер': 0.999, 'VIN': 0.998, 'Номер СТС': 0.998 }, [], null)
         await put('REQUEST_DOC', 'request_doc.pdf', 'PASSED', 96, { 'Номер заявки': number, 'Дата заявки': d(createdDay), 'Груз': 'Металлолом', 'Ставка': `${fmt(bestRate)} ₽/т` }, { 'Номер заявки': 0.99, 'Дата заявки': 0.99, 'Груз': 0.98, 'Ставка': 0.98 }, [], null)
       }

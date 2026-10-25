@@ -5,7 +5,7 @@
 export type RequestStatus = 'DRAFT' | 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'CONFIRMED' | 'CLOSED' | 'DELETED'
 export type RequestMode = 'AUCTION' | 'CLOSED'
 export type DocStatus = 'PENDING' | 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
-export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'LICENSE' | 'STS' | 'REQUEST_DOC' | 'POA' | 'ATTACHMENT'
+export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'STS' | 'REQUEST_DOC' | 'POA' | 'ATTACHMENT'
 
 /** Принадлежность записи справочника (Task 62): собственный парк / наёмный (ИП, ООО) / аренда-лизинг */
 export type OwnershipType = 'OWNED' | 'HIRED' | 'LEASE'
@@ -19,9 +19,6 @@ export interface DriverDTO {
   fullName: string
   birthDate: string
   passport: string
-  license: string
-  licenseTill: string
-  categories: string
   phone: string
   birthPlace: string
   /** адрес регистрации (место жительства) — колонка формы «Авто в порт» */
@@ -377,9 +374,6 @@ export interface IntakeDriverDraft {
   fullName: string
   birthDate: string
   passport: string
-  license: string
-  licenseTill: string
-  categories: string
   /** место рождения — со страницы паспорта с фото */
   birthPlace: string
   /** адрес регистрации — со страницы регистрации */
