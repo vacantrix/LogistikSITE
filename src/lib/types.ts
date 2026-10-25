@@ -395,6 +395,7 @@ export interface IntakeTruckDraft {
   plate: string
   vin: string
   sts: string
+  color: string
   owner: string
   confidence: Record<string, number>
 }
@@ -416,8 +417,8 @@ export interface VehicleIntakeResult {
   /** какая нейросеть читала: fast (лёгкая) / accurate (точная) */
   engineMode?: 'fast' | 'accurate'
   message: string
-  fields: { brand: string; plate: string; sts: string; owner: string }
-  confidence: Partial<Record<'brand' | 'plate' | 'sts' | 'owner', number>>
+  fields: { brand: string; plate: string; sts: string; color: string; owner: string }
+  confidence: Partial<Record<'brand' | 'plate' | 'sts' | 'color' | 'owner', number>>
   /** проблемы: вердикт движка + форматные правила «Авто в порт» */
   issues: string[]
 }

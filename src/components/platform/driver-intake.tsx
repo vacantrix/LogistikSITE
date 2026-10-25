@@ -883,7 +883,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       brand: pick(t.brand, res.fields.brand),
       plate: pick(t.plate, res.fields.plate),
       sts: pick(t.sts, res.fields.sts),
-      color: t.color,
+      color: pick(t.color, res.fields.color),
       owner: pick(t.owner, res.fields.owner),
     }
     ai.note(t, merged, () => 'sts')
@@ -921,7 +921,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         return false
       }
       const { merged, bad } = mergeVehicle(res)
-      const filled = (['brand', 'plate', 'sts', 'owner'] as const).filter((k) => !t[k].trim() && merged[k].trim())
+      const filled = (['brand', 'plate', 'sts', 'color', 'owner'] as const).filter((k) => !t[k].trim() && merged[k].trim())
       const badList = Object.values(bad)
       toast({
         title: filled.length === 0
@@ -1151,7 +1151,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       type: tr.type,
       plate: pick(tr.plate, res.fields.plate),
       sts: pick(tr.sts, res.fields.sts),
-      color: tr.color,
+      color: pick(tr.color, res.fields.color),
       owner: pick(tr.owner, res.fields.owner),
     }
     ai.note(tr, merged, () => 'sts')
@@ -1189,7 +1189,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
         return false
       }
       const { merged, bad } = mergeVehicle(res)
-      const filled = (['plate', 'sts', 'owner'] as const).filter((k) => !tr[k].trim() && merged[k].trim())
+      const filled = (['plate', 'sts', 'color', 'owner'] as const).filter((k) => !tr[k].trim() && merged[k].trim())
       const badList = Object.values(bad)
       toast({
         title: filled.length === 0

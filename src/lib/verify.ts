@@ -65,6 +65,7 @@ export const DOC_FIELDS: Record<DocType, FieldSpec[]> = {
     { label: 'VIN', kind: 'vin' },
     { label: 'Номер СТС', kind: 'passport' },
     { label: 'Марка', kind: 'text' },
+    { label: 'Цвет', kind: 'text', optional: true },
     // собственник напечатан на обороте СТС — на лицевой стороне его нет
     { label: 'Владелец', kind: 'text', optional: true },
   ],
@@ -708,6 +709,7 @@ export interface IntakeTruckDraft {
   plate: string
   vin: string
   sts: string
+  color: string
   owner: string
   confidence: Record<string, number>
 }
@@ -793,12 +795,14 @@ export function buildIntakeDraft(docs: Partial<Record<DocType, VerifyVerdict>>):
       plate: sPlate.v,
       vin: pick('STS', 'VIN').v,
       sts: pick('STS', 'Номер СТС').v,
+      color: pick('STS', 'Цвет').v,
       owner: pick('STS', 'Владелец').v,
       confidence: {
         brand: pick('STS', 'Марка').c,
         plate: sPlate.c,
         vin: pick('STS', 'VIN').c,
         sts: pick('STS', 'Номер СТС').c,
+        color: pick('STS', 'Цвет').c,
         owner: pick('STS', 'Владелец').c,
       },
     }

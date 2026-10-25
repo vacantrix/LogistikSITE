@@ -775,6 +775,34 @@ def extract_driver_license(path, lines):
     return f
 
 
+# цвета из СТС («Белый», «ЧЕРНЫЙ», «ТЕМНО-СИНИЙ»): подпись «Цвет» на бланке часто перекрыта —
+# тогда значение узнаём по самому слову
+COLOR_WORDS = ("БЕЛЫЙ", "ЧЕРНЫЙ", "СЕРЫЙ", "СИНИЙ", "КРАСНЫЙ", "ЗЕЛЕНЫЙ", "ЖЕЛТЫЙ", "ОРАНЖЕВЫЙ", "КОРИЧНЕВЫЙ",
+               "ГОЛУБОЙ", "СЕРЕБРИСТЫЙ", "БЕЖЕВЫЙ", "ФИОЛЕТОВЫЙ", "БОРДОВЫЙ", "БЕЛО", "ЧЕРНО", "СЕРО", "СИНЕ", "ТЕМНО",
+               "СВЕТЛО", "РАЗНОЦВЕТНЫЙ", "ХАКИ", "ЗОЛОТИСТЫЙ", "ВИШНЕВЫЙ", "ПЕСОЧНЫЙ")
+COLOR_RE = re.compile(r"^(?:(?:%s)[А-Я]*)(?:[\s-]+(?:%s)[А-Я]*)*$" % ("|".join(COLOR_WORDS), "|".join(COLOR_WORDS)))
+
+
+def sts_color(lines):
+    """«Цвет Белый»: значение в строке подписи или правее; иначе — строка из одного слова-цвета."""
+    for l in lines:
+        t = cyr(l["text"]).replace("Ё", "Е")
+        m = re.match(r"^\s*ЦВЕТ\s*[:.]?\s*(.*)$", t)
+        if not m:
+            continue
+        val = m.group(1).strip()
+        if not val:
+            r = right_of(lines, l)
+            val, l = (cyr(r["text"]).replace("Ё", "Е").strip(), r) if r else ("", l)
+        if val and COLOR_RE.match(re.sub(r"[^А-Я\s-]", "", val).strip()):
+            return field(val, l)
+    for l in lines:
+        t = re.sub(r"[^А-Я\s-]", "", cyr(l["text"]).replace("Ё", "Е")).strip()
+        if t and COLOR_RE.match(t):
+            return field(t, l)
+    return field(None, None)
+
+
 def extract_vehicle_registration(lines):
     """Лицевая сторона СТС: значения напечатаны ПОД подписями (раньше искали только справа)."""
     f = {}
@@ -819,6 +847,7 @@ def extract_vehicle_registration(lines):
     f["brand"] = brand or field(None, None)
     n = sts_number(lines)
     f["sts"] = {"value": n["value"], "conf": n["conf"], "line": n["line"]} if n else field(None, None)
+    f["color"] = sts_color(lines)
     f["owner"] = field(None, None)   # собственник — на обороте
     return f, n
 
@@ -1270,6 +1299,7 @@ def _analyze_lines(path, lines, quality, sharp):
         put("VIN", f["vin"])
         put("Номер СТС", f["sts"])
         put("Марка", f["brand"])
+        put("Цвет", f["color"])
         put("Владелец", f["owner"])
         if n and n["count"] >= 2 and n["copies"] == 1:
             confirm("Номер СТС", f"{n['count']} копии номера бланка совпали")

@@ -18,7 +18,7 @@ export const maxDuration = 600
  *   "accurate" — точная PP-OCRv5_server_det — кнопка «Проверить»;
  *   без mode   — автоподбор движка.
  *
- * Цвет по лицевой стороне СТС не читается — остаётся ручным полем.
+ * Лицевая сторона СТС даёт марку, госномер, номер СТС и цвет; собственник — на обороте.
  * Результат нормализуется и проверяется правилами «Авто в порт» (src/lib/port-fields.ts):
  * мусор вида «22о2/гвкгк» возвращается списком проблем, а не молча попадает в карточку.
  */
@@ -49,12 +49,14 @@ export async function POST(req: NextRequest) {
     brand: draft?.brand ?? '',
     plate: draft?.plate ?? '',
     sts: draft?.sts ?? '',
+    color: draft?.color ?? '',
     owner: draft?.owner ?? '',
   }
   const kinds: Record<string, PortFieldKind> = {
     brand: 'text',
     plate: kind === 'trailer' ? 'plateTrailer' : 'plate',
     sts: 'sts',
+    color: 'color',
     owner: 'text',
   }
   for (const [key, k] of Object.entries(kinds)) {
@@ -63,6 +65,8 @@ export async function POST(req: NextRequest) {
     // непустой, но кривой формат — проблема; пустое поле не проблема (заполнит человек)
     if (!res.ok && res.value !== '' && res.message) issues.push(res.message)
   }
+  // «ООО"ТРАНСАВТО"» → «ООО "ТРАНСАВТО"»: пробел после формы собственности
+  fields.owner = fields.owner.replace(/^(ООО|ОАО|ЗАО|ПАО|АО|ИП)\s*(["«])/, '$1 $2')
 
   const result: VehicleIntakeResult = {
     status: verdict.status,
@@ -75,6 +79,7 @@ export async function POST(req: NextRequest) {
       brand: verdict.confidences['Марка'] ?? 0,
       plate: verdict.confidences['Госномер'] ?? 0,
       sts: verdict.confidences['Номер СТС'] ?? 0,
+      color: verdict.confidences['Цвет'] ?? 0,
       owner: verdict.confidences['Владелец'] ?? 0,
     },
     issues,
