@@ -9,15 +9,21 @@ const KEEP_AS_IS_BYTES = 4_500_000
  * Обычное фото документа (JPEG/PNG/WebP до 2400 px и 4,5 МБ) не пересжимается:
  * прежнее сжатие до 1280 px и JPEG 80 % стирало мелкий шрифт паспорта, и нейросеть
  * переставала узнавать документ. Крупные снимки уменьшаются до 2400 px, JPEG 92 %.
+ * onProgress — доля готовности 0…1: чтение файла до 0,7, разбор картинки до 0,85, затем 1.
  */
-export async function fileToCompressedDataUri(file: File): Promise<string> {
+export async function fileToCompressedDataUri(file: File, onProgress?: (share: number) => void): Promise<string> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
+    reader.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress?.(0.7 * (e.loaded / e.total)) }
     reader.onload = () => resolve(String(reader.result))
     reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
     reader.readAsDataURL(file)
   })
-  if (dataUrl.startsWith('data:application/pdf')) return dataUrl
+  onProgress?.(0.7)
+  if (dataUrl.startsWith('data:application/pdf')) {
+    onProgress?.(1)
+    return dataUrl
+  }
   try {
     const img = document.createElement('img')
     img.decoding = 'async'
@@ -26,8 +32,10 @@ export async function fileToCompressedDataUri(file: File): Promise<string> {
       img.onerror = () => reject(new Error('image'))
       img.src = dataUrl
     })
+    onProgress?.(0.85)
     const side = Math.max(img.width, img.height, 1)
     if (side <= KEEP_AS_IS_SIDE && file.size <= KEEP_AS_IS_BYTES && /^data:image\/(jpeg|png|webp);/i.test(dataUrl)) {
+      onProgress?.(1)
       return dataUrl
     }
     const scale = Math.min(1, KEEP_AS_IS_SIDE / side)
@@ -37,8 +45,11 @@ export async function fileToCompressedDataUri(file: File): Promise<string> {
     const ctx = canvas.getContext('2d')
     if (!ctx) return dataUrl
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-    return canvas.toDataURL('image/jpeg', 0.92)
+    const out = canvas.toDataURL('image/jpeg', 0.92)
+    onProgress?.(1)
+    return out
   } catch {
+    onProgress?.(1)
     return dataUrl
   }
 }

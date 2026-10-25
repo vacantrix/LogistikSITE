@@ -35,7 +35,7 @@ import ScanOverlay from '@/components/platform/scan-overlay'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { DOC_TYPE_LABEL } from '@/lib/status'
-import { fileToCompressedDataUri } from '@/lib/demo-media'
+import { PhotoSteps, useStepUploads, type StepFile, type StepLoading } from '@/components/platform/photo-steps'
 import { validatePortField, type PortFieldKind } from '@/lib/port-fields'
 import type { DocType, IntakeResult, VehicleIntakeResult } from '@/lib/types'
 import type { Suggestion } from '@/lib/suggest'
@@ -63,11 +63,10 @@ export type TrailerDraft = { type: string; plate: string; sts: string; color: st
 /** Чем карточка занята: нейросеть заполняет (fast), проверяет (accurate) или тихо — из «Проверить все» (Task 83) */
 type CardBusy = 'fill' | 'check' | 'check-quiet' | null
 
-type Upload = { fileName: string; dataUri: string }
+type Upload = StepFile
 /** Фото документов водителя: паспорт и регистрация (водительское удостоверение не запрашивается) */
 const DRIVER_DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG']
 
-const EMPTY_UPLOADS: Partial<Record<DocType, Upload>> = {}
 const EMPTY_VERDICTS: Partial<Record<DocType, IntakeResult['documents'][number]>> = {}
 
 /** Данные из Excel/демо — поля, уже известные до проверки. Водительская карточка
@@ -213,7 +212,9 @@ export default function DriverLine({
   })
   /** регион и район выбранного из карты адреса — по ним подсказывается «Кем выдан» */
   const [addrGeo, setAddrGeo] = useState<Pick<Suggestion, 'region' | 'county'>>({})
-  const [uploads, setUploads] = useState<Partial<Record<DocType, Upload>>>(EMPTY_UPLOADS)
+  const readError = useCallback(() => toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' }), [toast])
+  // фото по шагам: 1 — страница с фото, 2 — регистрация; пока файл читается — кружок с процентами
+  const { files: uploads, setFiles: setUploads, loading: uploading, load: loadUpload, remove: removeUpload } = useStepUploads<DocType>(readError)
   const [verdicts, setVerdicts] = useState<Partial<Record<DocType, IntakeResult['documents'][number]>>>(EMPTY_VERDICTS)
   const [crossChecks, setCrossChecks] = useState<IntakeResult['crossChecks']>([])
   const [conf, setConf] = useState<Record<string, number>>({})
@@ -226,14 +227,9 @@ export default function DriverLine({
   const setField = useCallback((k: keyof typeof d, v: string) => setD((cur) => ({ ...cur, [k]: v })), [])
 
   const setUpload = useCallback(async (type: DocType, file: File) => {
-    try {
-      const dataUri = await fileToCompressedDataUri(file)
-      setUploads((cur) => ({ ...cur, [type]: { fileName: file.name, dataUri } }))
-      setVerdicts((cur) => { const n = { ...cur }; delete n[type]; return n })
-    } catch {
-      toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' })
-    }
-  }, [toast])
+    // новое фото — прежний вердикт по этому шагу больше не действует
+    if (await loadUpload(type, file)) setVerdicts((cur) => { const n = { ...cur }; delete n[type]; return n })
+  }, [loadUpload])
 
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
   const miss = (v: string) => showErrors && v.trim() === ''
@@ -421,10 +417,6 @@ export default function DriverLine({
     return () => registerCheck(id, null)
   }, [id, registerCheck])
 
-  const removeUpload = (type: DocType) => {
-    setUploads((cur) => { const n = { ...cur }; delete n[type]; return n })
-  }
-
   const lock = admitted !== null || busy !== null
 
   return (
@@ -455,7 +447,7 @@ export default function DriverLine({
             size="sm"
             variant="outline"
             onClick={() => void autofill()}
-            disabled={busy !== null}
+            disabled={busy !== null || uploading !== null}
             className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
           >
             <Sparkles className="h-4 w-4" aria-hidden />
@@ -466,7 +458,7 @@ export default function DriverLine({
           <Button
             size="sm"
             onClick={() => void check()}
-            disabled={busy !== null}
+            disabled={busy !== null || uploading !== null}
             className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
           >
             <ScanLine className="h-4 w-4" aria-hidden />
@@ -526,67 +518,37 @@ export default function DriverLine({
       {/* ——— фотографии водительских документов: паспорт и регистрация (Task 51/53) ——— */}
       <div className="mt-3">
         <div className="mb-1.5 text-xs font-semibold text-muted-foreground">Фотографии документов</div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {DRIVER_DOC_TYPES.map((type) => {
-            const up = uploads[type]
+        <PhotoSteps
+          steps={DRIVER_DOC_TYPES.map((type) => ({ key: type, label: DOC_TYPE_LABEL[type] }))}
+          files={uploads}
+          loading={uploading}
+          lock={lock}
+          showMiss={showErrors}
+          onPick={(type, f) => void setUpload(type, f)}
+          onRemove={removeUpload}
+          tone={(type) => (verdicts[type] ? (verdicts[type]!.status === 'PASSED' ? 'ok' : 'bad') : null)}
+          badge={(type) => (verdicts[type] ? <DocStatusBadge status={verdicts[type]!.status} /> : null)}
+          extra={(type) => {
             const v = verdicts[type]
-            const photoMiss = showErrors && !up
+            if (!v) return null
             return (
-              <div key={type} className={`rounded-lg border p-2 ${v ? (v.status === 'PASSED' ? 'border-emerald-200 bg-emerald-50/40' : 'border-red-200 bg-red-50/40') : photoMiss ? 'border-dashed border-red-400 bg-red-50/40' : 'border-dashed border-slate-300 bg-slate-50/40'}`}>
-                <div className="flex items-center justify-between gap-1">
-                  <span className={`truncate text-[11px] font-semibold ${photoMiss ? 'text-red-600' : 'text-slate-700'}`}>
-                    {DOC_TYPE_LABEL[type]}
-                    {photoMiss && <span aria-hidden> — добавьте фото</span>}
-                  </span>
-                  {v && <DocStatusBadge status={v.status} />}
-                </div>
-                {up ? (
-                  <>
-                    <img src={up.dataUri} alt={`Фото: ${DOC_TYPE_LABEL[type]}`} className="mt-1.5 h-16 w-full rounded border border-slate-200 bg-white object-contain" />
-                    <div className="mt-1 flex items-center justify-between gap-1">
-                      <span className="truncate text-[10px] text-muted-foreground" title={up.fileName}>{up.fileName}</span>
-                      {!admitted && (
-                        <>
-                          <label className="cursor-pointer text-[10px] font-medium text-blue-700 hover:underline">
-                            Заменить
-                            <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) void setUpload(type, f) }} />
-                          </label>
-                          <button type="button" className="text-[10px] text-slate-400 hover:text-red-600" aria-label={`Убрать ${DOC_TYPE_LABEL[type]}`} onClick={() => removeUpload(type)}>
-                            <X className="h-3 w-3" aria-hidden />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    {v && (
-                      <div className="mt-1 space-y-0.5">
-                        {/* качество приходит по шкале 0–100; 0 — распознавание не выполнялось */}
-                        {v.quality > 0 && (
-                          <div className={`text-[10px] font-medium ${v.quality >= 60 ? 'text-emerald-700' : 'text-amber-700'}`}>
-                            Качество изображения {Math.round(v.quality)}%
-                          </div>
-                        )}
-                        {v.issues.map((issue) => (
-                          <div key={issue} className="flex items-start gap-1 text-[10px] leading-snug text-red-700">
-                            <CircleAlert className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
-                            {issue}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <label
-                    title="JPG/PNG — нейросеть прочитает"
-                    className={`mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/60 text-center ${photoMiss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-blue-400'}`}
-                  >
-                    <span className={`text-[10px] font-medium ${photoMiss ? 'text-red-600' : 'text-blue-700'}`}>Загрузить фото</span>
-                    <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) void setUpload(type, f) }} />
-                  </label>
+              <div className="mt-1 space-y-0.5">
+                {/* качество приходит по шкале 0–100; 0 — распознавание не выполнялось */}
+                {v.quality > 0 && (
+                  <div className={`text-[10px] font-medium ${v.quality >= 60 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    Качество изображения {Math.round(v.quality)}%
+                  </div>
                 )}
+                {v.issues.map((issue) => (
+                  <div key={issue} className="flex items-start gap-1 text-[10px] leading-snug text-red-700">
+                    <CircleAlert className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
+                    {issue}
+                  </div>
+                ))}
               </div>
             )
-          })}
-        </div>
+          }}
+        />
       </div>
 
       {/* ——— перекрёстные сверки ——— */}
@@ -636,7 +598,7 @@ export interface SoloLineProps {
 
 /** Шапка одиночной карточки: иконка, заголовок, метка, кнопки «Автозаполнение»/«Проверить» и удаления */
 function SoloHeader({
-  icon, title, index, kind, tag, busy, admitted, onAutofill, onCheck, onRemove,
+  icon, title, index, kind, tag, busy, admitted, onAutofill, uploading = false, onCheck, onRemove,
 }: {
   icon: ReactNode
   title: string
@@ -648,6 +610,8 @@ function SoloHeader({
   admitted: boolean
   /** если задана — в шапке появляется кнопка «Автозаполнение» (Task 83) */
   onAutofill?: () => void
+  /** фото ещё загружается — кнопки нейросети ждут */
+  uploading?: boolean
   onCheck: () => void
   onRemove: () => void
 }) {
@@ -674,7 +638,7 @@ function SoloHeader({
           size="sm"
           variant="outline"
           onClick={onAutofill}
-          disabled={busy !== null}
+          disabled={busy !== null || uploading}
           className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
         >
           <Sparkles className="h-4 w-4" aria-hidden />
@@ -685,7 +649,7 @@ function SoloHeader({
         <Button
           size="sm"
           onClick={onCheck}
-          disabled={busy !== null}
+          disabled={busy !== null || uploading}
           className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800"
         >
           <ScanLine className="h-4 w-4" aria-hidden />
@@ -722,40 +686,30 @@ function SoloAdmitted({ title, label, kind, onRemove }: { title: string; label: 
 
 const SOLO_PHOTO_KEYS = ['vehicle', 'sts'] as const
 type SoloPhotoKey = (typeof SOLO_PHOTO_KEYS)[number]
-type SoloPhoto = { fileName: string; dataUri: string }
-type SoloPhotoState = Record<SoloPhotoKey, SoloPhoto | null>
-const EMPTY_SOLO_PHOTOS: SoloPhotoState = { vehicle: null, sts: null }
+type SoloPhoto = StepFile
+type SoloPhotoState = Partial<Record<SoloPhotoKey, SoloPhoto>>
 
 const TRUCK_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото тягача', sts: 'Фото СТС тягача' }
 const TRAILER_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото прицепа', sts: 'Фото СТС прицепа' }
 
-/** Состояние фото одиночной карточки + вставка скриншота из буфера обмена (общее для ТС и прицепа) */
+/** Состояние фото одиночной карточки (по шагам, с кружком прогресса) + вставка скриншота
+ * из буфера обмена (общее для ТС и прицепа) */
 function useSoloPhotos(
   labels: Record<SoloPhotoKey, string>,
   admitted: boolean,
   toast: ReturnType<typeof useToast>['toast'],
 ) {
-  const [photos, setPhotos] = useState<SoloPhotoState>(EMPTY_SOLO_PHOTOS)
+  const readError = useCallback(() => toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' }), [toast])
+  const { files: photos, loading, load, remove } = useStepUploads<SoloPhotoKey>(readError)
   const photosRef = useRef(photos)
   useEffect(() => {
     photosRef.current = photos
   })
 
-  /** выбор файла в слоте (клик по плашке или «Заменить») */
-  const pick = useCallback(async (k: SoloPhotoKey, file: File) => {
-    try {
-      const dataUri = await fileToCompressedDataUri(file)
-      setPhotos((cur) => ({ ...cur, [k]: { fileName: file.name, dataUri } }))
-    } catch {
-      toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' })
-    }
-  }, [toast])
+  /** выбор файла в шаге (клик по плашке или «Заменить») */
+  const pick = useCallback((k: SoloPhotoKey, file: File) => load(k, file), [load])
 
-  const remove = useCallback((k: SoloPhotoKey) => {
-    setPhotos((cur) => ({ ...cur, [k]: null }))
-  }, [])
-
-  // вставка изображения из буфера обмена (Ctrl+V): картинка занимает первый свободный слот
+  // вставка изображения из буфера обмена (Ctrl+V): картинка занимает первый незагруженный шаг
   useEffect(() => {
     if (admitted) return
     const onPaste = (e: ClipboardEvent) => {
@@ -769,31 +723,26 @@ function useSoloPhotos(
             toast({ title: 'Все слоты фото уже заняты', description: 'Замените или уберите фото, чтобы вставить новое' })
             return
           }
-          try {
-            const dataUri = await fileToCompressedDataUri(file)
-            if (photosRef.current[key]) continue // слот заняли, пока изображение сжималось
-            const up = { fileName: file.name || 'Вставленное фото', dataUri }
-            photosRef.current = { ...photosRef.current, [key]: up }
-            setPhotos(photosRef.current)
-            toast({ title: 'Фото вставлено из буфера', description: labels[key] })
-          } catch {
-            toast({ title: 'Ошибка', description: 'Не удалось прочитать изображение из буфера обмена', variant: 'destructive' })
-          }
+          const up = await load(key, file)
+          if (!up) return // файл не прочитан или идёт другая загрузка
+          photosRef.current = { ...photosRef.current, [key]: up }
+          toast({ title: 'Фото вставлено из буфера', description: labels[key] })
         }
       })()
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
-  }, [admitted, labels, toast])
+  }, [admitted, labels, load, toast])
 
-  return { photos, pick, remove }
+  return { photos, loading, pick, remove }
 }
 
-/** Слоты фото одиночной карточки: до загрузки — пунктирная плашка, после — превью */
+/** Фото одиночной карточки по шагам: 1 — машина, 2 — СТС */
 function SoloPhotos({
-  photos, labels, showMiss, lock, onPick, onRemove,
+  photos, loading, labels, showMiss, lock, onPick, onRemove,
 }: {
   photos: SoloPhotoState
+  loading: StepLoading<SoloPhotoKey>
   labels: Record<SoloPhotoKey, string>
   /** подсветка незаполненного — включается только после «Проверить» */
   showMiss: boolean
@@ -805,51 +754,17 @@ function SoloPhotos({
     <div className="mt-3">
       <div className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
         Фотографии
-        <InfoTip label="Как добавить фото">Загрузите файлом (JPG/PNG) или вставьте скриншот через Ctrl+V.</InfoTip>
+        <InfoTip label="Как добавить фото">Загрузите файлом (JPG/PNG) или вставьте скриншот через Ctrl+V — по порядку шагов.</InfoTip>
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {SOLO_PHOTO_KEYS.map((k) => {
-          const up = photos[k]
-          const photoMiss = showMiss && !up
-          return (
-            <div key={k} className={`rounded-lg border p-2 ${up ? 'border-slate-200 bg-slate-50/40' : photoMiss ? 'border-dashed border-red-400 bg-red-50/40' : 'border-dashed border-slate-300 bg-slate-50/40'}`}>
-              <div className="flex items-center justify-between gap-1">
-                <span className={`truncate text-[11px] font-semibold ${photoMiss ? 'text-red-600' : 'text-slate-700'}`}>
-                  {labels[k]}
-                  {photoMiss && <span aria-hidden> — добавьте фото</span>}
-                </span>
-              </div>
-              {up ? (
-                <>
-                  <img src={up.dataUri} alt={`Фото: ${labels[k]}`} className="mt-1.5 h-16 w-full rounded border border-slate-200 bg-white object-contain" />
-                  <div className="mt-1 flex items-center justify-between gap-1">
-                    <span className="truncate text-[10px] text-muted-foreground" title={up.fileName}>{up.fileName}</span>
-                    {!lock && (
-                      <>
-                        <label className="cursor-pointer text-[10px] font-medium text-blue-700 hover:underline">
-                          Заменить
-                          <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(k, f) }} />
-                        </label>
-                        <button type="button" className="text-[10px] text-slate-400 hover:text-red-600" aria-label={`Убрать ${labels[k]}`} onClick={() => onRemove(k)}>
-                          <X className="h-3 w-3" aria-hidden />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <label
-                  title="JPG/PNG или вставить Ctrl+V"
-                  className={`mt-1 flex h-16 cursor-pointer flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/60 text-center ${photoMiss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-blue-400'}`}
-                >
-                  <span className={`text-[10px] font-medium ${photoMiss ? 'text-red-600' : 'text-blue-700'}`}>Загрузить фото</span>
-                  <input type="file" accept="image/*" className="sr-only" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(k, f) }} />
-                </label>
-              )}
-            </div>
-          )
-        })}
-      </div>
+      <PhotoSteps
+        steps={SOLO_PHOTO_KEYS.map((k) => ({ key: k, label: labels[k] }))}
+        files={photos}
+        loading={loading}
+        lock={lock}
+        showMiss={showMiss}
+        onPick={onPick}
+        onRemove={onRemove}
+      />
     </div>
   )
 }
@@ -880,7 +795,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   /** поля, не прошедшие форматные правила «Авто в порт» (Task 80/83): ключ → сообщение */
   const [formatBad, setFormatBad] = useState<Record<string, string>>({})
   // фото ТС (Task 53): файл или Ctrl+V — оба слота обязательны
-  const { photos, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRUCK_PHOTO_LABELS, admitted !== null, toast)
+  const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRUCK_PHOTO_LABELS, admitted !== null, toast)
 
   const setField = useCallback((k: keyof TruckDraft, v: string) => {
     setT((cur) => ({ ...cur, [k]: v }))
@@ -1063,6 +978,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         kind="ТС"
         tag={initial ? 'Из Excel' : undefined}
         busy={busy}
+        uploading={photoLoading !== null}
         admitted={admitted !== null}
         onAutofill={() => void autofill()}
         onCheck={() => void check()}
@@ -1085,6 +1001,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
           {/* фото ТС и СТС — загрузка файлом или вставка Ctrl+V (Task 53) */}
           <SoloPhotos
             photos={photos}
+            loading={photoLoading}
             labels={TRUCK_PHOTO_LABELS}
             showMiss={showErrors}
             lock={lock}
@@ -1130,7 +1047,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
   /** поля, не прошедшие форматные правила «Авто в порт» (Task 80/83): ключ → сообщение */
   const [formatBad, setFormatBad] = useState<Record<string, string>>({})
   // фото прицепа (Task 53): файл или Ctrl+V — оба слота обязательны
-  const { photos, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRAILER_PHOTO_LABELS, admitted !== null, toast)
+  const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRAILER_PHOTO_LABELS, admitted !== null, toast)
 
   const setField = useCallback((k: keyof TrailerDraft, v: string) => {
     setTr((cur) => ({ ...cur, [k]: v }))
@@ -1313,6 +1230,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
         kind="прицепа"
         tag={initial ? 'Из Excel' : undefined}
         busy={busy}
+        uploading={photoLoading !== null}
         admitted={admitted !== null}
         onAutofill={() => void autofill()}
         onCheck={() => void check()}
@@ -1336,6 +1254,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
           {/* фото прицепа и СТС — загрузка файлом или вставка Ctrl+V (Task 53) */}
           <SoloPhotos
             photos={photos}
+            loading={photoLoading}
             labels={TRAILER_PHOTO_LABELS}
             showMiss={showErrors}
             lock={lock}
