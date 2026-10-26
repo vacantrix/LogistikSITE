@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
   const fields = {
     brand: draft?.brand ?? '',
     plate: draft?.plate ?? '',
+    vin: draft?.vin ?? '',
     sts: draft?.sts ?? '',
     color: draft?.color ?? '',
     owner: draft?.owner ?? '',
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
   const kinds: Record<string, PortFieldKind> = {
     brand: 'text',
     plate: kind === 'trailer' ? 'plateTrailer' : 'plate',
+    vin: 'vin',
     sts: 'sts',
     color: 'color',
     owner: 'text',
@@ -78,6 +80,7 @@ export async function POST(req: NextRequest) {
     confidence: {
       brand: verdict.confidences['Марка'] ?? 0,
       plate: verdict.confidences['Госномер'] ?? 0,
+      vin: verdict.confidences['VIN'] ?? 0,
       sts: verdict.confidences['Номер СТС'] ?? 0,
       color: verdict.confidences['Цвет'] ?? 0,
       owner: verdict.confidences['Владелец'] ?? 0,

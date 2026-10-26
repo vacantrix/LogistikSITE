@@ -7,6 +7,7 @@
  *   Госномер — А123ВС777 (тягач) или АВ1234 23 (прицеп), буквы только из «транспортного» набора;
  *   СТС      — ровно 10 цифр;
  *   Цвет     — только буквы (и дефис), без цифр;
+ *   VIN      — 17 знаков: латинские буквы без I, O, Q и цифры;
  *   Текстовые (марка, собственник) — без служебного мусора (/, \, ;, %…).
  *
  * Нормализация делает видимый пользователю ввод аккуратным: латинские двойники → кириллица
@@ -22,7 +23,7 @@ const LAT2CYR: Record<string, string> = {
   A: 'А', B: 'В', E: 'Е', K: 'К', M: 'М', H: 'Н', O: 'О', P: 'Р', C: 'С', T: 'Т', Y: 'У', X: 'Х',
 }
 
-export type PortFieldKind = 'plate' | 'plateTrailer' | 'sts' | 'color' | 'text'
+export type PortFieldKind = 'plate' | 'plateTrailer' | 'sts' | 'color' | 'vin' | 'text'
 
 export interface PortFieldRule {
   kind: PortFieldKind
@@ -36,11 +37,17 @@ export const PORT_FIELD_RULES: Record<PortFieldKind, PortFieldRule> = {
   plateTrailer: { kind: 'plateTrailer', label: 'Госномер прицепа', hint: 'формат АВ1234 23 — 2 буквы, 4 цифры, регион' },
   sts: { kind: 'sts', label: 'Номер СТС', hint: 'ровно 10 цифр' },
   color: { kind: 'color', label: 'Цвет', hint: 'только буквы, без цифр и символов' },
+  vin: { kind: 'vin', label: 'VIN', hint: '17 знаков: латинские буквы без I, O, Q и цифры' },
   text: { kind: 'text', label: 'Текстовое поле', hint: 'без служебных символов (/ \\ ; % # и т.п.)' },
 }
 
 const GARBAGE_RE = /[/\\;<>%#@$^*_=|~§°€£¥]/
 const COLOR_RE = /^[А-Яа-яЁёA-Za-z][А-Яа-яЁёA-Za-z\s-]*$/
+const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/
+/** Кириллические двойники → латиница (для VIN) */
+const CYR2LAT: Record<string, string> = {
+  А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X',
+}
 /** тягач: А123ВС777; прицеп: АВ1234 23 (регион 2–3 цифры) */
 const PLATE_TRUCK_RE = new RegExp(`^[${PLATE_LETTERS}]\\d{3}[${PLATE_LETTERS}]{2}\\d{2,3}$`)
 const PLATE_TRAILER_RE = new RegExp(`^[${PLATE_LETTERS}]{2}\\d{4}\\d{2,3}$`)
@@ -73,6 +80,10 @@ export function normalizePortField(kind: PortFieldKind, value: string): string {
       return raw.replace(/\D/g, '')
     case 'color':
       return raw.replace(/\s*-\s*/g, '-').replace(/\s+/g, ' ').trim()
+    case 'vin':
+      // в VIN нет букв I, O, Q — нейросеть путает их с 1 и 0
+      return raw.toUpperCase().replace(/[АВЕКМНОРСТУХ]/g, (ch) => CYR2LAT[ch] ?? ch)
+        .replace(/[^A-Z0-9]/g, '').replace(/O/g, '0').replace(/[IQ]/g, (ch) => (ch === 'I' ? '1' : '0'))
     case 'text':
       return raw
   }
@@ -112,6 +123,12 @@ export function validatePortField(kind: PortFieldKind, value: string): PortField
     case 'color': {
       if (!COLOR_RE.test(norm)) {
         return { ok: false, value: norm, message: `«${norm}» — цвет пишется буквами` }
+      }
+      return { ok: true, value: norm }
+    }
+    case 'vin': {
+      if (!VIN_RE.test(norm)) {
+        return { ok: false, value: norm, message: `«${norm}» — нужно 17 знаков: латинские буквы и цифры` }
       }
       return { ok: true, value: norm }
     }

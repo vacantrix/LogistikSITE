@@ -35,7 +35,7 @@ TRANSLIT = {"А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D", "Е": "E", "�
             "Й": "I", "К": "K", "Л": "L", "М": "M", "Н": "N", "О": "O", "П": "P", "Р": "R", "С": "S", "Т": "T",
             "У": "U", "Ф": "F", "Х": "KH", "Ц": "TS", "Ч": "CH", "Ш": "SH", "Щ": "SHCH", "Ъ": "IE", "Ы": "Y",
             "Ь": "", "Э": "E", "Ю": "IU", "Я": "IA"}
-SERIES_NUMBER_RE = re.compile(r"(\d{2}) ?(\d{2}) +(\d{6})")
+SERIES_NUMBER_RE = re.compile(r"(\d{2})\s*(\d{2})\s+(\d{6})")   # двойной пробел скана — не помеха
 
 # вид документа по шаблону → тип документа платформы
 PLATFORM_TYPE = {"passport": "PASSPORT_PHOTO", "passport_registration": "PASSPORT_REG",
@@ -319,6 +319,12 @@ def ru_field(src, value):
     return f
 
 
+def helper_ocr():
+    """Перечитывание мелких полей (код, номер на полях): точной моделью, а при нехватке памяти —
+    той, что уже загружена: вторая модель в том же процессе на стенде 4 ГБ — OOM (exit 137)."""
+    return get_ocr(_mode if LOW_MEMORY else "accurate")
+
+
 def reread_code(path, f):
     """Код подразделения («123-456»): первая цифра часто читается неверно («223»). Вырезку строки
     увеличиваем вдвое и читаем точной моделью; берём чтение, в котором нейросеть увереннее."""
@@ -331,7 +337,7 @@ def reread_code(path, f):
     if crop.size == 0:
         return f
     big = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    res = get_ocr("accurate").predict(big, use_textline_orientation=False)[0]
+    res = helper_ocr().predict(big, use_textline_orientation=False)[0]
     for t, sc in zip(res["rec_texts"], res["rec_scores"]):
         m = re.fullmatch(r"\s*(\d{3})\s?[-–]\s?(\d{3})\s*", t)
         if m and float(sc) > (f["conf"] or 0):
@@ -358,7 +364,7 @@ def read_margin_number(path, lines):
     for rot in (cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE):
         strip = cv2.resize(cv2.rotate(col, rot), None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         # строки ищем на полосе не длиннее 2000 px (8 с вместо 20–30), читаются они с увеличенной полосы
-        res = get_ocr("accurate").predict(strip, use_textline_orientation=False,
+        res = helper_ocr().predict(strip, use_textline_orientation=False,
                                           text_det_limit_side_len=MARGIN_MAX_SIDE, text_det_limit_type="max")[0]
         toks = sorted((float(np.array(p)[:, 0].min()), t.strip(), float(s))
                       for t, s, p in zip(res["rec_texts"], res["rec_scores"], res["rec_polys"]) if re.fullmatch(r"\d[\d ]*", t.strip()))
@@ -640,7 +646,8 @@ def fix_date_twins(t):
 
 CAR_PLATE_RE = re.compile(r"[АВЕКМНОРСТУХ]\d{3}[АВЕКМНОРСТУХ]{2}\d{2,3}")
 TRAILER_PLATE_RE = re.compile(r"[АВЕКМНОРСТУХ]{2}\d{4}\d{2,3}")
-STS_NUMBER_RE = re.compile(r"\d{2}\s?\d{2}\s?\d{6}")
+# «99 00 123456», «99  00 123456», бланк 2018+: «99 00 № 123456»
+STS_NUMBER_RE = re.compile(r"(\d{2})\s*(\d{2})\s*(?:№|N[oO°º]?\.?)?\s*(\d{6})")
 VIN_RE = re.compile(r"[A-HJ-NPR-Z0-9]{17}")
 
 
@@ -660,13 +667,18 @@ def as_vin(t):
 
 def sts_number(lines):
     """Красный номер бланка СТС «99 00 123456» (печатается внизу и вертикально на поле)."""
-    c = [l for l in lines if STS_NUMBER_RE.fullmatch(l["text"].strip())]
+    c = [(l, m) for l in lines for m in [STS_NUMBER_RE.fullmatch(l["text"].strip())] if m]
+    if not c:
+        # крупный кадр: широкие пробелы номера режут его на куски «99» «81» «897996» одного ряда
+        for row in rows_of(lines):
+            m = STS_NUMBER_RE.fullmatch(" ".join(l["text"].strip() for l in row)) if len(row) > 1 else None
+            if m:
+                c.append(({**row[0], "conf": min(l["conf"] for l in row)}, m))
     if not c:
         return None
-    best = max(c, key=lambda l: l["conf"])
-    d = re.sub(r"\s", "", best["text"])
-    return {"value": f"{d[:2]} {d[2:4]} {d[4:]}", "conf": round(best["conf"], 3), "line": best,
-            "copies": len({re.sub(r"\s", "", l["text"]) for l in c}), "count": len(c)}
+    best, m = max(c, key=lambda x: x[0]["conf"])
+    return {"value": f"{m.group(1)} {m.group(2)} {m.group(3)}", "conf": round(best["conf"], 3), "line": best,
+            "copies": len({"".join(x[1].groups()) for x in c}), "count": len(c)}
 
 
 # ---------------- шаблоны ВУ, СТС, регистрации ----------------
@@ -686,7 +698,7 @@ def reread_categories(path, lab):
     x0, x1 = int(lab["x0"]), int(min(W, lab["x0"] + 30 * h))
     y0, y1 = int(max(0, lab["cy"] - 1.2 * h)), int(min(H, lab["cy"] + 1.2 * h))
     strip = cv2.resize(img[y0:y1, x0:x1], None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
-    res = get_ocr("accurate").predict(strip, use_textline_orientation=False)[0]
+    res = helper_ocr().predict(strip, use_textline_orientation=False)[0]
     found = {}
     for t, s, p in sorted(zip(res["rec_texts"], res["rec_scores"], res["rec_polys"]), key=lambda r: np.array(r[2])[:, 0].min()):
         for x in re.split(r"[,.\s|\[\]()]+", t.upper().translate(CYR2LAT)):
@@ -803,6 +815,14 @@ def sts_color(lines):
     return field(None, None)
 
 
+def plausible_brand(value):
+    """«Марка»: не подпись бланка («Модель», «Тип ТС»), не VIN и хотя бы две буквы."""
+    v = (value or "").strip()
+    if len(re.findall(r"[A-Za-zА-Яа-яЁё]", v)) < 2 or as_vin(v):
+        return False
+    return not re.fullmatch(r"(?i)\W*(модель|марка|тип(\s+тс)?|категория|шасси|кузов|цвет)\W*", v)
+
+
 def extract_vehicle_registration(lines):
     """Лицевая сторона СТС: значения напечатаны ПОД подписями (раньше искали только справа)."""
     f = {}
@@ -844,6 +864,8 @@ def extract_vehicle_registration(lines):
             if m and not as_vin(m.group(1)):
                 brand = field(m.group(1), l)
                 break
+    if brand and not plausible_brand(brand["value"]):
+        brand = None
     f["brand"] = brand or field(None, None)
     n = sts_number(lines)
     f["sts"] = {"value": n["value"], "conf": n["conf"], "line": n["line"]} if n else field(None, None)
@@ -855,7 +877,12 @@ def extract_vehicle_registration(lines):
 def extract_sts_back(lines):
     """Оборот СТС: собственник (часто лизингополучатель), лизингодатель и срок временного учёта."""
     f = {}
-    lab = find_line(lines, "СОБСТВЕННИК", "ВЛАДЕЛЕЦ") or find_line(lines, "СОБСТВЕННИК")
+    lab = find_line(lines, "СОБСТВЕННИК", "ВЛАДЕЛЕЦ")
+    if not lab:
+        # заголовок прочитан не целиком: верхняя строка со «СОБСТВЕННИК», но не из «Особых отметок»
+        cands = [l for l in lines if "СОБСТВЕННИК" in re.sub(r"\s", "", l["text"].upper()).translate(LAT2CYR)
+                 and "ЛИЗИНГОДАТ" not in l["text"].upper().translate(LAT2CYR)]
+        lab = min(cands, key=lambda l: l["cy"]) if cands else None
     stop = find_line(lines, "СУБЪЕКТ")
     owner_lines = []
     if lab:
@@ -866,6 +893,8 @@ def extract_sts_back(lines):
         if len(owner_lines) > 1 and re.search(r"лизингополучател", text, re.I) and not re.search(r"ООО|АО|ИП", text.upper()):
             text = text + " " + owner_lines[1]["text"]
         text = re.sub(r"(?i)^\s*лизингополучатель\s*[-–—:]?\s*", "", text).strip()
+        # «000 "ТРАНСАВТО"», «00О»: нули вместо букв формы собственности
+        text = re.sub(r'^[0OО]{3}(?=\s*["«“])', "ООО", text)
         f["owner"] = field(text, min(owner_lines[:2], key=lambda l: l["conf"]))
     else:
         f["owner"] = field(None, None)
@@ -955,7 +984,7 @@ def extract_poa(lines):
     return f, stub
 
 
-MONTHS = {"ЯНВАР": 1, "ФЕВРАЛ": 2, "МАРТ": 3, "АПРЕЛ": 4, "МА": 5, "ИЮН": 6, "ИЮЛ": 7, "АВГУСТ": 8,
+WORD_MONTHS = {"ЯНВАР": 1, "ФЕВРАЛ": 2, "МАРТ": 3, "АПРЕЛ": 4, "МА": 5, "ИЮН": 6, "ИЮЛ": 7, "АВГУСТ": 8,
           "СЕНТЯБР": 9, "ОКТЯБР": 10, "НОЯБР": 11, "ДЕКАБР": 12}
 WORD_DATE_RE = re.compile(r"(\d{1,2})\s*(ЯНВАР|ФЕВРАЛ|МАРТ|АПРЕЛ|МА[ЯЙ]|ИЮН|ИЮЛ|АВГУСТ|СЕНТЯБР|ОКТЯБР|НОЯБР|ДЕКАБР)[А-Я]*\.?\s*(\d{4})")
 # подписи штампа старого образца: «Рег-н:», «Пункт:», «Улица:», «Дом:», «Корп:», «Кв:»
@@ -980,7 +1009,7 @@ def word_date(text):
     m = WORD_DATE_RE.search(cyr(text))
     if not m:
         return None
-    month = next(n for k, n in MONTHS.items() if m.group(2).startswith(k))
+    month = next(n for k, n in WORD_MONTHS.items() if m.group(2).startswith(k))
     value = f"{int(m.group(1)):02d}.{month:02d}.{m.group(3)}"
     return value if parse_date(value) else None
 
@@ -1069,15 +1098,63 @@ REQUIRED_KEYS = {
 }
 
 
-def prepare(path):
-    """Мелкие сканы увеличиваем вдвое: подписи паспорта высотой 10–16 px иначе не читаются."""
+# вырезанный документ увеличиваем до PREP_TARGET px по большей стороне, но не больше чем в PREP_MAX_SCALE раз
+PREP_TARGET = int(os.environ.get("OCR_PREP_TARGET", "1500"))
+PREP_MAX_SCALE = float(os.environ.get("OCR_PREP_MAX_SCALE", "3"))
+
+
+def document_box(img):
+    """Документ на белом листе (скан А4 с СТС на 20–35 % ширины): рамка содержимого или None.
+    «Не фон» — заметный цвет или тёмное; от крупнейшего пятна рамка растёт на соседние пятна,
+    дальние (пыль, разводы сканера) не входят. Фото с фоном (стол, шторы) не режем: там
+    содержимое занимает почти весь кадр."""
+    h, w = img.shape[:2]
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = ((hsv[..., 1] > 35) | (hsv[..., 2] < 190)).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((21, 21), np.uint8))
+    n, _, stats, _ = cv2.connectedComponentsWithStats(mask)
+    blobs = [tuple(int(v) for v in stats[i][:4]) for i in range(1, n) if stats[i][4] > 0.0005 * w * h]
+    if not blobs:
+        return None
+    x0, y0, bw, bh = max(blobs, key=lambda b: b[2] * b[3])
+    x1, y1 = x0 + bw, y0 + bh
+    gap = int(0.04 * max(w, h))
+    grown = True
+    while grown:
+        grown = False
+        for bx, by, bbw, bbh in blobs:
+            if bx < x1 + gap and bx + bbw > x0 - gap and by < y1 + gap and by + bbh > y0 - gap \
+                    and (bx < x0 or by < y0 or bx + bbw > x1 or by + bbh > y1):
+                x0, y0, x1, y1 = min(x0, bx), min(y0, by), max(x1, bx + bbw), max(y1, by + bbh)
+                grown = True
+    if (x1 - x0) * (y1 - y0) > 0.5 * w * h or min(x1 - x0, y1 - y0) < 120:
+        return None
+    pad = int(0.03 * max(x1 - x0, y1 - y0))
+    return max(0, x0 - pad), max(0, y0 - pad), min(w, x1 + pad), min(h, y1 + pad)
+
+
+def prepare(path, crop=True):
+    """Подготовка кадра: маленький документ на листе вырезается и увеличивается (до PREP_TARGET px),
+    мелкий кадр целиком — вдвое: подписи высотой 10–16 px иначе не читаются.
+    Возвращает (путь, вырезан ли документ)."""
     img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
-    if img is None or max(img.shape[:2]) >= UPSCALE_BELOW:
-        return path
-    big = cv2.resize(img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    out = path.with_name(path.stem + "_x2.png")   # без потерь: JPEG размывает мелкие подписи
-    cv2.imencode(".png", big)[1].tofile(str(out))
-    return out
+    if img is None:
+        return path, False
+    box = document_box(img) if crop else None
+    work = img[box[1]:box[3], box[0]:box[2]] if box else img
+    side = max(work.shape[:2])
+    if box:
+        k = min(PREP_MAX_SCALE, PREP_TARGET / side)
+    else:
+        k = 2.0 if side < UPSCALE_BELOW else 1.0   # мелкий кадр целиком — вдвое, как раньше
+    if not box and k <= 1.0:
+        return path, False
+    if k > 1.0:
+        work = cv2.resize(work, None, fx=k, fy=k, interpolation=cv2.INTER_CUBIC)
+    out = path.with_name(path.stem + ("_crop.png" if box else "_prep.png"))   # без потерь: JPEG размывает подписи
+    cv2.imencode(".png", work)[1].tofile(str(out))
+    return out, bool(box)
 
 
 def scaled(path, k, suffix):
@@ -1089,6 +1166,21 @@ def scaled(path, k, suffix):
     out = path.with_name(path.stem + suffix + ".png")   # без потерь, как и prepare()
     cv2.imencode(".png", big)[1].tofile(str(out))
     return out
+
+
+def _incomplete(out):
+    """Документ не узнан или не дочитаны его главные поля."""
+    f, t = out["fields"], out["docType"]
+    need = {"PASSPORT_PHOTO": ("Фамилия", "Имя", "Дата рождения", "Серия и номер", "Дата выдачи", "Код подразделения"),
+            "PASSPORT_REG": ("Дата регистрации", "Адрес регистрации"),
+            "POA": ("Номер доверенности", "Дата выдачи")}
+    if t == "UNKNOWN":
+        return True
+    if t == "STS":
+        keys = ("Номер СТС", "Владелец") if out.get("side") == "back" else ("Госномер", "Номер СТС", "Марка")
+    else:
+        keys = need.get(t, ())
+    return any(not f.get(k) for k in keys)
 
 
 def _needs_upscale(out):
@@ -1121,7 +1213,7 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
     path = Path(path)
     sharp = sharpness(path)
     quality = int(round(min(100.0, 60.0 * sharp / SHARPNESS_MIN)))
-    work = prepare(path)
+    work, cropped = prepare(path)
     try:
         if mode == "accurate":
             # сразу точная модель, быстрый проход не нужен: две модели вместе
@@ -1146,6 +1238,19 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                 second = _analyze_lines(work, read_lines(work), quality, sharp)
                 if _score(second) > _score(out):
                     out = second
+        # документ вырезан с листа, но не узнан или главные поля не дочитаны: читаем и исходный кадр
+        # и добираем пустое — результат по вырезке чувствителен к масштабу (×2,39 и ×2,392 — разное)
+        if cropped and _incomplete(out):
+            whole, _ = prepare(path, crop=False)
+            try:
+                _mode = "fast" if mode == "fast" or LOW_MEMORY else "accurate"
+                out = _fill_gaps(out, _analyze_lines(whole, read_lines(whole), quality, sharp), margin=0.1)
+            finally:
+                if whole != path:
+                    try:
+                        os.unlink(whole)
+                    except OSError:
+                        pass
         # фото с телефона: документ занимает часть кадра, шрифт мелкий, защитный фон —
         # документ не узнан или поля не дочитаны → проход по кадру, увеличенному в 1,5 раза,
         # точной моделью (на странице регистрации ошибок в адресе стало 5 из 52 знаков вместо 20)
@@ -1158,6 +1263,22 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                 finally:
                     try:
                         os.unlink(big)
+                    except OSError:
+                        pass
+        # документ не узнан — возможно, снят вверх ногами (штамп прописки): ещё проход по развёрнутому кадру
+        if upscale_retry and out["docType"] == "UNKNOWN":
+            img = cv2.imdecode(np.fromfile(str(work), np.uint8), cv2.IMREAD_COLOR)
+            if img is not None:
+                flipped = work.with_name(work.stem + "_r180.png")
+                cv2.imencode(".png", cv2.rotate(img, cv2.ROTATE_180))[1].tofile(str(flipped))
+                try:
+                    _mode = "fast" if LOW_MEMORY or mode == "fast" else "accurate"
+                    second = _analyze_lines(flipped, read_lines(flipped), quality, sharp)
+                    if second["docType"] != "UNKNOWN":
+                        out = second
+                finally:
+                    try:
+                        os.unlink(flipped)
                     except OSError:
                         pass
     finally:
@@ -1353,6 +1474,19 @@ def drop_models():
 
 
 def analyze_subprocess(path, mode=None):
+    """Распознавание в отдельном процессе (мало памяти). Для «Проверить» (accurate): если точная
+    модель не узнала документ или не дочитала поля, ещё один процесс с лёгкой моделью добирает
+    пустое — на стенде 4 ГБ точная иногда теряла всё ФИО, а лёгкая читала его."""
+    out = _run_isolated(path, mode)
+    if mode == "accurate" and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
+        try:
+            out = _fill_gaps(out, _run_isolated(path, "fast"))
+        except RuntimeError:
+            pass
+    return out
+
+
+def _run_isolated(path, mode=None):
     """analyze() в отдельном короткоживущем процессе (Task 83, стенд 4 ГБ).
 
     Точная нейросеть (PP-OCRv5_server_det) вместе с быстрой и пулом инференса
@@ -1374,7 +1508,10 @@ def analyze_subprocess(path, mode=None):
             env["OCR_ACCURATE_MAX_SIDE"] = str(limit)
         # __file__ — сам engine.py (sys.argv[0] у сервера — server.py, он займет порт)
         args = [_sys.executable, _os.path.abspath(__file__), str(path), mode or "auto"]
-        return _sp.run(args, capture_output=True, text=True, timeout=290, env=env)
+        # вывод ребёнка — UTF-8 с обеих сторон: на Windows по умолчанию cp1251, и кириллица
+        # в JSON ломала чтение результата (паспорт падал, СТС читался с искажениями)
+        env["PYTHONIOENCODING"] = "utf-8"
+        return _sp.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=290, env=env)
 
     avail_mb = available_mb()
     if avail_mb >= 6000:
@@ -1388,8 +1525,12 @@ def analyze_subprocess(path, mode=None):
     last_err = "subprocess не вернул результат"
     for limit in attempts:
         run = run_child(limit)
+        if run.returncode in (137, -9):
+            # процесс убит системой из-за нехватки памяти — последняя строка stderr тут ни при чём
+            last_err = f"нехватка памяти: распознавание остановлено системой (OOM, кадр {limit} px)"
+            continue
         if run.returncode == 0:
-            lines = [l for l in run.stdout.splitlines() if l.startswith("###JSON###")]
+            lines = [l for l in (run.stdout or "").splitlines() if l.startswith("###JSON###")]
             if lines:
                 return _json.loads(lines[-1][len("###JSON###"):])
         if run.stderr:

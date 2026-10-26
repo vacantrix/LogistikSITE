@@ -57,7 +57,8 @@ export const TRAILER_LABELS: Record<string, string> = {
 }
 
 /** Черновики полей техники — общие для линии водителя и одиночных карточек (Task 48) */
-export type TruckDraft = { brand: string; plate: string; sts: string; color: string; owner: string }
+/** vin — необязательный: в форме «Авто в порт» его нет, но нейросеть читает его с СТС надёжнее всего */
+export type TruckDraft = { brand: string; plate: string; vin: string; sts: string; color: string; owner: string }
 export type TrailerDraft = { type: string; plate: string; sts: string; color: string; owner: string }
 
 /** Чем карточка занята: нейросеть заполняет (fast), проверяет (accurate) или тихо — из «Проверить все» (Task 83) */
@@ -128,6 +129,7 @@ function TruckFields({
     <div className={className}>
       <FieldInput id={`${prefix}-tb`} label="Марка, модель" placeholder="КАМАЗ 54901-CA" value={value.brand} conf={conf?.brand} invalid={miss(value.brand) || badF('brand')} disabled={lock} onChange={(v) => onChange('brand', v)} />
       <FieldInput id={`${prefix}-tp`} label="Госномер" placeholder="У783АХ152" value={value.plate} mono conf={conf?.plate} invalid={miss(value.plate) || badF('plate')} disabled={lock} onChange={(v) => onChange('plate', v)} />
+      <FieldInput id={`${prefix}-tv`} label="VIN" placeholder="17 знаков" value={value.vin} mono conf={conf?.vin} invalid={badF('vin')} disabled={lock} onChange={(v) => onChange('vin', v)} />
       <FieldInput id={`${prefix}-ts`} label="СТС" placeholder="99 17 454545" value={value.sts} mono conf={conf?.sts} invalid={miss(value.sts) || badF('sts')} disabled={lock} onChange={(v) => onChange('sts', v)} />
       <FieldInput id={`${prefix}-tc`} label="Цвет" placeholder="зелёный" value={value.color} conf={conf?.color} invalid={miss(value.color) || badF('color')} disabled={lock} onChange={(v) => onChange('color', v)} />
       <FieldInput id={`${prefix}-to`} label="Собственник" placeholder="ООО «Перевозчик Б»" value={value.owner} conf={conf?.owner} invalid={miss(value.owner) || badF('owner')} disabled={lock} onChange={(v) => onChange('owner', v)} />
@@ -831,6 +833,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   const [t, setT] = useState<TruckDraft>({
     brand: initial?.brand ?? '',
     plate: initial?.plate ?? '',
+    vin: initial?.vin ?? '',
     sts: initial?.sts ?? '',
     color: initial?.color ?? '',
     owner: initial?.owner ?? '',
@@ -873,7 +876,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   const lock = admitted !== null || busy !== null
 
   /** Правила «Авто в порт» по полям карточки тягача (Task 80/83) */
-  const fieldKinds: Record<keyof TruckDraft, PortFieldKind> = { brand: 'text', plate: 'plate', sts: 'sts', color: 'color', owner: 'text' }
+  const fieldKinds: Record<keyof TruckDraft, PortFieldKind> = { brand: 'text', plate: 'plate', vin: 'vin', sts: 'sts', color: 'color', owner: 'text' }
 
   /** Слить результат нейросети с ручным вводом: заполняются только пустые поля;
    * вернуть слитые значения и подсветить поля, нарушающие формат (Task 83) */
@@ -882,6 +885,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     const merged: TruckDraft = {
       brand: pick(t.brand, res.fields.brand),
       plate: pick(t.plate, res.fields.plate),
+      vin: pick(t.vin, res.fields.vin),
       sts: pick(t.sts, res.fields.sts),
       color: pick(t.color, res.fields.color),
       owner: pick(t.owner, res.fields.owner),
@@ -921,14 +925,14 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         return false
       }
       const { merged, bad } = mergeVehicle(res)
-      const filled = (['brand', 'plate', 'sts', 'color', 'owner'] as const).filter((k) => !t[k].trim() && merged[k].trim())
+      const filled = (['brand', 'plate', 'vin', 'sts', 'color', 'owner'] as const).filter((k) => !t[k].trim() && merged[k].trim())
       const badList = Object.values(bad)
       toast({
         title: filled.length === 0
           ? 'Нового прочитать не удалось'
           : badList.length > 0 ? 'Заполнено, но есть нарушения формата' : 'Карточка заполнена нейросетью',
         description: [
-          filled.length > 0 ? `Заполнено: ${filled.map((k) => TRUCK_LABELS[k]).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — лёгкая модель ничего не добавила',
+          filled.length > 0 ? `Заполнено: ${filled.map((k) => (k === 'vin' ? 'VIN' : TRUCK_LABELS[k])).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — лёгкая модель ничего не добавила',
           badList.length > 0 ? badList.join(' · ') : null,
         ].filter(Boolean).join(' · '),
         ...(badList.length > 0 ? { variant: 'destructive' as const } : {}),
@@ -1001,6 +1005,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         carrierId,
         brand: merged.brand.trim(),
         plate: merged.plate.trim(),
+        vin: merged.vin.trim(),
         sts: merged.sts.trim(),
         color: merged.color.trim(),
         owner: merged.owner.trim(),
@@ -1061,7 +1066,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
             conf={conf}
             bad={formatBad}
             onChange={setField}
-            className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5"
+            className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6"
           />
           {/* фото ТС и СТС — загрузка файлом или вставка Ctrl+V (Task 53) */}
           <SoloPhotos
