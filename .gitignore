@@ -62,3 +62,4 @@ server.log
 .zscripts/dev.pid
 !.env.example
 __pycache__/
+.venv/
