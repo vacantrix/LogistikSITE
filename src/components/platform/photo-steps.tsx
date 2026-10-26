@@ -3,26 +3,34 @@
 /**
  * Пошаговая загрузка фото документов: шаги открываются по порядку — пока не загружен
  * шаг 1, шаг 2 закрыт. Пока файл читается, на шаге заполняется кружок с процентами.
- * Карточка водителя: 1 — страница паспорта с фото, 2 — регистрация; техника: 1 — машина, 2 — СТС.
+ * Карточка водителя: 1 — страница паспорта с фото, 2 — регистрация; техника: 1 — машина,
+ * 2 — СТС лицевая, 3 — СТС оборот. Сразу после загрузки фото проверяется на размер, резкость
+ * и темноту (lib/photo-quality): плохой снимок помечается до нейросети.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, ImagePlus, Lock, X } from 'lucide-react'
+import { WithTip } from '@/components/platform/common'
 import { fileToCompressedDataUri, sleep } from '@/lib/demo-media'
+import { assessPhoto, type PhotoQuality } from '@/lib/photo-quality'
 
-export type StepFile = { fileName: string; dataUri: string }
+/** quality — проверка снимка при загрузке (размер, резкость, темнота) */
+export type StepFile = { fileName: string; dataUri: string; quality?: PhotoQuality }
 export type StepLoading<K extends string> = { key: K; progress: number } | null
 
 /** Кружок заполняется не быстрее этого — загрузку видно даже у мгновенно прочитанного файла */
 const MIN_RING_MS = 900
 
-/** Файлы шагов и загрузка одного файла с прогрессом; onError — файл не прочитался */
-export function useStepUploads<K extends string>(onError: () => void) {
+/** Файлы шагов и загрузка одного файла с прогрессом; onError — файл не прочитался,
+ * onWarn — снимок плохого качества (мелкий, размытый, тёмный) */
+export function useStepUploads<K extends string>(onError: () => void, onWarn?: (issues: string[]) => void) {
   const [files, setFiles] = useState<Partial<Record<K, StepFile>>>({})
   const [loading, setLoading] = useState<StepLoading<K>>(null)
   const busy = useRef(false)
   const onErrorRef = useRef(onError)
+  const onWarnRef = useRef(onWarn)
   useEffect(() => {
     onErrorRef.current = onError
+    onWarnRef.current = onWarn
   })
 
   /** Загружает файл в шаг; null — файл не прочитан или идёт другая загрузка */
@@ -36,11 +44,13 @@ export function useStepUploads<K extends string>(onError: () => void) {
     const tick = setInterval(() => setLoading({ key, progress: Math.min(real, (Date.now() - t0) / MIN_RING_MS) }), 40)
     try {
       const dataUri = await fileToCompressedDataUri(file, (share) => { real = share })
+      const quality = await assessPhoto(dataUri).catch(() => null)
       real = 1
       const rest = MIN_RING_MS - (Date.now() - t0)
       if (rest > 0) await sleep(rest + 80)
-      const up = { fileName: file.name || 'Фото', dataUri }
+      const up: StepFile = { fileName: file.name || 'Фото', dataUri, ...(quality ? { quality } : {}) }
       setFiles((cur) => ({ ...cur, [key]: up }))
+      if (quality?.issues.length) onWarnRef.current?.(quality.issues)
       return up
     } catch {
       onErrorRef.current()
@@ -141,7 +151,7 @@ export function PhotoSteps<K extends string>({
   )
 
   return (
-    <ol className="grid grid-cols-1 gap-2 sm:grid-cols-2" aria-label="Фотографии по шагам">
+    <ol className={`grid grid-cols-1 gap-2 ${steps.length >= 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`} aria-label="Фотографии по шагам">
       {steps.map((s, i) => {
         const file = files[s.key]
         const isLoading = loading?.key === s.key
@@ -149,10 +159,12 @@ export function PhotoSteps<K extends string>({
         const locked = !file && !isLoading && i > current
         const miss = showMiss && !file && !isLoading
         const t = file ? tone?.(s.key) ?? null : null
+        const poor = Boolean(file?.quality?.issues.length)
         const frame = isLoading
           ? 'border-blue-300 bg-blue-50/40'
           : file
-            ? t === 'ok' ? 'border-emerald-200 bg-emerald-50/40' : t === 'bad' ? 'border-red-200 bg-red-50/40' : 'border-slate-200 bg-slate-50/40'
+            ? t === 'ok' ? 'border-emerald-200 bg-emerald-50/40' : t === 'bad' ? 'border-red-200 bg-red-50/40'
+              : poor ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 bg-slate-50/40'
             : miss && !locked
               ? 'border-dashed border-red-400 bg-red-50/40'
               : active
@@ -168,7 +180,19 @@ export function PhotoSteps<K extends string>({
                   {miss && !locked && <span aria-hidden> — добавьте фото</span>}
                 </span>
               </span>
-              {file && !isLoading && badge?.(s.key)}
+              {file && !isLoading && (
+                <span className="flex shrink-0 items-center gap-1">
+                  {/* плохой снимок — значок, причины по наведению */}
+                  {poor && (
+                    <WithTip tip={`Может не распознаться: ${file.quality!.issues.join('; ')}. Лучше переснять.`}>
+                      <span tabIndex={0} className="rounded border border-amber-300 bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-800">
+                        Плохое фото
+                      </span>
+                    </WithTip>
+                  )}
+                  {badge?.(s.key)}
+                </span>
+              )}
             </div>
 
             {/* замена фото идёт с тем же кружком, что и первая загрузка */}

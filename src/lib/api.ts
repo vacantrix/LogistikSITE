@@ -140,7 +140,7 @@ export const api = {
 
   /** Распознавание СТС для карточек «Добавить ТС»/«Добавить прицеп» (Task 83):
    * mode "fast" — лёгкая нейросеть («Автозаполнение»), "accurate" — точная («Проверить») */
-  intakeVehicle: (body: { kind: 'truck' | 'trailer'; sts: { fileName: string; dataUri: string }; mode?: 'fast' | 'accurate' }) =>
+  intakeVehicle: (body: { kind: 'truck' | 'trailer'; sts?: { fileName: string; dataUri: string }; stsBack?: { fileName: string; dataUri: string }; mode?: 'fast' | 'accurate' }) =>
     fetch('/api/vehicles/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<VehicleIntakeResult>),
 
   /** Подсказки проформы водителя: адрес и место рождения — из карты, «Кем выдан» — по региону и базе */

@@ -19,7 +19,7 @@
  * и сама допускает карточку в базу аккаунта (идемпотентно, по паспорту)
  * или отклоняет. Одиночные карточки допускаются сразу после валидации полей и фото.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   BadgeCheck, CarFront, CircleAlert, IdCard, ScanLine, Sparkles, Truck, Trash2, X,
 } from 'lucide-react'
@@ -251,7 +251,8 @@ export default function DriverLine({
   const [addrGeo, setAddrGeo] = useState<Pick<Suggestion, 'region' | 'county'>>({})
   const readError = useCallback(() => toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' }), [toast])
   // фото по шагам: 1 — страница с фото, 2 — регистрация; пока файл читается — кружок с процентами
-  const { files: uploads, setFiles: setUploads, loading: uploading, load: loadUpload, remove: removeUpload } = useStepUploads<DocType>(readError)
+  const warnPhoto = useMemo(() => photoWarnToast(toast), [toast])
+  const { files: uploads, setFiles: setUploads, loading: uploading, load: loadUpload, remove: removeUpload } = useStepUploads<DocType>(readError, warnPhoto)
   const [verdicts, setVerdicts] = useState<Partial<Record<DocType, IntakeResult['documents'][number]>>>(EMPTY_VERDICTS)
   const [crossChecks, setCrossChecks] = useState<IntakeResult['crossChecks']>([])
   const [conf, setConf] = useState<Record<string, number>>({})
@@ -733,15 +734,28 @@ function SoloAdmitted({ title, label, kind, onRemove }: { title: string; label: 
 
 // ——— Фотографии одиночных карточек «ТС»/«Прицеп» (Task 53): загрузка файлом
 // или вставка из буфера обмена (Ctrl+V). Слоты обязательны и подсвечиваются
-// только после «Проверить» — ровно как поля. ———
+// только после «Проверить» — ровно как поля. СТС — две стороны: с лицевой нейросеть
+// читает марку, госномер, VIN, номер и цвет, с оборота — собственника; номер СТС
+// сверяется между сторонами. ———
 
-const SOLO_PHOTO_KEYS = ['vehicle', 'sts'] as const
+const SOLO_PHOTO_KEYS = ['vehicle', 'sts', 'stsBack'] as const
 type SoloPhotoKey = (typeof SOLO_PHOTO_KEYS)[number]
 type SoloPhoto = StepFile
 type SoloPhotoState = Partial<Record<SoloPhotoKey, SoloPhoto>>
 
-const TRUCK_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото тягача', sts: 'Фото СТС тягача' }
-const TRAILER_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото прицепа', sts: 'Фото СТС прицепа' }
+const TRUCK_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото тягача', sts: 'СТС тягача — лицевая', stsBack: 'СТС тягача — оборот' }
+const TRAILER_PHOTO_LABELS: Record<SoloPhotoKey, string> = { vehicle: 'Фото прицепа', sts: 'СТС прицепа — лицевая', stsBack: 'СТС прицепа — оборот' }
+
+/** С какой стороны СТС нейросеть читает поле карточки: собственник — с оборота */
+const VEHICLE_FIELD_SOURCE = (f: string): SoloPhotoKey => (f === 'owner' ? 'stsBack' : 'sts')
+
+/** Предупреждение о плохом снимке сразу после загрузки — до нейросети */
+function photoWarnToast(toast: ReturnType<typeof useToast>['toast']) {
+  return (issues: string[]) => toast({
+    title: 'Фото плохого качества',
+    description: `${issues.join(' · ')} — нейросеть может прочитать с ошибками, лучше переснять`,
+  })
+}
 
 /** Состояние фото одиночной карточки (по шагам, с кружком прогресса) + вставка скриншота
  * из буфера обмена (общее для ТС и прицепа) */
@@ -751,7 +765,8 @@ function useSoloPhotos(
   toast: ReturnType<typeof useToast>['toast'],
 ) {
   const readError = useCallback(() => toast({ title: 'Ошибка', description: 'Не удалось прочитать файл', variant: 'destructive' }), [toast])
-  const { files: photos, loading, load, remove } = useStepUploads<SoloPhotoKey>(readError)
+  const warn = useMemo(() => photoWarnToast(toast), [toast])
+  const { files: photos, setFiles, loading, load, remove } = useStepUploads<SoloPhotoKey>(readError, warn)
   const photosRef = useRef(photos)
   useEffect(() => {
     photosRef.current = photos
@@ -759,6 +774,12 @@ function useSoloPhotos(
 
   /** выбор файла в шаге (клик по плашке или «Заменить») */
   const pick = useCallback((k: SoloPhotoKey, file: File) => load(k, file), [load])
+
+  /** нейросеть узнала лицевую сторону и оборот СТС в чужих слотах — меняем фото местами */
+  const swapSts = useCallback(() => setFiles((cur) => {
+    const { sts, stsBack, ...rest } = cur
+    return { ...rest, ...(stsBack ? { sts: stsBack } : {}), ...(sts ? { stsBack: sts } : {}) }
+  }), [setFiles])
 
   // вставка изображения из буфера обмена (Ctrl+V): картинка занимает первый незагруженный шаг
   useEffect(() => {
@@ -785,10 +806,13 @@ function useSoloPhotos(
     return () => document.removeEventListener('paste', onPaste)
   }, [admitted, labels, load, toast])
 
-  return { photos, loading, pick, remove }
+  return { photos, loading, pick, remove, swapSts }
 }
 
-/** Фото одиночной карточки по шагам: 1 — машина, 2 — СТС */
+/** Пояснение к тосту: стороны СТС переложены нейросетью */
+const STS_SWAP_NOTE = 'Стороны СТС были перепутаны — фото переложены в свои слоты.'
+
+/** Фото одиночной карточки по шагам: 1 — машина, 2 — СТС лицевая, 3 — СТС оборот */
 function SoloPhotos({
   photos, loading, labels, showMiss, lock, onPick, onRemove,
 }: {
@@ -805,7 +829,7 @@ function SoloPhotos({
     <div className="mt-3">
       <div className="mb-1.5 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
         Фотографии
-        <InfoTip label="Как добавить фото">Загрузите файлом (JPG/PNG) или вставьте скриншот через Ctrl+V — по порядку шагов.</InfoTip>
+        <InfoTip label="Как добавить фото">Загрузите файлом (JPG/PNG) или вставьте скриншот через Ctrl+V — по порядку шагов. СТС — обе стороны: номер на них должен совпадать.</InfoTip>
       </div>
       <PhotoSteps
         steps={SOLO_PHOTO_KEYS.map((k) => ({ key: k, label: labels[k] }))}
@@ -822,7 +846,7 @@ function SoloPhotos({
 
 /**
  * Одиночная карточка «Добавить ТС» — пополняет базу одним тягачом, без водителя
- * и прицепа. Все 5 полей и 2 фото (Task 53 — загрузка файлом или вставка Ctrl+V)
+ * и прицепа. Все 6 полей и 3 фото (Task 53 — загрузка файлом или вставка Ctrl+V)
  * обязательны: подсветка незаполненного появляется только после «Проверить»
  * и гаснет при заполнении. Допуск после валидации (идемпотентно по госномеру).
  * Может принимать данные из Excel-строки (initial, Task 51).
@@ -846,8 +870,8 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   const [conf, setConf] = useState<Record<string, number>>({})
   /** поля, не прошедшие форматные правила «Авто в порт» (Task 80/83): ключ → сообщение */
   const [formatBad, setFormatBad] = useState<Record<string, string>>({})
-  // фото ТС (Task 53): файл или Ctrl+V — оба слота обязательны
-  const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRUCK_PHOTO_LABELS, admitted !== null, toast)
+  // фото ТС (Task 53): файл или Ctrl+V — все три слота обязательны
+  const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto, swapSts } = useSoloPhotos(TRUCK_PHOTO_LABELS, admitted !== null, toast)
 
   const tRef = useRef(t)
   useEffect(() => {
@@ -890,7 +914,8 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       color: pick(t.color, res.fields.color),
       owner: pick(t.owner, res.fields.owner),
     }
-    ai.note(t, merged, () => 'sts')
+    if (res.swapped) swapSts()
+    ai.note(t, merged, VEHICLE_FIELD_SOURCE)
     setT(merged)
     setConf(res.confidence as Record<string, number>)
     const bad: Record<string, string> = {}
@@ -902,26 +927,27 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     }
     setFormatBad(bad)
     return { merged, bad }
-  }, [t, ai])
+  }, [t, ai, swapSts])
 
-  /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает СТС и заполняет
-   * пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
+  /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает обе стороны СТС
+   * и заполняет пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
   const autofill = useCallback(async (): Promise<boolean> => {
     if (admitted || busy) return false
     setShowErrors(true)
-    if (!photos.sts) {
+    if (!photos.sts && !photos.stsBack) {
       toast({
         title: 'Требуется загрузить фото',
-        description: 'Добавьте фото: СТС тягача — нейросеть заполнит карточку по нему',
+        description: 'Добавьте фото СТС тягача (лицевая и оборот) — нейросеть заполнит карточку по ним',
         variant: 'destructive',
       })
       return false
     }
     setBusy('fill')
     try {
-      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, mode: 'fast' })
+      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, stsBack: photos.stsBack, mode: 'fast' })
       if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
-        toast({ title: 'СТС не распознано', description: res.message, variant: 'destructive' })
+        if (res.swapped) swapSts()
+        toast({ title: res.crossCheck?.ok === false ? 'Стороны от разных СТС' : 'СТС не распознано', description: [res.message, res.swapped ? STS_SWAP_NOTE : null].filter(Boolean).join(' · '), variant: 'destructive' })
         return false
       }
       const { merged, bad } = mergeVehicle(res)
@@ -934,6 +960,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         description: [
           filled.length > 0 ? `Заполнено: ${filled.map((k) => (k === 'vin' ? 'VIN' : TRUCK_LABELS[k])).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — лёгкая модель ничего не добавила',
           badList.length > 0 ? badList.join(' · ') : null,
+          res.swapped ? STS_SWAP_NOTE : null,
         ].filter(Boolean).join(' · '),
         ...(badList.length > 0 ? { variant: 'destructive' as const } : {}),
       })
@@ -944,7 +971,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     } finally {
       setBusy(null)
     }
-  }, [admitted, busy, photos.sts, mergeVehicle, t, toast])
+  }, [admitted, busy, photos.sts, photos.stsBack, mergeVehicle, swapSts, t, toast])
 
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
@@ -978,12 +1005,12 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     try {
       // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает СТС
       // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
-      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts!, mode: 'accurate' })
+      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, stsBack: photos.stsBack, mode: 'accurate' })
       const { merged, bad } = mergeVehicle(res)
 
       if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
         if (!quiet) {
-          toast({ title: 'СТС не прошло проверку', description: `${res.message} — замените фото или введите данные вручную`, variant: 'destructive' })
+          toast({ title: 'СТС не прошло проверку', description: `${res.message} — замените фото или введите данные вручную${res.swapped ? ` · ${STS_SWAP_NOTE}` : ''}`, variant: 'destructive' })
         }
         return false
       }
@@ -998,9 +1025,10 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       }
 
       // фото ТС сохраняются вместе с записью — предосмотр в «Справочниках» (Task 54)
+      const slots = res.swapped ? { ...photos, sts: photos.stsBack, stsBack: photos.sts } : photos
       const truckPhotos = SOLO_PHOTO_KEYS
-        .filter((k) => photos[k])
-        .map((k) => ({ label: TRUCK_PHOTO_LABELS[k], fileName: photos[k]!.fileName, dataUri: photos[k]!.dataUri }))
+        .filter((k) => slots[k])
+        .map((k) => ({ label: TRUCK_PHOTO_LABELS[k], fileName: slots[k]!.fileName, dataUri: slots[k]!.dataUri }))
       const post = await api.createDirectory('truck', {
         carrierId,
         brand: merged.brand.trim(),
@@ -1094,7 +1122,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
 
 /**
  * Одиночная карточка «Добавить прицеп» — пополняет базу одним прицепом, без
- * водителя и тягача. Все 5 полей (тип — Select) и 2 фото (Task 53 — загрузка
+ * водителя и тягача. Все 5 полей (тип — Select) и 3 фото (Task 53 — загрузка
  * файлом или вставка Ctrl+V) обязательны: подсветка только после «Проверить».
  * Допуск после валидации. Может принимать данные из Excel-строки (initial, Task 51).
  */
@@ -1116,8 +1144,8 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
   const [conf, setConf] = useState<Record<string, number>>({})
   /** поля, не прошедшие форматные правила «Авто в порт» (Task 80/83): ключ → сообщение */
   const [formatBad, setFormatBad] = useState<Record<string, string>>({})
-  // фото прицепа (Task 53): файл или Ctrl+V — оба слота обязательны
-  const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto } = useSoloPhotos(TRAILER_PHOTO_LABELS, admitted !== null, toast)
+  // фото прицепа (Task 53): файл или Ctrl+V — все три слота обязательны
+  const { photos, loading: photoLoading, pick: pickPhoto, remove: removePhoto, swapSts } = useSoloPhotos(TRAILER_PHOTO_LABELS, admitted !== null, toast)
 
   const trRef = useRef(tr)
   useEffect(() => {
@@ -1159,7 +1187,8 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       color: pick(tr.color, res.fields.color),
       owner: pick(tr.owner, res.fields.owner),
     }
-    ai.note(tr, merged, () => 'sts')
+    if (res.swapped) swapSts()
+    ai.note(tr, merged, VEHICLE_FIELD_SOURCE)
     setTr(merged)
     setConf(res.confidence as Record<string, number>)
     const bad: Record<string, string> = {}
@@ -1171,26 +1200,27 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     }
     setFormatBad(bad)
     return { merged, bad }
-  }, [tr, ai])
+  }, [tr, ai, swapSts])
 
-  /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает СТС и заполняет
-   * пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
+  /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает обе стороны СТС
+   * и заполняет пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
   const autofill = useCallback(async (): Promise<boolean> => {
     if (admitted || busy) return false
     setShowErrors(true)
-    if (!photos.sts) {
+    if (!photos.sts && !photos.stsBack) {
       toast({
         title: 'Требуется загрузить фото',
-        description: 'Добавьте фото: СТС прицепа — нейросеть заполнит карточку по нему',
+        description: 'Добавьте фото СТС прицепа (лицевая и оборот) — нейросеть заполнит карточку по ним',
         variant: 'destructive',
       })
       return false
     }
     setBusy('fill')
     try {
-      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, mode: 'fast' })
+      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, stsBack: photos.stsBack, mode: 'fast' })
       if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
-        toast({ title: 'СТС не распознано', description: res.message, variant: 'destructive' })
+        if (res.swapped) swapSts()
+        toast({ title: res.crossCheck?.ok === false ? 'Стороны от разных СТС' : 'СТС не распознано', description: [res.message, res.swapped ? STS_SWAP_NOTE : null].filter(Boolean).join(' · '), variant: 'destructive' })
         return false
       }
       const { merged, bad } = mergeVehicle(res)
@@ -1203,6 +1233,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
         description: [
           filled.length > 0 ? `Заполнено: ${filled.map((k) => TRAILER_LABELS[k]).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — лёгкая модель ничего не добавила',
           badList.length > 0 ? badList.join(' · ') : null,
+          res.swapped ? STS_SWAP_NOTE : null,
         ].filter(Boolean).join(' · '),
         ...(badList.length > 0 ? { variant: 'destructive' as const } : {}),
       })
@@ -1213,7 +1244,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     } finally {
       setBusy(null)
     }
-  }, [admitted, busy, photos.sts, mergeVehicle, tr, toast])
+  }, [admitted, busy, photos.sts, photos.stsBack, mergeVehicle, swapSts, tr, toast])
 
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
@@ -1247,12 +1278,12 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     try {
       // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает СТС
       // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
-      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts!, mode: 'accurate' })
+      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, stsBack: photos.stsBack, mode: 'accurate' })
       const { merged, bad } = mergeVehicle(res)
 
       if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
         if (!quiet) {
-          toast({ title: 'СТС не прошло проверку', description: `${res.message} — замените фото или введите данные вручную`, variant: 'destructive' })
+          toast({ title: 'СТС не прошло проверку', description: `${res.message} — замените фото или введите данные вручную${res.swapped ? ` · ${STS_SWAP_NOTE}` : ''}`, variant: 'destructive' })
         }
         return false
       }
@@ -1267,9 +1298,10 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       }
 
       // фото прицепа сохраняются вместе с записью — предосмотр в «Справочниках» (Task 54)
+      const slots = res.swapped ? { ...photos, sts: photos.stsBack, stsBack: photos.sts } : photos
       const trailerPhotos = SOLO_PHOTO_KEYS
-        .filter((k) => photos[k])
-        .map((k) => ({ label: TRAILER_PHOTO_LABELS[k], fileName: photos[k]!.fileName, dataUri: photos[k]!.dataUri }))
+        .filter((k) => slots[k])
+        .map((k) => ({ label: TRAILER_PHOTO_LABELS[k], fileName: slots[k]!.fileName, dataUri: slots[k]!.dataUri }))
       const post = await api.createDirectory('trailer', {
         carrierId,
         type: merged.type || TRAILER_TYPES[0],

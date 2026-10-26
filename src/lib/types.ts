@@ -421,6 +421,10 @@ export interface VehicleIntakeResult {
   confidence: Partial<Record<'brand' | 'plate' | 'vin' | 'sts' | 'color' | 'owner', number>>
   /** проблемы: вердикт движка + форматные правила «Авто в порт» */
   issues: string[]
+  /** лицевая сторона и оборот были загружены не в свои слоты — фото нужно поменять местами */
+  swapped?: boolean
+  /** сверка номера СТС между сторонами (null — одна сторона или номер не прочитан) */
+  crossCheck?: { ok: boolean; detail: string } | null
 }
 
 /** Итог сохранения нового водителя */
