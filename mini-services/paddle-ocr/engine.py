@@ -4,6 +4,8 @@ PaddleOCR (три нейросети: поиск строк, ориентаци�
 Дальше обычный код: тип документа по ключевым словам, поля по шаблону и независимые
 подтверждения, которые видны на самом документе (копии номера на полях паспорта,
 латинская строка ВУ, повторное чтение категорий, срок ВУ = выдача + 10 лет).
+Свободный текст (место рождения, «Кем выдан», адрес, имя, отчество) сверяется со словарём
+(lexicon.py, см. lex_fix); наклонённое, снятое боком или вверх ногами фото выпрямляется.
 
 Правила проверки (сверка с заявкой, пороги, статусы) — на платформе (src/lib/verify.ts):
 сервис получает только фото и ничего не знает о заявке.
@@ -55,6 +57,10 @@ ACCURATE_MAX_SIDE = int(os.environ.get("OCR_ACCURATE_MAX_SIDE", "1600"))
 # (OOM-killer, exit 137 на фото 1500×2100 при ~1,8 ГБ свободных): детекция — на кадре до этого лимита,
 # сами строки читаются с исходного фото, поля те же
 FAST_DET_LIMIT = int(os.environ.get("OCR_DET_FAST_LIMIT", "736"))
+# …но на 736 px паспорт на листе А4 не узнаётся вовсе. Повторный проход (документ не узнан или поля
+# не дочитаны) ищет строки на кадре до 1216 px. Замер пика памяти процесса на фото 1440×1920:
+# 736 px — 0,44 ГБ, 1216 px — 0,64 ГБ, без лимита — 1,1 ГБ; строк на 1216 находится больше всего
+FAST_DET_RETRY_LIMIT = int(os.environ.get("OCR_DET_FAST_RETRY_LIMIT", "1216"))
 
 
 def available_mb():
@@ -138,6 +144,7 @@ def add_years(d, n):
 
 _ocr = {}
 _mode = "fast"
+_det_limit = None   # лимит кадра поиска строк лёгкой моделью на этот проход (None — FAST_DET_LIMIT)
 
 # признаки известных документов: если на фото нет ни одного, точный повторный проход не нужен —
 # это другая страница (военный учёт, семейное положение, оборот ВУ), её отправят на перезагрузку
@@ -190,6 +197,147 @@ def greedy(probs, chars, allowed=None):
     return "".join(chars[i] for i in idx[keep]), (float(mx[keep].mean()) if keep.any() else 0.0)
 
 
+# ---------------- словарная правка: «ВАРНАУЛ» → «БАРНАУЛ», «ФОРОДА» → «ГОРОДА» ----------------
+# Слово не из словаря меняется на близкое словарное (1–2 буквы), только если нейросеть сама допускала
+# такое чтение: правдоподобие строки с новым словом по выходу CTC хуже исходного не больше чем на
+# LEX_TAU (натуральный логарифм). Уверенно прочитанное редкое слово (фамилия, улица не из списка)
+# остаётся как есть: замена букв, в которых нейросеть уверена, стоит десятки единиц.
+LEX_TAU = float(os.environ.get("OCR_LEX_TAU", "4.5"))   # ошибки чтения: 0…3,8; верные редкие слова: от 5,7
+LEX_WORD_RE = re.compile(r"[А-ЯЁ]+(?:-[А-ЯЁ]+)*")
+# сокращения, слипающиеся с соседним словом: «ТУАПСЕУЛ» → «ТУАПСЕ УЛ», «ГТУАПСЕ» → «Г ТУАПСЕ»
+LEX_SHORT = ("Г", "С", "П", "Д", "Х", "УЛ", "КВ", "ПР", "РН")
+_lex_index = {}
+_lex_by_len = {}
+
+
+def ctc_logp(lp, pos, text):
+    """log P(text | выход CTC): сумма по всем выравниваниям (прямой проход), пустой символ — индекс 0.
+    lp — логарифмы вероятностей [шаги × символы], pos — индекс символа. None — символа нет в модели."""
+    if not text:
+        return float(lp[:, 0].sum())
+    try:
+        ext = [0]
+        for c in text:
+            ext += [pos[c], 0]
+    except KeyError:
+        return None
+    ext = np.array(ext)
+    S = len(ext)
+    skip = np.zeros(S, bool)
+    skip[2:] = (ext[2:] != 0) & (ext[2:] != ext[:-2])
+    a = np.full(S, -np.inf)
+    a[0] = lp[0, ext[0]]
+    a[1] = lp[0, ext[1]] if S > 1 else -np.inf
+    for t in range(1, lp.shape[0]):
+        a1 = np.concatenate(([-np.inf], a[:-1]))
+        a2 = np.where(skip, np.concatenate(([-np.inf, -np.inf], a[:-2])), -np.inf)
+        a = np.logaddexp(np.logaddexp(a, a1), a2) + lp[t, ext]
+    return float(np.logaddexp(a[-1], a[-2]) if S > 1 else a[-1])
+
+
+def _lev(a, b):
+    d = list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        prev, d[0] = d[0], i
+        for j in range(1, len(b) + 1):
+            prev, d[j] = d[j], min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] != b[j - 1]))
+    return d[len(b)]
+
+
+def _deletes(w):
+    return {w[:i] + w[i + 1:] for i in range(len(w))}
+
+
+def lex_words(kind):
+    from lexicon import LEXICON
+    return LEXICON[kind]
+
+
+def lex_near(word, kind, maxd):
+    """Словарные слова не дальше maxd правок (индекс удалений: замена, вставка, пропуск буквы)."""
+    idx = _lex_index.get(kind)
+    if idx is None:
+        idx = {}
+        for w in lex_words(kind):
+            for k in {w} | _deletes(w):
+                idx.setdefault(k, set()).add(w)
+        _lex_index[kind] = idx
+    found = set()
+    for k in {word} | _deletes(word):
+        found |= idx.get(k, set())
+    near = [w for w in found if w != word and _lev(w, word) <= maxd]
+    if maxd >= 2 and len(word) >= 6:
+        # две замены букв («МАЯКОЕСКОТО» → «МАЯКОВСКОГО»): индекс удалений их не находит — сверяем
+        # со словами той же длины
+        if kind not in _lex_by_len:
+            _lex_by_len[kind] = {}
+            for w in lex_words(kind):
+                _lex_by_len[kind].setdefault(len(w), []).append(w)
+        near += [w for w in _lex_by_len[kind].get(len(word), ())
+                 if w not in found and sum(a != b for a, b in zip(w, word)) <= 2]
+    return near
+
+
+def _part_cands(part, kind, words):
+    """Варианты части слипшегося слова: короткая — сокращение (одна буква — без ошибок, две — одна замена)."""
+    if len(part) <= 2:
+        return [a for a in LEX_SHORT if len(a) == len(part) and sum(x != y for x, y in zip(a, part)) <= len(part) - 1]
+    return [part] if part in words else lex_near(part, kind, 1)
+
+
+def _lex_probs(line):
+    """Выход CTC строки с голосами латинских и цифровых двойников, отданными русским буквам."""
+    probs, chars = line["probs"]
+    pos = {c: k for k, c in enumerate(chars)}
+    p = probs.copy()
+    for lat, rus in TWINS:
+        if lat in pos and rus in pos:
+            p[:, pos[rus]] += probs[:, pos[lat]]
+    return np.log(np.clip(p, 1e-12, None)), pos
+
+
+def lex_fix(text, line, kind):
+    """Правка слов строки по словарю kind (place, issuer, address, name, patronymic).
+    text — прочитанное с этой строки (тот же выход CTC); без выхода CTC строка не меняется."""
+    if not text or not line or not line.get("probs"):
+        return text
+    words = lex_words(kind)
+    lp, pos = _lex_probs(line)
+    base = re.sub(r"(?<=[А-Я])[306]|[306](?=[А-Я]{2})", lambda m: m.group(0).translate(DIGIT_TWINS),
+                  cyr(text).replace("Ё", "Е"))
+    base_score = ctc_logp(lp, pos, base)
+    if base_score is None:
+        return text
+    out = base
+    for m in reversed(list(LEX_WORD_RE.finditer(base))):
+        w = m.group(0)
+        if w in words or len(w) < 4:
+            continue
+        cands = lex_near(w, kind, 1 if len(w) <= 5 else 2)
+        if len(w) <= 5:
+            cands = [c for c in cands if len(c) == len(w)]   # короткое слово: только замена буквы
+        if len(w) >= 6:
+            # два слова, слипшиеся в одно: «ФОРОДАВАРНАУЛА» → «ГОРОДА БАРНАУЛА», «ТУАПСЕУЙ» → «ТУАПСЕ УЛ»
+            for i in range(1, len(w)):
+                left, right = w[:i], w[i:]
+                if min(len(left), len(right)) < 3 and kind not in ("address", "place"):
+                    continue
+                ls = _part_cands(left, kind, words)
+                rs = _part_cands(right, kind, words) if ls else []
+                cands += [f"{a} {b}" for a in ls[:5] for b in rs[:5]]
+        best, best_score = None, -np.inf
+        for c in cands:
+            variants = (c, c.replace(" ", "")) if " " in c else (c,)
+            for v in variants:
+                s = ctc_logp(lp, pos, out[:m.start()] + v + out[m.end():])
+                if s is not None and s > best_score:
+                    best, best_score = c, s
+        cur = ctc_logp(lp, pos, out)
+        if best and cur is not None and best_score > cur - LEX_TAU:
+            out = out[:m.start()] + best + out[m.end():]
+    return out
+
+
 def get_ocr(mode=None):
     """mode: fast — быстрая модель поиска текста, accurate — точная (медленнее в 3–5 раз).
 
@@ -220,22 +368,116 @@ def read_lines(path):
     if _mode == "accurate":
         limit = {"text_det_limit_side_len": ACCURATE_MAX_SIDE, "text_det_limit_type": "max"}
     elif LOW_MEMORY:
-        limit = {"text_det_limit_side_len": FAST_DET_LIMIT, "text_det_limit_type": "max"}
+        limit = {"text_det_limit_side_len": _det_limit or FAST_DET_LIMIT, "text_det_limit_type": "max"}
     else:
         limit = {}
     res = ocr.predict(str(path), **limit)[0]
     decoded = [(*greedy(p[b], chars), p[b], chars) for p, chars in _PROBS for b in range(p.shape[0])]
+    angles = list(res.get("textline_orientation_angles") or [])
+    if len(angles) != len(res["rec_texts"]):
+        angles = [None] * len(res["rec_texts"])
     lines = []
-    for text, score, poly in zip(res["rec_texts"], res["rec_scores"], res["rec_polys"]):
+    for text, score, poly, angle in zip(res["rec_texts"], res["rec_scores"], res["rec_polys"], angles):
         p = np.array(poly, dtype=float)
         x0, y0 = p.min(axis=0)
         x1, y1 = p.max(axis=0)
         hit = next((d for d in decoded if d[0] == text and abs(d[1] - score) < 1e-3), None)
         lines.append({"text": text, "conf": float(score), "x0": x0, "y0": y0, "x1": x1, "y1": y1,
                       "cx": (x0 + x1) / 2, "cy": (y0 + y1) / 2, "w": x1 - x0, "h": y1 - y0,
-                      "probs": (hit[2], hit[3]) if hit else None})
+                      "probs": (hit[2], hit[3]) if hit else None, "poly": p, "img_box": (x0, y0, x1, y1),
+                      "angle": None if angle is None else int(angle)})
+    deskew_lines(lines)
     lines.sort(key=lambda l: (l["cy"], l["x0"]))
     return lines
+
+
+def page_turn(lines):
+    """Как повернуть кадр, чтобы страница стояла прямо (код cv2.rotate), или None.
+    Фото боком: строки вертикальные — сторону поворота голосуют строки по классификатору ориентации
+    (PaddleOCR поворачивает высокую вырезку против часовой: «0» — кадр повёрнут по часовой).
+    Вверх ногами: большинство горизонтальных строк классификатор переворачивает на 180°."""
+    long = [l for l in lines if len(l["text"].strip()) >= 4 and l.get("angle") is not None]
+    if len(long) < 4:
+        return None
+    wt = lambda l: len(l["text"].strip()) * max(l["conf"], 0.1)
+    vert = [l for l in long if l["h"] > 2 * l["w"]]
+    hor = [l for l in long if l["w"] > 2 * l["h"]]
+    sv, sh = sum(map(wt, vert)), sum(map(wt, hor))
+    if sv > 1.5 * sh:
+        up = sum(wt(l) for l in vert if l["angle"] == 0)
+        return cv2.ROTATE_90_COUNTERCLOCKWISE if up >= sv / 2 else cv2.ROTATE_90_CLOCKWISE
+    if sh > 0 and sum(wt(l) for l in hor if l["angle"] == 1) > 0.65 * sh:
+        return cv2.ROTATE_180
+    return None
+
+
+def read_upright(work, source):
+    """Первое чтение кадра; снятую боком или вверх ногами страницу поворачиваем и читаем ещё раз.
+    Возвращает (строки, кадр, повороты): повёрнутый кадр — новый временный файл (исходный work,
+    если он временный, удаляется); повороты нужны, чтобы так же повернуть кадр целиком."""
+    lines = read_lines(work)
+    turns = []
+    for _ in range(2):   # боком → прямо, и если угадали сторону неверно — ещё на 180°
+        turn = page_turn(lines)
+        if turn is None:
+            break
+        img = cv2.imdecode(np.fromfile(str(work), np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            break
+        turned = work.with_name(work.stem + f"_t{len(turns)}.png")
+        cv2.imencode(".png", cv2.rotate(img, turn))[1].tofile(str(turned))
+        if work != source:
+            try:
+                os.unlink(work)
+            except OSError:
+                pass
+        work = turned
+        turns.append(turn)
+        lines = read_lines(work)
+        if turn == cv2.ROTATE_180:
+            break
+    return lines, work, turns
+
+
+def turned_copy(path, turns, suffix):
+    """Копия кадра с теми же поворотами, что у основного (read_upright), или сам path."""
+    if not turns:
+        return path
+    img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
+    for t in turns:
+        img = cv2.rotate(img, t)
+    out = path.with_name(path.stem + suffix + ".png")
+    cv2.imencode(".png", img)[1].tofile(str(out))
+    return out
+
+
+def deskew_lines(lines):
+    """Наклонённое фото (телефон в руке): координаты строк поворачиваются так, чтобы строки шли
+    горизонтально. Иначе у длинной наклонной строки центр оказывается ниже соседней короткой и строки
+    штампа меняются местами («Р-Н ЛЕНИНСКИЙ, СВЕРДЛОВСКАЯ ОБЛ.»). Сами строки уже прочитаны по
+    выпрямленным вырезкам; вырезки с фото (код подразделения, номер на полях) — по img_box."""
+    angles = [np.degrees(np.arctan2(*(l["poly"][1] - l["poly"][0])[::-1]))
+              for l in lines if l["w"] > 3 * l["h"] and len(l["text"].strip()) >= 4]
+    if len(angles) < 3:
+        return
+    a = float(np.median(angles))
+    if abs(a) < 1.0 or abs(a) > 30.0:
+        return
+    t = np.radians(-a)
+    c, s = np.cos(t), np.sin(t)
+    pts = np.concatenate([l["poly"] for l in lines])
+    o = (pts.min(axis=0) + pts.max(axis=0)) / 2
+    for l in lines:
+        q = (l["poly"] - o) @ np.array([[c, s], [-s, c]]) + o
+        x0, y0 = q.min(axis=0)
+        x1, y1 = q.max(axis=0)
+        l.update(x0=x0, y0=y0, x1=x1, y1=y1, cx=(x0 + x1) / 2, cy=(y0 + y1) / 2, w=x1 - x0, h=y1 - y0)
+
+
+def img_box(l):
+    """Рамка строки на самом фото (до выпрямления координат в deskew_lines): для вырезок."""
+    x0, y0, x1, y1 = l.get("img_box") or (l["x0"], l["y0"], l["x1"], l["y1"])
+    return {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "cx": (x0 + x1) / 2, "cy": (y0 + y1) / 2, "w": x1 - x0, "h": y1 - y0}
 
 
 def sharpness(path):
@@ -289,9 +531,22 @@ def right_of(lines, anchor):
     return row[0] if row else None
 
 
+def label_like(text, word):
+    """Мелкая подпись бланка, прочитанная с ошибкой: «Meero» — «МЕСТО», «рожления» — «РОЖДЕНИЯ».
+    word — подпись целиком; совпадение начала слова или не больше 1 ошибки (2 — у слов от 5 букв)."""
+    t = cyr(text).replace("Ё", "Е")
+    if word[:max(4, len(word) - 2)] in t:   # «МЕСТ», «РОЖДЕН» — как раньше
+        return True
+    maxd = 2 if len(word) >= 5 else 1
+    return any(abs(len(tok) - len(word)) <= 1 and _lev(tok, word) <= maxd for tok in re.findall(r"[А-Я0-9]+", t))
+
+
 def near_label(lines, word, pred, up=4.0, down=1.5):
-    """Значение у мелкой подписи паспорта: правее подписи и чуть выше неё."""
-    lab = next((l for l in lines if word.upper() in cyr(l["text"])), None)
+    """Значение у мелкой подписи паспорта: правее подписи и чуть выше неё.
+    word — начало подписи («мест») или подпись целиком в верхнем регистре («МЕСТО») — тогда
+    подпись узнаётся и прочитанной с ошибкой."""
+    exact = word.isupper()
+    lab = next((l for l in lines if (label_like(l["text"], word) if exact else word.upper() in cyr(l["text"]))), None)
     if not lab:
         return None
     c = [l for l in lines if l is not lab and l["x0"] > lab["x0"] + 2 * lab["h"] and
@@ -318,7 +573,7 @@ def field(value, src):
 def ru_field(src, value):
     """Поле ФИО: буквы заново выбираются только среди русских (см. RUSSIAN_ONLY). Цифры, похожие
     на буквы («3ЕБКИН»), переносят свой голос на русскую букву. Если значение — хвост строки после
-    номера подписи («1. ЗЕБКИН»), перечитываем всю строку и берём буквенную часть."""
+    номера подписи («1. ИВАНОВ»), перечитываем всю строку и берём буквенную часть."""
     f = field(cyr(value).translate(DIGIT_TWINS) if value else None, src)
     if RUSSIAN_ONLY and src and src.get("probs") and value and value.strip() in src["text"]:
         text, score = greedy(*src["probs"], allowed=RUSSIAN)
@@ -342,8 +597,9 @@ def reread_code(path, f):
     if not l:
         return f
     img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
-    pad = int(0.4 * l["h"])
-    crop = img[max(0, int(l["y0"]) - pad):int(l["y1"]) + pad, max(0, int(l["x0"]) - pad):int(l["x1"]) + pad]
+    b = img_box(l)
+    pad = int(0.4 * b["h"])
+    crop = img[max(0, int(b["y0"]) - pad):int(b["y1"]) + pad, max(0, int(b["x0"]) - pad):int(b["x1"]) + pad]
     if crop.size == 0:
         return f
     big = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
@@ -367,7 +623,7 @@ def read_margin_number(path, lines):
     if not vertical:
         return []
     img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
-    x0, x1 = int(min(l["x0"] for l in vertical)), int(max(l["x1"] for l in vertical))
+    x0, x1 = int(min(img_box(l)["x0"] for l in vertical)), int(max(img_box(l)["x1"] for l in vertical))
     pad = int(0.6 * (x1 - x0))
     col = img[:, max(0, x0 - pad):min(img.shape[1], x1 + pad)]
     best = []
@@ -526,8 +782,11 @@ def issued_by(lines, f):
              and l["text"] == l["text"].upper()]
     if not parts:
         return field(None, None)
-    parts.sort(key=lambda l: (round(l["cy"] / max(l["h"], 1)), l["x0"]))
-    return field(fix_letters(re.sub(r"\s+", " ", cyr(" ".join(l["text"] for l in parts))).strip()), min(parts, key=lambda l: l["conf"]))
+    # по рядам сверху вниз, в ряду — слева направо (округление cy/h ставило соседние строки разной
+    # высоты в один ряд: «ПО ГОР. МОСКВЕ … ОТДЕЛОМ УФМС РОССИИ»)
+    parts = [l for r in rows_of(parts) for l in r]
+    text = " ".join(lex_fix(cyr(l["text"]), l, "issuer") for l in parts)
+    return field(fix_letters(re.sub(r"\s+", " ", text).strip()), min(parts, key=lambda l: l["conf"]))
 
 
 # «ГОР.» нейросеть путает с похожими по начертанию «ФОП», «ФОР», «ГОП», «ТОР»
@@ -535,12 +794,36 @@ SETTLEMENT_FIXES = re.compile(r"(^|\s)(?:ФОП|ФОР|ГОП|ТОР|Г0Р|ГО�
 
 
 def fix_letters(value):
-    """«КОJIОМНА» → «КОЛОМНА»: «Л» нейросеть часто читает как латинские «JI»."""
-    return value.replace("JI", "Л") if value else value
+    """«КОJIОМНА» → «КОЛОМНА»: «Л» нейросеть часто читает как латинские «JI»; «УI» — «УЛ»."""
+    if not value:
+        return value
+    return re.sub(r"(?<![А-ЯA-Z])У[IІl|](?![А-ЯA-Z])", "УЛ", value.replace("JI", "Л"))
+
+
+# обрывок перед названием: «Г.», прочитанное как «F», греческая «Γ», «r»; «С.», «П.»
+PREFIX_SHAPES = ((re.compile(r"^(?:ГОР|ТОР|ФОР)[.,]?$"), "ГОР."), (re.compile(r"^[ГΓFTr][.,:]?$"), "Г."),
+                 (re.compile(r"^[СC][.,]$"), "С."), (re.compile(r"^П[.,]$"), "П."), (re.compile(r"^ПОС[.,]?$"), "ПОС."))
+# сокращение без точки: «Г ТУАПСЕ» → «Г. ТУАПСЕ»
+ABBR_NO_DOT = re.compile(r"(^|\s)(Г|С|П|Д|Х|ПОС|ДЕР|УЛ|КВ)\s+(?=[А-Я0-9])")
+
+
+def settlement_prefix(lines, place):
+    """Короткий обрывок слева от названия в той же строке — сокращение «Г.», «С.», «П.» или ""."""
+    near = [l for l in lines if l is not place and abs(l["cy"] - place["cy"]) < 0.6 * max(l["h"], place["h"])
+            and place["x0"] - 3 * place["h"] < l["x1"] <= place["x0"] + 0.3 * place["h"] and len(l["text"].strip()) <= 4]
+    for l in sorted(near, key=lambda l: -l["x1"]):
+        t = l["text"].strip().upper().translate(LAT2CYR)
+        for shape, value in PREFIX_SHAPES:
+            if shape.match(t) or shape.match(l["text"].strip()):
+                return value
+    return ""
 
 
 def fix_settlement(value):
-    return SETTLEMENT_FIXES.sub(lambda m: m.group(1) + "ГОР. ", value).strip() if value else value
+    if not value:
+        return value
+    value = SETTLEMENT_FIXES.sub(lambda m: m.group(1) + "ГОР. ", value).strip()
+    return ABBR_NO_DOT.sub(lambda m: f"{m.group(1)}{m.group(2)}. ", value)
 
 
 def above_value(lines, anchor, pred, rows=6.0):
@@ -573,18 +856,37 @@ def extract_passport(path, lines):
              and abs(l["cx"] - top["cx"]) < 0.8 * max(l["w"], top["w"]) and is_upper_word(l["text"]) and not re.search(r"\d", l["text"])]
         v = min(c, key=lambda l: abs(l["cy"] - (top["cy"] + bottom["cy"]) / 2)) if c else None
         f["name"] = ru_field(v, v["text"] if v else None)
-    place = near_label(lines, "мест", lambda t: bool(re.search(r"[А-ЯЁ]{3}", cyr(t))) and not DATE_RE.search(t) and t.upper() == t, up=2.0, down=3.0)
+    if not all(f[k]["value"] for k in ("surname", "name", "patronymic")):
+        # подписи «Фамилия», «Имя», «Отчество» прочитаны неузнаваемо («2», «HME»): ФИО — три строки
+        # заглавными в столбце значений над строкой «МУЖ./ЖЕН.» и датой рождения
+        sex = next((l for l in lines if re.search(r"МУЖ|ЖЕН", cyr(l["text"]))), None)
+        if sex:
+            row = [l for l in lines if DATE_RE.search(l["text"]) and abs(l["cy"] - sex["cy"]) < 1.5 * sex["h"]]
+            ref = max(row, key=lambda l: l["w"]) if row else sex
+            col = sorted((l for l in lines if 0.5 * sex["h"] < sex["cy"] - l["cy"] < 12 * sex["h"]
+                          and ref["x0"] - 2 * ref["h"] < l["cx"] < ref["x1"] and is_upper_word(l["text"])
+                          and not re.search(r"\d|РОССИЙ|ФЕДЕРАЦ|ПАСПОРТ", cyr(l["text"]))), key=lambda l: l["cy"])
+            if len(col) >= 3:
+                for key, l in zip(("surname", "name", "patronymic"), col[-3:]):
+                    if not f[key]["value"]:
+                        f[key] = ru_field(l, l["text"])
+    # имя и отчество — из словаря имён («ИБАН» → «ИВАН»), если нейросеть допускала такое чтение
+    for key, kind in (("name", "name"), ("patronymic", "patronymic")):
+        if f[key]["value"] and f[key]["line"]:
+            f[key]["value"] = lex_fix(f[key]["value"], f[key]["line"], kind)
+    place = near_label(lines, "МЕСТО", lambda t: bool(re.search(r"[А-ЯЁ]{3}", cyr(t))) and not DATE_RE.search(t) and t.upper() == t, up=2.0, down=3.0)
     if not place:
         # «Дата рождения» и «Место рождения»: подпись «Место» мелкая и теряется — берём нижнюю «рождения»
-        labs = sorted((l for l in lines if "РОЖДЕН" in cyr(l["text"])), key=lambda l: -l["cy"])
+        labs = sorted((l for l in lines if label_like(l["text"], "РОЖДЕНИЯ")), key=lambda l: -l["cy"])
         ok = lambda t: bool(re.search(r"[А-ЯЁ]{3}", cyr(t))) and not DATE_RE.search(t) and t.upper() == t and not re.search(r"МУЖ|ЖЕН", cyr(t))
         for lab in labs:
             c = [l for l in lines if l is not lab and l["x0"] > lab["x0"] + lab["h"] and -2.5 * lab["h"] < l["cy"] - lab["cy"] < 1.5 * lab["h"] and ok(l["text"])]
             if c:
                 place = min(c, key=lambda l: abs(l["cy"] - lab["cy"]))
                 break
+    prefix = settlement_prefix(lines, place) if place else ""
     if place:
-        # место рождения бывает в две строки («Г. АБИНСК» / «КРАСНОДАРСКИЙ КРАЙ») — склеиваем столбец
+        # место рождения бывает в две строки («Г. ТУАПСЕ» / «КРАСНОДАРСКИЙ КРАЙ») — склеиваем столбец
         parts, cur = [place], place
         for _ in range(2):
             nxt = next((l for l in lines if l not in parts and 0 < l["cy"] - cur["cy"] < 1.8 * cur["h"]
@@ -601,8 +903,11 @@ def extract_passport(path, lines):
             raw = cyr(place["text"])
             if fix_settlement(raw) != raw:
                 f["birth_place"]["value"] = raw
+            f["birth_place"]["value"] = lex_fix(f["birth_place"]["value"], place, "place")
         else:
-            f["birth_place"] = field(cyr(" ".join(l["text"] for l in parts)), min(parts, key=lambda l: l["conf"]))
+            f["birth_place"] = field(" ".join(lex_fix(cyr(l["text"]), l, "place") for l in parts), min(parts, key=lambda l: l["conf"]))
+        if prefix and not re.match(r"^(Г|ГОР|С|П|ПОС|Д|ДЕР|Х|СТ-ЦА|РП|ПГТ)\b", f["birth_place"]["value"] or ""):
+            f["birth_place"]["value"] = f"{prefix} {f['birth_place']['value']}"
         f["birth_place"]["value"] = fix_settlement(f["birth_place"]["value"])
     else:
         f["birth_place"] = field(None, None)
@@ -704,6 +1009,7 @@ def reread_categories(path, lab):
     вправо, увеличиваем в 3 раза и читаем ещё раз; оставляем только обозначения категорий."""
     img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
     H, W = img.shape[:2]
+    lab = img_box(lab)
     h = lab["h"]
     x0, x1 = int(lab["x0"]), int(min(W, lab["x0"] + 30 * h))
     y0, y1 = int(max(0, lab["cy"] - 1.2 * h)), int(min(H, lab["cy"] + 1.2 * h))
@@ -1035,7 +1341,7 @@ def join_rows(rows):
 
 
 def fix_numbers(value):
-    """«Д. 11О» → «Д. 110»: буква О рядом с цифрами — ноль."""
+    """«Д. 1О» → «Д. 10»: буква О рядом с цифрами — ноль."""
     return re.sub(r"(?<=\d)[ОO]|[ОO](?=\d)", "0", value) if value else value
 
 
@@ -1070,6 +1376,19 @@ def labeled_address(text):
     return ", ".join(out) or None
 
 
+DEPARTMENT_WORDS = ("ОТДЕЛ", "ОТДЕЛОМ", "ОТДЕЛЕНИЕ", "ОТДЕЛЕНИЕМ", "ВОПРОСАМ", "МИГРАЦИИ", "ПАСПОРТНЫЙ", "ПАСПОРТНО-ВИЗОВОЙ")
+
+
+def is_department(text):
+    """Строка подразделения под адресом штампа — конец адреса. Узнаётся и прочитанная с ошибками:
+    «ОТАЕН ПО ВОПРОСАН ЕИГРАЦИИ», «УФМС», «ОМВД»."""
+    t = cyr(text).replace("Ё", "Е")
+    if re.search(r"ОТДЕ|МИГРАЦ|УФМС|[ОУ]?МВД|ОВД|ПВС", t):
+        return True
+    return any(_lev(tok, w) <= (1 if len(w) <= 6 else 2) for tok in re.findall(r"[А-Я-]{5,}", t) for w in DEPARTMENT_WORDS
+               if abs(len(tok) - len(w)) <= 1)
+
+
 def extract_registration(lines):
     f = {}
     head = next((l for l in lines if "ЗАРЕГИСТРИРОВАН" in l["text"].upper()), None)
@@ -1085,13 +1404,14 @@ def extract_registration(lines):
                 d = max(row, key=lambda l: l["cy"])
                 f["reg_date"] = field(value, min(row, key=lambda l: l["conf"]))
                 break
-    stop = next((l for l in lines if re.search(r"ОТДЕ|МИГРАЦ", l["text"].upper()) and (d is None or l["cy"] > d["cy"])), None)
+    stop = next((l for l in lines if is_department(l["text"]) and (d is None or l["cy"] > d["cy"])), None)
     addr = [l for l in lines if d and l["cy"] > d["cy"] + 0.5 * d["h"] and (stop is None or l["cy"] < stop["cy"] - 0.5 * stop["h"])
             and len(re.sub(r"[^А-ЯA-Zа-яa-z0-9]", "", l["text"])) >= 3]
     if addr:
         worst = min(addr, key=lambda l: l["conf"])
-        rows = [" ".join(l["text"] for l in r) for r in rows_of(addr)]
-        f["address"] = field(fix_letters(fix_numbers(labeled_address(" ".join(rows)) or join_rows(rows))), worst)
+        rows = [" ".join(lex_fix(cyr(l["text"]), l, "address") for l in r) for r in rows_of(addr)]
+        value = fix_letters(fix_numbers(labeled_address(" ".join(rows)) or join_rows(rows)))
+        f["address"] = field(ABBR_NO_DOT.sub(lambda m: f"{m.group(1)}{m.group(2)}. ", value), worst)
     else:
         f["address"] = field(None, None)
     v = next((l for l in lines if re.fullmatch(r"\d{3}-\d{3}", l["text"].strip())), None)
@@ -1200,9 +1520,14 @@ def _needs_upscale(out):
     if t == "UNKNOWN":
         return True
     if t == "PASSPORT_PHOTO":
-        return any(not f.get(k) for k in ("Фамилия", "Имя", "Отчество", "Дата рождения", "Серия и номер", "Дата выдачи", "Код подразделения"))
+        keys = ("Фамилия", "Имя", "Отчество", "Дата рождения", "Серия и номер", "Дата выдачи", "Код подразделения")
+        # экономия памяти: повтор — та же лёгкая модель на кадре до 1216 px (5–10 с), его не жалко
+        # и ради места рождения и «Кем выдан»
+        return any(not f.get(k) for k in keys + (("Место рождения", "Кем выдан") if LOW_MEMORY else ()))
     if t == "PASSPORT_REG":
-        return not f.get("Адрес регистрации") or c.get("Адрес регистрации", 0) < 0.6
+        # «5» вместо адреса — от адреса прочитан обрывок: тоже повтор
+        addr = f.get("Адрес регистрации") or ""
+        return len(re.findall(r"[А-ЯЁA-Z]", addr.upper())) < 8 or c.get("Адрес регистрации", 0) < 0.6
     if t == "STS" and out.get("side") == "front":
         return not f.get("Госномер") or not f.get("Номер СТС")
     return False
@@ -1218,7 +1543,7 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
       "accurate" — только точная модель (PP-OCRv5_server_det) — кнопка «Проверить»
                    (реальная проверка перед попаданием в базу);
       None       — прежнее поведение: быстрый проход + точный повтор, если поля не дочитаны."""
-    global _mode
+    global _mode, _det_limit
     from pathlib import Path
     path = Path(path)
     sharp = sharpness(path)
@@ -1229,7 +1554,7 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
             # сразу точная модель, быстрый проход не нужен: две модели вместе
             # + пул инференса — OOM на стенде 4 ГБ (Task 83, живые тесты)
             _mode = "accurate"
-            lines = read_lines(work)
+            lines, work, turns = read_upright(work, path)
             out = _analyze_lines(work, lines, quality, sharp)
             # памяти хватает на обе модели: что точная не дочитала, добираем лёгкой
             # (на реальном паспорте лёгкая находит дату выдачи и код подразделения, точная — нет)
@@ -1238,7 +1563,7 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                 out = _fill_gaps(out, _analyze_lines(work, read_lines(work), quality, sharp))
         else:
             _mode = "fast"
-            lines = read_lines(work)
+            lines, work, turns = read_upright(work, path)
             out = _analyze_lines(work, lines, quality, sharp)
             hinted = any(h in flat_text(lines) for h in DOC_HINTS)
             if mode == "fast":
@@ -1252,6 +1577,14 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
         # и добираем пустое — результат по вырезке чувствителен к масштабу (×2,39 и ×2,392 — разное)
         if cropped and _incomplete(out):
             whole, _ = prepare(path, crop=False)
+            if turns:
+                rotated = turned_copy(whole, turns, "_t")
+                if whole != path:
+                    try:
+                        os.unlink(whole)
+                    except OSError:
+                        pass
+                whole = rotated
             try:
                 _mode = "fast" if mode == "fast" or LOW_MEMORY else "accurate"
                 out = _fill_gaps(out, _analyze_lines(whole, read_lines(whole), quality, sharp), margin=0.1)
@@ -1269,8 +1602,10 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
             if big:
                 try:
                     _mode = "fast" if LOW_MEMORY and mode == "fast" else "accurate"
+                    _det_limit = FAST_DET_RETRY_LIMIT
                     out = _fill_gaps(out, _analyze_lines(big, read_lines(big), quality, sharp), margin=0.1)
                 finally:
+                    _det_limit = None
                     try:
                         os.unlink(big)
                     except OSError:

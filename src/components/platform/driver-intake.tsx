@@ -203,7 +203,28 @@ function useAiFields<F extends string, S extends string>() {
     return stale
   }, [])
 
-  return { note, takeStale }
+  /** Слить новое чтение с карточкой: пустые поля заполняются; при refine (точная нейросеть,
+   * «Проверить») заменяются и поля, которые заполнила лёгкая нейросеть и человек не правил —
+   * иначе ошибка «Автозаполнения» доживала бы до базы. refined — заменённые поля. */
+  const merge = useCallback(<T extends Record<F, string>>(cur: T, next: Partial<Record<F, string>>, refine: boolean, sourceOf: (f: F) => S) => {
+    const out = { ...cur }
+    const refined: F[] = []
+    for (const f of Object.keys(next) as F[]) {
+      const v = next[f]?.trim()
+      if (!v) continue
+      if (!cur[f].trim()) {
+        out[f] = v as T[F]
+      } else if (refine && v !== cur[f] && ref.current[f]?.value === cur[f]) {
+        out[f] = v as T[F]
+        refined.push(f)
+        ref.current[f] = { value: v, source: sourceOf(f) }
+      }
+    }
+    note(cur, out, sourceOf)
+    return { merged: out, refined }
+  }, [note])
+
+  return { note, takeStale, merge }
 }
 
 /** копия объекта без перечисленных ключей */
@@ -303,23 +324,22 @@ export default function DriverLine({
       setUploads(files)
     }
     const movedNote = moved.length > 0 ? 'Страницы паспорта были перепутаны местами — фото переложены в свои слоты.' : ''
-    const pick = (cur: string, next: string | undefined) => cur || next || ''
-    // заполняем ТОЛЬКО пустые поля — вручную введённое не затирается
-    const eff = {
-      ...d,
-      fullName: pick(d.fullName, res.driver.fullName),
-      birthDate: pick(d.birthDate, res.driver.birthDate),
-      passport: pick(d.passport, res.driver.passport),
-      passportIssuedDate: pick(d.passportIssuedDate, res.driver.passportIssuedDate),
-      citizenship: pick(d.citizenship, res.driver.citizenship),
-      passportIssuedBy: pick(d.passportIssuedBy, res.driver.passportIssuedBy),
-      birthPlace: pick(d.birthPlace, res.driver.birthPlace),
-      address: pick(d.address, res.driver.address),
-    }
-    ai.note(d, eff, DRIVER_FIELD_SOURCE)
+    // заполняем пустые поля; вручную введённое не затирается, а заполненное лёгкой нейросетью
+    // «Проверить» перечитывает точной
+    const { merged: eff, refined } = ai.merge(d, {
+      fullName: res.driver.fullName,
+      birthDate: res.driver.birthDate,
+      passport: res.driver.passport,
+      passportIssuedDate: res.driver.passportIssuedDate,
+      citizenship: res.driver.citizenship,
+      passportIssuedBy: res.driver.passportIssuedBy,
+      birthPlace: res.driver.birthPlace,
+      address: res.driver.address,
+    }, mode === 'accurate', DRIVER_FIELD_SOURCE)
     setD(eff)
     setConf(res.driver.confidence ?? {})
-    return { effD: eff, latest: res.documents, files, movedNote }
+    const refinedNote = refined.length > 0 ? `Точная нейросеть уточнила: ${refined.map((k) => DRIVER_LABELS[k]).join(', ')}.` : ''
+    return { effD: eff, latest: res.documents, files, movedNote: [movedNote, refinedNote].filter(Boolean).join(' ') }
   }, [uploads, d, ai])
 
   const check = useCallback(async (quiet = false): Promise<boolean> => {
@@ -902,20 +922,12 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   /** Правила «Авто в порт» по полям карточки тягача (Task 80/83) */
   const fieldKinds: Record<keyof TruckDraft, PortFieldKind> = { brand: 'text', plate: 'plate', vin: 'vin', sts: 'sts', color: 'color', owner: 'text' }
 
-  /** Слить результат нейросети с ручным вводом: заполняются только пустые поля;
-   * вернуть слитые значения и подсветить поля, нарушающие формат (Task 83) */
-  const mergeVehicle = useCallback((res: VehicleIntakeResult) => {
-    const pick = (cur: string, next: string | undefined) => cur.trim() || next || ''
-    const merged: TruckDraft = {
-      brand: pick(t.brand, res.fields.brand),
-      plate: pick(t.plate, res.fields.plate),
-      vin: pick(t.vin, res.fields.vin),
-      sts: pick(t.sts, res.fields.sts),
-      color: pick(t.color, res.fields.color),
-      owner: pick(t.owner, res.fields.owner),
-    }
+  /** Слить результат нейросети с ручным вводом: заполняются пустые поля, а при refine («Проверить»)
+   * и заполненные лёгкой нейросетью, если человек их не правил; вернуть слитые значения
+   * и подсветить поля, нарушающие формат (Task 83) */
+  const mergeVehicle = useCallback((res: VehicleIntakeResult, refine = false) => {
+    const { merged, refined } = ai.merge(t, res.fields, refine, VEHICLE_FIELD_SOURCE)
     if (res.swapped) swapSts()
-    ai.note(t, merged, VEHICLE_FIELD_SOURCE)
     setT(merged)
     setConf(res.confidence as Record<string, number>)
     const bad: Record<string, string> = {}
@@ -926,7 +938,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       if (!r.ok && r.message) bad[k] = r.message
     }
     setFormatBad(bad)
-    return { merged, bad }
+    return { merged, bad, refined }
   }, [t, ai, swapSts])
 
   /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает обе стороны СТС
@@ -1006,7 +1018,8 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает СТС
       // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
       const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, stsBack: photos.stsBack, mode: 'accurate' })
-      const { merged, bad } = mergeVehicle(res)
+      const { merged, bad, refined } = mergeVehicle(res, true)
+      const refinedNote = refined.length > 0 ? `Точная нейросеть уточнила: ${refined.map((k) => (k === 'vin' ? 'VIN' : TRUCK_LABELS[k])).join(', ')}` : ''
 
       if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
         if (!quiet) {
@@ -1040,7 +1053,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       }, truckPhotos)
       const label = post.truck ? `${post.truck.brand} ${post.truck.plate}` : `${merged.brand.trim()} ${merged.plate.trim()}`
       setAdmitted(label)
-      toast({ title: 'ТС допущено в базу', description: label })
+      toast({ title: 'ТС допущено в базу', description: [label, refinedNote].filter(Boolean).join(' · ') })
       return true
     } catch (e) {
       toast({
@@ -1176,19 +1189,13 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
   /** Правила «Авто в порт» по полям карточки прицепа: госномер — по шаблону прицепа (Task 80/83) */
   const fieldKinds: Record<keyof TrailerDraft, PortFieldKind> = { type: 'text', plate: 'plateTrailer', sts: 'sts', color: 'color', owner: 'text' }
 
-  /** Слить результат нейросети с ручным вводом: заполняются только пустые поля;
-   * вернуть слитые значения и подсветить поля, нарушающие формат (Task 83) */
-  const mergeVehicle = useCallback((res: VehicleIntakeResult) => {
-    const pick = (cur: string, next: string | undefined) => cur.trim() || next || ''
-    const merged: TrailerDraft = {
-      type: tr.type,
-      plate: pick(tr.plate, res.fields.plate),
-      sts: pick(tr.sts, res.fields.sts),
-      color: pick(tr.color, res.fields.color),
-      owner: pick(tr.owner, res.fields.owner),
-    }
+  /** Слить результат нейросети с ручным вводом: заполняются пустые поля, а при refine («Проверить»)
+   * и заполненные лёгкой нейросетью, если человек их не правил; вернуть слитые значения
+   * и подсветить поля, нарушающие формат (Task 83). Тип прицепа нейросеть не читает. */
+  const mergeVehicle = useCallback((res: VehicleIntakeResult, refine = false) => {
+    const { plate, sts, color, owner } = res.fields
+    const { merged, refined } = ai.merge(tr, { plate, sts, color, owner }, refine, VEHICLE_FIELD_SOURCE)
     if (res.swapped) swapSts()
-    ai.note(tr, merged, VEHICLE_FIELD_SOURCE)
     setTr(merged)
     setConf(res.confidence as Record<string, number>)
     const bad: Record<string, string> = {}
@@ -1199,7 +1206,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       if (!r.ok && r.message) bad[k] = r.message
     }
     setFormatBad(bad)
-    return { merged, bad }
+    return { merged, bad, refined }
   }, [tr, ai, swapSts])
 
   /** «Автозаполнение» (Task 83): лёгкая нейросеть (PP-OCRv5 mobile) читает обе стороны СТС
@@ -1279,7 +1286,8 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       // ——— «Проверить» — реальная нейропроверка: точная нейросеть (PP-OCRv5 server) читает СТС
       // перед попаданием карточки в базу (Task 83); лёгкая модель оставлена «Автозаполнению» ———
       const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, stsBack: photos.stsBack, mode: 'accurate' })
-      const { merged, bad } = mergeVehicle(res)
+      const { merged, bad, refined } = mergeVehicle(res, true)
+      const refinedNote = refined.length > 0 ? `Точная нейросеть уточнила: ${refined.map((k) => TRAILER_LABELS[k]).join(', ')}` : ''
 
       if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
         if (!quiet) {
@@ -1312,7 +1320,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       }, trailerPhotos)
       const label = post.trailer ? `${post.trailer.type} ${post.trailer.plate}` : `${merged.type} ${merged.plate.trim()}`
       setAdmitted(label)
-      toast({ title: 'Прицеп допущен в базу', description: label })
+      toast({ title: 'Прицеп допущен в базу', description: [label, refinedNote].filter(Boolean).join(' · ') })
       return true
     } catch (e) {
       toast({
