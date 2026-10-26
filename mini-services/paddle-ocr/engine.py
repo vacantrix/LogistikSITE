@@ -307,7 +307,8 @@ def latin_below(lines, v):
 
 
 def is_upper_word(t):
-    return bool(re.search(r"[A-Za-zА-Яа-я]{3}", t)) and t.upper() == t
+    # Ё/ё — вне диапазонов А-Я/а-я: без них «ПЁТР», «СЕМЁН» не считаются словами (Task 84, живой тест)
+    return bool(re.search(r"[A-Za-zА-Яа-яЁё]{3}", t)) and t.upper() == t
 
 
 def field(value, src):
