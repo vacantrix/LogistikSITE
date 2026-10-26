@@ -785,8 +785,14 @@ def issued_by(lines, f):
     # по рядам сверху вниз, в ряду — слева направо (округление cy/h ставило соседние строки разной
     # высоты в один ряд: «ПО ГОР. МОСКВЕ … ОТДЕЛОМ УФМС РОССИИ»)
     parts = [l for r in rows_of(parts) for l in r]
-    text = " ".join(lex_fix(cyr(l["text"]), l, "issuer") for l in parts)
-    return field(fix_letters(re.sub(r"\s+", " ", text).strip()), min(parts, key=lambda l: l["conf"]))
+    text = fix_letters(re.sub(r"\s+", " ", " ".join(lex_fix(cyr(l["text"]), l, "issuer") for l in parts)).strip())
+    f = field(text, min(parts, key=lambda l: l["conf"]))
+    # все слова — из словаря штампов: надёжное чтение, хотя строки читались неуверенно (платформа не
+    # подставляет «Кем выдан» с уверенностью ниже 0,6 — защита от рукописи, а рукопись словарь не проходит)
+    tokens = [t for t in LEX_WORD_RE.findall(text) if len(t) >= 3]
+    if tokens and all(t in lex_words("issuer") for t in tokens):
+        f["conf"] = max(f["conf"] or 0, 0.7)
+    return f
 
 
 # «ГОР.» нейросеть путает с похожими по начертанию «ФОП», «ФОР», «ГОП», «ТОР»
