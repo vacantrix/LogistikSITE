@@ -62,6 +62,7 @@ server.log
 .zscripts/dev.pid
 !.env.example
 __pycache__/
+.venv/
 
 # локальный OCR: окружение и модели живут рядом с сервисом (из %TEMP% их вычищает автоочистка Windows)
 mini-services/paddle-ocr/.venv/
