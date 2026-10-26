@@ -51,6 +51,10 @@ UPSCALE_BELOW = int(os.environ.get("OCR_UPSCALE_BELOW", "1300"))   # мелки�
 # точная модель ищет строки на кадре не больше этого размера: на фото паспорта 1500×2000 — 38 с вместо 70,
 # поля те же (сами строки читаются с исходного кадра)
 ACCURATE_MAX_SIDE = int(os.environ.get("OCR_ACCURATE_MAX_SIDE", "1600"))
+# режим экономии памяти (Task 84): большой кадр в быстрой модели выдавливал сервисы стенда
+# (OOM-killer, exit 137 на фото 1500×2100 при ~1,8 ГБ свободных): детекция — на кадре до этого лимита,
+# сами строки читаются с исходного фото, поля те же
+FAST_DET_LIMIT = int(os.environ.get("OCR_DET_FAST_LIMIT", "736"))
 
 
 def available_mb():
@@ -213,7 +217,12 @@ def get_ocr(mode=None):
 def read_lines(path):
     ocr = get_ocr()
     _PROBS.clear()
-    limit = {"text_det_limit_side_len": ACCURATE_MAX_SIDE, "text_det_limit_type": "max"} if _mode == "accurate" else {}
+    if _mode == "accurate":
+        limit = {"text_det_limit_side_len": ACCURATE_MAX_SIDE, "text_det_limit_type": "max"}
+    elif LOW_MEMORY:
+        limit = {"text_det_limit_side_len": FAST_DET_LIMIT, "text_det_limit_type": "max"}
+    else:
+        limit = {}
     res = ocr.predict(str(path), **limit)[0]
     decoded = [(*greedy(p[b], chars), p[b], chars) for p, chars in _PROBS for b in range(p.shape[0])]
     lines = []
