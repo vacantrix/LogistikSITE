@@ -77,22 +77,23 @@ async function drawBadge(count: number): Promise<string | null> {
   if (img) ctx.drawImage(img, 0, 0, SIZE, SIZE)
 
   // кружок в правом верхнем углу: синяя заливка + белая обводка-кольцо.
-  // Крупный бейдж (Task 104): радиус 17 при 64px холста — заметен даже в 16px вкладке
-  const cx = 44
-  const cy = 20
-  const r = 17
+  // Максимально крупный бейдж (Task 105): радиус 20 при 64px холста — кружок
+  // занимает ~70 % ширины иконки и хорошо виден даже в 16px вкладке
+  const cx = 42
+  const cy = 22
+  const r = 20
   ctx.beginPath()
   ctx.arc(cx, cy, r, 0, Math.PI * 2)
   ctx.fillStyle = BADGE_BLUE
   ctx.fill()
-  ctx.lineWidth = 3.5
+  ctx.lineWidth = 4
   ctx.strokeStyle = RING
   ctx.stroke()
 
   // белая цифра по центру кружка; больше девяти — компактное «9+»
   const label = count > 9 ? '9+' : String(count)
   ctx.fillStyle = '#ffffff'
-  ctx.font = `700 ${label.length > 1 ? 17 : 23}px -apple-system, 'Segoe UI', system-ui, sans-serif`
+  ctx.font = `700 ${label.length > 1 ? 19 : 26}px -apple-system, 'Segoe UI', system-ui, sans-serif`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillText(label, cx, cy + 1)
