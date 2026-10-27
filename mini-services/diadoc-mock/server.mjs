@@ -137,6 +137,9 @@ createServer(async (req, res) => {
     const box = guidFrom(`box-${q.inn}`)
     return json(res, 200, { Organizations: [{ Inn: q.inn, Kpp: q.kpp ?? '', ShortName: `Организация ИНН ${q.inn}`, Boxes: [{ BoxId: `${box.replace(/-/g, '')}@diadoc.ru`, BoxIdGuid: box, Title: `Организация ИНН ${q.inn}` }] }] })
   }
+  if (path === '/V2/GetDocumentTypes') {
+    return json(res, 200, { DocumentTypes: [{ Name: 'LogisticsWaybill', Title: 'Электронная транспортная накладная', Functions: [{ Name: 'reception', Versions: [{ Version: 'kl_trn_mt_05_01', IsActual: true }] }] }] })
+  }
   if (path === '/GenerateTitleXml' && req.method === 'POST') {
     const xml = await readBody(req)
     if (q.documentTypeNamedId !== 'LogisticsWaybill' || q.documentFunction !== 'reception' || q.documentVersion !== 'kl_trn_mt_05_01' || q.titleIndex !== '0') {
