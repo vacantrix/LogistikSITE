@@ -165,11 +165,18 @@ export const api = {
   updateDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo', id: string, data: Record<string, unknown>) =>
     fetch('/api/directory', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, data }) })).then(json<{ ok: boolean; cargoType?: CargoTypeDTO }>),
 
-  reports: (month?: string) =>
-    fetch(`/api/reports${month ? `?month=${encodeURIComponent(month)}` : ''}`, withAuth({ cache: 'no-store' })).then(json<ReportSummary>),
-  /** ссылка на скачивание бумажной проформы (1 — экономия, 2 — обороты); кука сессии — автоматически */
-  reportDocxUrl: (type: 1 | 2, month?: string) =>
-    `/api/reports/docx?type=${type}${month ? `&month=${encodeURIComponent(month)}` : ''}`,
+  reports: (params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][])
+    return fetch(`/api/reports${qs.toString() ? `?${qs}` : ''}`, withAuth({ cache: 'no-store' })).then(json<ReportSummary>)
+  },
+  /** ссылка на скачивание бумажной проформы (1 — экономия, 2 — обороты) за выбранный
+   *  период — документ формируется на сервере автоматически; кука сессии — автоматически */
+  reportDocxUrl: (type: 1 | 2, params?: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams({ type: String(type) })
+    if (params?.from) qs.set('from', params.from)
+    if (params?.to) qs.set('to', params.to)
+    return `/api/reports/docx?${qs.toString()}`
+  },
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, withAuth({ cache: 'no-store' })).then(json<{ events: EventFeedItem[] }>),
 
   /** Уведомления колокольчика (Task 69): список + число непрочитанных */

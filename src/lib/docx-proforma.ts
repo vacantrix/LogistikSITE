@@ -8,7 +8,8 @@ import type { ReportSummary } from '@/lib/types'
 import { buildPieSvg } from '@/lib/pie-svg'
 
 /**
- * Бумажные проформы раздела «Отчёты» (Task 99): DOCX с круговыми диаграммами.
+ * Бумажные проформы раздела «Отчёты» (Task 100): DOCX с круговыми диаграммами,
+ * формируются автоматически по выбранному периоду (ReportSummary.period).
  *
  * Диаграммы строятся тем же кодом, что и на странице (buildPieSvg), затем
  * растеризуются в PNG через @resvg/resvg-js с явными шрифтами DejaVu
@@ -199,12 +200,8 @@ function dataTable(opts: {
   return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, borders: GRID_BORDERS, rows })
 }
 
-function noteAndSignature(formNo: number, note: string): Paragraph[] {
+function noteAndSignature(formNo: number): Paragraph[] {
   return [
-    new Paragraph({
-      spacing: { before: 220, after: 300, line: 276 },
-      children: [new TextRun({ text: note, size: 17, italics: true, color: '64748B', font: 'Calibri' })],
-    }),
     new Paragraph({
       spacing: { before: 260, after: 60, line: 312 },
       tabStops: [{ type: TabStopType.RIGHT, position: 9638 }],
@@ -254,14 +251,14 @@ export async function buildProforma1Docx(data: ReportSummary, operator = '—'):
     ...proformaHeader({
       formCode: 'АЭМЗ-ОП-1',
       title: 'Проформа № 1. Экономия по заявкам',
-      period: `Период: ${p1.monthLabel}`,
+      period: `Период: ${p1.periodLabel}`,
       extra: `Сформировано: ${nowLabel()} (МСК) · Ответственный: ${operator}`,
     }),
 
     heading('1. Сводка за период'),
     kpiGrid([
       { label: 'СЭКОНОМЛЕНО ВСЕГО', value: fmtMoney(p1.savedTotal), accent: true },
-      { label: p1.monthComplete ? 'ПРОЕКЦИЯ (МЕСЯЦ ЗАВЕРШЁН)' : 'ПРОЕКЦИЯ НА МЕСЯЦ', value: fmtMoney(p1.projectionMonth) },
+      { label: p1.projectionLabel.toUpperCase(), value: fmtMoney(p1.projectionMonth) },
       { label: 'СРЕДНЯЯ ЭКОНОМИЯ НА ЗАЯВКУ', value: fmtMoney(p1.avgSaving) },
       { label: 'СРЕДНЕЕ СНИЖЕНИЕ СТАВКИ', value: fmtPct(p1.avgSavingPct) },
     ]),
@@ -288,7 +285,7 @@ export async function buildProforma1Docx(data: ReportSummary, operator = '—'):
           ]),
           totalRow: ['ИТОГО', `${p1.savingsCount} ${pluralRu(p1.savingsCount)}`, '', '', fmtMoney(p1.savedTotal), fmtPct(p1.avgSavingPct), ''],
         }),
-    ...noteAndSignature(1, 'Экономия по заявке = (стартовая ставка − итоговая ставка торгов) × тоннаж. Проекция на месяц — оценка по среднему дневному темпу экономии выбранного периода; для завершившихся месяцев равна факту.'),
+    ...noteAndSignature(1),
   ]
 
   const doc = new Document({
@@ -298,8 +295,8 @@ export async function buildProforma1Docx(data: ReportSummary, operator = '—'):
   const buffer = await Packer.toBuffer(doc)
   return {
     buffer,
-    fileName: `aemz-proforma-1-economy-${data.month}.docx`,
-    displayName: `Проформа №1 — Экономия по заявкам (${p1.monthLabel}).docx`,
+    fileName: `aemz-proforma-1-economy-${data.period.from}_${data.period.to}.docx`,
+    displayName: `Проформа №1 — Экономия по заявкам (${p1.periodLabel}).docx`,
   }
 }
 
@@ -308,13 +305,13 @@ export async function buildProforma1Docx(data: ReportSummary, operator = '—'):
 export async function buildProforma2Docx(data: ReportSummary, operator = '—'): Promise<{ buffer: Buffer; fileName: string; displayName: string }> {
   const p2 = data.proforma2
   const chart1 = buildPieSvg({ title: 'Оборот по перевозчикам (привлечённый транспорт)', slices: p2.byCarrier.map((c) => ({ label: c.name, value: c.turnover })), unit: '₽', centerHint: 'оборот' })
-  const chart2 = buildPieSvg({ title: 'Заявки месяца по статусам', slices: p2.byStatus.map((s) => ({ label: s.label, value: s.value })), unit: 'шт', centerHint: 'заявок' })
+  const chart2 = buildPieSvg({ title: 'Заявки периода по статусам', slices: p2.byStatus.map((s) => ({ label: s.label, value: s.value })), unit: 'шт', centerHint: 'заявок' })
 
   const children: ISectionOptions['children'] = [
     ...proformaHeader({
       formCode: 'АЭМЗ-ОП-2',
       title: 'Проформа № 2. Обороты и привлечённый транспорт',
-      period: `Период: ${p2.monthLabel}`,
+      period: `Период: ${p2.periodLabel}`,
       extra: `Сформировано: ${nowLabel()} (МСК) · Ответственный: ${operator}`,
     }),
 
@@ -346,7 +343,7 @@ export async function buildProforma2Docx(data: ReportSummary, operator = '—'):
           ]),
           totalRow: ['ИТОГО', String(p2.confirmedCount), fmtMoney(p2.turnover), fmtRate(p2.avgRate), '100 %'],
         }),
-    ...noteAndSignature(2, 'Оборот = итоговая ставка торгов × тоннаж по подтверждённым рейсам. Привлечённый транспорт — перевозки, выполненные перевозчиками площадки (рейсы с назначенным победителем торгов). ЭТрН — электронная транспортная накладная в Диадоке.'),
+    ...noteAndSignature(2),
   ]
 
   const doc = new Document({
@@ -356,8 +353,8 @@ export async function buildProforma2Docx(data: ReportSummary, operator = '—'):
   const buffer = await Packer.toBuffer(doc)
   return {
     buffer,
-    fileName: `aemz-proforma-2-turnover-${data.month}.docx`,
-    displayName: `Проформа №2 — Обороты и привлечённый транспорт (${p2.monthLabel}).docx`,
+    fileName: `aemz-proforma-2-turnover-${data.period.from}_${data.period.to}.docx`,
+    displayName: `Проформа №2 — Обороты и привлечённый транспорт (${p2.periodLabel}).docx`,
   }
 }
 

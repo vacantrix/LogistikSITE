@@ -209,20 +209,21 @@ export interface ReportSummary {
   savingsByRequest: { number: string; cargo: string; startRate: number; bestRate: number | null; savings: number }[]
   carriers: { name: string; taken: number; avgRate: number; refused: number }[]
 
-  /* ——— Проформы (Task 99): месяц + две бумажные формы с круговыми диаграммами ——— */
+  /* ——— Проформы (Task 100): произвольный период + две бумажные формы с круговыми диаграммами ——— */
 
-  /** доступные месяцы для селектора («2025-10», по убыванию, максимум 6) */
-  months: string[]
-  /** выбранный месяц «2025-10» и подпись «Октябрь 2025» */
-  month: string
-  monthLabel: string
+  /** выбранный период: даты включительно, «YYYY-MM-DD» */
+  period: { from: string; to: string }
+  /** подпись периода: «Май 2025» для календарного месяца, иначе «01.05.2025 – 15.05.2025» */
+  periodLabel: string
+  /** current-month — идущий месяц (считается проекция), done-month — полный завершённый месяц, range — произвольный диапазон */
+  periodKind: 'current-month' | 'done-month' | 'range'
   /** момент формирования отчёта (ISO) */
   generatedAt: string
 
-  /** Проформа № 1 — экономия по заявкам за выбранный месяц */
+  /** Проформа № 1 — экономия по заявкам за выбранный период */
   proforma1: {
-    monthLabel: string
-    /** подтверждённых рейсов за месяц */
+    periodLabel: string
+    /** подтверждённых рейсов за период */
     confirmedCount: number
     /** из них с ненулевой экономией */
     savingsCount: number
@@ -236,9 +237,11 @@ export interface ReportSummary {
     avgSaving: number
     /** средний процент снижения ставки, % */
     avgSavingPct: number
-    /** проекция (прогноз) экономии на полный месяц, ₽ */
+    /** проекция на полный месяц (идущий месяц) либо факт за период, ₽ */
     projectionMonth: number
-    /** месяц уже завершён — проекция равна факту */
+    /** подпись показателя: «Проекция на месяц» / «Факт за месяц» / «Факт за период» */
+    projectionLabel: string
+    /** период завершён — проекция равна факту */
     monthComplete: boolean
     /** круговая: структура экономии по направлениям */
     byDirection: ReportPieSlice[]
@@ -248,10 +251,10 @@ export interface ReportSummary {
     rows: Proforma1Row[]
   }
 
-  /** Проформа № 2 — обороты и привлечённый транспорт за выбранный месяц */
+  /** Проформа № 2 — обороты и привлечённый транспорт за выбранный период */
   proforma2: {
-    monthLabel: string
-    /** заявок за месяц (без удалённых) */
+    periodLabel: string
+    /** заявок за период (без удалённых) */
     requestsCount: number
     /** подтверждено рейсов (привлечённый транспорт) */
     confirmedCount: number
@@ -259,7 +262,7 @@ export interface ReportSummary {
     turnover: number
     /** средняя ставка подтверждённых рейсов, ₽/т */
     avgRate: number
-    /** общий тоннаж заявок месяца, т */
+    /** общий тоннаж заявок периода, т */
     tonnageTotal: number
     /** среднее количество ставок на заявку */
     avgBids: number
@@ -267,7 +270,7 @@ export interface ReportSummary {
     etrnCount: number
     /** привлечённый транспорт по перевозчикам */
     byCarrier: Proforma2CarrierRow[]
-    /** круговая: заявки месяца по статусам */
+    /** круговая: заявки периода по статусам */
     byStatus: ReportPieSlice[]
   }
 }

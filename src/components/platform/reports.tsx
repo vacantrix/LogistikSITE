@@ -1,30 +1,36 @@
 'use client'
 
 /**
- * «Отчёты» (Task 99) — переработанный раздел из двух бумажных проформ:
- *  № 1 — экономия по заявкам за месяц: сколько сэкономлено всего, проекция на
- *  месяц и из чего она складывается (по направлениям и по каждой заявке);
+ * «Отчёты» (Task 100) — две бумажные проформы за выбранный период:
+ *  № 1 — экономия по заявкам: сколько сэкономлено всего, проекция на месяц
+ *  (для идущего месяца) и из чего она складывается (по направлениям и по
+ *  каждой заявке);
  *  № 2 — обороты и использование привлечённого транспорта: количество заявок,
  *  оборот, распределение по перевозчикам и статусам.
- * Круговые диаграммы строятся единым кодом с DOCX (lib/pie-svg) — на странице
- * они выглядят так же, как в скачанных файлах. Кнопка «Скачать DOCX» отдаёт
- * готовую бумажную форму (api/reports/docx).
+ * Период выбирается календарём (или пресетами) — и данные на странице, и DOCX
+ * формируются сервером автоматически по этому периоду. Круговые диаграммы
+ * строятся единым кодом с DOCX (lib/pie-svg) — на странице они выглядят так же,
+ * как в скачанных файлах.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download } from 'lucide-react'
+import { endOfMonth, startOfMonth, subDays, subMonths } from 'date-fns'
+import { ru } from 'date-fns/locale'
+import { CalendarRange, Download } from 'lucide-react'
+import type { DateRange } from 'react-day-picker'
 import {
-  ErrorBlock, InfoTip, LoadingBlock, SectionHeader, type TabProps,
+  ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { api } from '@/lib/api'
 import { rate } from '@/lib/status'
-import { cn, monthLabel } from '@/lib/utils'
+import { cn, dayOf, fmtDayRu, parseDay } from '@/lib/utils'
 import { buildPieSvg } from '@/lib/pie-svg'
 import type { ReportPieSlice, ReportSummary } from '@/lib/types'
 
@@ -33,13 +39,10 @@ const pct = (v: number): string => `${v.toFixed(1).replace('.', ',')} %`
 const ton = (v: number): string => `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(v)} т`
 
 /** плитка-показатель внутри проформы */
-function ProTile({ label, value, hint, accent }: { label: string; value: string; hint?: string; accent?: boolean }) {
+function ProTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-        {label}
-        {hint && <InfoTip label={label}>{hint}</InfoTip>}
-      </div>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
       <div className={cn('mt-1 text-xl font-bold leading-tight tabular-nums', accent ? 'text-emerald-600' : 'text-slate-900')}>
         {value}
       </div>
@@ -63,18 +66,30 @@ function PieView({ title, slices, unit, centerHint }: { title: string; slices: R
   )
 }
 
+/** пресеты периода: метка → границы (даты включительно) */
+const PERIOD_PRESETS: { label: string; range: () => DateRange }[] = [
+  { label: 'Текущий месяц', range: () => ({ from: startOfMonth(new Date()), to: new Date() }) },
+  { label: 'Прошлый месяц', range: () => ({ from: startOfMonth(subMonths(new Date(), 1)), to: endOfMonth(subMonths(new Date(), 1)) }) },
+  { label: 'Последние 7 дней', range: () => ({ from: subDays(new Date(), 6), to: new Date() }) },
+  { label: 'Последние 30 дней', range: () => ({ from: subDays(new Date(), 29), to: new Date() }) },
+]
+
 export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const [report, setReport] = useState<ReportSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [switching, setSwitching] = useState(false)
-  const monthRef = useRef('')
+  const [range, setRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: new Date() }))
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const periodRef = useRef<{ from?: string; to?: string }>({})
+  /** зеркало range для selectRange: отличаем первый клик выбора от продолжения */
+  const rangeRef = useRef<DateRange | undefined>({ from: startOfMonth(new Date()), to: new Date() })
 
-  const load = useCallback(async (m?: string) => {
-    if (!m) setSwitching(true)
+  const load = useCallback(async (p?: { from?: string; to?: string }) => {
+    if (!p) setSwitching(true)
     try {
-      const data = await api.reports(m || undefined)
-      monthRef.current = data.month
+      const data = await api.reports(p)
+      periodRef.current = data.period
       setReport(data)
       setError(null)
     } catch (e) {
@@ -87,38 +102,104 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
 
   useEffect(() => { void load() }, [load])
 
-  // real-time: событие из шины WS мгновенно догружает отчёты за выбранный месяц
+  // real-time: событие из шины WS мгновенно догружает отчёты за выбранный период
   useEffect(() => {
-    if (liveTick > 0) void load(monthRef.current || undefined)
+    if (liveTick > 0) void load(periodRef.current)
   }, [liveTick, load])
 
-  const changeMonth = (m: string) => { void load(m) }
+  /** применить период: обновить календарь и перезагрузить отчёты */
+  const applyPeriod = useCallback((from?: Date, to?: Date) => {
+    if (!from || !to) return
+    const next = { from, to }
+    rangeRef.current = next
+    setRange(next)
+    void load({ from: dayOf(from), to: dayOf(to) })
+  }, [load])
+
+  /**
+   * Выбор диапазона. У react-day-picker v9 клик по дате при уже полном диапазоне
+   * растягивает его одной границей; привычная семантика датапикеров иная — клик
+   * начинает новый выбор. Поэтому один изменённый край трактуем как старт нового
+   * диапазона (ждём второй клик), а полный новый диапазон — применяем сразу.
+   */
+  const selectRange = (r: DateRange | undefined) => {
+    const prev = rangeRef.current
+    const prevFull = Boolean(prev?.from && prev?.to)
+    let next: DateRange | undefined = r
+    if (prevFull && r?.from && r?.to) {
+      const sameFrom = r.from.getTime() === prev.from?.getTime()
+      const sameTo = r.to.getTime() === prev.to?.getTime()
+      if (sameFrom && !sameTo) next = { from: r.to }
+      else if (!sameFrom && sameTo) next = { from: r.from }
+    }
+    rangeRef.current = next
+    setRange(next)
+    if (next?.from && next?.to) {
+      applyPeriod(next.from, next.to)
+      setPickerOpen(false)
+    }
+  }
 
   if (loading && !report) return <LoadingBlock label="Загрузка отчётов…" />
-  if (error && !report) return <ErrorBlock message={error} onRetry={() => void load(monthRef.current || undefined)} />
+  if (error && !report) return <ErrorBlock message={error} onRetry={() => void load(periodRef.current)} />
 
   const p1 = report?.proforma1
   const p2 = report?.proforma2
   const p1Rows = p1?.rows ?? []
   const p2Carriers = p2?.byCarrier ?? []
+  const today = new Date()
+  const rangeLabel = range?.from && range?.to
+    ? (dayOf(range.from) === dayOf(range.to) ? fmtDayRu(range.from) : `${fmtDayRu(range.from)} – ${fmtDayRu(range.to)}`)
+    : range?.from
+      ? `${fmtDayRu(range.from)} – …`
+      : 'Выберите период'
 
   return (
     <div>
-      <SectionHeader
-        eyebrow="Бумажные проформы"
-        title="Отчёты"
-        desc={<>Две бумажные формы за выбранный месяц: экономия по заявкам и обороты с привлечённым транспортом. Диаграммы видны на странице и попадают в скачанные DOCX.</>}
-      >
-        <Select value={monthRef.current || undefined} onValueChange={changeMonth} disabled={!report || switching}>
-          <SelectTrigger className="h-10 w-[190px]" aria-label="Месяц отчёта">
-            <SelectValue placeholder="Месяц" />
-          </SelectTrigger>
-          <SelectContent>
-            {(report?.months ?? []).map((m) => (
-              <SelectItem key={m} value={m}>{monthLabel(m)}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <SectionHeader eyebrow="Бумажные проформы" title="Отчёты">
+        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              className="h-10 gap-2 border-slate-300 font-medium text-slate-800"
+              disabled={!report || switching}
+              aria-label="Период отчёта"
+            >
+              <CalendarRange className="h-4 w-4 text-slate-500" aria-hidden />
+              {rangeLabel}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-auto p-0">
+            <div className="flex flex-col sm:flex-row">
+              <div className="flex shrink-0 flex-col gap-0.5 border-b border-slate-100 p-2 sm:w-44 sm:border-b-0 sm:border-r">
+                {PERIOD_PRESETS.map((preset) => (
+                  <Button
+                    key={preset.label}
+                    variant="ghost"
+                    size="sm"
+                    className="justify-start font-normal text-slate-700"
+                    onClick={() => {
+                      const r = preset.range()
+                      if (r.from && r.to) applyPeriod(r.from, r.to)
+                      setPickerOpen(false)
+                    }}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </div>
+              <Calendar
+                mode="range"
+                numberOfMonths={1}
+                selected={range}
+                onSelect={selectRange}
+                locale={ru}
+                disabled={{ after: today }}
+                defaultMonth={range?.from}
+              />
+            </div>
+          </PopoverContent>
+        </Popover>
       </SectionHeader>
 
       {error && report && (
@@ -136,16 +217,13 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                 <Badge className="bg-slate-900 text-slate-50 hover:bg-slate-900">Проформа № 1</Badge>
                 <Badge variant="outline" className="border-slate-300 text-slate-600">Форма АЭМЗ-ОП-1</Badge>
               </div>
-              <CardTitle className="text-lg text-slate-900">Экономия по заявкам за месяц</CardTitle>
+              <CardTitle className="text-lg text-slate-900">Экономия по заявкам</CardTitle>
               <CardDescription>
-                {p1?.monthLabel ?? '—'} · подтверждено рейсов: {p1?.confirmedCount ?? 0}, из них с экономией: {p1?.savingsCount ?? 0}
-                <InfoTip label="Экономия по заявкам">
-                  Экономия заявки = (стартовая ставка торгов − итоговая ставка) × тоннаж. В расчёт входят подтверждённые и закрытые рейсы месяца.
-                </InfoTip>
+                {p1?.periodLabel ?? '—'} · подтверждено рейсов: {p1?.confirmedCount ?? 0}, из них с экономией: {p1?.savingsCount ?? 0}
               </CardDescription>
             </div>
             <Button asChild className="h-10 shrink-0">
-              <a href={api.reportDocxUrl(1, monthRef.current || undefined)} title="Скачать бумажную проформу № 1 (DOCX)">
+              <a href={api.reportDocxUrl(1, periodRef.current)} title="Скачать бумажную проформу № 1 (DOCX)">
                 <Download className="h-4 w-4" aria-hidden />
                 Скачать DOCX
               </a>
@@ -153,29 +231,10 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
           </CardHeader>
           <CardContent className="space-y-5 p-5">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <ProTile
-                label="Сэкономлено всего"
-                value={money(p1?.savedTotal ?? 0)}
-                accent
-                hint="сумма экономии по всем заявкам месяца"
-              />
-              <ProTile
-                label={p1?.monthComplete ? 'Факт за месяц' : 'Проекция на месяц'}
-                value={money(p1?.projectionMonth ?? 0)}
-                hint={p1?.monthComplete
-                  ? 'месяц завершён — проекция равна фактической экономии'
-                  : 'прогноз экономии на полный месяц по среднему дневному темпу'}
-              />
-              <ProTile
-                label="Средняя на заявку"
-                value={money(p1?.avgSaving ?? 0)}
-                hint="средняя экономия одной заявки"
-              />
-              <ProTile
-                label="Снижение ставки"
-                value={pct(p1?.avgSavingPct ?? 0)}
-                hint="средний процент снижения ставки от стартовой"
-              />
+              <ProTile label="Сэкономлено всего" value={money(p1?.savedTotal ?? 0)} accent />
+              <ProTile label={p1?.projectionLabel ?? 'Проекция на месяц'} value={money(p1?.projectionMonth ?? 0)} />
+              <ProTile label="Средняя на заявку" value={money(p1?.avgSaving ?? 0)} />
+              <ProTile label="Снижение ставки" value={pct(p1?.avgSavingPct ?? 0)} />
             </div>
 
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -184,10 +243,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
             </div>
 
             <div>
-              <div className="mb-2 flex items-center gap-1 text-sm font-semibold text-slate-800">
-                Из чего складывается экономия
-                <InfoTip label="Из чего складывается экономия">Каждая заявка месяца: стартовая ставка → итоговая, экономия деньгами и процент снижения.</InfoTip>
-              </div>
+              <div className="mb-2 text-sm font-semibold text-slate-800">Из чего складывается экономия</div>
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <div className="max-h-96 overflow-auto">
                   <Table>
@@ -218,7 +274,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                       ))}
                       {p1Rows.length > 1 && (
                         <TableRow className="bg-slate-50 font-semibold">
-                          <TableCell colSpan={4} className="text-slate-700">ИТОГО за {p1?.monthLabel.toLowerCase() ?? 'период'}</TableCell>
+                          <TableCell colSpan={4} className="text-slate-700">ИТОГО за период</TableCell>
                           <TableCell className="whitespace-nowrap text-right tabular-nums text-emerald-700">{money(p1?.savedTotal ?? 0)}</TableCell>
                           <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">{pct(p1?.avgSavingPct ?? 0)}</TableCell>
                           <TableCell />
@@ -227,7 +283,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                       {p1Rows.length === 0 && (
                         <TableRow>
                           <TableCell colSpan={7} className="py-8 text-center text-slate-400">
-                            За выбранный месяц заявок с экономией нет
+                            За выбранный период заявок с экономией нет
                           </TableCell>
                         </TableRow>
                       )}
@@ -249,14 +305,11 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
               </div>
               <CardTitle className="text-lg text-slate-900">Обороты и привлечённый транспорт</CardTitle>
               <CardDescription>
-                {p2?.monthLabel ?? '—'} · заявок: {p2?.requestsCount ?? 0}, рейсов на привлечённом транспорте: {p2?.confirmedCount ?? 0}
-                <InfoTip label="Обороты и привлечённый транспорт">
-                  Оборот = итоговая ставка × тоннаж по подтверждённым рейсам. Привлечённый транспорт — перевозки перевозчиков площадки (рейсы с назначенным победителем торгов).
-                </InfoTip>
+                {p2?.periodLabel ?? '—'} · заявок: {p2?.requestsCount ?? 0}, рейсов на привлечённом транспорте: {p2?.confirmedCount ?? 0}
               </CardDescription>
             </div>
             <Button asChild className="h-10 shrink-0">
-              <a href={api.reportDocxUrl(2, monthRef.current || undefined)} title="Скачать бумажную проформу № 2 (DOCX)">
+              <a href={api.reportDocxUrl(2, periodRef.current)} title="Скачать бумажную проформу № 2 (DOCX)">
                 <Download className="h-4 w-4" aria-hidden />
                 Скачать DOCX
               </a>
@@ -264,10 +317,10 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
           </CardHeader>
           <CardContent className="space-y-5 p-5">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <ProTile label="Заявок за месяц" value={String(p2?.requestsCount ?? 0)} hint="все заявки месяца, кроме удалённых" />
-              <ProTile label="Рейсов подтверждено" value={String(p2?.confirmedCount ?? 0)} hint="выполнены привлечённым транспортом перевозчиков" />
-              <ProTile label="Оборот" value={money(p2?.turnover ?? 0)} accent hint="итоговые ставки подтверждённых рейсов × тоннаж" />
-              <ProTile label="Средняя ставка" value={rate(p2?.avgRate ?? null)} hint="средняя итоговая ставка подтверждённых рейсов" />
+              <ProTile label="Заявок за период" value={String(p2?.requestsCount ?? 0)} />
+              <ProTile label="Рейсов подтверждено" value={String(p2?.confirmedCount ?? 0)} />
+              <ProTile label="Оборот" value={money(p2?.turnover ?? 0)} accent />
+              <ProTile label="Средняя ставка" value={rate(p2?.avgRate ?? null)} />
             </div>
 
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600">
@@ -278,14 +331,11 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
 
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
               <PieView title="Оборот по перевозчикам (привлечённый транспорт)" slices={(p2?.byCarrier ?? []).map((c) => ({ label: c.name, value: c.turnover, share: c.share }))} unit="₽" centerHint="оборот" />
-              <PieView title="Заявки месяца по статусам" slices={p2?.byStatus ?? []} unit="шт" centerHint="заявок" />
+              <PieView title="Заявки периода по статусам" slices={p2?.byStatus ?? []} unit="шт" centerHint="заявок" />
             </div>
 
             <div>
-              <div className="mb-2 flex items-center gap-1 text-sm font-semibold text-slate-800">
-                Перевозчики за период
-                <InfoTip label="Перевозчики за период">Сколько рейсов взял каждый перевозчик, его оборот, средняя ставка и доля в обороте месяца.</InfoTip>
-              </div>
+              <div className="mb-2 text-sm font-semibold text-slate-800">Перевозчики за период</div>
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <div className="max-h-96 overflow-auto">
                   <Table>
@@ -320,7 +370,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
                       {p2Carriers.length === 0 && (
                         <TableRow>
                           <TableCell colSpan={5} className="py-8 text-center text-slate-400">
-                            За выбранный месяц подтверждённых рейсов нет
+                            За выбранный период подтверждённых рейсов нет
                           </TableCell>
                         </TableRow>
                       )}

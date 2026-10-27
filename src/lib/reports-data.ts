@@ -1,14 +1,20 @@
 /**
- * Агрегация данных для раздела «Отчёты» (Task 99).
+ * Агрегация данных для раздела «Отчёты» (Task 100).
  * Считает всё на сервере один раз: глобальный KPI (для дашборда — совместимость),
- * проформу № 1 (экономия по заявкам за месяц) и проформу № 2 (обороты и
- * привлечённый транспорт за месяц). Экономия в проформах считается деньгами:
+ * проформу № 1 (экономия по заявкам) и проформу № 2 (обороты и привлечённый
+ * транспорт) за произвольный период. Период задаётся датами from/to
+ * (включительно, «YYYY-MM-DD»); legacy month=YYYY-MM и отсутствие параметров
+ * дают текущий месяц. Экономия в проформах считается деньгами:
  * (стартовая ставка − итоговая ставка) × тоннаж, в отличие от старого KPI,
  * который суммировал разности ставок (₽/т) и сохранён для дашборда как был.
+ *
+ * Проекция на полный месяц считается только для идущего календарного месяца
+ * (факт / прошедшие дни × дни месяца); для завершённого месяца и произвольного
+ * диапазона показывается факт за период.
  */
 import { db } from '@/lib/db'
 import { REQUEST_STATUS_META } from '@/lib/status'
-import { monthLabel, monthOf } from '@/lib/utils'
+import { dayOf, fmtDayRu, monthLabel, monthOf, parseDay } from '@/lib/utils'
 import type {
   Proforma1Row, ReportPieSlice, ReportSummary,
 } from '@/lib/types'
@@ -34,17 +40,58 @@ interface ReportRequest {
   winner: { name: string } | null
 }
 
-/** границы месяца [от, до) */
-function monthRange(ym: string): { from: Date; to: Date } {
-  const [y, m] = ym.split('-').map(Number)
-  const from = new Date(y, (m ?? 1) - 1, 1)
-  const to = new Date(y, m ?? 1, 1)
-  return { from, to }
+/** полночь следующего дня (эксклюзивная граница периода) */
+function dayAfter(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
 }
 
 function daysInMonth(ym: string): number {
   const [y, m] = ym.split('-').map(Number)
   return new Date(y, m ?? 1, 0).getDate()
+}
+
+/**
+ * Границы периода по параметрам запроса: from/to — «YYYY-MM-DD» включительно
+ * (перепутанные местами даты упорядочиваются), month — legacy «YYYY-MM».
+ * Без параметров — текущий месяц с 1-го числа.
+ */
+export function resolvePeriod(params: { from?: string; to?: string; month?: string } = {}): { from: Date; to: Date } {
+  const now = new Date()
+  const f = parseDay(params.from)
+  const t = parseDay(params.to)
+  if (f && t) {
+    const [from, toIncl] = f.getTime() <= t.getTime() ? [f, t] : [t, f]
+    return { from, to: dayAfter(toIncl) }
+  }
+  if (params.month && MONTH_RE.test(params.month)) {
+    const [y, m] = params.month.split('-').map(Number)
+    return { from: new Date(y, (m ?? 1) - 1, 1), to: new Date(y, m ?? 1, 1) }
+  }
+  return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: dayAfter(now) }
+}
+
+/** классификация периода: идущий месяц (проекция) / полный месяц / произвольный диапазон */
+function classifyPeriod(from: Date, toExcl: Date, now: Date): ReportSummary['periodKind'] {
+  const startsFirst = from.getDate() === 1
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  if (startsFirst && from.getTime() === currentMonthStart.getTime() && toExcl.getTime() > now.getTime()) {
+    return 'current-month'
+  }
+  const toIncl = new Date(toExcl.getTime() - 1)
+  const lastDay = new Date(from.getFullYear(), from.getMonth() + 1, 0)
+  const fullMonth = startsFirst
+    && toIncl.getFullYear() === lastDay.getFullYear()
+    && toIncl.getMonth() === lastDay.getMonth()
+    && toIncl.getDate() === lastDay.getDate()
+  return fullMonth ? 'done-month' : 'range'
+}
+
+/** подпись периода: месяц — «Май 2025», диапазон — «01.05.2025 – 15.05.2025» (один день — только дата) */
+function periodLabelOf(from: Date, toExcl: Date, kind: ReportSummary['periodKind']): string {
+  if (kind !== 'range') return monthLabel(monthOf(from))
+  const toIncl = new Date(toExcl.getTime() - 1)
+  const sameDay = dayOf(from) === dayOf(toIncl)
+  return sameDay ? fmtDayRu(from) : `${fmtDayRu(from)} – ${fmtDayRu(toIncl)}`
 }
 
 /** разбить список на топ-N и «Прочие» (для круговых диаграмм) */
@@ -64,9 +111,11 @@ function withShares(items: { label: string; value: number }[]): ReportPieSlice[]
   return items.map((x) => ({ ...x, share: Math.round((x.value / total) * 1000) / 10 }))
 }
 
-export async function buildReport(monthParam?: string): Promise<ReportSummary> {
+export async function buildReport(periodParams: { from?: string; to?: string; month?: string } = {}): Promise<ReportSummary> {
   const now = new Date()
-  const month = monthParam && MONTH_RE.test(monthParam) ? monthParam : monthOf(now)
+  const { from, to } = resolvePeriod(periodParams)
+  const periodKind = classifyPeriod(from, to, now)
+  const periodLabel = periodLabelOf(from, to, periodKind)
 
   const requests = (await db.request.findMany({
     include: { bids: true, winner: true, documents: true },
@@ -112,17 +161,15 @@ export async function buildReport(monthParam?: string): Promise<ReportSummary> {
     if (!carMap.has(c.name)) carMap.set(c.name, { taken: c._count.wonRequests, sum: 0, n: 0 })
   }
 
-  /* ——— Выбранный месяц ——— */
+  /* ——— Выбранный период ——— */
 
-  const { from, to } = monthRange(month)
-  const currentMonth = monthOf(now)
-  const inMonth = requests.filter((r) => r.createdAt >= from && r.createdAt < to && r.status !== 'DELETED')
-  /** подтверждённые рейсы месяца — выполнены привлечённым транспортом перевозчиков */
-  const monthDone = inMonth.filter((r) => (r.status === 'CONFIRMED' || r.status === 'CLOSED') && r.winnerId != null)
+  const inPeriod = requests.filter((r) => r.createdAt >= from && r.createdAt < to && r.status !== 'DELETED')
+  /** подтверждённые рейсы периода — выполнены привлечённым транспортом перевозчиков */
+  const periodDone = inPeriod.filter((r) => (r.status === 'CONFIRMED' || r.status === 'CLOSED') && r.winnerId != null)
 
   /* ——— Проформа № 1: экономия по заявкам ——— */
 
-  const rows: Proforma1Row[] = monthDone
+  const rows: Proforma1Row[] = periodDone
     .map((r) => {
       const best = r.bestRate ?? r.startRate
       const rateSaving = Math.max(0, r.startRate - best)
@@ -143,16 +190,22 @@ export async function buildReport(monthParam?: string): Promise<ReportSummary> {
     .sort((a, b) => b.savings - a.savings)
 
   const savedTotal = rows.reduce((s, r) => s + r.savings, 0)
-  const startTotal = monthDone.reduce((s, r) => s + r.startRate * r.tonnage, 0)
-  const finalTotal = monthDone.reduce((s, r) => s + (r.bestRate ?? r.startRate) * r.tonnage, 0)
+  const startTotal = periodDone.reduce((s, r) => s + r.startRate * r.tonnage, 0)
+  const finalTotal = periodDone.reduce((s, r) => s + (r.bestRate ?? r.startRate) * r.tonnage, 0)
   const avgSaving = rows.length ? savedTotal / rows.length : 0
   const avgSavingPct = startTotal > 0 ? Math.max(0, ((startTotal - finalTotal) / startTotal) * 100) : 0
 
-  // проекция: фактическая экономия, растянутая на полный месяц по среднему дневному темпу
-  const dim = daysInMonth(month)
-  const monthComplete = month !== currentMonth
-  const dayNow = monthComplete ? dim : Math.max(now.getDate(), 1)
-  const projectionMonth = monthComplete ? savedTotal : Math.round((savedTotal / dayNow) * dim)
+  // проекция: для идущего месяца — факт, растянутый на полный месяц по среднему
+  // дневному темпу; для завершённого месяца и произвольного периода — факт
+  const monthComplete = periodKind !== 'current-month'
+  let projectionMonth = savedTotal
+  let projectionLabel = periodKind === 'done-month' ? 'Факт за месяц' : 'Факт за период'
+  if (!monthComplete) {
+    const dim = daysInMonth(monthOf(from))
+    const dayNow = Math.max(now.getDate(), 1)
+    projectionMonth = Math.round((savedTotal / dayNow) * dim)
+    projectionLabel = 'Проекция на месяц'
+  }
 
   const byDirection = withShares(
     Object.entries(
@@ -166,8 +219,8 @@ export async function buildReport(monthParam?: string): Promise<ReportSummary> {
   )
 
   const proforma1: ReportSummary['proforma1'] = {
-    monthLabel: monthLabel(month),
-    confirmedCount: monthDone.length,
+    periodLabel,
+    confirmedCount: periodDone.length,
     savingsCount: rows.length,
     startTotal,
     finalTotal,
@@ -175,6 +228,7 @@ export async function buildReport(monthParam?: string): Promise<ReportSummary> {
     avgSaving,
     avgSavingPct,
     projectionMonth,
+    projectionLabel,
     monthComplete,
     byDirection: topPlusOther(byDirection, 6),
     byRequest: topPlusOther(
@@ -186,15 +240,15 @@ export async function buildReport(monthParam?: string): Promise<ReportSummary> {
 
   /* ——— Проформа № 2: обороты и привлечённый транспорт ——— */
 
-  const turnover = monthDone.reduce((s, r) => s + (r.bestRate ?? r.startRate) * r.tonnage, 0)
-  const avgRate = monthDone.length ? monthDone.reduce((s, r) => s + (r.bestRate ?? r.startRate), 0) / monthDone.length : 0
-  const tonnageTotal = inMonth.reduce((s, r) => s + r.tonnage, 0)
-  const bidsInMonth = inMonth.filter((r) => r.bids.length > 0)
-  const avgBidsMonth = bidsInMonth.length ? bidsInMonth.reduce((s, r) => s + r.bids.length, 0) / bidsInMonth.length : 0
-  const etrnCount = monthDone.filter((r) => r.etrnStatus !== 'NONE').length
+  const turnover = periodDone.reduce((s, r) => s + (r.bestRate ?? r.startRate) * r.tonnage, 0)
+  const avgRate = periodDone.length ? periodDone.reduce((s, r) => s + (r.bestRate ?? r.startRate), 0) / periodDone.length : 0
+  const tonnageTotal = inPeriod.reduce((s, r) => s + r.tonnage, 0)
+  const bidsInPeriod = inPeriod.filter((r) => r.bids.length > 0)
+  const avgBidsPeriod = bidsInPeriod.length ? bidsInPeriod.reduce((s, r) => s + r.bids.length, 0) / bidsInPeriod.length : 0
+  const etrnCount = periodDone.filter((r) => r.etrnStatus !== 'NONE').length
 
   const carrierTurnover = new Map<string, { trips: number; turnover: number; rateSum: number }>()
-  for (const r of monthDone) {
+  for (const r of periodDone) {
     const name = r.winner?.name ?? '—'
     const cur = carrierTurnover.get(name) ?? { trips: 0, turnover: 0, rateSum: 0 }
     cur.trips++
@@ -217,29 +271,23 @@ export async function buildReport(monthParam?: string): Promise<ReportSummary> {
     statusOrder
       .map((st) => ({
         label: REQUEST_STATUS_META[st].short,
-        value: inMonth.filter((r) => r.status === st).length,
+        value: inPeriod.filter((r) => r.status === st).length,
       }))
       .filter((x) => x.value > 0),
   )
 
   const proforma2: ReportSummary['proforma2'] = {
-    monthLabel: monthLabel(month),
-    requestsCount: inMonth.length,
-    confirmedCount: monthDone.length,
+    periodLabel,
+    requestsCount: inPeriod.length,
+    confirmedCount: periodDone.length,
     turnover,
     avgRate,
     tonnageTotal,
-    avgBids: Math.round(avgBidsMonth * 10) / 10,
+    avgBids: Math.round(avgBidsPeriod * 10) / 10,
     etrnCount,
     byCarrier,
     byStatus,
   }
-
-  /* ——— Доступные месяцы для селектора (с данными + текущий, 6 шт, по убыванию) ——— */
-
-  const monthSet = new Set<string>(requests.filter((r) => r.status !== 'DELETED').map((r) => monthOf(r.createdAt)))
-  monthSet.add(currentMonth)
-  const months = [...monthSet].sort().reverse().slice(0, 6)
 
   return {
     kpi: {
@@ -261,9 +309,9 @@ export async function buildReport(monthParam?: string): Promise<ReportSummary> {
     carriers: [...carMap.entries()]
       .map(([name, v]) => ({ name, taken: v.taken, avgRate: v.n ? Math.round(v.sum / v.n) : 0, refused: 0 }))
       .sort((a, b) => b.taken - a.taken),
-    months,
-    month,
-    monthLabel: monthLabel(month),
+    period: { from: dayOf(from), to: dayOf(new Date(to.getTime() - 1)) },
+    periodLabel,
+    periodKind,
     proforma1,
     proforma2,
     generatedAt: now.toISOString(),
