@@ -1,12 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { buildReport } from '@/lib/reports-data'
+import { parseIsoDay } from '@/lib/report-period'
 import { buildProforma1Docx, buildProforma2Docx } from '@/lib/docx-proforma'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const DAY_FMT = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * GET /api/reports/docx?type=1|2&from=YYYY-MM-DD&to=YYYY-MM-DD — скачать бумажную
@@ -22,8 +21,8 @@ export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams
   for (const key of ['from', 'to'] as const) {
     const v = sp.get(key)
-    if (v && !DAY_FMT.test(v)) {
-      return NextResponse.json({ error: 'Период задаётся датами в формате ГГГГ-ММ-ДД' }, { status: 400 })
+    if (v && !parseIsoDay(v)) {
+      return NextResponse.json({ error: 'Период задаётся существующими датами в формате ГГГГ-ММ-ДД' }, { status: 400 })
     }
   }
 

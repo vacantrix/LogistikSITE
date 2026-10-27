@@ -51,7 +51,9 @@ function svgToPng(svg: string, width = 1200): Buffer {
     font: {
       fontFiles: FONT_FILES,
       loadSystemFonts: FONT_FILES.length === 0,
-      defaultFontFamily: 'DejaVu Sans',
+      // без DejaVu (Windows) — системный Arial, а не шрифт с засечками
+      defaultFontFamily: FONT_FILES.length ? 'DejaVu Sans' : 'Arial',
+      sansSerifFamily: FONT_FILES.length ? 'DejaVu Sans' : 'Arial',
     },
   })
   return Buffer.from(resvg.render().asPng())

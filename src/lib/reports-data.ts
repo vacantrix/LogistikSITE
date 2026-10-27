@@ -10,16 +10,15 @@
  *
  * Проекция на полный месяц считается только для идущего календарного месяца
  * (факт / прошедшие дни × дни месяца); для завершённого месяца и произвольного
- * диапазона показывается факт за период.
+ * диапазона показывается факт за период. Дни и месяцы — по МСК (report-period.ts).
  */
 import { db } from '@/lib/db'
 import { REQUEST_STATUS_META } from '@/lib/status'
-import { dayOf, fmtDayRu, monthLabel, monthOf, parseDay } from '@/lib/utils'
+import { monthLabel } from '@/lib/utils'
+import { daysInMonth, isoDay, isoMonth, mskDay, resolvePeriod, ruDay, type ReportPeriod } from '@/lib/report-period'
 import type {
   Proforma1Row, ReportPieSlice, ReportSummary,
 } from '@/lib/types'
-
-const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 
 /** Заявка с нужными для отчётов связями (Prisma-включения) */
 interface ReportRequest {
@@ -40,58 +39,10 @@ interface ReportRequest {
   winner: { name: string } | null
 }
 
-/** полночь следующего дня (эксклюзивная граница периода) */
-function dayAfter(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
-}
-
-function daysInMonth(ym: string): number {
-  const [y, m] = ym.split('-').map(Number)
-  return new Date(y, m ?? 1, 0).getDate()
-}
-
-/**
- * Границы периода по параметрам запроса: from/to — «YYYY-MM-DD» включительно
- * (перепутанные местами даты упорядочиваются), month — legacy «YYYY-MM».
- * Без параметров — текущий месяц с 1-го числа.
- */
-export function resolvePeriod(params: { from?: string; to?: string; month?: string } = {}): { from: Date; to: Date } {
-  const now = new Date()
-  const f = parseDay(params.from)
-  const t = parseDay(params.to)
-  if (f && t) {
-    const [from, toIncl] = f.getTime() <= t.getTime() ? [f, t] : [t, f]
-    return { from, to: dayAfter(toIncl) }
-  }
-  if (params.month && MONTH_RE.test(params.month)) {
-    const [y, m] = params.month.split('-').map(Number)
-    return { from: new Date(y, (m ?? 1) - 1, 1), to: new Date(y, m ?? 1, 1) }
-  }
-  return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: dayAfter(now) }
-}
-
-/** классификация периода: идущий месяц (проекция) / полный месяц / произвольный диапазон */
-function classifyPeriod(from: Date, toExcl: Date, now: Date): ReportSummary['periodKind'] {
-  const startsFirst = from.getDate() === 1
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  if (startsFirst && from.getTime() === currentMonthStart.getTime() && toExcl.getTime() > now.getTime()) {
-    return 'current-month'
-  }
-  const toIncl = new Date(toExcl.getTime() - 1)
-  const lastDay = new Date(from.getFullYear(), from.getMonth() + 1, 0)
-  const fullMonth = startsFirst
-    && toIncl.getFullYear() === lastDay.getFullYear()
-    && toIncl.getMonth() === lastDay.getMonth()
-    && toIncl.getDate() === lastDay.getDate()
-  return fullMonth ? 'done-month' : 'range'
-}
-
 /** подпись периода: месяц — «Май 2025», диапазон — «01.05.2025 – 15.05.2025» (один день — только дата) */
-function periodLabelOf(from: Date, toExcl: Date, kind: ReportSummary['periodKind']): string {
-  if (kind !== 'range') return monthLabel(monthOf(from))
-  const toIncl = new Date(toExcl.getTime() - 1)
-  const sameDay = dayOf(from) === dayOf(toIncl)
-  return sameDay ? fmtDayRu(from) : `${fmtDayRu(from)} – ${fmtDayRu(toIncl)}`
+function periodLabelOf(p: ReportPeriod): string {
+  if (p.kind !== 'range') return monthLabel(isoMonth(p.first))
+  return isoDay(p.first) === isoDay(p.last) ? ruDay(p.first) : `${ruDay(p.first)} – ${ruDay(p.last)}`
 }
 
 /** разбить список на топ-N и «Прочие» (для круговых диаграмм) */
@@ -113,9 +64,9 @@ function withShares(items: { label: string; value: number }[]): ReportPieSlice[]
 
 export async function buildReport(periodParams: { from?: string; to?: string; month?: string } = {}): Promise<ReportSummary> {
   const now = new Date()
-  const { from, to } = resolvePeriod(periodParams)
-  const periodKind = classifyPeriod(from, to, now)
-  const periodLabel = periodLabelOf(from, to, periodKind)
+  const period = resolvePeriod(periodParams, now)
+  const { from, to, kind: periodKind } = period
+  const periodLabel = periodLabelOf(period)
 
   const requests = (await db.request.findMany({
     include: { bids: true, winner: true, documents: true },
@@ -201,8 +152,8 @@ export async function buildReport(periodParams: { from?: string; to?: string; mo
   let projectionMonth = savedTotal
   let projectionLabel = periodKind === 'done-month' ? 'Факт за месяц' : 'Факт за период'
   if (!monthComplete) {
-    const dim = daysInMonth(monthOf(from))
-    const dayNow = Math.max(now.getDate(), 1)
+    const dim = daysInMonth(period.first.y, period.first.m)
+    const dayNow = mskDay(now).d
     projectionMonth = Math.round((savedTotal / dayNow) * dim)
     projectionLabel = 'Проекция на месяц'
   }
@@ -309,7 +260,7 @@ export async function buildReport(periodParams: { from?: string; to?: string; mo
     carriers: [...carMap.entries()]
       .map(([name, v]) => ({ name, taken: v.taken, avgRate: v.n ? Math.round(v.sum / v.n) : 0, refused: 0 }))
       .sort((a, b) => b.taken - a.taken),
-    period: { from: dayOf(from), to: dayOf(new Date(to.getTime() - 1)) },
+    period: { from: isoDay(period.first), to: isoDay(period.last) },
     periodLabel,
     periodKind,
     proforma1,

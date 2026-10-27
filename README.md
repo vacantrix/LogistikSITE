@@ -9,19 +9,21 @@
 - **Next.js 16 (App Router) + TypeScript**
 - **Prisma ORM + SQLite** (`db/custom.db`)
 - **Tailwind CSS 4 + shadcn/ui**
-- Нейро-проверка документов: GLM-4.6V через `z-ai-web-dev-sdk` + OCR-микросервис (`mini-services/ocr-service`, порт 3020)
-- Интеграционная шина 1С: REST + API-ключ (`/api/1c/*`)
+- Распознавание документов — локальный PaddleOCR (`mini-services/paddle-ocr`, порт 3031) через шлюз
+  `mini-services/ocr-service` (порт 3020): фото документов не покидают сервер, облачных моделей нет
+- Интеграционная шина 1С: REST + API-ключ (`/api/integration/1c/*`)
 
 ## Запуск
 
 ```bash
 bun install
 bun run db:push        # схема БД
-bun run auth:seed      # пользователи платформы (идемпотентно)
+bun run auth:seed      # пользователи платформы (идемпотентно; пароль — SEED_PASSWORD из .env.local)
 bun run dev            # http://localhost:3000
 ```
 
-OCR-микросервис (опционально, платформа работает и без него — фолбэк на GLM-4.6V):
+Распознавание документов (без него документы остаются «на проверке», пока сервис не ответит):
+PaddleOCR — по инструкции `mini-services/paddle-ocr/README.md` (:3031), затем шлюз:
 
 ```bash
 cd mini-services/ocr-service && bun install && bun run dev   # :3020
@@ -29,7 +31,8 @@ cd mini-services/ocr-service && bun install && bun run dev   # :3020
 
 ## Доступы (демо-контур)
 
-Пароль для всех учётных записей: **`aemz2024`**
+Пароль один для всех учётных записей — `SEED_PASSWORD` в `.env.local` (без неё сид печатает
+случайный). Репозиторий публичный — пароль в нём не храним.
 
 | Логин        | Кто                | Кабинет                  |
 | ------------ | ------------------ | ------------------------ |
@@ -40,7 +43,8 @@ cd mini-services/ocr-service && bun install && bun run dev   # :3020
 | `carrier-v`  | ООО «Перевозчик В» | Кабинет перевозчика      |
 | `carrier-g`  | ООО «Перевозчик Г» | Кабинет перевозчика      |
 
-Экран входа показывает те же доступы по ссылке «Демо-доступы для тестирования».
+Экран входа показывает те же доступы по ссылке «Демо-доступы для тестирования», если задан
+`NEXT_PUBLIC_DEMO_PASSWORD` (только для демо-стенда).
 Сессия — подписанная HttpOnly-кука (`aemz_session`, 7 дней), пароли — scrypt-хеши.
 
 ## Сценарий для теста (5 минут)
@@ -61,7 +65,8 @@ cd mini-services/ocr-service && bun install && bun run dev   # :3020
 src/app/api/…            REST API (заявки, ставки, документы, OCR, 1С, auth)
 src/components/platform/ экраны платформы (агент / логист)
 src/lib/                 статусная модель, auth, OCR-клиент
-mini-services/ocr-service  OCR-микросервис (PaddleOCR → GLM-4.6V)
+mini-services/ocr-service  шлюз OCR (очередь, токен) → mini-services/paddle-ocr
+mini-services/paddle-ocr   локальный PaddleOCR (Python)
 prisma/schema.prisma     модель данных (SQLite)
 scripts/                 идемпотентные сиды (users)
 ```

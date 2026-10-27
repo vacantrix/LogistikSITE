@@ -26,7 +26,9 @@ const PALETTE = [
 /** Дополнительные оттенки, если долек больше восьми */
 const PALETTE_EXTRA = ['#b45309', '#4d7c0f', '#9333ea', '#be123c', '#0e7490', '#475569', '#15803d', '#a16207']
 
-const FONT = 'DejaVu Sans'
+// DejaVu — на Linux-сервере (кириллица и ₽ для DOCX); на Windows его нет — без запасных
+// шрифтов браузер и resvg рисовали подписи шрифтом с засечками
+const FONT = "'DejaVu Sans', Arial, 'Segoe UI', sans-serif"
 const W = 680
 const H = 340
 const CX = 158

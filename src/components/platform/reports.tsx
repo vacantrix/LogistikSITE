@@ -31,7 +31,7 @@ import {
 } from '@/components/ui/table'
 import { api } from '@/lib/api'
 import { rate } from '@/lib/status'
-import { cn, dayOf, fmtDayRu, parseDay } from '@/lib/utils'
+import { cn, dayOf, fmtDayRu } from '@/lib/utils'
 import { buildPieSvg } from '@/lib/pie-svg'
 import type { ReportPieSlice, ReportSummary } from '@/lib/types'
 
@@ -142,11 +142,10 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
    */
   const selectRange = (r: DateRange | undefined) => {
     const prev = rangeRef.current
-    const prevFull = Boolean(prev?.from && prev?.to)
     let next: DateRange | undefined = r
-    if (prevFull && r?.from && r?.to) {
-      const sameFrom = r.from.getTime() === prev.from?.getTime()
-      const sameTo = r.to.getTime() === prev.to?.getTime()
+    if (prev?.from && prev.to && r?.from && r?.to) {
+      const sameFrom = r.from.getTime() === prev.from.getTime()
+      const sameTo = r.to.getTime() === prev.to.getTime()
       if (sameFrom && !sameTo) next = { from: r.to }
       else if (!sameFrom && sameTo) next = { from: r.from }
     }
