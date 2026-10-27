@@ -16,7 +16,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, CircleCheck, Eye, FileSpreadsheet, ScrollText, Search } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
+  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -357,10 +357,10 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                               </div>
                             </TableCell>
                             <TableCell className="whitespace-nowrap">
-                              {/* яркий пузырь группы + точный статус под ним (Task 75/76) */}
+                              {/* группа точкой и словом + точный статус под ним (Task 75/76) */}
                               <div className="flex flex-col items-start gap-0.5">
-                                <Badge variant="outline" className={`${g.badge} whitespace-nowrap`}>{g.label}</Badge>
-                                <span className="text-[11px] font-medium leading-tight text-slate-600">
+                                <StatusDot dot={g.dot}>{g.label}</StatusDot>
+                                <span className="text-xs leading-tight text-slate-500">
                                   {TRIP_STATUS_SUB[r.status] ?? r.status}
                                 </span>
                               </div>
@@ -446,12 +446,12 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
                   Рейс <span className="text-blue-700">№{detail.number}</span>
-                  <Badge variant="outline" className={TRIP_GROUP_META[tripGroupOf(detail.status)].badge}>
+                  <StatusDot dot={TRIP_GROUP_META[tripGroupOf(detail.status)].dot} className="font-normal">
                     {TRIP_GROUP_META[tripGroupOf(detail.status)].label}
-                  </Badge>
-                  <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-slate-100 text-slate-700">
-                    {TRIP_STATUS_SUB[detail.status] ?? detail.status}
-                  </Badge>
+                  </StatusDot>
+                  <span className="text-sm font-normal text-slate-500">
+                    · {TRIP_STATUS_SUB[detail.status] ?? detail.status}
+                  </span>
                 </DialogTitle>
                 <DialogDescription className="sr-only">
                   Этапы рейса, документы и журнал событий

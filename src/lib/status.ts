@@ -77,12 +77,14 @@ export const MODE_META: Record<RequestMode, { label: string; sub: string; tile: 
   },
 }
 
-export const DOC_STATUS_META: Record<DocStatus, { label: string; badge: string }> = {
-  PENDING: { label: 'На проверке', badge: 'bg-slate-100 text-slate-700 border-slate-200' },
-  PASSED: { label: 'Передать дальше', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  REUPLOAD: { label: 'Перезагрузить документ', badge: 'bg-amber-100 text-amber-800 border-amber-200' },
-  REJECTED: { label: 'Отказ с причиной', badge: 'bg-red-100 text-red-800 border-red-200' },
-  MANUAL: { label: 'Ручная проверка', badge: 'bg-blue-100 text-blue-800 border-blue-200' },
+/** tone — цветной текст у статуса, который требует действия (warning) или означает отказ (danger);
+ *  у остальных статусов цвет несёт только точка */
+export const DOC_STATUS_META: Record<DocStatus, { label: string; badge: string; dot: string; tone?: 'warning' | 'danger' }> = {
+  PENDING: { label: 'На проверке', badge: 'bg-slate-100 text-slate-700 border-slate-200', dot: 'bg-slate-400' },
+  PASSED: { label: 'Передать дальше', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
+  REUPLOAD: { label: 'Перезагрузить документ', badge: 'bg-amber-100 text-amber-800 border-amber-200', dot: 'bg-amber-500', tone: 'warning' },
+  REJECTED: { label: 'Отказ с причиной', badge: 'bg-red-100 text-red-800 border-red-200', dot: 'bg-red-500', tone: 'danger' },
+  MANUAL: { label: 'Ручная проверка', badge: 'bg-blue-100 text-blue-800 border-blue-200', dot: 'bg-blue-500' },
 }
 
 export const DOC_TYPE_LABEL: Record<string, string> = {

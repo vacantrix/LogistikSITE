@@ -19,7 +19,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
+  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -227,8 +227,8 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                               {/* группа статуса + точный статус (Task 67): «Завершена» — только закрытый рейс.
                                   Task 73: яркий насыщенный пузырь группы + читаемая подпись под ним */}
                               <div className="flex flex-col items-start gap-0.5">
-                                <Badge variant="outline" className={`${g.badge} whitespace-nowrap`}>{g.label}</Badge>
-                                <span className="text-[11px] font-medium leading-tight text-slate-600">
+                                <StatusDot dot={g.dot} tone={g === REQUEST_GROUP_META.deleted ? 'danger' : undefined}>{g.label}</StatusDot>
+                                <span className="text-xs leading-tight text-slate-500">
                                   {REQUEST_STATUS_META[r.status as RequestDTO['status']]?.label ?? r.status}
                                 </span>
                               </div>
@@ -300,12 +300,12 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
                   Заявка <span className="text-blue-700">{detail.number}</span>
-                  <Badge variant="outline" className={REQUEST_GROUP_META[requestGroupOf(detail.status)].badge}>
+                  <StatusDot dot={REQUEST_GROUP_META[requestGroupOf(detail.status)].dot} className="font-normal">
                     {REQUEST_GROUP_META[requestGroupOf(detail.status)].label}
-                  </Badge>
-                  <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-slate-100 text-slate-700">
-                    {REQUEST_STATUS_META[detail.status]?.label ?? detail.status}
-                  </Badge>
+                  </StatusDot>
+                  <span className="text-sm font-normal text-slate-500">
+                    · {REQUEST_STATUS_META[detail.status]?.label ?? detail.status}
+                  </span>
                 </DialogTitle>
                 <DialogDescription>
                   Создана {fmtDateTime(detail.createdAt)} · {detail.createdBy}

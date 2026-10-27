@@ -13,7 +13,6 @@ import { Fragment } from 'react'
 import {
   BadgeCheck,
   CheckCircle2,
-  CircleAlert,
   FileCheck2,
   Handshake,
   MousePointerClick,
@@ -22,8 +21,7 @@ import {
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Badge } from '@/components/ui/badge'
-import { AgentStatusBadge, InfoTip } from '@/components/platform/common'
+import { AgentStatusBadge, InfoTip, StatusDot } from '@/components/platform/common'
 import type { RequestDTO, RequestStatus } from '@/lib/types'
 
 interface PipelineStage {
@@ -31,7 +29,6 @@ interface PipelineStage {
   icon: typeof MousePointerClick
   circle: string
   ring: string
-  countCls: string
   line: string
   tip: string
 }
@@ -42,7 +39,6 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     icon: MousePointerClick,
     circle: 'bg-sky-500',
     ring: 'ring-sky-100',
-    countCls: 'text-sky-700',
     line: 'from-sky-200 to-teal-200',
     tip: 'Всё начинается здесь: вы выбираете рейс на «Площадке заявок» (статусы «Торги» или «Закрытые ставки») и подаёте свою ставку.',
   },
@@ -51,7 +47,6 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     icon: Handshake,
     circle: 'bg-teal-500',
     ring: 'ring-teal-100',
-    countCls: 'text-teal-700',
     line: 'from-teal-200 to-violet-200',
     tip: 'Ваша ставка на согласовании у отдела сбыта АЭМЗ: цена идёт вниз — побеждает лучшая ставка на понижение.',
   },
@@ -60,7 +55,6 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     icon: CheckCircle2,
     circle: 'bg-violet-500',
     ring: 'ring-violet-100',
-    countCls: 'text-violet-700',
     line: 'from-violet-200 to-amber-200',
     tip: 'Вас согласовали — вы победили в торгах! Рейс закреплён за вами: можно подавать заявку — назначить водителя и загрузить документы.',
   },
@@ -69,7 +63,6 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     icon: FileCheck2,
     circle: 'bg-amber-500',
     ring: 'ring-amber-100',
-    countCls: 'text-amber-700',
     line: 'from-amber-200 to-blue-200',
     tip: 'Вы подаёте заявку: загрузите паспорт, СТС, скан заявки и доверенность — нейросеть проверит каждый документ сразу при загрузке.',
   },
@@ -78,7 +71,6 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     icon: PackageCheck,
     circle: 'bg-blue-600',
     ring: 'ring-blue-100',
-    countCls: 'text-blue-700',
     line: 'from-blue-200 to-emerald-200',
     tip: 'Мы готовим рейс к выезду: проверяем ваши документы, оформляем ЭДО с заводом и пропуск на погрузку — от вас ничего не требуется.',
   },
@@ -87,7 +79,6 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     icon: Truck,
     circle: 'bg-emerald-500',
     ring: 'ring-emerald-100',
-    countCls: 'text-emerald-700',
     line: 'from-emerald-200 to-emerald-300',
     tip: 'Вас оформили: рейс готов — можно отправлять водителя на погрузку и начинать выполнение.',
   },
@@ -96,7 +87,6 @@ export const PIPELINE_STAGES: PipelineStage[] = [
     icon: BadgeCheck,
     circle: 'bg-emerald-600',
     ring: 'ring-emerald-100',
-    countCls: 'text-emerald-700',
     line: '',
     tip: 'Водитель выполнил рейс — логист закрыл заявку. Завершённая заявка остаётся в кабинете в конце списка: итоговая ставка и история торгов сохраняются, карточку можно скрыть кнопкой «Удалить».',
   },
@@ -152,26 +142,19 @@ export function StatusPipeline({
       <CardContent className="px-3 py-4 sm:px-6">
         {request === null ? null : outbid ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-100 text-red-800">
-              <CircleAlert className="mr-1 h-3 w-3" aria-hidden />
-              Ставка перебита
-            </Badge>
+            <StatusDot dot="bg-red-500" tone="danger">Ставку перебили</StatusDot>
             {frozenNote && <InfoTip label="Что это значит">{frozenNote.replace(/^· /, '')}</InfoTip>}
           </div>
         ) : frozen ? (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
-              Согласование ставки
-            </Badge>
+            <StatusDot dot="bg-slate-400">Согласование ставки</StatusDot>
             {frozenNote && <InfoTip label="Что это значит">{frozenNote.replace(/^· /, '')}</InfoTip>}
           </div>
         ) : (
           <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             {/* заявка без ставки агента стоит на «Выборе рейса» — бейдж дублирует этап, а не «Согласование ставки» */}
             {activeIdx === 0 ? (
-              <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
-                Выбор рейса
-              </Badge>
+              <StatusDot dot={PIPELINE_STAGES[0].circle}>Выбор рейса</StatusDot>
             ) : (
               <AgentStatusBadge status={request.status} />
             )}
@@ -209,8 +192,10 @@ export function StatusPipeline({
                           </span>
                         )}
                       </span>
-                      <span className={`whitespace-nowrap text-sm font-bold leading-none ${isDone ? 'text-emerald-600' : isCurrent ? st.countCls : 'text-slate-400'}`}>
-                        {hasRequest ? (isDone ? 'Готово' : isCurrent ? 'Текущий этап' : frozen && i > idx ? 'Закрыто' : 'Ожидает') : '\u00A0'}
+                      {/* подпись состояния — только у пройденных и текущего этапа: у будущих нет
+                          «Закрыто»/«Ожидает» — «Закрыто» читалось как «рейс закрыт» */}
+                      <span className={`whitespace-nowrap text-xs leading-none ${isCurrent ? 'font-semibold text-slate-900' : 'font-medium text-slate-500'}`}>
+                        {hasRequest && (isDone || isCurrent) ? (isDone ? 'Готово' : 'Сейчас') : '\u00A0'}
                       </span>
                       <span className={`text-[11px] leading-tight sm:text-xs ${isCurrent ? 'font-semibold text-slate-900' : colored ? 'font-medium text-slate-600' : 'font-medium text-slate-400'}`}>
                         {st.label}

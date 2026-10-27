@@ -41,15 +41,36 @@ export function RoleNotice({ role }: { role: RoleKind }) {
   )
 }
 
+/**
+ * Статус «точкой и словом»: цвет несёт маленькая точка, слово — обычным текстом без плашки,
+ * рамки и капса. Цветной текст — только у того, что требует действия (warning) или означает
+ * отказ и ошибку (danger). Единый вид статусов во всех разделах.
+ */
+export function StatusDot({ dot, children, tone, className = '' }: {
+  dot: string
+  children: ReactNode
+  tone?: 'warning' | 'danger'
+  className?: string
+}) {
+  const text = tone === 'danger' ? 'text-red-700' : tone === 'warning' ? 'text-amber-700' : 'text-slate-700'
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm ${text} ${className}`}>
+      <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
+      {children}
+    </span>
+  )
+}
+
 export function StatusBadge({ status }: { status: RequestStatus }) {
-  const meta = REQUEST_STATUS_META[status] ?? { label: status, badge: 'bg-slate-100 text-slate-700 border-slate-200' }
-  return <Badge variant="outline" className={`${meta.badge} whitespace-nowrap`}>{meta.label}</Badge>
+  const meta = REQUEST_STATUS_META[status] ?? { label: status, dot: 'bg-slate-400' }
+  return <StatusDot dot={meta.dot} tone={status === 'DELETED' ? 'danger' : undefined}>{meta.label}</StatusDot>
 }
 
 /** Статус заявки глазами агента-перевозчика: что происходит с его рейсом прямо сейчас */
 export function AgentStatusBadge({ status }: { status: string }) {
-  const label = AGENT_STATUS_LABEL[status] ?? REQUEST_STATUS_META[status as RequestStatus]?.label ?? status
-  return <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-700">{label}</Badge>
+  const meta = REQUEST_STATUS_META[status as RequestStatus]
+  const label = AGENT_STATUS_LABEL[status] ?? meta?.label ?? status
+  return <StatusDot dot={meta?.dot ?? 'bg-slate-400'}>{label}</StatusDot>
 }
 
 /** Режим приёма ставок без пузыря (Task 49): только иконка с цветом режима и
@@ -70,7 +91,7 @@ export function ModeBadge({ mode }: { mode: RequestMode }) {
 
 export function DocStatusBadge({ status }: { status: DocStatus }) {
   const meta = DOC_STATUS_META[status]
-  return <Badge variant="outline" className={`${meta.badge} whitespace-nowrap`}>{meta.label}</Badge>
+  return <StatusDot dot={meta.dot} tone={meta.tone}>{meta.label}</StatusDot>
 }
 
 /** Бейдж срока действия документа: красный «истёк», янтарный «истекает», нейтральный «скоро», обычная дата */

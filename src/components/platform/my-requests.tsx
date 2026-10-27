@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   CircleAlert,
+  CircleCheck,
   ArrowRight,
   Car,
   CheckCircle2,
@@ -16,6 +17,7 @@ import {
   FileX,
   History,
   IdCard,
+  Info,
   Loader2,
   Lock,
   MapPin,
@@ -26,6 +28,7 @@ import {
   Trash2,
   TrendingDown,
   Trophy,
+  TriangleAlert,
   Truck,
   Upload,
   User,
@@ -34,7 +37,6 @@ import {
   X,
 } from 'lucide-react'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -51,6 +53,7 @@ import {
   InfoTip,
   LoadingBlock,
   SectionHeader,
+  StatusDot,
   type TabProps,
 } from '@/components/platform/common'
 import { PIPELINE_STAGES, STAGE_OF_STATUS, StatusPipeline } from '@/components/platform/status-pipeline'
@@ -99,33 +102,56 @@ const stageOf = (r: RequestDTO): number => (r.status === 'PUBLISHED' ? 1 : STAGE
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
 
+/** Тон статусной строки: цвет несёт только иконка, текст обычный (вариант «точка и слово») */
+type LineTone = 'danger' | 'warning' | 'success' | 'info' | 'neutral'
+interface AgentLine { text: string; tone: LineTone }
+
+const LINE_ICON: Record<LineTone, { Icon: typeof Info; cls: string }> = {
+  danger: { Icon: CircleAlert, cls: 'text-red-600' },
+  warning: { Icon: TriangleAlert, cls: 'text-amber-600' },
+  success: { Icon: CircleCheck, cls: 'text-emerald-600' },
+  info: { Icon: Info, cls: 'text-slate-400' },
+  neutral: { Icon: Info, cls: 'text-slate-400' },
+}
+
+/** Строка статуса между тонкими линиями — без цветной заливки и рамки */
+function StatusLine({ line }: { line: AgentLine }) {
+  const { Icon, cls } = LINE_ICON[line.tone]
+  return (
+    <div className="flex items-start gap-2 border-y border-slate-200 py-2.5 text-sm text-slate-700" role="status">
+      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${cls}`} aria-hidden />
+      <span>{line.text}</span>
+    </div>
+  )
+}
+
 /** Текст-подсказка для агента по статусу заявки */
-function agentLine(r: RequestDTO, myBid: BidDTO | null): { text: string; cls: string } {
+function agentLine(r: RequestDTO, myBid: BidDTO | null): AgentLine {
   switch (r.status) {
     case 'PUBLISHED':
       if (r.mode === 'CLOSED')
-        return { text: 'Закрытая ставка подана — цену увидит только логист при подведении итогов', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+        return { text: 'Закрытая ставка подана — цены конкурентов не видны до итогов', tone: 'info' }
       if (r.bestRate == null)
-        return { text: 'Ставка подана — ждём первых конкурентов по рейсу', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+        return { text: 'Ставка подана, других ставок пока нет', tone: 'info' }
       if (myBid && myBid.amount <= r.bestRate)
-        return { text: 'Ваша ставка сейчас лучшая — ждём закрытия приёма ставок', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
-      return { text: 'Вашу ставку перебили — подайте новую, пониженную', cls: 'border-amber-200 bg-amber-50 text-amber-900' }
+        return { text: 'Ваша ставка сейчас лучшая', tone: 'success' }
+      return { text: 'Вашу ставку перебили — можно подать новую', tone: 'danger' }
     case 'AWARDED':
-      return { text: 'Вы выиграли — рейс закреплён за вами', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
+      return { text: 'Вы выиграли, рейс закреплён за вами', tone: 'success' }
     case 'DOCS_REVIEW': {
       const bad = r.documents.some((d) => d.status === 'REUPLOAD' || d.status === 'REJECTED')
       return bad
-        ? { text: 'Требует исправления: причина у каждого документа — догрузите исправленные сканы через «Подать документы»', cls: 'border-amber-300 bg-amber-50 text-amber-900' }
-        : { text: 'Нейросеть проверяет документы — статус обновится автоматически', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+        ? { text: 'Нужно исправить документы: причина указана у каждого, исправленные загрузите в «Подать документы»', tone: 'warning' }
+        : { text: 'Нейросеть проверяет документы', tone: 'info' }
     }
     case 'AT_LOGIST':
-      return { text: 'Комплект у логиста — идёт сверка фото с полями заявки', cls: 'border-blue-200 bg-blue-50 text-blue-900' }
+      return { text: 'Документы у логиста на сверке', tone: 'info' }
     case 'CONFIRMED':
-      return { text: 'Рейс выполняется — документы подтверждены, водитель может выезжать на погрузку', cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' }
+      return { text: 'Документы подтверждены, водитель может ехать на погрузку', tone: 'success' }
     case 'CLOSED':
-      return { text: 'Рейс выполнен и закрыт — данные в реестре рейсов и бухгалтерии АЭМЗ', cls: 'border-emerald-300 bg-emerald-50 text-emerald-900' }
+      return { text: 'Рейс выполнен и закрыт', tone: 'success' }
     default:
-      return { text: 'Рейс закрыт', cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+      return { text: 'Рейс закрыт', tone: 'neutral' }
   }
 }
 
@@ -133,7 +159,6 @@ function agentLine(r: RequestDTO, myBid: BidDTO | null): { text: string; cls: st
 function issueClass(status: DocStatus): string {
   if (status === 'REJECTED') return 'text-red-600'
   if (status === 'REUPLOAD') return 'text-amber-600'
-  if (status === 'MANUAL') return 'text-blue-600'
   return 'text-slate-500'
 }
 
@@ -597,21 +622,26 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
         const lost = cardState === 'lost'
         const grey = cardState === 'withdrawn' || cardState === 'lost'
         const outbidLost = lost && lostOutbid(r)
-        const line =
+        const line: AgentLine =
           cardState === 'available'
-            ? { text: 'Заявка открыта для отклика — подайте ставку, чтобы участвовать в торгах', cls: 'border-sky-200 bg-sky-50 text-sky-900' }
+            ? { text: 'Заявка открыта — подайте ставку, чтобы участвовать в торгах', tone: 'info' }
             : cardState === 'withdrawn'
-              ? { text: 'Вы снялись с заявки — ставка отозвана, торги идут без вас', cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+              ? { text: 'Вы снялись с заявки, торги идут без вас', tone: 'neutral' }
               : outbidLost
                 ? r.status === 'PUBLISHED'
-                  ? { text: 'Торги завершены: вашу ставку перебили — заявка остаётся в полной истории', cls: 'border-red-200 bg-red-50 text-red-800' }
-                  : { text: 'Ставка перебита — рейс забрал другой перевозчик по более низкой цене', cls: 'border-red-200 bg-red-50 text-red-800' }
+                  ? { text: 'Торги завершены, вашу ставку перебили', tone: 'danger' }
+                  : { text: 'Рейс забрал другой перевозчик по более низкой ставке', tone: 'danger' }
                 : lost && r.status === 'PUBLISHED'
-                  ? { text: 'Торги завершены: ваша цена не победила — заявка остаётся в полной истории', cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+                  ? { text: 'Торги завершены, ваша ставка не победила', tone: 'neutral' }
                   : lost
-                    ? { text: `Рейс забрал другой перевозчик${r.winnerName ? ` (${r.winnerName})` : ''} — заявка остаётся в полной истории`, cls: 'border-slate-300 bg-slate-100 text-slate-600' }
+                    ? { text: `Рейс забрал другой перевозчик${r.winnerName ? ` (${r.winnerName})` : ''}`, tone: 'neutral' }
                     : cardState === 'outbid'
-                      ? { text: 'Ставка перебита — подайте новую, пониженную, пока тендер не закрыт', cls: 'border-red-300 bg-red-100 text-red-800' }
+                      ? {
+                          text: r.deadline
+                            ? `Вашу ставку перебили. Новую можно подать до ${fmtDateTime(r.deadline)}`
+                            : 'Вашу ставку перебили — можно подать новую',
+                          tone: 'danger',
+                        }
                       : agentLine(r, myBid)
         const tl = bidding && now !== null && r.deadline ? timeLeft(r.deadline) : null
         const awarded = !grey && r.status === 'AWARDED'
@@ -633,29 +663,22 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                 : cardState === 'withdrawn'
                   ? 'withdrawn'
                   : null
-        /** цвет большой карточки по состоянию (Task 52): красная — перебита, серая — выход/проигрыш,
-            приглушённая — завершённый рейс (Task 68) */
-        const cardCls =
-          cardState === 'outbid'
-            ? 'border-red-300 bg-red-50/50 shadow-sm'
-            : grey
-              ? 'border-slate-200 bg-slate-100/80 shadow-sm'
-              : closed
-                ? 'border-emerald-200 bg-emerald-50/40 shadow-sm'
-                : 'border-slate-200 shadow-sm'
+        /** большая карточка без цветных заливок и рамок: серый фон — только у выхода и
+            проигрыша (Task 52), состояние говорит строка статуса */
+        const cardCls = grey ? 'border-slate-200 bg-slate-50 shadow-sm' : 'border-slate-200 shadow-sm'
 
         /** Секция документов: единый вид для «Подтверждено» (свёрнуто) и «Документы» (раскрыто) */
         const docsSection = (
           <div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <FileText className="h-4 w-4 text-blue-600" aria-hidden />
+                <FileText className="h-4 w-4 text-slate-400" aria-hidden />
                 Документы (6 файлов к заявке)
               </h4>
               {missingDocs.length > 0 && (
-                <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[11px] font-semibold text-amber-800" aria-label={`Пропущено документов: ${missingDocs.length} из ${DOC_ORDER.length}`}>
+                <StatusDot dot="bg-amber-500" tone="warning">
                   Пропущено: {missingDocs.length} из {DOC_ORDER.length}
-                </Badge>
+                </StatusDot>
               )}
               {hasPending && (
                 <Button
@@ -679,11 +702,11 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                 return (
                   <div
                     key={type}
-                    className={`flex flex-col rounded-xl border p-3 ${doc ? 'border-slate-200 bg-white' : 'border-dashed border-amber-300 bg-amber-50/70'}`}
+                    className={`flex flex-col rounded-xl border p-3 ${doc ? 'border-slate-200 bg-white' : 'border-dashed border-slate-300 bg-white'}`}
                   >
                     <div className="mb-2 flex items-start justify-between gap-2">
                       <span className="flex items-center gap-2">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700" aria-hidden>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500" aria-hidden>
                           <Icon className="h-4 w-4" />
                         </span>
                         <span className="text-xs font-semibold leading-tight text-slate-800">{DOC_TYPE_LABEL[type]}</span>
@@ -691,7 +714,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       {doc ? (
                         <DocStatusBadge status={doc.status} />
                       ) : (
-                        <Badge variant="outline" className="border-amber-300 bg-amber-100 text-[10px] font-semibold text-amber-800">Не загружен</Badge>
+                        <StatusDot dot="bg-amber-500" tone="warning" className="text-xs">Не загружен</StatusDot>
                       )}
                     </div>
 
@@ -783,7 +806,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
               Брак: размытое СТС (демо)
             </Button>
             {verifyingId === r.id && (
-              <span className="flex items-center gap-1.5 text-sm font-medium text-blue-700" role="status">
+              <span className="flex items-center gap-1.5 text-sm text-slate-600" role="status">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                 Нейросеть проверяет…
               </span>
@@ -797,7 +820,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
             <div className="lg:sticky lg:top-4">
               <div className="mb-2 flex items-center justify-between px-1">
                 <span
-                  className="text-[11px] font-semibold uppercase tracking-wide text-slate-400"
+                  className="text-xs text-slate-500"
                   title={visible.length !== mine.length ? `Показаны не все заявки: всего ${mine.length}` : undefined}
                 >
                   Ваши заявки · {visible.length}{visible.length !== mine.length ? ` из ${mine.length}` : ''}
@@ -857,28 +880,22 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
               <nav aria-label="Список ваших заявок" className={`max-h-56 space-y-2 overflow-y-auto pr-1 sm:max-h-72 lg:max-h-[calc(100vh-14rem)] ${THIN_SCROLL}`}>
                 {visible.map((m) => {
                   const selected = m.id === r.id
-                  // цветовые состояния мини-карточки (Task 52/54): красная — перебита,
-                  // серые — выход/проигрыш; этап линии — по статусной модели агента
+                  // состояния мини-карточки (Task 52/54): цвет несёт только точка у статуса,
+                  // карточки без цветных заливок и рамок; выбранная — серый фон и полоска слева
                   const state = cardStateOf(m, now)
                   const stage = displayStageOf(m)
                   const st = PIPELINE_STAGES[stage]
-                  // красный фон — только активное перебитие в идущих торгах;
-                  // завершённый проигрыш остаётся серым, но со статусом «Ставка перебита»
                   const red = state === 'outbid'
                   const lostOutbidMini = state === 'lost' && lostOutbid(m)
                   const greyMini = state === 'withdrawn' || state === 'lost'
-                  const miniCls = red
-                    ? `border-red-300 bg-red-50 hover:border-red-400 ${selected ? 'shadow-sm ring-1 ring-red-400' : ''}`
-                    : greyMini
-                      ? 'border-slate-200 bg-slate-100 hover:border-slate-300'
-                      : selected
-                        ? 'border-blue-500 bg-blue-50/70 shadow-sm'
-                        : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
-                  const dotCls = red ? 'bg-red-500' : greyMini ? 'bg-slate-400' : st.circle
-                  // статусная модель агента (Task 54): перебитым — «Ставка перебита»,
+                  const miniCls = selected
+                    ? 'border-slate-300 bg-slate-100 shadow-[inset_3px_0_0_#0f172a]'
+                    : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                  const dotCls = red || lostOutbidMini ? 'bg-red-500' : greyMini ? 'bg-slate-400' : state === 'available' ? 'bg-sky-500' : st.circle
+                  // статусная модель агента (Task 54): перебитым — «Ставку перебили»,
                   // проигранным без перебития — замороженное «Согласование ставки»
                   const miniLabel = red || lostOutbidMini
-                    ? 'Ставка перебита'
+                    ? 'Ставку перебили'
                     : state === 'withdrawn'
                       ? 'Вы снялись с заявки'
                       : state === 'lost'
@@ -886,7 +903,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         : state === 'available'
                           ? 'Доступна для отклика'
                           : st.label
-                  const labelCls = red || lostOutbidMini ? 'text-red-600' : greyMini ? 'text-slate-500' : state === 'available' ? 'text-sky-700' : 'text-slate-400'
+                  const labelCls = red || lostOutbidMini ? 'text-red-700' : greyMini ? 'text-slate-500' : 'text-slate-600'
                   return (
                     <button
                       key={m.id}
@@ -895,10 +912,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       aria-current={selected ? 'true' : undefined}
                       className={`w-full rounded-xl border p-3 text-left transition-colors ${miniCls}`}
                     >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className={`font-mono text-sm font-bold ${red ? 'text-red-700' : greyMini ? 'text-slate-500' : 'text-blue-700'}`}>{m.number}</span>
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotCls}`} aria-hidden title={red ? 'Ставка перебита' : `Этап: ${st.label}`} />
-                      </span>
+                      <span className={`font-mono text-sm font-semibold ${greyMini ? 'text-slate-500' : 'text-slate-900'}`}>{m.number}</span>
                       <span className="mt-1 flex items-center gap-1 text-xs text-slate-700">
                         {pointInfo(m.fromPoint).short}
                         <ArrowRight className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -910,7 +924,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           <AnimatedRate value={state === 'available' ? (m.bestRate ?? m.startRate) : m.status === 'PUBLISHED' ? (myBidOf(m)?.amount ?? m.bestRate) : m.bestRate} format={rate} />
                         </span>
                       </span>
-                      <span className={`mt-1 block truncate text-[10px] font-semibold uppercase tracking-wide ${labelCls}`}>
+                      <span className={`mt-1.5 flex items-center gap-1.5 truncate text-xs ${labelCls}`}>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${dotCls}`} aria-hidden />
                         {miniLabel}
                       </span>
                     </button>
@@ -928,19 +943,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
+                        {/* статус показан один раз — над линией этапов, итог — в строке статуса ниже */}
                         <h3 className="text-lg font-bold text-slate-900">Заявка {r.number}</h3>
-                        {lost && r.status !== 'PUBLISHED' && (
-                          <Badge variant="outline" className="whitespace-nowrap border-slate-300 bg-slate-100 text-slate-600">
-                            Забрал другой перевозчик
-                          </Badge>
-                        )}
-                        {/* красный индикатор «Ставка перебита» (Task 52) */}
-                        {cardState === 'outbid' && (
-                          <Badge variant="outline" className="whitespace-nowrap border-red-300 bg-red-100 text-red-800">
-                            <CircleAlert className="mr-1 h-3 w-3" aria-hidden />
-                            Ставка перебита
-                          </Badge>
-                        )}
                         {/* иконка отмены — добровольный выход из идущих торгов (Task 52) */}
                         {bidding && myBid && (
                           <Button
@@ -990,23 +994,22 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     </div>
                   </div>
 
-                  {/* Статусная строка для агента */}
-                  <div className={`rounded-lg border px-3 py-2 text-sm font-medium ${line.cls}`} role="status">
-                    {line.text}
-                  </div>
+                  {/* Статусная строка для агента: иконка тона и обычный текст между тонкими линиями;
+                      у выигранной заявки её заменяет блок «Вы выиграли» — без повтора */}
+                  {!awarded && <StatusLine line={line} />}
 
                   {/* ——— Участие в торгах: ставка подана, рейс ещё на площадке.
                       Для серых карточек (выход/проигрыш) блок скрыт (Task 52) ——— */}
                   {bidding && myBid && !grey && (
-                    <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+                    <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                       <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <TrendingDown className="h-4 w-4 text-sky-700" aria-hidden />
+                        <TrendingDown className="h-4 w-4 text-slate-400" aria-hidden />
                         Участвуете в торгах
                       </h4>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <div className="rounded-lg border border-sky-200 bg-white px-3 py-2">
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <div className="text-xs text-muted-foreground">Моя ставка</div>
-                          <div className="text-base font-bold tabular-nums text-sky-800">
+                          <div className="text-base font-bold tabular-nums text-slate-900">
                             <AnimatedRate value={myBid?.amount ?? null} format={rate} />
                           </div>
                         </div>
@@ -1029,20 +1032,16 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         </div>
                       </div>
                       {r.deadline && (
-                        /* «Приём ставок до» — заметная плашка (Task 53): фон, крупный шрифт,
-                           срочный вариант красным, когда время заканчивается */
-                        <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border px-3 py-2.5 ${tl?.urgent ? 'border-red-300 bg-red-100/80' : 'border-sky-300 bg-sky-100'}`}>
-                          <Clock className={`h-5 w-5 shrink-0 ${tl?.urgent ? 'text-red-600' : 'text-sky-700'}`} aria-hidden />
-                          <span className={`text-sm font-bold ${tl?.urgent ? 'text-red-800' : 'text-sky-900'}`}>
-                            Приём ставок до
-                          </span>
-                          <span className={`text-base font-extrabold tabular-nums ${tl?.urgent ? 'text-red-900' : 'text-slate-900'}`}>
+                        /* «Приём ставок до» (Task 53): строка с часами без заливки,
+                           когда время заканчивается — красные часы и время */
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                          <Clock className={`h-4 w-4 shrink-0 ${tl?.urgent ? 'text-red-600' : 'text-slate-400'}`} aria-hidden />
+                          <span className="text-slate-500">Приём ставок до</span>
+                          <span className={`font-semibold tabular-nums ${tl?.urgent ? 'text-red-700' : 'text-slate-900'}`}>
                             {fmtDateTime(r.deadline)}
                           </span>
                           {tl && (
-                            <span className={`ml-auto rounded-full border bg-white px-2.5 py-0.5 text-xs font-bold tabular-nums ${tl.urgent ? 'border-red-300 text-red-700' : 'border-sky-300 text-sky-800'}`}>
-                              {tl.text}
-                            </span>
+                            <span className={`tabular-nums ${tl.urgent ? 'text-red-700' : 'text-slate-500'}`}>· {tl.text}</span>
                           )}
                         </div>
                       )}
@@ -1067,9 +1066,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
                   {/* ——— Доступна для отклика (Task 54): заявка на площадке, агент ещё не ставил ставку ——— */}
                   {available && (
-                    <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+                    <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                       <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                        <TrendingDown className="h-4 w-4 text-sky-700" aria-hidden />
+                        <TrendingDown className="h-4 w-4 text-slate-400" aria-hidden />
                         Заявка открыта для отклика
                       </h4>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -1092,18 +1091,14 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         </div>
                       </div>
                       {r.deadline && (
-                        <div className={`flex flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border px-3 py-2.5 ${tl?.urgent ? 'border-red-300 bg-red-100/80' : 'border-sky-300 bg-sky-100'}`}>
-                          <Clock className={`h-5 w-5 shrink-0 ${tl?.urgent ? 'text-red-600' : 'text-sky-700'}`} aria-hidden />
-                          <span className={`text-sm font-bold ${tl?.urgent ? 'text-red-800' : 'text-sky-900'}`}>
-                            Приём ставок до
-                          </span>
-                          <span className={`text-base font-extrabold tabular-nums ${tl?.urgent ? 'text-red-900' : 'text-slate-900'}`}>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                          <Clock className={`h-4 w-4 shrink-0 ${tl?.urgent ? 'text-red-600' : 'text-slate-400'}`} aria-hidden />
+                          <span className="text-slate-500">Приём ставок до</span>
+                          <span className={`font-semibold tabular-nums ${tl?.urgent ? 'text-red-700' : 'text-slate-900'}`}>
                             {fmtDateTime(r.deadline)}
                           </span>
                           {tl && (
-                            <span className={`ml-auto rounded-full border bg-white px-2.5 py-0.5 text-xs font-bold tabular-nums ${tl.urgent ? 'border-red-300 text-red-700' : 'border-sky-300 text-sky-800'}`}>
-                              {tl.text}
-                            </span>
+                            <span className={`tabular-nums ${tl.urgent ? 'text-red-700' : 'text-slate-500'}`}>· {tl.text}</span>
                           )}
                         </div>
                       )}
@@ -1126,22 +1121,20 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
                   {/* ——— Подтверждено: агент выиграл тендер (Task 50) ——— */}
                   {awarded && (
-                    <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 sm:p-5" role="status">
-                      <div className="flex items-start gap-3">
-                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm" aria-hidden>
-                          <Trophy className="h-6 w-6" />
-                        </span>
+                    <div className="space-y-4 rounded-xl border border-slate-200 p-4 sm:p-5" role="status">
+                      <div className="flex items-start gap-2.5">
+                        <Trophy className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
                         <div className="min-w-0">
-                          <h4 className="text-lg font-bold leading-snug text-emerald-900">Вы выиграли!</h4>
-                          <p className="mt-0.5 text-sm leading-snug text-emerald-800">
-                            Поздравляем: ставка {rate(r.bestRate)} согласована — рейс закреплён за «{carrierName}».
+                          <h4 className="text-base font-semibold leading-snug text-slate-900">Вы выиграли</h4>
+                          <p className="mt-0.5 text-sm leading-snug text-slate-600">
+                            Ставка {rate(r.bestRate)} согласована, рейс закреплён за «{carrierName}».
                           </p>
                         </div>
                       </div>
 
                       {/* Экипаж: что уже выбрано по рейсу */}
-                      <div className="rounded-xl border border-emerald-200 bg-white p-3.5">
-                        <h5 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                        <h5 className="flex items-center gap-2 text-sm font-medium text-slate-700">
                           <Users className="h-3.5 w-3.5 text-slate-400" aria-hidden />
                           Экипаж
                         </h5>
@@ -1166,7 +1159,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                         <Button
                           onClick={() => onNavigate('crew')}
                           variant="outline"
-                          className="gap-1.5 border-emerald-200 bg-white hover:bg-emerald-50"
+                          className="gap-1.5"
                           aria-label="Перейти к разделу «Назначение экипажей»"
                         >
                           <Users className="h-4 w-4" aria-hidden />
@@ -1178,18 +1171,18 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       </div>
 
                       {/* Документы: свёрнутый загрузчик — раскрывается, когда пора подавать комплект */}
-                      <div className="border-t border-emerald-200 pt-3">
+                      <div className="border-t border-slate-200 pt-3">
                         <button
                           type="button"
                           onClick={() => setDocsOpenId((cur) => (cur === r.id ? null : r.id))}
                           aria-expanded={docsOpen}
-                          className="flex items-center gap-1.5 text-sm font-medium text-emerald-800 transition-colors hover:text-emerald-900"
+                          className="flex items-center gap-1.5 text-sm font-medium text-slate-700 transition-colors hover:text-slate-900"
                           aria-label={`${docsOpen ? 'Скрыть' : 'Открыть'} загрузку документов по заявке ${r.number}`}
                         >
                           {docsOpen ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
                           Загрузить документы по заявке
                           {missingDocs.length > 0 && (
-                            <span className="text-xs font-normal text-emerald-700">
+                            <span className="text-xs font-normal text-slate-500">
                               · не загружено: {missingDocs.length} из {DOC_ORDER.length}
                             </span>
                           )}
@@ -1325,7 +1318,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                 <div className="space-y-3">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="font-mono text-sm font-bold text-blue-700">{bidReq.number}</span>
+                      <span className="font-mono text-sm font-semibold text-slate-900">{bidReq.number}</span>
                       <span className="text-xs text-slate-500">погрузка {bidReq.loadDate} · {bidReq.loadWindow}</span>
                     </div>
                     <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-700">
@@ -1336,11 +1329,11 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       {bidReq.cargo}, {bidReq.tonnage} т
                     </p>
                   </div>
-                  <div className="rounded-xl border-2 border-blue-600 bg-blue-50 px-4 py-3 text-center">
-                    <div className="text-xs font-medium uppercase tracking-wide text-blue-700">Ваша новая ставка</div>
-                    <div className="text-3xl font-bold tabular-nums text-blue-700">{rate(amount)}</div>
+                  <div className="rounded-xl border border-slate-300 px-4 py-3 text-center">
+                    <div className="text-xs text-slate-500">Ваша новая ставка</div>
+                    <div className="text-3xl font-bold tabular-nums text-slate-900">{rate(amount)}</div>
                     {bidReq.mode === 'AUCTION' && bidReq.bestRate != null && (
-                      <div className="mt-1 text-xs text-blue-800">
+                      <div className="mt-1 text-xs text-slate-500">
                         текущая лучшая {rate(floor)} · экономия для АЭМЗ {rate(floor - amount)}
                       </div>
                     )}
