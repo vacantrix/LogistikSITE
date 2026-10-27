@@ -41,7 +41,9 @@ const CELL_MARGINS = { top: 70, bottom: 70, left: 110, right: 110 }
 const FONT_FILES = [
   '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
   '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-].filter((p) => existsSync(p))
+  // turbopackIgnore: без него сборщик считал путь динамическим и клал в standalone-сборку
+  // весь проект — базу, .env, фото документов (предупреждение next build)
+].filter((p) => existsSync(/*turbopackIgnore: true*/ p))
 
 /** SVG → PNG (буфер), для вставки диаграмм в документ */
 function svgToPng(svg: string, width = 1200): Buffer {

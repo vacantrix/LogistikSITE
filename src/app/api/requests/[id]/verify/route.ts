@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { requireUser, viewerOf } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
-import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
+import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
 import { inTx, loadRequestFor } from '@/lib/requests'
 import { loadVerifySettings } from '@/lib/settings'
 import { plog, plogError } from '@/lib/platform-log'
@@ -102,7 +102,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     })
   }
 
+  // уведомления — только после транзакции: запись глобальным db внутри открытой транзакции
+  // SQLite ждёт её же блокировку, через 15 с — таймаут P1008, и комплект не доходил до логиста
+  const notes: { to: 'carrier' | 'logists'; payload: NotifyPayload }[] = []
   await inTx(async (tx) => {
+    notes.length = 0 // при повторе транзакции не дублируем
     for (const { id: docId, v } of verdicts) {
       await tx.document.updateMany({
         where: { id: docId, status: 'PENDING' },
@@ -135,11 +139,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         data: { requestId: id, type: 'DOC_VERIFIED', message: `Проверка завершена: требуется исправление — ${blocked.map((d) => d.fileName).join(', ')}` },
       })
       // перевозчику — что именно нужно исправить (Task 69)
-      await notifyCarrier(request.winnerId, {
-        type: 'DOCS_RETURNED',
-        title: `Автопроверка: нужны исправления · №${request.number}`,
-        body: `Перезагрузите: ${blocked.map((d) => d.fileName).join(', ')}`,
-        requestId: id,
+      notes.push({
+        to: 'carrier',
+        payload: {
+          type: 'DOCS_RETURNED',
+          title: `Автопроверка: нужны исправления · №${request.number}`,
+          body: `Перезагрузите: ${blocked.map((d) => d.fileName).join(', ')}`,
+          requestId: id,
+        },
       })
     } else {
       const passed = docs.filter((d) => d.status === 'PASSED').length
@@ -150,14 +157,25 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         data: { requestId: id, type: 'DOC_VERIFIED', message: `Комплект прошёл проверку — передан логисту (принято автоматически: ${passed}, на ручной сверке: ${manual})` },
       })
       // логисту — пакет готов к сверке (Task 69)
-      await notifyLogists({
-        type: 'DOCS_READY',
-        title: `Документы готовы к проверке · №${request.number}`,
-        body: `${request.winner?.name ?? 'Перевозчик'}: комплект прошёл автопроверку — заявка в очереди «Проверка документов»`,
-        requestId: id,
+      notes.push({
+        to: 'logists',
+        payload: {
+          type: 'DOCS_READY',
+          title: `Документы готовы к проверке · №${request.number}`,
+          body: `${request.winner?.name ?? 'Перевозчик'}: комплект прошёл автопроверку — заявка в очереди «Проверка документов»`,
+          requestId: id,
+        },
       })
     }
   })
+  for (const n of notes) {
+    try {
+      if (n.to === 'carrier') await notifyCarrier(request.winnerId, n.payload)
+      else await notifyLogists(n.payload)
+    } catch (err) {
+      console.error('notification error', n.payload.type, err)
+    }
+  }
 
   notifyLive({ type: 'DOCS_VERIFIED', requestId: id })
   // журнал событий платформы (Task 76): итог автопроверки комплекта
