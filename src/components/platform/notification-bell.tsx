@@ -7,6 +7,8 @@
  *    закрытие рейса, удаление заявки.
  * Обновляется по liveTick (шина WS), по открытию и страховочным интервалом;
  * клик по уведомлению отмечает его прочитанным и ведёт в нужный раздел.
+ * Непрочитанный счётчик выносится в вкладку браузера: цифра в заголовке плюс
+ * синий кружок с белой цифрой на иконке вкладки (lib/favicon-badge, Task 103).
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
@@ -15,6 +17,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { setFaviconBadge } from '@/lib/favicon-badge'
 import type { RoleKind, TabKey } from '@/components/platform/common'
 import type { NotificationDTO } from '@/lib/types'
 
@@ -94,9 +97,10 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
     return () => clearInterval(t)
   }, [load])
 
-  // заголовок вкладки браузера: видимая непрочитанная цифра
+  // вкладка браузера: цифра в заголовке + синий кружок с белой цифрой на иконке
   useEffect(() => {
     document.title = unread > 0 ? `(${unread}) АЭМЗ Логистика` : 'АЭМЗ Логистика'
+    setFaviconBadge(unread)
   }, [unread])
 
   const openPanel = (o: boolean) => {
