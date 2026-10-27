@@ -67,3 +67,6 @@ __pycache__/
 # локальный OCR: окружение и модели живут рядом с сервисом (из %TEMP% их вычищает автоочистка Windows)
 mini-services/paddle-ocr/.venv/
 mini-services/paddle-ocr/.models/
+
+# альбом тестовых фото пользователя (персональные данные) — не для git
+/download/*.pdf
