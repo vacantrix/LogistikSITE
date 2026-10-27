@@ -74,7 +74,7 @@ function popupHtml(p: MapPoint, withBid: boolean): string {
       : ''
   return (
     `<div style="min-width:200px">` +
-    `<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#94a3b8">${p.kind === 'loading' ? 'Пункт погрузки' : 'Пункт выгрузки'}</div>` +
+    `<div style="font-size:11px;font-weight:500;color:#64748b">${p.kind === 'loading' ? 'Пункт погрузки' : 'Пункт выгрузки'}</div>` +
     `<div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:2px">${esc(p.short)} · заявок: ${p.requests.length}</div>` +
     `<div style="font-size:12px;color:#334155;margin-top:2px">${esc(p.name)}</div>` +
     `<div style="font-size:11px;color:#64748b">${esc(p.address)}</div>` +

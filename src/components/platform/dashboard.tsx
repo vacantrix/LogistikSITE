@@ -148,7 +148,7 @@ export default function DashboardTab({ onNavigate }: TabProps) {
                   >
                     {events.map((ev) => (
                       <li key={ev.id} className="flex items-start gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-slate-50">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600" aria-hidden />
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-400" aria-hidden />
                         <div className="min-w-0 flex-1">
                           <div className="text-sm leading-snug text-slate-800">{ev.message}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -157,7 +157,7 @@ export default function DashboardTab({ onNavigate }: TabProps) {
                               <button
                                 type="button"
                                 onClick={() => onNavigate('board')}
-                                className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-semibold text-blue-700 transition-colors hover:bg-blue-100"
+                                className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-700 transition-colors hover:bg-slate-50"
                                 aria-label={`Открыть заявку ${ev.requestNumber} на площадке заявок`}
                               >
                                 {ev.requestNumber}
@@ -183,10 +183,10 @@ export default function DashboardTab({ onNavigate }: TabProps) {
                       key={a.key}
                       type="button"
                       onClick={() => onNavigate(a.key)}
-                      className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60"
+                      className="group flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition-colors hover:border-slate-300 hover:bg-slate-50"
                       aria-label={`Перейти в раздел «${a.title}»`}
                     >
-                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700 transition-colors group-hover:bg-blue-100" aria-hidden>
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 transition-colors group-hover:bg-slate-200" aria-hidden>
                         <a.icon className="h-5 w-5" />
                       </span>
                       <span className="min-w-0">

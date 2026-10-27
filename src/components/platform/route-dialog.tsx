@@ -111,7 +111,7 @@ export function RouteButton({
               <span className="h-6 w-px border-l-2 border-dashed border-slate-200" aria-hidden />
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Погрузка</div>
+              <div className="text-[11px] font-medium text-muted-foreground">Погрузка</div>
               <div className="mt-0.5 text-sm font-semibold text-slate-900">{a.name}</div>
               <div className="mt-0.5 text-sm text-slate-600">{a.address}</div>
             </div>
@@ -122,7 +122,7 @@ export function RouteButton({
               <ToIcon className="h-4 w-4" />
             </span>
             <div className="min-w-0">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Выгрузка</div>
+              <div className="text-[11px] font-medium text-muted-foreground">Выгрузка</div>
               <div className="mt-0.5 text-sm font-semibold text-slate-900">{b.name}</div>
               <div className="mt-0.5 text-sm text-slate-600">{b.address}</div>
               {!b.known && (

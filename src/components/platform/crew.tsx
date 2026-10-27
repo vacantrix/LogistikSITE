@@ -22,7 +22,7 @@ import {
   Users,
 } from 'lucide-react'
 import {
-  AgentStatusBadge, EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, type TabProps,
+  AgentStatusBadge, EmptyState, ErrorBlock, InfoTip, LoadingBlock, NoticeLine, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -151,7 +151,7 @@ function TrailerCell({ z }: { z: TrailerDTO }) {
 function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <tr>
-      <th scope="row" className="w-28 bg-slate-50 px-3 py-2 text-left align-top text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:w-36">
+      <th scope="row" className="w-28 bg-slate-50 px-3 py-2 text-left align-top text-[11px] font-medium text-slate-500 sm:w-36">
         {label}
       </th>
       <td className="px-3 py-2 align-top text-slate-800">{children}</td>
@@ -537,9 +537,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
       />
 
       {!activeCarrierId && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
-          Выберите перевозчика в шапке, чтобы действовать от его имени
-        </div>
+        <NoticeLine tone="warning" className="mb-4">Выберите перевозчика в шапке, чтобы действовать от его имени</NoticeLine>
       )}
 
       {activeCarrierId && (
@@ -547,7 +545,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
           <div className="min-w-0 space-y-4">
             {/* ——— Требуют экипажа ——— */}
             <div className="flex items-center justify-between gap-2 px-1">
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+              <h3 className="text-sm font-medium text-slate-500">
                 Требуют экипажа · {needCrew.length}
               </h3>
             </div>
@@ -576,8 +574,8 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                         <tbody className="divide-y divide-slate-100">
                           <InfoRow label="Заявка">
                             <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                              <span className="font-mono text-base font-bold text-blue-700">{r.number}</span>
-                              <span className="text-xs font-bold uppercase tracking-wide text-slate-700">{MODE_META[r.mode].label}</span>
+                              <span className="font-mono text-base font-bold text-slate-900">{r.number}</span>
+                              <span className="text-xs font-medium text-slate-700">{MODE_META[r.mode].label}</span>
                               <span className="text-xs text-slate-500">{AGENT_STATUS_LABEL[r.status] ?? REQUEST_STATUS_META[r.status].label}</span>
                             </span>
                           </InfoRow>
@@ -696,7 +694,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
 
             {/* ——— Передано Логисту ——— */}
             <div className="pt-2">
-              <h3 className="mb-2 px-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+              <h3 className="mb-2 px-1 text-sm font-medium text-slate-500">
                 Передано Логисту · {onPlatform.length}
               </h3>
               <Card className="border-slate-200 shadow-sm">
@@ -720,7 +718,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                           const z = trailerById(r.trailerId)
                           return (
                             <TableRow key={r.id}>
-                              <TableCell className="whitespace-nowrap font-mono text-sm font-bold text-blue-700">{r.number}</TableCell>
+                              <TableCell className="whitespace-nowrap font-mono text-sm font-bold text-slate-900">{r.number}</TableCell>
                               <TableCell className="whitespace-nowrap text-slate-600">
                                 {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
                               </TableCell>
@@ -812,9 +810,9 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
               </thead>
               <tbody>
                 {(importRows ?? []).map((r) => (
-                  <tr key={r.line} className={`border-t border-slate-100 ${r.ok ? '' : 'bg-red-50/50'}`}>
+                  <tr key={r.line} className="border-t border-slate-100">
                     <td className="px-3 py-2 text-slate-400">{r.line}</td>
-                    <td className="px-3 py-2 font-mono font-semibold text-blue-700">{r.requestNo || '—'}</td>
+                    <td className="px-3 py-2 font-mono font-semibold text-slate-900">{r.requestNo || '—'}</td>
                     <td className="px-3 py-2 text-slate-700">{r.driverName || '—'}</td>
                     <td className="px-3 py-2 font-mono text-slate-700">{r.truckPlate || '—'}</td>
                     <td className="px-3 py-2 font-mono text-slate-500">{r.trailerPlate || '—'}</td>

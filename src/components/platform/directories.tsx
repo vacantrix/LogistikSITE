@@ -13,7 +13,6 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Building2,
@@ -29,10 +28,9 @@ import {
   Truck,
   User,
   Wrench,
-  X,
 } from 'lucide-react'
 import {
-  ErrorBlock, ExpiryBadge, InfoTip, LoadingBlock, SectionHeader, type TabProps,
+  ErrorBlock, ExpiryBadge, InfoTip, LoadingBlock, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
 import { Badge } from '@/components/ui/badge'
@@ -113,21 +111,14 @@ const OWNERSHIP_LABEL: Record<OwnershipType, string> = {
   LEASE: 'Аренда · Лизинг',
 }
 
-/** Стили бейджа «Принадлежность» */
-const OWNERSHIP_BADGE_CLS: Record<OwnershipType, string> = {
-  OWNED: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  HIRED: 'border-blue-200 bg-blue-50 text-blue-700',
-  LEASE: 'border-amber-200 bg-amber-50 text-amber-700',
-}
-
-/** Ячейка «Принадлежность»: бейдж типа + собственник; для аренды/лизинга — строка договора (Task 62).
+/** Ячейка «Принадлежность»: тип обычным текстом + собственник; для аренды/лизинга — строка договора (Task 62).
  *  Для тягачей/прицепов имя собственника не дублируем — оно видно в колонке «Собственник» */
 function OwnershipCell({ type, owner, contract, hideOwner = false }: { type: OwnershipType; owner: string; contract: string; hideOwner?: boolean }) {
   const showOwner = !hideOwner && owner !== '' && owner !== '—'
   const showContract = type === 'LEASE' && contract !== '' && contract !== '—'
   return (
     <TableCell className="max-w-[210px]">
-      <Badge variant="outline" className={OWNERSHIP_BADGE_CLS[type]}>{OWNERSHIP_LABEL[type]}</Badge>
+      <div className="text-sm text-slate-700">{OWNERSHIP_LABEL[type]}</div>
       {showOwner && <div className="mt-1 truncate text-xs text-slate-500" title={owner}>{owner}</div>}
       {showContract && (
         <div className="truncate text-[11px] text-slate-400" title={`Договор-основание: ${contract}`}>{contract}</div>
@@ -162,17 +153,18 @@ const PHOTO_SLOTS: Record<Kind, PhotoSlot[]> = {
 }
 
 /** Бейдж статуса документа: иконка + подпись + классы */
+/** Статус слота документа точкой и словом: цветной текст — только у того, что требует действия */
 interface SlotStatus {
   label: string
-  cls: string
-  icon: typeof X
+  dot: string
+  tone?: 'warning' | 'danger'
 }
 
-const STATUS_LOADED: SlotStatus = { label: 'Загружен', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700', icon: CheckCircle2 }
-const STATUS_MISSING: SlotStatus = { label: 'Отсутствует', cls: 'border-slate-200 bg-slate-100 text-slate-500', icon: X }
-const STATUS_EXPIRED: SlotStatus = { label: 'Истекает срок', cls: 'border-red-300 bg-red-100 text-red-700', icon: CalendarClock }
-const STATUS_EXPIRING: SlotStatus = { label: 'Истекает срок', cls: 'border-amber-300 bg-amber-100 text-amber-700', icon: CalendarClock }
-const STATUS_REVIEW: SlotStatus = { label: 'Требует проверки', cls: 'border-amber-300 bg-amber-100 text-amber-700', icon: AlertTriangle }
+const STATUS_LOADED: SlotStatus = { label: 'Загружен', dot: 'bg-emerald-500' }
+const STATUS_MISSING: SlotStatus = { label: 'Отсутствует', dot: 'bg-slate-300' }
+const STATUS_EXPIRED: SlotStatus = { label: 'Истекает срок', dot: 'bg-red-500', tone: 'danger' }
+const STATUS_EXPIRING: SlotStatus = { label: 'Истекает срок', dot: 'bg-amber-500', tone: 'warning' }
+const STATUS_REVIEW: SlotStatus = { label: 'Требует проверки', dot: 'bg-amber-500', tone: 'warning' }
 
 /** Статус слота документа: по скану (NEEDS_REVIEW) и сроку из карточки записи (Task 62) */
 function slotStatus(photo: DirectoryPhotoDTO | undefined, expiryDate: string | undefined): SlotStatus {
@@ -544,7 +536,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Database className="h-4 w-4 text-blue-700" aria-hidden />
+              <Database className="h-4 w-4 text-slate-400" aria-hidden />
               Кадры и техника
               <InfoTip label="Кадры и техника">
                 {isLogist
@@ -554,7 +546,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
             </div>
           </div>
           <div className="mt-3">
-            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Последние добавления</div>
+            <div className="mb-1.5 text-[11px] font-medium text-slate-500">Последние добавления</div>
             {recentAdditions.length === 0 ? (
               <p className="text-xs text-slate-500">Пока ничего</p>
             ) : (
@@ -567,7 +559,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                         type="button"
                         onClick={() => setOpen(r.tab)}
                         title={`${r.kindLabel} — добавлен ${fmtCreated(r.createdAt)}${isLogist ? ` · ${r.carrierName}` : ''}`}
-                        className="flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 transition hover:border-blue-300 hover:bg-blue-50/60"
+                        className="flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                       >
                         <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                         <span className="max-w-[200px] truncate font-medium">{r.title}</span>
@@ -584,7 +576,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
       </Card>
 
       {/* Сроки документов: что и когда истекает */}
-      <Card className={`mb-4 shadow-sm ${expiredCount > 0 ? 'border-red-200 bg-red-50/40' : expiryItems.length > 0 ? 'border-amber-200 bg-amber-50/40' : 'border-emerald-200 bg-emerald-50/40'}`}>
+      <Card className="mb-4 border-slate-200 shadow-sm">
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
@@ -593,12 +585,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                 : <CalendarClock className={`h-4 w-4 ${expiredCount > 0 ? 'text-red-600' : 'text-amber-600'}`} aria-hidden />}
               Сроки документов
               {expiryItems.length > 0 && (
-                <Badge variant="outline" className={expiredCount > 0 ? 'border-red-300 bg-red-100 text-red-700' : 'border-amber-300 bg-amber-100 text-amber-700'}>
+                <StatusDot dot={expiredCount > 0 ? 'bg-red-500' : 'bg-amber-500'} tone={expiredCount > 0 ? 'danger' : 'warning'} className="font-normal">
                   {expiredCount > 0 ? `истекло: ${expiredCount}` : 'требуют внимания'}
                   {expiryItems.length > expiredCount ? ` · истекают: ${expiryItems.length - expiredCount}` : ''}
-                </Badge>
+                </StatusDot>
               )}
-              <InfoTip label="Цвета сроков">Подсветка: красный — срок истёк, янтарный — осталось до 30 дней, серый — до 90 дней.</InfoTip>
+              <InfoTip label="Цвета сроков">Точка у срока: красная — срок истёк, янтарная — осталось до 30 дней, серая — до 90 дней.</InfoTip>
             </div>
           </div>
 
@@ -609,7 +601,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
               {expiryItems.map((item) => {
                 const Icon = item.icon
                 return (
-                  <li key={item.key} className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 ${item.info.state === 'expired' ? 'border-red-200 bg-white' : 'border-amber-200 bg-white'}`}>
+                  <li key={item.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2">
                     <Icon className={`h-4 w-4 shrink-0 ${item.info.state === 'expired' ? 'text-red-500' : 'text-amber-500'}`} aria-hidden />
                     <span className="text-sm font-medium text-slate-800">{item.title}</span>
                     {isLogist && <span className="text-xs text-slate-400">{item.carrierName}</span>}
@@ -649,9 +641,9 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                 </span>
                 <span className="text-sm font-bold text-slate-900">{KIND_TITLES[s.kind]}</span>
                 {expiring > 0 && (
-                  <Badge variant="outline" className="ml-auto border-amber-300 bg-amber-50 text-amber-700">
+                  <StatusDot dot="bg-amber-500" tone="warning" className="ml-auto text-xs">
                     истекает: {expiring}
-                  </Badge>
+                  </StatusDot>
                 )}
               </div>
               <div className="mt-3 flex items-end justify-between gap-2">
@@ -672,7 +664,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <Building2 className="h-4 w-4 text-blue-700" aria-hidden />
+                <Building2 className="h-4 w-4 text-slate-400" aria-hidden />
                 Компании-исполнители
                 <InfoTip label="Роль компании">
                   Перевозчик — рейсы получают заказ-заявку на перевозку, экспедитор — поручение экспедитору. Смена роли меняет ещё не подписанные документы; подписанные остаются как есть.
@@ -995,16 +987,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                     const photo = photoList?.find((p) => p.label === slot.label)
                     const expiryDate = slot.expiryKey ? photoView.expiry?.[slot.expiryKey] : undefined
                     const status = slotStatus(photo, expiryDate)
-                    const StatusIcon = status.icon
                     const info = expiryDate === undefined ? null : expiryInfo(expiryDate)
                     return (
                       <figure key={slot.label} className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-                        {/* статус документа — бейдж сверху карточки */}
+                        {/* статус документа — точкой и словом сверху карточки */}
                         <div className="px-2.5 pt-2">
-                          <Badge variant="outline" className={status.cls}>
-                            <StatusIcon aria-hidden />
-                            {status.label}
-                          </Badge>
+                          <StatusDot dot={status.dot} tone={status.tone} className="text-xs">{status.label}</StatusDot>
                         </div>
                         {photo ? (
                           <div className="px-2.5 pt-2">

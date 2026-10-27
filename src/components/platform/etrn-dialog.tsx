@@ -8,7 +8,7 @@
  *  — EtrnStatus — полоска «Т1 → Т2 → Т3 → Т4», этап перевозки, УИД ГИС ЭПД и ошибки.
  */
 import { useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Loader2, Send } from 'lucide-react'
+import { AlertTriangle, Loader2, Send } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { InfoTip } from '@/components/platform/common'
+import { InfoTip, NoticeLine, StatusDot } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { etrnStageLabel, etrnTitlesDone } from '@/lib/diadoc/stages'
@@ -45,13 +45,8 @@ export function EtrnStatus({ doc }: { doc: EdoDocDTO }) {
     <div className="mt-2 space-y-1.5 rounded-md border border-slate-200 bg-white p-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
         {steps.map(([t, hint, ok]) => (
-          <span
-            key={t}
-            title={hint}
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${ok ? 'border-emerald-600 bg-emerald-500 text-white' : 'border-slate-300 bg-slate-100 text-slate-500'}`}
-          >
-            {ok && <CheckCircle2 className="h-3 w-3" aria-hidden />}
-            {t}
+          <span key={t} title={hint} className="inline-flex">
+            <StatusDot dot={ok ? 'bg-emerald-500' : 'bg-slate-300'} className={`text-xs ${ok ? '' : 'text-slate-400'}`}>{t}</StatusDot>
           </span>
         ))}
         <span className="text-xs font-medium text-slate-700">{etrnStageLabel(d.stage)}</span>
@@ -61,7 +56,7 @@ export function EtrnStatus({ doc }: { doc: EdoDocDTO }) {
         {d.gisStatus && <span>ГИС ЭПД: {d.gisStatus}</span>}
       </div>
       {d.gisError && (
-        <div className="flex items-start gap-1.5 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700">
+        <div className="flex items-start gap-1.5 text-[11px] text-red-700">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
           {d.gisError}
         </div>
@@ -108,7 +103,7 @@ function Select({ label, value, onChange, options }: { label: string; value: str
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <fieldset className="rounded-lg border border-slate-200 p-3">
-      <legend className="px-1 text-xs font-bold uppercase tracking-wide text-slate-500">{title}</legend>
+      <legend className="px-1 text-xs font-medium text-slate-500">{title}</legend>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{children}</div>
     </fieldset>
   )
@@ -184,7 +179,7 @@ export function EtrnSendDialog({ open, onOpenChange, target, diadoc, onSent }: {
           <DialogDescription className="sr-only">Титул грузоотправителя Т1 — {diadoc.stand}</DialogDescription>
         </DialogHeader>
 
-        {loadError && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{loadError}</p>}
+        {loadError && <NoticeLine tone="danger">{loadError}</NoticeLine>}
         {!v && !loadError && (
           <div className="flex items-center gap-2 py-8 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" aria-hidden />Собираем данные рейса…</div>
         )}
@@ -240,7 +235,7 @@ export function EtrnSendDialog({ open, onOpenChange, target, diadoc, onSent }: {
             </Section>
 
             <fieldset className="rounded-lg border border-slate-200 p-3">
-              <legend className="px-1 text-xs font-bold uppercase tracking-wide text-slate-500">Прицеп</legend>
+              <legend className="px-1 text-xs font-medium text-slate-500">Прицеп</legend>
               <div className="mb-2 flex items-center gap-2">
                 <Checkbox
                   id="etrn-trailer"
@@ -270,10 +265,10 @@ export function EtrnSendDialog({ open, onOpenChange, target, diadoc, onSent }: {
             </Section>
 
             {errors.length > 0 && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                <div className="mb-1 flex items-center gap-1.5 font-semibold"><AlertTriangle className="h-4 w-4" aria-hidden />Диадок не принял накладную</div>
+              <NoticeLine tone="danger">
+                <div className="mb-1 font-medium text-slate-900">Диадок не принял накладную</div>
                 <ul className="ml-5 list-disc space-y-0.5">{errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
-              </div>
+              </NoticeLine>
             )}
           </div>
         )}

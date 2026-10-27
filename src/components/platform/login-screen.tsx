@@ -82,7 +82,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
           {/* Мультиаккаунт (Task 74): быстрый вход в сохранённые аккаунты этого браузера */}
           {saved.length > 0 && (
             <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Продолжить как</p>
+              <p className="text-[11px] font-medium text-slate-500">Продолжить как</p>
               <div className="mt-2 space-y-1.5">
                 {saved.map((a) => (
                   <button
@@ -164,7 +164,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
               </div>
 
               {error && (
-                <p className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700" role="alert">
+                <p className="flex items-start gap-2 border-y border-slate-200 py-2.5 text-sm text-red-700" role="alert">
                   <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                   <span>{error}</span>
                 </p>
@@ -193,7 +193,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
             )}
             {DEMO_PASSWORD && showDemo && (
               <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3" role="note">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <p className="text-[11px] font-medium text-slate-500">
                   Пароль для всех: <span className="font-mono text-slate-900">{DEMO_PASSWORD}</span>
                 </p>
                 <ul className="mt-2 space-y-1">

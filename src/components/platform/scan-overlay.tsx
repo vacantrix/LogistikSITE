@@ -49,7 +49,7 @@ function ScanMessages({ list, title, sub }: { list: string[]; title?: string; su
       </div>
 
       {title && (
-        <div className="mt-3 text-sm font-bold uppercase tracking-wide text-slate-700">{title}</div>
+        <div className="mt-3 text-sm font-medium text-slate-700">{title}</div>
       )}
 
       {/* сменяющиеся сообщения */}

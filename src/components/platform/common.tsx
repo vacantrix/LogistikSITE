@@ -3,9 +3,15 @@
 /** Общие строительные блоки разделов платформы */
 import { useState, type ComponentType, type ReactNode } from 'react'
 import {
-  AlertTriangle, Clock, FileWarning, Info, RefreshCw, ServerCrash, WifiOff,
+  AlertTriangle,
+  CircleAlert,
+  CircleCheck,
+  FileWarning,
+  Info,
+  RefreshCw,
+  ServerCrash,
+  WifiOff,
 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AGENT_STATUS_LABEL, DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } from '@/lib/status'
@@ -61,6 +67,35 @@ export function StatusDot({ dot, children, tone, className = '' }: {
   )
 }
 
+/** Тон строки-уведомления: цвет несёт только иконка, текст обычный */
+export type NoticeTone = 'danger' | 'warning' | 'success' | 'info' | 'neutral'
+
+const NOTICE_ICON: Record<NoticeTone, { Icon: ComponentType<{ className?: string }>; cls: string }> = {
+  danger: { Icon: CircleAlert, cls: 'text-red-600' },
+  warning: { Icon: AlertTriangle, cls: 'text-amber-600' },
+  success: { Icon: CircleCheck, cls: 'text-emerald-600' },
+  info: { Icon: Info, cls: 'text-slate-400' },
+  neutral: { Icon: Info, cls: 'text-slate-400' },
+}
+
+/**
+ * Уведомление строкой: иконка тона и обычный текст между тонкими линиями — вместо
+ * цветных плашек с заливкой и рамкой. Единый вид предупреждений во всех разделах.
+ */
+export function NoticeLine({ tone = 'info', children, className = '' }: {
+  tone?: NoticeTone
+  children: ReactNode
+  className?: string
+}) {
+  const { Icon, cls } = NOTICE_ICON[tone]
+  return (
+    <div className={`flex items-start gap-2 border-y border-slate-200 py-2.5 text-sm text-slate-700 ${className}`} role="status">
+      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${cls}`} aria-hidden />
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
 export function StatusBadge({ status }: { status: RequestStatus }) {
   const meta = REQUEST_STATUS_META[status] ?? { label: status, dot: 'bg-slate-400' }
   return <StatusDot dot={meta.dot} tone={status === 'DELETED' ? 'danger' : undefined}>{meta.label}</StatusDot>
@@ -94,18 +129,14 @@ export function DocStatusBadge({ status }: { status: DocStatus }) {
   return <StatusDot dot={meta.dot} tone={meta.tone}>{meta.label}</StatusDot>
 }
 
-/** Бейдж срока действия документа: красный «истёк», янтарный «истекает», нейтральный «скоро», обычная дата */
+/** Срок действия документа точкой и словом: красная — истёк, янтарная — истекает, серая — скоро; иначе дата */
 export function ExpiryBadge({ date, className = '' }: { date?: string | null; className?: string }) {
   const info = expiryInfo(date)
   if (info.state === 'none') return <span className={`text-sm text-slate-400 ${className}`}>—</span>
   if (info.state === 'ok') return <span className={`whitespace-nowrap text-sm text-slate-600 ${className}`}>{info.date}</span>
-  if (info.state === 'soon') return <Badge variant="outline" className={`whitespace-nowrap ${info.badgeCls} ${className}`}>{info.label}</Badge>
-  return (
-    <Badge variant="outline" className={`whitespace-nowrap gap-1 ${info.badgeCls} ${className}`}>
-      {info.state === 'expired' ? <AlertTriangle className="h-3 w-3" aria-hidden /> : <Clock className="h-3 w-3" aria-hidden />}
-      {info.label}
-    </Badge>
-  )
+  if (info.state === 'expired') return <StatusDot dot="bg-red-500" tone="danger" className={className}>{info.label}</StatusDot>
+  if (info.state === 'warn') return <StatusDot dot="bg-amber-500" tone="warning" className={className}>{info.label}</StatusDot>
+  return <StatusDot dot="bg-slate-400" className={className}>{info.label}</StatusDot>
 }
 
 /**
@@ -148,7 +179,7 @@ export function SectionHeader({ eyebrow, title, desc, children }: { eyebrow?: st
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        {eyebrow && <div className="text-xs font-semibold uppercase tracking-widest text-blue-700">{eyebrow}</div>}
+        {eyebrow && <div className="text-xs font-medium text-slate-500">{eyebrow}</div>}
         <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
           {title}
           {/* описание раздела — только по наведению на «i» */}

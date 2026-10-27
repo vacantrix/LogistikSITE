@@ -3,10 +3,18 @@
 /** «Торги» — экран логиста: согласование победителя, продление, прямые предложения */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Clock, ClockPlus, EyeOff, Gavel, Handshake, Send, Timer, TrendingDown, TrendingUp, Trophy,
+  Clock,
+  ClockPlus,
+  EyeOff,
+  Gavel,
+  Handshake,
+  Send,
+  Timer,
+  TrendingUp,
+  Trophy,
 } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, ModeBadge, SectionHeader, StatusBadge, type TabProps,
+  EmptyState, ErrorBlock, LoadingBlock, ModeBadge, SectionHeader, StatusBadge, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -50,11 +58,11 @@ function Countdown({ deadline, now }: { deadline: string | null; now: number | n
   )
 }
 
-function Metric({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'green' }) {
+function Metric({ label, value }: { label: string; value: string; tone?: 'default' | 'green' }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-0.5 text-sm font-bold ${tone === 'green' ? 'text-emerald-600' : 'text-slate-900'}`}>{value}</div>
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="mt-0.5 text-sm font-bold text-slate-900">{value}</div>
     </div>
   )
 }
@@ -196,12 +204,12 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
           <TabsTrigger value="live">
             <Gavel className="h-4 w-4" aria-hidden />
             Идут торги
-            <Badge variant="outline" className="ml-1 border-blue-200 bg-blue-50 px-1.5 text-xs text-blue-700">{live.length}</Badge>
+            <Badge variant="outline" className="ml-1 border-slate-200 bg-white px-1.5 text-xs text-slate-500">{live.length}</Badge>
           </TabsTrigger>
           <TabsTrigger value="awarded">
             <Trophy className="h-4 w-4" aria-hidden />
             Согласованные
-            <Badge variant="outline" className="ml-1 border-violet-200 bg-violet-50 px-1.5 text-xs text-violet-700">{awarded.length}</Badge>
+            <Badge variant="outline" className="ml-1 border-slate-200 bg-white px-1.5 text-xs text-slate-500">{awarded.length}</Badge>
           </TabsTrigger>
         </TabsList>
 
@@ -227,7 +235,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-lg font-bold text-blue-700">№{r.number}</span>
+                        <span className="text-lg font-bold text-slate-900">№{r.number}</span>
                         <ModeBadge mode={r.mode} />
                       </div>
                       <div className="text-sm text-slate-600">
@@ -278,17 +286,14 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
                           {sortedBids.map((b) => {
                             const isBest = minAmount != null && b.amount === minAmount
                             return (
-                              <TableRow key={b.id} className={isBest ? 'bg-emerald-50/60' : undefined}>
+                              <TableRow key={b.id}>
                                 <TableCell className="font-medium text-slate-800">{b.carrierName}</TableCell>
                                 <TableCell className="whitespace-nowrap font-semibold text-slate-900">{rate(b.amount)}</TableCell>
                                 <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(b.createdAt)}</TableCell>
                                 <TableCell className="whitespace-nowrap text-slate-600">{takenMap.get(b.carrierId) ?? '—'}</TableCell>
                                 <TableCell>
                                   {isBest && (
-                                    <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
-                                      <TrendingDown className="mr-1 h-3 w-3" aria-hidden />
-                                      Лучшая ставка
-                                    </Badge>
+                                    <StatusDot dot="bg-emerald-500">Лучшая ставка</StatusDot>
                                   )}
                                 </TableCell>
                                 <TableCell className="text-right">
@@ -356,7 +361,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
           {awarded.map((r) => (
             <Card key={r.id} className="border-slate-200 shadow-sm">
               <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-4">
-                <span className="text-base font-bold text-blue-700">№{r.number}</span>
+                <span className="text-base font-bold text-slate-900">№{r.number}</span>
                 <div className="text-sm text-slate-600">
                   {r.fromPoint} → {r.toPoint} · {r.cargo}, {num(r.tonnage)} т
                 </div>
@@ -389,7 +394,7 @@ export default function AuctionsTab({ activeCarrierId: _activeCarrierId, onNavig
                   <>
                     Заявка №{awardBid.request.number} · {awardBid.request.fromPoint} → {awardBid.request.toPoint}.
                     Перевозчик <span className="font-semibold text-slate-900">{awardBid.bid.carrierName}</span> — ставка{' '}
-                    <span className="font-semibold text-emerald-700">{rate(awardBid.bid.amount)}</span>
+                    <span className="font-semibold text-slate-900">{rate(awardBid.bid.amount)}</span>
                     {awardBid.request.startRate > awardBid.bid.amount && (
                       <> · экономия {rate(awardBid.request.startRate - awardBid.bid.amount)}</>
                     )}

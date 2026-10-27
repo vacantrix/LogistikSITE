@@ -27,7 +27,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { DocStatusBadge, InfoTip } from '@/components/platform/common'
+import { DocStatusBadge, InfoTip, NoticeLine, StatusDot } from '@/components/platform/common'
 import {
   DateField, FieldLabel, GeoField, IssuedByField, PositionField, fieldCls,
 } from '@/components/platform/proforma-fields'
@@ -503,15 +503,10 @@ export default function DriverLine({
         </span>
         <span className="text-sm font-semibold text-slate-900">{d.fullName.trim() || 'Новый водитель'}</span>
         {initial?.driver ? (
-          <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-px text-[10px] font-semibold text-sky-700">
-            Строка {index + 1} · Excel
-          </span>
+          <span className="text-xs text-slate-500">Строка {index + 1} · Excel</span>
         ) : null}
         {admitted && (
-          <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-700">
-            <BadgeCheck className="h-3 w-3" aria-hidden />
-            допущен в базу
-          </span>
+          <StatusDot dot="bg-emerald-500" className="text-xs">допущен в базу</StatusDot>
         )}
         <span className="flex-1" />
         {!admitted && (
@@ -520,7 +515,7 @@ export default function DriverLine({
             variant="outline"
             onClick={() => void autofill()}
             disabled={busy !== null || uploading !== null}
-            className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
+            className="gap-1.5"
           >
             <Sparkles className="h-4 w-4" aria-hidden />
             {busy === 'fill' ? 'Заполняем…' : 'Автозаполнение'}
@@ -544,21 +539,22 @@ export default function DriverLine({
 
       {/* ——— плашка допуска ——— */}
       {admitted && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          <BadgeCheck className="h-4 w-4 shrink-0" aria-hidden />
-          <span className="font-semibold">Водитель допущен в базу</span>
-          <span>· {admitted}</span>
-          <span className="flex-1" />
-          <Button size="sm" variant="outline" className="h-7 gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-100" onClick={() => onRemove(id)}>
-            <Trash2 className="h-3.5 w-3.5" aria-hidden />
-            Убрать карточку
-          </Button>
-        </div>
+        <NoticeLine tone="success" className="mt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-slate-900">Водитель допущен в базу</span>
+            <span>· {admitted}</span>
+            <span className="flex-1" />
+            <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => onRemove(id)}>
+              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              Убрать карточку
+            </Button>
+          </div>
+        </NoticeLine>
       )}
 
       {/* ——— ТОЛЬКО данные водителя (Task 51): техника добавляется отдельными карточками ——— */}
-      <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/30 p-3">
-        <div className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-800">
+      <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
+        <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500">
           <IdCard className="h-3.5 w-3.5" aria-hidden />
           Данные водителя
         </div>
@@ -626,11 +622,11 @@ export default function DriverLine({
       {/* ——— перекрёстные сверки ——— */}
       {crossChecks.length > 0 && !admitted && (
         <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
-          <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Перекрёстные сверки</div>
+          <div className="mb-1 text-[11px] font-medium text-muted-foreground">Перекрёстные сверки</div>
           <ul className="space-y-0.5">
             {crossChecks.map((c) => (
-              <li key={c.label} className={`flex items-start gap-1.5 text-xs ${c.ok ? 'text-emerald-700' : 'text-red-700'}`}>
-                {c.ok ? <BadgeCheck className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden /> : <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />}
+              <li key={c.label} className={`flex items-start gap-1.5 text-xs ${c.ok ? 'text-slate-600' : 'text-red-700'}`}>
+                {c.ok ? <BadgeCheck className="mt-px h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden /> : <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />}
                 <span><span className="font-semibold">{c.label}</span> — {c.detail}</span>
               </li>
             ))}
@@ -694,15 +690,10 @@ function SoloHeader({
       </span>
       <span className="text-sm font-semibold text-slate-900">{title}</span>
       {tag && (
-        <span className="rounded border border-sky-200 bg-sky-50 px-1.5 py-px text-[10px] font-semibold text-sky-700">
-          {tag}
-        </span>
+        <span className="text-xs text-slate-500">{tag}</span>
       )}
       {admitted && (
-        <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-700">
-          <BadgeCheck className="h-3 w-3" aria-hidden />
-          допущено в базу
-        </span>
+        <StatusDot dot="bg-emerald-500" className="text-xs">допущено в базу</StatusDot>
       )}
       <span className="flex-1" />
       {!admitted && onAutofill && (
@@ -711,7 +702,7 @@ function SoloHeader({
           variant="outline"
           onClick={onAutofill}
           disabled={busy !== null || uploading}
-          className="gap-1.5 border-violet-300 text-violet-700 hover:bg-violet-50"
+          className="gap-1.5"
         >
           <Sparkles className="h-4 w-4" aria-hidden />
           {busy === 'fill' ? 'Заполняем…' : 'Автозаполнение'}
@@ -735,20 +726,21 @@ function SoloHeader({
   )
 }
 
-/** Зелёная плашка допуска одиночной карточки */
+/** Строка допуска одиночной карточки: зелёная иконка, обычный текст */
 function SoloAdmitted({ title, label, kind, onRemove }: { title: string; label: string; kind: string; onRemove: () => void }) {
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-      <BadgeCheck className="h-4 w-4 shrink-0" aria-hidden />
-      <span className="font-semibold">{title}</span>
+    <NoticeLine tone="success" className="mt-3">
+      <div className="flex flex-wrap items-center gap-2">
+      <span className="font-medium text-slate-900">{title}</span>
       <span>· {label}</span>
       <span className="flex-1" />
-      <Button size="sm" variant="outline" className="h-7 gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-100" onClick={onRemove}>
+      <Button size="sm" variant="outline" className="h-7 gap-1" onClick={onRemove}>
         <Trash2 className="h-3.5 w-3.5" aria-hidden />
         Убрать карточку
       </Button>
       <span className="sr-only">{kind} записан в справочник аккаунта</span>
-    </div>
+      </div>
+    </NoticeLine>
   )
 }
 

@@ -107,7 +107,7 @@ function TabItem({ tabKey, label, short, active, onClick, Icon }: {
       aria-current={active ? 'page' : undefined}
       aria-label={label}
       className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 px-0.5 pt-1.5 pb-1 transition-colors ${
-        active ? 'text-blue-700' : 'text-slate-500 active:bg-slate-100'
+        active ? 'text-slate-900' : 'text-slate-500 active:bg-slate-100'
       }`}
     >
       {/* индикатор активного раздела — полоска сверху */}
@@ -185,7 +185,7 @@ function BottomTabBar({ tab, onNavigate, nav }: {
                   onClick={() => { setMoreOpen(false); onNavigate(n.key) }}
                   aria-current={active ? 'page' : undefined}
                   className={`flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
-                    active ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-100'
+                    active ? 'bg-slate-100 text-slate-900' : 'text-slate-700 hover:bg-slate-100'
                   }`}
                 >
                   <Icon className="h-5 w-5 shrink-0" />
@@ -331,7 +331,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             <LogoMark variant="inverse" className="h-9 w-9" />
             <div>
               <div className="text-sm font-bold leading-tight sm:text-base">АЭМЗ Логистика</div>
-              <div className="text-[11px] uppercase tracking-widest text-slate-300">{isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}</div>
+              <div className="text-[11px] text-slate-300">{isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}</div>
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">

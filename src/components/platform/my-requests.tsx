@@ -3,10 +3,7 @@
 /** Раздел «Мои заявки» — кабинет агента: открытые и доступные к отклику заявки, торги, выигранные рейсы */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  CircleAlert,
-  CircleCheck,
   ArrowRight,
-  Car,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -17,7 +14,6 @@ import {
   FileX,
   History,
   IdCard,
-  Info,
   Loader2,
   Lock,
   MapPin,
@@ -28,7 +24,6 @@ import {
   Trash2,
   TrendingDown,
   Trophy,
-  TriangleAlert,
   Truck,
   Upload,
   User,
@@ -52,8 +47,10 @@ import {
   ErrorBlock,
   InfoTip,
   LoadingBlock,
+  NoticeLine,
   SectionHeader,
   StatusDot,
+  type NoticeTone,
   type TabProps,
 } from '@/components/platform/common'
 import { PIPELINE_STAGES, STAGE_OF_STATUS, StatusPipeline } from '@/components/platform/status-pipeline'
@@ -102,28 +99,8 @@ const stageOf = (r: RequestDTO): number => (r.status === 'PUBLISHED' ? 1 : STAGE
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
 
-/** Тон статусной строки: цвет несёт только иконка, текст обычный (вариант «точка и слово») */
-type LineTone = 'danger' | 'warning' | 'success' | 'info' | 'neutral'
-interface AgentLine { text: string; tone: LineTone }
-
-const LINE_ICON: Record<LineTone, { Icon: typeof Info; cls: string }> = {
-  danger: { Icon: CircleAlert, cls: 'text-red-600' },
-  warning: { Icon: TriangleAlert, cls: 'text-amber-600' },
-  success: { Icon: CircleCheck, cls: 'text-emerald-600' },
-  info: { Icon: Info, cls: 'text-slate-400' },
-  neutral: { Icon: Info, cls: 'text-slate-400' },
-}
-
-/** Строка статуса между тонкими линиями — без цветной заливки и рамки */
-function StatusLine({ line }: { line: AgentLine }) {
-  const { Icon, cls } = LINE_ICON[line.tone]
-  return (
-    <div className="flex items-start gap-2 border-y border-slate-200 py-2.5 text-sm text-slate-700" role="status">
-      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${cls}`} aria-hidden />
-      <span>{line.text}</span>
-    </div>
-  )
-}
+/** Строка статуса для агента: тон (цвет иконки) и короткий текст */
+interface AgentLine { text: string; tone: NoticeTone }
 
 /** Текст-подсказка для агента по статусу заявки */
 function agentLine(r: RequestDTO, myBid: BidDTO | null): AgentLine {
@@ -570,9 +547,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
       <SectionHeader title={`Мои заявки · ${carrierName}`} />
 
       {!activeCarrierId && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
-          Выберите перевозчика в шапке, чтобы действовать от его имени
-        </div>
+        <NoticeLine tone="warning" className="mb-4">Выберите перевозчика в шапке, чтобы действовать от его имени</NoticeLine>
       )}
 
       {loading && <LoadingBlock label="Загружаем ваши заявки…" />}
@@ -996,7 +971,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
                   {/* Статусная строка для агента: иконка тона и обычный текст между тонкими линиями;
                       у выигранной заявки её заменяет блок «Вы выиграли» — без повтора */}
-                  {!awarded && <StatusLine line={line} />}
+                  {!awarded && <NoticeLine tone={line.tone}>{line.text}</NoticeLine>}
 
                   {/* ——— Участие в торгах: ставка подана, рейс ещё на площадке.
                       Для серых карточек (выход/проигрыш) блок скрыт (Task 52) ——— */}
@@ -1360,7 +1335,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
               <div className="space-y-3 py-1 text-center" role="status">
                 <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-500" aria-hidden />
                 <p className="text-sm font-semibold text-slate-900">
-                  {lastBid != null ? <>Новая ставка: <span className="text-emerald-700">{rate(lastBid)}</span></> : 'Новая ставка принята'}
+                  {lastBid != null ? <>Новая ставка: <span className="text-slate-900">{rate(lastBid)}</span></> : 'Новая ставка принята'}
                   {bidReq.mode === 'CLOSED' && ' (закрытая)'}
                 </p>
               </div>

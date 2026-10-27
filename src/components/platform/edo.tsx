@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Building2, Eye, FileSignature, PenLine, RefreshCw, ScrollText, Send, UserRound } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, WithTip, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusDot, WithTip, type TabProps,
 } from '@/components/platform/common'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -75,17 +75,11 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-/** Пузырь статуса подписания стороны (яркие, стиль реестров) */
+/** Подпись стороны точкой и словом: подписано — зелёная точка, ждёт — янтарная */
 function SignBadge({ signed, label }: { signed: boolean; label: string }) {
-  return signed ? (
-    <Badge variant="outline" className="whitespace-nowrap bg-emerald-500 text-white border-emerald-600 shadow-sm">
-      ✓ {label}
-    </Badge>
-  ) : (
-    <Badge variant="outline" className="whitespace-nowrap bg-amber-100 text-amber-800 border-amber-300">
-      Ожидает · {label}
-    </Badge>
-  )
+  return signed
+    ? <StatusDot dot="bg-emerald-500">{label}</StatusDot>
+    : <StatusDot dot="bg-amber-500" tone="warning">Ожидает · {label}</StatusDot>
 }
 
 /** Порядок комплектов и документов в карточке рейса */
@@ -173,11 +167,11 @@ export default function EdoTab({ role, liveTick }: TabProps) {
         }
       >
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">Ожидают подписи: {counters.awaiting}</Badge>
-          <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-emerald-700">Подписано: {counters.signed}</Badge>
+          <StatusDot dot="bg-amber-500">Ожидают подписи: {counters.awaiting}</StatusDot>
+          <StatusDot dot="bg-emerald-500">Подписано: {counters.signed}</StatusDot>
           {diadoc?.enabled && (
             <>
-              <Badge variant="outline" className="border-blue-300 bg-blue-50 text-blue-800">{diadoc.stand.charAt(0).toUpperCase() + diadoc.stand.slice(1)}</Badge>
+              <span className="text-sm text-slate-500">{diadoc.stand.charAt(0).toUpperCase() + diadoc.stand.slice(1)}</span>
               {/* время последней сверки — по наведению на кнопку */}
               <WithTip tip={diadoc.lastSyncAt ? `Статусы ЭТрН сверены с Диадоком ${fmtDateTime(diadoc.lastSyncAt)}` : 'Сверить статусы ЭТрН с Диадоком'}>
                 <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
@@ -219,13 +213,10 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                   <CardContent className="space-y-4 p-4 sm:p-5">
                     {/* шапка рейса */}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                      <span className="text-base font-bold text-blue-700">№{r.number}</span>
-                      <Badge variant="outline" className={inWork
-                        ? 'bg-violet-500 text-white border-violet-600 shadow-sm'
-                        : 'bg-emerald-500 text-white border-emerald-600 shadow-sm'}
-                      >
+                      <span className="text-base font-bold text-slate-900">№{r.number}</span>
+                      <StatusDot dot={inWork ? 'bg-violet-500' : 'bg-emerald-500'}>
                         {inWork ? 'В работе' : 'Завершён'}
-                      </Badge>
+                      </StatusDot>
                       <Badge variant="outline" className="border-slate-300 bg-white text-slate-700">
                         {forwarder ? 'Экспедитор' : 'Перевозчик'}
                       </Badge>
@@ -296,7 +287,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
                   {previewDoc.doc.title}
-                  <span className="text-blue-700">№{previewDoc.doc.number}</span>
+                  <span className="text-slate-900">№{previewDoc.doc.number}</span>
                 </DialogTitle>
                 <DialogDescription>
                   Рейс №{previewDoc.pack.request.number} · {previewDoc.doc.partyRole}
@@ -369,7 +360,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                   >
                     <Eye className="h-4 w-4 text-slate-400" aria-hidden />
                     {doc.title}
-                    <span className="font-mono text-xs text-blue-700">№{doc.number}</span>
+                    <span className="font-mono text-xs text-slate-500">№{doc.number}</span>
                   </button>
                   {/* у ЭТрН через Диадок подписи показывает полоса титулов Т1–Т4 — без дублей */}
                   {!viaDiadoc && (
@@ -389,7 +380,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                 {viaDiadoc && <EtrnStatus doc={doc} />}
                 {viaDiadoc && !doc.diadoc && isLogist && pack.request.status === 'CONFIRMED' && onEtrnSend && (
                   <div className="mt-2">
-                    <Button size="sm" variant="outline" onClick={() => onEtrnSend(doc)} className="h-8 border-blue-200 text-blue-700 hover:bg-blue-50">
+                    <Button size="sm" variant="outline" onClick={() => onEtrnSend(doc)} className="h-8">
                       <Send className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                       Отправить ЭТрН в Диадок (Т1)
                     </Button>
@@ -397,18 +388,20 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                 )}
                 {viaDiadoc && doc.diadoc && !doc.partySigned && !isLogist && (
                   <WithTip tip="Подпишите титул перевозчика Т2 в своём Диадоке — платформа увидит подпись автоматически">
-                    <Badge variant="outline" className="mt-2 border-blue-300 bg-blue-50 text-blue-800" tabIndex={0}>Ждёт вашей подписи Т2 в Диадоке</Badge>
+                    <span tabIndex={0} className="mt-2 inline-flex">
+                      <StatusDot dot="bg-amber-500" tone="warning">Ждёт вашей подписи Т2 в Диадоке</StatusDot>
+                    </span>
                   </WithTip>
                 )}
                 {canSign && (
                   <div className="mt-2">
                     {isLogist ? (
-                      <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8 border-blue-200 text-blue-700 hover:bg-blue-50">
+                      <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8">
                         <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                         Подписать (КЭП АЭМЗ)
                       </Button>
                     ) : (
-                      <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                      <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8">
                         <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                         {doc.party === 'EXPEDITOR' ? 'Подписать (КЭП экспедитора)' : 'Подписать (КЭП перевозчика)'}
                       </Button>

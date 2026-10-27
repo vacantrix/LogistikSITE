@@ -26,7 +26,6 @@ import {
   Search,
   Send,
   Timer,
-  TrendingDown,
   TrendingUp,
   Trash2,
   Trophy,
@@ -60,7 +59,9 @@ import {
   ModeBadge,
   InfoTip,
   SectionHeader,
+  NoticeLine,
   StatusBadge,
+  StatusDot,
   WithTip,
   DocStatusBadge,
   type TabProps,
@@ -139,11 +140,11 @@ function DeadlineCell({ request, now }: { request: RequestDTO; now: number | nul
 }
 
 /** Компактная метрика торгового стенда */
-function Metric({ label, value, tone = 'default' }: { label: string; value: React.ReactNode; tone?: 'default' | 'green' }) {
+function Metric({ label, value }: { label: string; value: React.ReactNode; tone?: 'default' | 'green' }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-0.5 text-sm font-bold ${tone === 'green' ? 'text-emerald-600' : 'text-slate-900'}`}>{value}</div>
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="mt-0.5 text-sm font-bold text-slate-900">{value}</div>
     </div>
   )
 }
@@ -232,7 +233,7 @@ function AuctionDesk({ request, now, busy, onExtend, onOffer, onRaise }: {
   const urgentClock = now !== null && timeLeft(request.deadline)?.urgent === true
 
   return (
-    <div className="space-y-3 rounded-xl border border-blue-200 bg-white p-4">
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
       {/* шапка: маршрут и обратный отсчёт */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="text-sm text-slate-600">
@@ -289,21 +290,18 @@ function AuctionDesk({ request, now, busy, onExtend, onOffer, onRaise }: {
                 // свежая ставка (пришла по WebSocket меньше 20 сек назад) помечается бейджем
                 const fresh = now !== null && Date.now() - new Date(b.createdAt).getTime() < 20_000
                 return (
-                  <TableRow key={b.id} className={isBest ? 'bg-emerald-50/60' : ''}>
+                  <TableRow key={b.id}>
                     <TableCell className="font-medium text-slate-800">
                       <span className="flex items-center gap-2">
                         {b.carrierName}
-                        {fresh && <Badge variant="outline" className="whitespace-nowrap border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700">новая</Badge>}
+                        {fresh && <span className="whitespace-nowrap text-xs text-slate-500">новая</span>}
                       </span>
                     </TableCell>
                     <TableCell className="whitespace-nowrap font-semibold text-slate-900">{rate(b.amount)}</TableCell>
                     <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(b.createdAt)}</TableCell>
                     <TableCell>
                       {isBest && (
-                        <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
-                          <TrendingDown className="mr-1 h-3 w-3" aria-hidden />
-                          Лучшая
-                        </Badge>
+                        <StatusDot dot="bg-emerald-500">Лучшая</StatusDot>
                       )}
                     </TableCell>
                   </TableRow>
@@ -831,9 +829,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       </SectionHeader>
 
       {!isLogist && !activeCarrierId && (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
-          Выберите перевозчика в шапке, чтобы действовать от его имени
-        </div>
+        <NoticeLine tone="warning" className="mb-4">Выберите перевозчика в шапке, чтобы действовать от его имени</NoticeLine>
       )}
 
       {loading && <LoadingBlock label="Загружаем заявки…" />}
@@ -844,17 +840,17 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
           {/* Полоса «Требует внимания» — появляется только когда есть работа */}
           {isLogist && attention.length > 0 && (
             <div
-              className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+              className="flex flex-wrap items-center gap-2 border-y border-slate-200 py-2.5"
               role="status"
               aria-label="Требует внимания"
             >
-              <span className="mr-1 text-xs font-bold uppercase tracking-wide text-amber-800">Требует внимания:</span>
+              <span className="mr-1 text-xs font-medium text-amber-700">Требует внимания:</span>
               {attention.map((a) => (
                 <button
                   key={a.key}
                   type="button"
                   onClick={a.onClick}
-                  className="flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100"
+                  className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   <a.icon className="h-3.5 w-3.5" aria-hidden />
                   {a.text}
@@ -902,9 +898,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                   disabled={filtered.length === 0}
                   aria-label="Открыть карту доставки"
                 >
-                  <MapIcon className="h-4 w-4 text-blue-600" aria-hidden />
+                  <MapIcon className="h-4 w-4 text-slate-500" aria-hidden />
                   Карта доставки
-                  <Badge variant="outline" className="h-5 border-blue-200 bg-blue-50 px-1.5 text-[11px] text-blue-700">{deliveryCount}</Badge>
+                  <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[11px] text-slate-500">{deliveryCount}</Badge>
                 </Button>
               </WithTip>
             </CardContent>
@@ -960,16 +956,16 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                           <Fragment key={r.id}>
                           <tr
                             onClick={() => onRowClick(r)}
-                            className={`cursor-pointer align-middle transition-colors hover:bg-blue-50/40 ${my ? 'bg-sky-50/70' : ''}`}
+                            className={`cursor-pointer align-middle transition-colors hover:bg-slate-50 ${my ? 'bg-slate-50/70' : ''}`}
                           >
                             <td className="border-b border-slate-100 py-3 pr-3">
                               <div className="flex flex-col items-start gap-1">
-                                <span className="font-semibold text-blue-700">{r.number}</span>
+                                <span className="font-semibold text-slate-900">{r.number}</span>
                                 {my && (
                                   /* «Ваша ставка» — иконка + стоимость перевозки; цена обновляется
                                      динамически (анимация стрелки при смене значения, Task 53) */
                                   <span
-                                    className="inline-flex items-center gap-1 whitespace-nowrap text-sky-700"
+                                    className="inline-flex items-center gap-1 whitespace-nowrap text-slate-600"
                                     title={`Ваша ставка: ${rate(my.amount)}`}
                                     aria-label={`Ваша ставка: ${rate(my.amount)}`}
                                   >
@@ -1072,7 +1068,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                         </tr>
                         {expanded && (
                           <tr>
-                            <td colSpan={10} className="border-b border-slate-100 bg-blue-50/40 px-2 py-3">
+                            <td colSpan={10} className="border-b border-slate-100 bg-slate-50 px-2 py-3">
                               <AuctionDesk
                                 request={r}
                                 now={now}
@@ -1099,7 +1095,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <History className="h-4 w-4 text-blue-600" aria-hidden />
+                  <History className="h-4 w-4 text-slate-400" aria-hidden />
                   Журнал событий
                 </CardTitle>
               </CardHeader>
@@ -1216,25 +1212,25 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
-                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Заявка</div>
+                      <div className="text-[11px] text-muted-foreground">Заявка</div>
                       <div className="font-semibold text-slate-900">{bidReq.number}</div>
                     </div>
                     <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
-                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Погрузка</div>
+                      <div className="text-[11px] text-muted-foreground">Погрузка</div>
                       <div className="font-semibold text-slate-900">{bidReq.loadDate}, {bidReq.loadWindow}</div>
                     </div>
                     <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
-                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Маршрут и груз</div>
+                      <div className="text-[11px] text-muted-foreground">Маршрут и груз</div>
                       <div className="font-semibold text-slate-900">
                         {pointInfo(bidReq.fromPoint).short} → {pointInfo(bidReq.toPoint).short} · {bidReq.cargo}
                       </div>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-center">
-                    <div className="text-[11px] uppercase tracking-wide text-blue-700">Ваша ставка</div>
-                    <div className="text-2xl font-bold tabular-nums text-blue-900">{rate(bidFinal)}</div>
+                  <div className="rounded-xl border border-slate-300 px-4 py-3 text-center">
+                    <div className="text-xs text-slate-500">Ваша ставка</div>
+                    <div className="text-2xl font-bold tabular-nums text-slate-900">{rate(bidFinal)}</div>
                     {bidReq.mode === 'AUCTION' && (
-                      <div className="mt-0.5 text-xs text-blue-800">
+                      <div className="mt-0.5 text-xs text-slate-500">
                         текущая лучшая {rate(bidReq.bestRate ?? bidReq.startRate)}
                         {bidReq.bestRate != null && bidReq.startRate > bidFinal && (
                           <> · экономия для АЭМЗ {rate(bidReq.startRate - bidFinal)}</>
@@ -1288,7 +1284,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
             <>
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
-                  Заявка <span className="text-blue-700">{detailReq.number}</span>
+                  Заявка <span className="text-slate-900">{detailReq.number}</span>
                   {/* пузырь «На площадке» в деталях не нужен (Task 34): режим и так виден рядом */}
                   {detailReq.status !== 'PUBLISHED' && (isLogist
                     ? <StatusBadge status={detailReq.status} />
@@ -1319,7 +1315,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                   { label: detailReq.winnerName ? 'Перевозчик' : 'Окончание ставок', value: detailReq.winnerName ?? '—' },
                 ].map((f) => (
                   <div key={f.label} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{f.label}</div>
+                    <div className="text-[11px] text-muted-foreground">{f.label}</div>
                     <div className="mt-0.5 text-sm font-semibold text-slate-900">{f.value}</div>
                   </div>
                 ))}
@@ -1354,7 +1350,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 return (
                 <div>
                   <h4 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                    <Gavel className="h-4 w-4 text-blue-600" aria-hidden />
+                    <Gavel className="h-4 w-4 text-slate-400" aria-hidden />
                     Ставки ({activeBids.length})
                   </h4>
                   {activeBids.length === 0 ? (
@@ -1375,14 +1371,14 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                           {activeBids.map((b) => {
                             const isBest = bestBid(activeBids) === b.amount
                             return (
-                              <TableRow key={b.id} className={isBest ? 'bg-emerald-50' : undefined}>
+                              <TableRow key={b.id}>
                                 <TableCell className="font-medium">
                                   <span className="flex items-center gap-2">
                                     {b.carrierName}
-                                    {isBest && <Badge className="border-emerald-200 bg-emerald-100 text-[10px] text-emerald-800" variant="outline">лучшая</Badge>}
+                                    {isBest && <StatusDot dot="bg-emerald-500" className="text-xs text-slate-500">лучшая</StatusDot>}
                                   </span>
                                 </TableCell>
-                                <TableCell className={isBest ? 'font-semibold text-emerald-700' : 'text-slate-700'}>
+                                <TableCell className={isBest ? 'font-semibold text-slate-900' : 'text-slate-700'}>
                                   {rate(b.amount)}
                                 </TableCell>
                                 <TableCell className="text-muted-foreground">{fmtDateTime(b.createdAt)}</TableCell>
@@ -1485,7 +1481,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         <DialogContent className="grid h-[92vh] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-blue-600" aria-hidden />
+              <MapPin className="h-5 w-5 text-slate-500" aria-hidden />
               Карта доставки
             </DialogTitle>
             {/* описание — только для экранного диктора, на экране его нет */}
@@ -1506,7 +1502,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                   type="button"
                   onClick={() => setFocusPointId(p.id)}
                   className={`flex items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                    focusPointId === p.id ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                    focusPointId === p.id ? 'border-slate-300 bg-slate-100' : 'border-slate-200 bg-white hover:bg-slate-50'
                   }`}
                 >
                   <span

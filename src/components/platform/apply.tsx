@@ -297,8 +297,8 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
             exit={{ opacity: 0, y: -8, scale: 0.98 }}
             transition={{ type: 'spring', stiffness: 320, damping: 26 }}
           >
-            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-              <span className="flex items-center gap-1.5 text-sm font-semibold text-blue-900">
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                 <ScanLine className="h-4 w-4" aria-hidden />
                 Карточек в работе: {totalCards}
               </span>

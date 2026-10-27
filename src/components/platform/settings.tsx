@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { History, Save, Server, ShieldCheck, UserCog } from 'lucide-react'
 import {
-  ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
+  ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -105,9 +105,9 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
       <SectionHeader title="Настройки" />
 
       {error && settings && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+        <NoticeLine tone="warning" className="mb-4">
           Не удалось обновить данные: {error}. Показаны последние загруженные значения.
-        </div>
+        </NoticeLine>
       )}
 
       {/* 1. Пороги уверенности */}

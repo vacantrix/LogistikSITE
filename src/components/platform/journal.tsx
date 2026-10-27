@@ -17,7 +17,7 @@ import {
   AlertCircle, ChevronDown, Info, TriangleAlert, TimerReset,
 } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, type TabProps,
+  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -34,11 +34,11 @@ const REFRESH_MS = 15_000
 const fmtLogTime = (iso: string): string =>
   new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
-/** Яркие пузыри уровней (стиль реестров, Task 73): белый текст на насыщенном фоне */
-const LEVEL_META: Record<PlatformLogLevel, { label: string; badge: string; Icon: typeof Info }> = {
-  INFO: { label: 'Событие', badge: 'bg-sky-500 text-white border-sky-600 shadow-sm', Icon: Info },
-  WARN: { label: 'Внимание', badge: 'bg-amber-500 text-white border-amber-600 shadow-sm', Icon: AlertCircle },
-  ERROR: { label: 'Ошибка', badge: 'bg-red-500 text-white border-red-600 shadow-sm', Icon: TriangleAlert },
+/** Уровни точкой и словом: цветной текст — у предупреждений и ошибок */
+const LEVEL_META: Record<PlatformLogLevel, { label: string; dot: string; tone?: 'warning' | 'danger' }> = {
+  INFO: { label: 'Событие', dot: 'bg-sky-500' },
+  WARN: { label: 'Внимание', dot: 'bg-amber-500', tone: 'warning' },
+  ERROR: { label: 'Ошибка', dot: 'bg-red-500', tone: 'danger' },
 }
 
 /** Русские подписи типов событий — журнал читается без знания кодов */
@@ -185,7 +185,7 @@ export default function JournalTab({ liveTick }: TabProps) {
                     return (
                       <TabsTrigger key={lv} value={lv} className="gap-1.5 data-[state=active]:bg-white">
                         <span className="flex items-center gap-1.5">
-                          <span className={`h-2 w-2 shrink-0 rounded-full ${meta.badge.split(' ')[0]}`} aria-hidden />
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden />
                           {lv === 'INFO' ? 'События' : lv === 'WARN' ? 'Предупреждения' : 'Ошибки'}
                         </span>
                         <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{tabCounts[lv]}</Badge>
@@ -218,7 +218,6 @@ export default function JournalTab({ liveTick }: TabProps) {
                 <ul className="divide-y divide-slate-100">
                   {filtered.map((e) => {
                     const meta = LEVEL_META[e.level]
-                    const Icon = meta.Icon
                     const expanded = expandedId === e.id
                     return (
                       <li key={e.id}>
@@ -231,17 +230,14 @@ export default function JournalTab({ liveTick }: TabProps) {
                           {/* время */}
                           <span className="w-[104px] shrink-0 font-mono text-[11px] leading-5 text-slate-500">{fmtLogTime(e.createdAt)}</span>
                           {/* уровень */}
-                          <Badge variant="outline" className={`${meta.badge} shrink-0 whitespace-nowrap`}>
-                            <Icon className="mr-1 h-3 w-3" aria-hidden />
-                            {meta.label}
-                          </Badge>
+                          <StatusDot dot={meta.dot} tone={meta.tone} className="w-[88px] shrink-0">{meta.label}</StatusDot>
                           {/* сообщение */}
                           <span className="min-w-0 flex-1 break-words text-sm leading-snug text-slate-800">{e.message}</span>
                           {/* контекст: заявка/перевозчик */}
                           {(e.requestNumber || e.carrierName) && (
                             <span className="hidden shrink-0 items-center gap-1 sm:flex">
                               {e.requestNumber && (
-                                <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-white font-mono text-[10px] text-blue-700">
+                                <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-white font-mono text-[11px] text-slate-700">
                                   {e.requestNumber}
                                 </Badge>
                               )}
@@ -265,7 +261,7 @@ export default function JournalTab({ liveTick }: TabProps) {
                             </div>
                             {e.meta && Object.keys(e.meta).length > 0 && (
                               <div>
-                                <div className="mb-1 font-semibold uppercase tracking-wide text-slate-500">Технические подробности</div>
+                                <div className="mb-1 font-medium text-slate-500">Технические подробности</div>
                                 <pre className="max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700">
                                   {JSON.stringify(e.meta, null, 2)}
                                 </pre>
@@ -290,7 +286,7 @@ export default function JournalTab({ liveTick }: TabProps) {
 function Chip({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1">
-      <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-400">{label}</span>
+      <span className="shrink-0 text-[11px] text-slate-400">{label}</span>
       <span className={`min-w-0 truncate ${mono ? 'font-mono' : ''} text-slate-700`}>{value}</span>
     </span>
   )

@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, ImagePlus, Lock, X } from 'lucide-react'
-import { WithTip } from '@/components/platform/common'
+import { StatusDot, WithTip } from '@/components/platform/common'
 import { fileToCompressedDataUri, sleep } from '@/lib/demo-media'
 import { assessPhoto, type PhotoQuality } from '@/lib/photo-quality'
 
@@ -88,17 +88,17 @@ export function UploadRing({ progress }: { progress: number }) {
           className="stroke-blue-600 transition-[stroke-dashoffset] duration-100 ease-out"
         />
       </svg>
-      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tabular-nums text-blue-700">{pct}%</span>
+      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tabular-nums text-slate-600">{pct}%</span>
     </div>
   )
 }
 
-/** Номер шага: готово — галочка, текущий — синий, закрытый — серый */
+/** Номер шага: готово — галочка, текущий — тёмный, закрытый — серый */
 function StepNumber({ n, state }: { n: number; state: 'done' | 'active' | 'locked' }) {
   const cls = state === 'done'
     ? 'bg-emerald-600 text-white'
     : state === 'active'
-      ? 'bg-blue-600 text-white ring-2 ring-blue-200'
+      ? 'bg-slate-900 text-white'
       : 'bg-slate-200 text-slate-500'
   return (
     <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${cls}`} aria-hidden>
@@ -160,16 +160,16 @@ export function PhotoSteps<K extends string>({
         const miss = showMiss && !file && !isLoading
         const t = file ? tone?.(s.key) ?? null : null
         const poor = Boolean(file?.quality?.issues.length)
+        // рамки без заливок: красная — только ошибка распознавания и пропущенное фото
         const frame = isLoading
-          ? 'border-blue-300 bg-blue-50/40'
+          ? 'border-slate-300 bg-white'
           : file
-            ? t === 'ok' ? 'border-emerald-200 bg-emerald-50/40' : t === 'bad' ? 'border-red-200 bg-red-50/40'
-              : poor ? 'border-amber-300 bg-amber-50/40' : 'border-slate-200 bg-slate-50/40'
+            ? t === 'bad' ? 'border-red-300 bg-white' : 'border-slate-200 bg-white'
             : miss && !locked
-              ? 'border-dashed border-red-400 bg-red-50/40'
+              ? 'border-dashed border-red-300 bg-white'
               : active
-                ? 'border-dashed border-blue-400 bg-blue-50/30'
-                : 'border-dashed border-slate-200 bg-slate-50/40'
+                ? 'border-dashed border-slate-400 bg-white'
+                : 'border-dashed border-slate-200 bg-white'
         return (
           <li key={s.key} className={`rounded-lg border p-2 ${frame}`} aria-current={active || isLoading ? 'step' : undefined}>
             <div className="flex items-center justify-between gap-1">
@@ -185,8 +185,8 @@ export function PhotoSteps<K extends string>({
                   {/* плохой снимок — значок, причины по наведению */}
                   {poor && (
                     <WithTip tip={`Может не распознаться: ${file.quality!.issues.join('; ')}. Лучше переснять.`}>
-                      <span tabIndex={0} className="rounded border border-amber-300 bg-amber-50 px-1.5 py-px text-[10px] font-semibold text-amber-800">
-                        Плохое фото
+                      <span tabIndex={0} className="inline-flex">
+                        <StatusDot dot="bg-amber-500" tone="warning" className="text-[11px]">Плохое фото</StatusDot>
                       </span>
                     </WithTip>
                   )}
@@ -197,9 +197,9 @@ export function PhotoSteps<K extends string>({
 
             {/* замена фото идёт с тем же кружком, что и первая загрузка */}
             {isLoading ? (
-              <div className="mt-1 flex h-16 items-center justify-center gap-2 rounded border border-blue-200 bg-white/70">
+              <div className="mt-1 flex h-16 items-center justify-center gap-2 rounded border border-slate-200 bg-white">
                 <UploadRing progress={loading.progress} />
-                <span className="text-[10px] font-medium text-blue-700">{file ? 'Заменяем…' : 'Загружаем…'}</span>
+                <span className="text-[11px] text-slate-500">{file ? 'Заменяем…' : 'Загружаем…'}</span>
               </div>
             ) : file ? (
               <>
@@ -238,10 +238,10 @@ export function PhotoSteps<K extends string>({
             ) : (
               <label
                 title="JPG или PNG"
-                className={`mt-1 flex h-16 flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/70 text-center ${blocked ? 'pointer-events-none opacity-60' : 'cursor-pointer'} ${miss ? 'border-red-300 hover:border-red-400' : 'border-blue-300 hover:border-blue-500 hover:bg-blue-50/60'}`}
+                className={`mt-1 flex h-16 flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/70 text-center ${blocked ? 'pointer-events-none opacity-60' : 'cursor-pointer'} ${miss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'}`}
               >
-                <ImagePlus className={`h-4 w-4 ${miss ? 'text-red-500' : 'text-blue-600'}`} aria-hidden />
-                <span className={`text-[10px] font-medium ${miss ? 'text-red-600' : 'text-blue-700'}`}>Загрузить фото</span>
+                <ImagePlus className={`h-4 w-4 ${miss ? 'text-red-500' : 'text-slate-400'}`} aria-hidden />
+                <span className={`text-[11px] font-medium ${miss ? 'text-red-600' : 'text-slate-600'}`}>Загрузить фото</span>
                 {input(s.key)}
               </label>
             )}

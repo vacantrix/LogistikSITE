@@ -5,17 +5,27 @@
  *  кнопки «Увеличить»/«Скачать» убраны (клик по скану / окно предосмотра), яркая плашка решения):
  *  очередь с вычисляемыми состояниями (новые / ожидают проверки / расхождения / проверено /
  *  отклонено), фильтры и поиск, данные рейса из системы, сканы с зумом, сверка полей OCR. */
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertTriangle, ArrowRight, Ban, Check, CheckCheck, CircleAlert, CircleCheck, ClipboardCheck, Hourglass,
-  Inbox, ListChecks, MapPin, Package, RefreshCw, ScanSearch, Search, Truck as TruckIcon,
-  Undo2, UserCog, UserRound, X,
+  AlertTriangle,
+  ArrowRight,
+  Ban,
+  CheckCheck,
+  ClipboardCheck,
+  ListChecks,
+  MapPin,
+  Package,
+  Search,
+  Truck as TruckIcon,
+  Undo2,
+  UserCog,
+  UserRound,
+  X,
 } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusBadge, WithTip, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, NoticeLine, SectionHeader, StatusBadge, StatusDot, WithTip, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -117,15 +127,15 @@ function buildRows(
   ]
 }
 
+/** цветной текст — только у сомнительного чтения */
 function confClass(conf: number): string {
-  if (conf >= 0.95) return 'text-emerald-600'
-  if (conf >= 0.6) return 'text-blue-600'
-  return 'text-amber-600'
+  if (conf >= 0.6) return 'text-slate-500'
+  return 'text-amber-700'
 }
 
 function IssueIcon({ docStatus }: { docStatus: DocumentDTO['status'] }) {
   if (docStatus === 'REJECTED') return <Ban className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden />
-  if (docStatus === 'MANUAL') return <UserCog className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" aria-hidden />
+  if (docStatus === 'MANUAL') return <UserCog className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
   return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />
 }
 
@@ -136,68 +146,33 @@ type QueueState = 'new' | 'pending' | 'mismatch' | 'verified' | 'rejected'
 /** mismatch → pending → new → rejected → verified — порядок сортировки очереди */
 const STATE_ORDER: QueueState[] = ['mismatch', 'pending', 'new', 'rejected', 'verified']
 
-const STATE_META: Record<QueueState, { label: string; dot: string; badge: string; chip: string; text: string }> = {
-  new: {
-    label: 'Новые', dot: 'bg-sky-500', text: 'text-sky-700',
-    badge: 'border-sky-200 bg-sky-50 text-sky-700', chip: 'border-sky-600 bg-sky-600 text-white',
-  },
-  pending: {
-    label: 'Ожидают проверки', dot: 'bg-blue-500', text: 'text-blue-700',
-    badge: 'border-blue-200 bg-blue-50 text-blue-700', chip: 'border-blue-600 bg-blue-600 text-white',
-  },
-  mismatch: {
-    label: 'Расхождения', dot: 'bg-red-500', text: 'text-red-600',
-    badge: 'border-red-200 bg-red-50 text-red-700', chip: 'border-red-600 bg-red-600 text-white',
-  },
-  verified: {
-    label: 'Проверено', dot: 'bg-emerald-500', text: 'text-emerald-600',
-    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700', chip: 'border-emerald-600 bg-emerald-600 text-white',
-  },
-  rejected: {
-    label: 'Отклонено', dot: 'bg-amber-500', text: 'text-amber-600',
-    badge: 'border-amber-200 bg-amber-50 text-amber-700', chip: 'border-amber-600 bg-amber-600 text-white',
-  },
+/** состояния очереди точкой и словом: цветной текст — у расхождений (danger) и отклонённых (warning) */
+const STATE_META: Record<QueueState, { label: string; dot: string; text: string; tone?: 'warning' | 'danger' }> = {
+  new: { label: 'Новые', dot: 'bg-sky-500', text: 'text-slate-600' },
+  pending: { label: 'Ожидают проверки', dot: 'bg-blue-500', text: 'text-slate-600' },
+  mismatch: { label: 'Расхождения', dot: 'bg-red-500', text: 'text-red-700', tone: 'danger' },
+  verified: { label: 'Проверено', dot: 'bg-emerald-500', text: 'text-slate-600' },
+  rejected: { label: 'Отклонено', dot: 'bg-amber-500', text: 'text-amber-700', tone: 'warning' },
 }
 
-/** иконки состояний очереди — чип в шапке карточки (Task 71) */
-const STATE_ICON: Record<QueueState, ComponentType<{ className?: string }>> = {
-  new: Inbox,
-  pending: Hourglass,
-  mismatch: CircleAlert,
-  verified: CheckCheck,
-  rejected: Undo2,
-}
-
-/** чип состояния очереди: иконка и подпись — значки без текста читались плохо */
+/** состояние очереди в шапке карточки (Task 71) */
 function StateChip({ state }: { state: QueueState }) {
   const meta = STATE_META[state]
-  const Icon = STATE_ICON[state]
-  return (
-    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium ${meta.badge}`}>
-      <Icon className="h-4 w-4" aria-hidden />
-      {meta.label}
-    </span>
-  )
+  return <StatusDot dot={meta.dot} tone={meta.tone}>{meta.label}</StatusDot>
 }
 
 /** статус заявки в шапке карточки — иконка с подписью:
  *  «У логиста — сверка», «Возвращено агенту», «Проверено» */
-const STATUS_CHIP_META: Partial<Record<RequestStatus, { Icon: ComponentType<{ className?: string }>; label: string; cls: string }>> = {
-  AT_LOGIST: { Icon: ScanSearch, label: 'У логиста — сверка', cls: 'border-blue-200 bg-blue-50 text-blue-600' },
-  DOCS_REVIEW: { Icon: Undo2, label: 'Возвращено агенту на доработку', cls: 'border-amber-200 bg-amber-50 text-amber-600' },
-  CONFIRMED: { Icon: CheckCheck, label: 'Проверено — рейс выполняется', cls: 'border-emerald-200 bg-emerald-50 text-emerald-600' },
+const STATUS_CHIP_META: Partial<Record<RequestStatus, { label: string; dot: string; tone?: 'warning' }>> = {
+  AT_LOGIST: { label: 'У логиста — сверка', dot: 'bg-blue-500' },
+  DOCS_REVIEW: { label: 'Возвращено агенту на доработку', dot: 'bg-amber-500', tone: 'warning' },
+  CONFIRMED: { label: 'Проверено — рейс выполняется', dot: 'bg-emerald-500' },
 }
 
 function StatusChip({ status }: { status: RequestStatus }) {
   const meta = STATUS_CHIP_META[status]
   if (!meta) return <StatusBadge status={status} />
-  const { Icon, label, cls } = meta
-  return (
-    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium ${cls}`}>
-      <Icon className="h-4 w-4" aria-hidden />
-      {label}
-    </span>
-  )
+  return <StatusDot dot={meta.dot} tone={meta.tone}>{meta.label}</StatusDot>
 }
 
 /** короткие названия вкладок документов — полное название в подсказке */
@@ -222,23 +197,9 @@ function docDot(status: DocStatus): string {
 }
 
 /** иконки статусов документа — чип с иконкой и подписью */
-const DOC_STATUS_ICON: Record<DocStatus, ComponentType<{ className?: string }>> = {
-  PENDING: Hourglass,
-  PASSED: CircleCheck,
-  REUPLOAD: RefreshCw,
-  REJECTED: Ban,
-  MANUAL: UserCog,
-}
-
 function DocStatusChip({ status }: { status: DocStatus }) {
   const meta = DOC_STATUS_META[status]
-  const Icon = DOC_STATUS_ICON[status]
-  return (
-    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-xs font-medium ${meta.badge}`}>
-      <Icon className="h-4 w-4" aria-hidden />
-      {meta.label}
-    </span>
-  )
+  return <StatusDot dot={meta.dot} tone={meta.tone}>{meta.label}</StatusDot>
 }
 
 /** есть ли OCR-расхождение хотя бы по одному обязательному полю любого документа */
@@ -446,9 +407,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
         title="Проверка документов"
         desc="Пакеты документов по выигранным рейсам: автопроверка нейросетью уже выполнена — остаётся сверить со сканами и принять решение"
       >
-        <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
-          В очереди: {atLogistCount}
-        </Badge>
+        <span className="text-sm text-slate-500">В очереди: {atLogistCount}</span>
       </SectionHeader>
 
       {queue.length === 0 ? (
@@ -487,7 +446,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     onClick={() => setStateFilter(s)}
                     aria-pressed={active}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                      active ? meta.chip : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                     }`}
                   >
                     <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} aria-hidden />
@@ -529,15 +488,16 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
 
           {/* заявки, требующие исправления у агента, — компактная строка вместо крупной плашки */}
           {needFix.length > 0 && (
-            <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              <span className="font-semibold">На доработке у агента:</span>
-              {needFix.map((r) => (
-                <span key={r.id} className="rounded-md border border-amber-300 bg-white px-1.5 py-0.5 font-medium">
-                  №{r.number}
-                </span>
-              ))}
-            </div>
+            <NoticeLine tone="warning" className="mb-4">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span className="font-medium text-slate-900">На доработке у агента:</span>
+                {needFix.map((r) => (
+                  <span key={r.id} className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-medium">
+                    №{r.number}
+                  </span>
+                ))}
+              </div>
+            </NoticeLine>
           )}
 
           <div className="grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -577,14 +537,11 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                       aria-label={`Заявка №${r.number}, состояние: ${meta.label}`}
                       className={`w-full rounded-xl border p-3 text-left transition-colors ${
                         active
-                          ? 'border-blue-500 bg-blue-50/70 shadow-sm'
+                          ? 'border-slate-300 bg-slate-100 shadow-[inset_3px_0_0_#0f172a]'
                           : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
                       }`}
                     >
-                      <span className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-sm font-bold text-blue-700">№{r.number}</span>
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden title={`Состояние: ${meta.label}`} />
-                      </span>
+                      <span className="font-mono text-sm font-semibold text-slate-900">№{r.number}</span>
                       <span className="mt-1 flex items-center gap-1 text-xs text-slate-700">
                         <span className="truncate">{r.fromPoint}</span>
                         <ArrowRight className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
@@ -594,7 +551,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                         <span className="truncate text-slate-500">{r.winnerName ?? '—'}</span>
                         <span className="shrink-0 font-semibold text-slate-900">{rate(r.bestRate)}</span>
                       </span>
-                      <span className={`mt-1 block truncate text-[10px] font-semibold uppercase tracking-wide ${meta.text}`}>
+                      <span className={`mt-1.5 flex items-center gap-1.5 truncate text-xs ${meta.text}`}>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} aria-hidden />
                         {meta.label}
                       </span>
                     </button>
@@ -642,7 +600,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                   {/* данные рейса из системы (автозаполнение, read-only) — компактная сетка */}
                   <div className="border-b border-slate-100 p-4 sm:p-5">
                     <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
-                      <ListChecks className="h-4 w-4 text-blue-600" aria-hidden />
+                      <ListChecks className="h-4 w-4 text-slate-400" aria-hidden />
                       Данные рейса из системы
                       <InfoTip label="Данные рейса">Сверяются со сканами документов.</InfoTip>
                     </div>
@@ -663,7 +621,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                         { label: 'Ставка', value: rate(selected.bestRate) },
                       ].map((it) => (
                         <div key={it.label} className="min-w-0">
-                          <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{it.label}</dt>
+                          <dt className="text-[11px] text-slate-400">{it.label}</dt>
                           <dd className="mt-0.5 break-words text-sm font-medium text-slate-800">{it.value}</dd>
                         </div>
                       ))}
@@ -747,7 +705,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                                     row.expected != null && row.actual !== '' &&
                                     normValue(row.expected, row.kind) !== normValue(row.actual, row.kind)
                                   return (
-                                    <TableRow key={row.label} className={mismatch ? 'bg-red-50' : undefined}>
+                                    <TableRow key={row.label}>
                                       <TableCell className="whitespace-nowrap font-medium text-slate-700">{row.label}</TableCell>
                                       <TableCell className="text-slate-600">{row.expected ?? '—'}</TableCell>
                                       <TableCell>
@@ -762,15 +720,9 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                                         {row.expected == null ? (
                                           <span className="text-xs text-slate-400">—</span>
                                         ) : mismatch ? (
-                                          <Badge variant="outline" className="gap-1 whitespace-nowrap border-red-200 bg-red-50 text-red-700">
-                                            <X className="h-3 w-3" aria-hidden />
-                                            Расхождение
-                                          </Badge>
+                                          <StatusDot dot="bg-red-500" tone="danger">Расхождение</StatusDot>
                                         ) : (
-                                          <Badge variant="outline" className="gap-1 whitespace-nowrap border-emerald-200 bg-emerald-50 text-emerald-700">
-                                            <Check className="h-3 w-3" aria-hidden />
-                                            Совпадает
-                                          </Badge>
+                                          <StatusDot dot="bg-emerald-500">Совпадает</StatusDot>
                                         )}
                                       </TableCell>
                                     </TableRow>
@@ -784,7 +736,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                         {/* флаги проверки */}
                         {activeDoc.issues.length > 0 && (
                           <div className="rounded-lg border border-slate-200 bg-white p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Флаги автопроверки</div>
+                            <div className="text-xs font-medium text-slate-500">Флаги автопроверки</div>
                             <ul className="mt-2 space-y-1.5">
                               {activeDoc.issues.map((issue, i) => (
                                 <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
@@ -799,14 +751,12 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                     )}
                   </div>
 
-                  {/* решение по пакету (Task 72): карточка-действие, итоги — яркими плашками-пузырями */}
+                  {/* решение по пакету (Task 72): карточка-действие, итог — строкой с иконкой */}
                   <div className="border-t border-slate-100 p-4 sm:p-5">
                     {isEditable ? (
-                      <div className="overflow-hidden rounded-2xl border border-blue-200/80 shadow-sm">
-                        <div className="flex items-center gap-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-emerald-50 px-4 py-3 sm:px-5">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-sky-500 text-white shadow-sm" aria-hidden>
-                            <ClipboardCheck className="h-5 w-5" />
-                          </span>
+                      <div className="overflow-hidden rounded-2xl border border-slate-200">
+                        <div className="flex items-center gap-3 border-b border-slate-100 bg-white px-4 py-3 sm:px-5">
+                          <ClipboardCheck className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                               Решение по пакету
@@ -848,7 +798,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                             <WithTip tip="Пакет вернётся агенту с выбранной причиной">
                               <Button
                                 variant="outline"
-                                className="mt-2 h-11 w-full border-amber-300 bg-white text-amber-800 hover:bg-amber-50"
+                                className="mt-2 h-11 w-full"
                                 disabled={busy === selected.id}
                                 onClick={() => { setReturnReason(''); setReturnComment(''); setReturnOpen(true) }}
                                 aria-label="Отправить документы на доработку — вернуть агенту"
@@ -862,49 +812,29 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                         </div>
                       </div>
                     ) : selected.status === 'CONFIRMED' ? (
-                      /* утверждено — яркая изумрудная плашка-пузырь */
-                      <div className="relative w-fit max-w-full">
-                        <div className="rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-200 via-emerald-100 to-emerald-50 px-4 py-3 shadow-md shadow-emerald-200/70">
-                          <div className="flex items-start gap-3">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm" aria-hidden>
-                              <CheckCheck className="h-5 w-5" />
-                            </span>
-                            <div className="min-w-0">
-                              <div className="text-sm font-bold text-emerald-900">Утверждено — рейс выполняется</div>
-                              {selected.verifyComment ? (
-                                <div className="mt-0.5 text-xs text-emerald-800">
-                                  <span className="font-semibold">Комментарий логиста:</span> {selected.verifyComment}
-                                </div>
-                              ) : (
-                                <div className="mt-0.5 text-xs text-emerald-700/90">Пропуск подготовлен, ЭТрН — в разделе «Подписать ЭДО»</div>
-                              )}
-                            </div>
+                      /* утверждено — строка с зелёной иконкой */
+                      <NoticeLine tone="success">
+                        <div className="font-medium text-slate-900">Утверждено — рейс выполняется</div>
+                        {selected.verifyComment ? (
+                          <div className="mt-0.5 text-xs text-slate-600">
+                            <span className="font-medium">Комментарий логиста:</span> {selected.verifyComment}
                           </div>
-                        </div>
-                        <span className="absolute -top-[7px] left-7 h-3.5 w-3.5 rotate-45 rounded-[3px] border-l-2 border-t-2 border-emerald-400 bg-emerald-200" aria-hidden />
-                      </div>
+                        ) : (
+                          <div className="mt-0.5 text-xs text-slate-500">Пропуск подготовлен, ЭТрН — в разделе «Подписать ЭДО»</div>
+                        )}
+                      </NoticeLine>
                     ) : (
-                      /* возвращено агенту — яркая янтарная плашка-пузырь */
-                      <div className="relative w-fit max-w-full">
-                        <div className="rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-200 via-amber-100 to-amber-50 px-4 py-3 shadow-md shadow-amber-200/70">
-                          <div className="flex items-start gap-3">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-500 text-white shadow-sm" aria-hidden>
-                              <Undo2 className="h-5 w-5" />
-                            </span>
-                            <div className="min-w-0">
-                              <div className="text-sm font-bold text-amber-900">Возвращено агенту на доработку</div>
-                              {selected.verifyComment ? (
-                                <div className="mt-0.5 text-xs text-amber-800">
-                                  <span className="font-semibold">Причина / комментарий:</span> {selected.verifyComment}
-                                </div>
-                              ) : (
-                                <div className="mt-0.5 text-xs text-amber-700/90">Пакет ждёт исправлений от перевозчика</div>
-                              )}
-                            </div>
+                      /* возвращено агенту — строка с янтарной иконкой */
+                      <NoticeLine tone="warning">
+                        <div className="font-medium text-slate-900">Возвращено агенту на доработку</div>
+                        {selected.verifyComment ? (
+                          <div className="mt-0.5 text-xs text-slate-600">
+                            <span className="font-medium">Причина / комментарий:</span> {selected.verifyComment}
                           </div>
-                        </div>
-                        <span className="absolute -top-[7px] left-7 h-3.5 w-3.5 rotate-45 rounded-[3px] border-l-2 border-t-2 border-amber-400 bg-amber-200" aria-hidden />
-                      </div>
+                        ) : (
+                          <div className="mt-0.5 text-xs text-slate-500">Пакет ждёт исправлений от перевозчика</div>
+                        )}
+                      </NoticeLine>
                     )}
                   </div>
                 </CardContent>

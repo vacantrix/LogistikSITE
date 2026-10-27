@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, SectionHeader, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, NoticeLine, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import { RoutePointsInline } from '@/components/platform/route-dialog'
 import { DEADLINE_OPTIONS, RequestFormDialog } from '@/components/platform/request-form'
@@ -19,7 +19,6 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -155,11 +154,11 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
                 <Card key={r.id} className="border-slate-200 shadow-sm">
                   <CardContent className="space-y-3 p-4">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-blue-700">{r.number}</span>
+                      <span className="font-semibold text-slate-900">{r.number}</span>
                       {origin.unanswered ? (
-                        <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">Торги без ставок</Badge>
+                        <StatusDot dot="bg-amber-500" tone="warning">Торги без ставок</StatusDot>
                       ) : (
-                        <Badge variant="outline" className="border-dashed border-slate-300 bg-slate-50 text-slate-600">Сохранён без публикации</Badge>
+                        <StatusDot dot="bg-slate-400">Сохранён без публикации</StatusDot>
                       )}
                       <span className="ml-auto text-xs text-muted-foreground">{fmtDateTime(origin.at)}</span>
                     </div>
@@ -268,9 +267,9 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
                   </Select>
                 </div>
                 {loadDatePassed(publishTarget.loadDate) && (
-                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  <NoticeLine tone="danger">
                     Дата погрузки {publishTarget.loadDate} уже прошла — сначала измените её в черновике.
-                  </p>
+                  </NoticeLine>
                 )}
               </div>
               <DialogFooter>

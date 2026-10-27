@@ -221,7 +221,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                         const editable = r.status === 'PUBLISHED' || r.status === 'DRAFT'
                         return (
                           <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setDetailId(r.id)}>
-                            <TableCell className="whitespace-nowrap font-bold text-blue-700">№{r.number}</TableCell>
+                            <TableCell className="whitespace-nowrap font-bold text-slate-900">№{r.number}</TableCell>
                             <TableCell className="whitespace-nowrap text-slate-600">{fmtDateTime(r.createdAt)}</TableCell>
                             <TableCell className="whitespace-nowrap">
                               {/* группа статуса + точный статус (Task 67): «Завершена» — только закрытый рейс.
@@ -299,7 +299,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
             <>
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
-                  Заявка <span className="text-blue-700">{detail.number}</span>
+                  Заявка <span className="text-slate-900">{detail.number}</span>
                   <StatusDot dot={REQUEST_GROUP_META[requestGroupOf(detail.status)].dot} className="font-normal">
                     {REQUEST_GROUP_META[requestGroupOf(detail.status)].label}
                   </StatusDot>
@@ -322,14 +322,14 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   { label: 'Лучшая ставка', value: detail.bestRate != null ? rate(detail.bestRate) : '—' },
                 ].map((f) => (
                   <div key={f.label} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{f.label}</div>
+                    <div className="text-[11px] text-muted-foreground">{f.label}</div>
                     <div className="mt-0.5 text-sm font-semibold text-slate-900">{f.value}</div>
                   </div>
                 ))}
               </div>
               {detail.comment && (
                 <div className="rounded-lg border border-slate-200 bg-white p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Комментарий для исполнителя</div>
+                  <div className="text-[11px] text-muted-foreground">Комментарий для исполнителя</div>
                   <p className="mt-1 whitespace-pre-line text-sm text-slate-800">{detail.comment}</p>
                 </div>
               )}

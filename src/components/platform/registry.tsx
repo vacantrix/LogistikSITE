@@ -80,10 +80,10 @@ function Pipeline({ status, passPackage, etrnStatus }: { status: string; passPac
             aria-current={i === cur ? 'step' : undefined}
             className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium ${
               i < cur
-                ? 'border-blue-600 bg-blue-600 text-white'
+                ? 'border-slate-200 bg-white text-slate-600'
                 : i === cur
-                  ? 'border-blue-400 bg-blue-100 text-blue-800'
-                  : 'border-slate-200 bg-slate-100 text-slate-500'
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-400'
             }`}
           >
             {step}
@@ -98,19 +98,13 @@ function DocBadges({ r, stacked }: { r: RequestDTO; stacked?: boolean }) {
   return (
     <div className={stacked ? 'flex flex-col items-start gap-1' : 'flex flex-wrap gap-1'}>
       {r.passPackage && (
-        <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
-          Пропуск ✓
-        </Badge>
+        <StatusDot dot="bg-emerald-500" className="text-xs">Пропуск</StatusDot>
       )}
       {r.etrnStatus === 'SENT' && (
-        <Badge variant="outline" className="whitespace-nowrap border-blue-200 bg-blue-50 text-blue-700">
-          ЭТрН отправлена
-        </Badge>
+        <StatusDot dot="bg-blue-500" className="text-xs">ЭТрН отправлена</StatusDot>
       )}
       {r.etrnStatus === 'SIGNED' && (
-        <Badge variant="outline" className="whitespace-nowrap border-emerald-300 bg-emerald-50 text-emerald-700">
-          ЭТрН подписана
-        </Badge>
+        <StatusDot dot="bg-emerald-500" className="text-xs">ЭТрН подписана</StatusDot>
       )}
       {r.etrnStatus !== 'SENT' && r.etrnStatus !== 'SIGNED' && (
         <span className="text-xs text-slate-400">ЭТрН —</span>
@@ -352,7 +346,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                             {/* номер + дата погрузки под ним (Task 75: компактно, как пузырь + подпись) */}
                             <TableCell className="whitespace-nowrap">
                               <div className="flex flex-col items-start leading-tight">
-                                <span className="font-bold text-blue-700">№{r.number}</span>
+                                <span className="font-bold text-slate-900">№{r.number}</span>
                                 <span className="text-[11px] text-slate-500">{r.loadDate}</span>
                               </div>
                             </TableCell>
@@ -393,7 +387,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                                 <span className="text-[11px] text-slate-500">старт {rate(r.startRate)}</span>
                               </div>
                             </TableCell>
-                            <TableCell className={`whitespace-nowrap font-semibold ${(r.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                            <TableCell className={`whitespace-nowrap font-semibold ${(r.savings ?? 0) > 0 ? 'text-slate-900' : 'text-slate-500'}`}>
                               {rate(r.savings)}
                             </TableCell>
                             <TableCell onClick={(e) => { e.stopPropagation(); onNavigate('edo') }} className="cursor-pointer">
@@ -445,7 +439,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
             <>
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
-                  Рейс <span className="text-blue-700">№{detail.number}</span>
+                  Рейс <span className="text-slate-900">№{detail.number}</span>
                   <StatusDot dot={TRIP_GROUP_META[tripGroupOf(detail.status)].dot} className="font-normal">
                     {TRIP_GROUP_META[tripGroupOf(detail.status)].label}
                   </StatusDot>
@@ -463,29 +457,29 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
 
                 <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Направление</div>
+                    <div className="text-[11px] text-slate-500">Направление</div>
                     <div className="text-sm font-medium text-slate-800">{detail.fromPoint} → {detail.toPoint}</div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Груз</div>
+                    <div className="text-[11px] text-slate-500">Груз</div>
                     <div className="text-sm font-medium text-slate-800">{detail.cargo}, {num(detail.tonnage)} т · {detail.truckType}</div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Погрузка</div>
+                    <div className="text-[11px] text-slate-500">Погрузка</div>
                     <div className="text-sm font-medium text-slate-800">{detail.loadDate} · {detail.loadWindow}</div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Перевозчик</div>
+                    <div className="text-[11px] text-slate-500">Перевозчик</div>
                     <div className="text-sm font-medium text-slate-800">{detail.winnerName ?? '—'}</div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Водитель</div>
+                    <div className="text-[11px] text-slate-500">Водитель</div>
                     <div className="text-sm font-medium text-slate-800">
                       {detail.driverId ? drivers.get(detail.driverId)?.fullName ?? '—' : '—'}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">ТС</div>
+                    <div className="text-[11px] text-slate-500">ТС</div>
                     <div className="text-sm font-medium text-slate-800">
                       {detail.truckId ? (() => {
                         const t = trucks.get(detail.truckId)
@@ -497,24 +491,24 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Ставка</div>
+                    <div className="text-[11px] text-slate-500">Ставка</div>
                     <div className="text-sm font-medium text-slate-800">{rate(detail.startRate)} → {rate(detail.bestRate)}</div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Экономия</div>
-                    <div className={`text-sm font-semibold ${(detail.savings ?? 0) > 0 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    <div className="text-[11px] text-slate-500">Экономия</div>
+                    <div className={`text-sm font-semibold ${(detail.savings ?? 0) > 0 ? 'text-slate-900' : 'text-slate-500'}`}>
                       {rate(detail.savings)}
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Документы</div>
+                    <div className="text-[11px] text-slate-500">Документы</div>
                     <div className="mt-0.5"><DocBadges r={detail} /></div>
                   </div>
                 </div>
 
                 {/* журнал событий */}
                 <div>
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Журнал событий</div>
+                  <div className="mb-2 text-xs font-medium text-slate-500">Журнал событий</div>
                   <div className={`max-h-60 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 ${THIN_SCROLL}`}>
                     {[...detail.events]
                       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))

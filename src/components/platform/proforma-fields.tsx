@@ -22,16 +22,23 @@ const MapPickDialog = dynamic(() => import('@/components/platform/map-pick-dialo
 /** Встроенные варианты должности */
 export const POSITIONS = ['Водитель'] as const
 
-function confCls(c: number): string {
-  if (c >= 0.8) return 'bg-emerald-50 text-emerald-700 border-emerald-200'
-  if (c >= 0.55) return 'bg-amber-50 text-amber-700 border-amber-200'
-  return 'bg-red-50 text-red-700 border-red-200'
+/** Уверенность точкой и числом: цветной текст — только у сомнительного и слабого чтения */
+function confLook(c: number): { dot: string; text: string } {
+  if (c >= 0.8) return { dot: 'bg-emerald-500', text: 'text-slate-500' }
+  if (c >= 0.55) return { dot: 'bg-amber-500', text: 'text-amber-700' }
+  return { dot: 'bg-red-500', text: 'text-red-700' }
 }
 
 /** Уверенность нейросети в прочитанном поле */
 function ConfChip({ c }: { c: number }) {
   const pct = Math.round(c * 100)
-  return <span className={`ml-1.5 inline-flex items-center rounded border px-1 py-px text-[10px] font-semibold ${confCls(c)}`}>{pct}%</span>
+  const look = confLook(c)
+  return (
+    <span className={`ml-1.5 inline-flex items-center gap-1 text-[11px] tabular-nums ${look.text}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${look.dot}`} aria-hidden />
+      {pct}%
+    </span>
+  )
 }
 
 /** Подпись поля: красная — обязательное поле пусто после «Проверить»; чип — уверенность нейросети */
@@ -292,7 +299,7 @@ export function SuggestField({
                 id={`${listId}-${i}`}
                 role="option"
                 aria-selected={i === active}
-                className={`cursor-pointer rounded px-2 py-1.5 text-sm ${i === active ? 'bg-blue-50 text-blue-900' : 'text-slate-800'}`}
+                className={`cursor-pointer rounded px-2 py-1.5 text-sm ${i === active ? 'bg-slate-100 text-slate-900' : 'text-slate-800'}`}
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(s)}
               >

@@ -199,8 +199,8 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
   }
 
   const sectionTitle = (n: number, text: string) => (
-    <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-blue-700" aria-hidden>{n}</span>
+    <h4 className="flex items-center gap-2 text-xs font-medium text-slate-500">
+      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600" aria-hidden>{n}</span>
       {text}
     </h4>
   )
