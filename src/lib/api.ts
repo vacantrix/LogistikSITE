@@ -177,6 +177,39 @@ export const api = {
     if (params?.to) qs.set('to', params.to)
     return `/api/reports/docx?${qs.toString()}`
   },
+  /**
+   * Скачать бумажную проформу blob'ом (Task 101): пока документ формируется на
+   * сервере, раздел показывает анимацию песочных часов. Токен сессии уходит
+   * заголовком Authorization, имя файла берётся из Content-Disposition
+   * (filename* UTF-8 → кириллица и пробелы сохраняются).
+   */
+  reportDocxBlob: async (type: 1 | 2, params?: { from?: string; to?: string }): Promise<{ blob: Blob; fileName: string }> => {
+    const res = await fetch(api.reportDocxUrl(type, params), withAuth({ cache: 'no-store' }))
+    if (res.status === 401 && typeof window !== 'undefined') {
+      // сессия недействительна — как в json(): убираем аккаунт этой вкладки и показываем экран входа
+      try {
+        const token = sessionStorage.getItem(ACTIVE_TOKEN_KEY)
+        if (token) removeAccountByToken(token)
+        sessionStorage.removeItem(ACTIVE_TOKEN_KEY)
+      } catch { /* приватный режим */ }
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+      throw new Error('Требуется вход в систему')
+    }
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(data.error || `Ошибка запроса (${res.status})`)
+    }
+    const cd = res.headers.get('Content-Disposition') ?? ''
+    let fileName = type === 1 ? 'aemz-proforma-1.docx' : 'aemz-proforma-2.docx'
+    const utf8 = /filename\*=UTF-8''([^;\s]+)/i.exec(cd)
+    if (utf8?.[1]) {
+      fileName = decodeURIComponent(utf8[1].replace(/^["']|["']$/g, ''))
+    } else {
+      const ascii = /filename="?([^";]+)"?/i.exec(cd)
+      if (ascii?.[1]) fileName = ascii[1]
+    }
+    return { blob: await res.blob(), fileName }
+  },
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, withAuth({ cache: 'no-store' })).then(json<{ events: EventFeedItem[] }>),
 
   /** Уведомления колокольчика (Task 69): список + число непрочитанных */
