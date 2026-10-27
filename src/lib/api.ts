@@ -2,6 +2,7 @@
 import type {
   CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
+import type { ReportId, ReportPreview, ReportSettings } from '@/lib/reports/catalog'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
 import type { SuggestKind, Suggestion } from '@/lib/suggest'
 import {
@@ -169,22 +170,19 @@ export const api = {
     const qs = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][])
     return fetch(`/api/reports${qs.toString() ? `?${qs}` : ''}`, withAuth({ cache: 'no-store' })).then(json<ReportSummary>)
   },
-  /** ссылка на скачивание бумажной проформы (1 — экономия, 2 — обороты) за выбранный
-   *  период — документ формируется на сервере автоматически; кука сессии — автоматически */
-  reportDocxUrl: (type: 1 | 2, params?: { from?: string; to?: string }) => {
-    const qs = new URLSearchParams({ type: String(type) })
-    if (params?.from) qs.set('from', params.from)
-    if (params?.to) qs.set('to', params.to)
-    return `/api/reports/docx?${qs.toString()}`
-  },
+  /** Сводка отчёта из каталога по настройкам — сколько строк и на какую сумму попадёт в документ */
+  reportPreview: (report: ReportId, settings: ReportSettings) =>
+    fetch('/api/reports/export', withAuth({
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report, settings, preview: true }),
+    })).then(json<{ preview: ReportPreview }>),
   /**
-   * Скачать бумажную проформу blob'ом (Task 101): пока документ формируется на
-   * сервере, раздел показывает анимацию песочных часов. Токен сессии уходит
-   * заголовком Authorization, имя файла берётся из Content-Disposition
-   * (filename* UTF-8 → кириллица и пробелы сохраняются).
+   * Сформировать отчёт и получить DOCX blob'ом: токен сессии уходит заголовком Authorization,
+   * имя файла берётся из Content-Disposition (filename* UTF-8 — кириллица и пробелы сохраняются).
    */
-  reportDocxBlob: async (type: 1 | 2, params?: { from?: string; to?: string }): Promise<{ blob: Blob; fileName: string }> => {
-    const res = await fetch(api.reportDocxUrl(type, params), withAuth({ cache: 'no-store' }))
+  reportExport: async (report: ReportId, settings: ReportSettings): Promise<{ blob: Blob; fileName: string }> => {
+    const res = await fetch('/api/reports/export', withAuth({
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report, settings }), cache: 'no-store',
+    }))
     if (res.status === 401 && typeof window !== 'undefined') {
       // сессия недействительна — как в json(): убираем аккаунт этой вкладки и показываем экран входа
       try {
@@ -200,7 +198,7 @@ export const api = {
       throw new Error(data.error || `Ошибка запроса (${res.status})`)
     }
     const cd = res.headers.get('Content-Disposition') ?? ''
-    let fileName = type === 1 ? 'aemz-proforma-1.docx' : 'aemz-proforma-2.docx'
+    let fileName = `aemz-${report}.docx`
     const utf8 = /filename\*=UTF-8''([^;\s]+)/i.exec(cd)
     if (utf8?.[1]) {
       fileName = decodeURIComponent(utf8[1].replace(/^["']|["']$/g, ''))

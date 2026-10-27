@@ -1,71 +1,41 @@
 'use client'
 
 /**
- * «Отчёты» (Task 100) — две бумажные проформы за выбранный период:
- *  № 1 — экономия по заявкам: сколько сэкономлено всего, проекция на месяц
- *  (для идущего месяца) и из чего она складывается (по направлениям и по
- *  каждой заявке);
- *  № 2 — обороты и использование привлечённого транспорта: количество заявок,
- *  оборот, распределение по перевозчикам и статусам.
- * Период выбирается календарём (или пресетами) — и данные на странице, и DOCX
- * формируются сервером автоматически по этому периоду. Круговые диаграммы
- * строятся единым кодом с DOCX (lib/pie-svg) — на странице они выглядят так же,
- * как в скачанных файлах. Пока документ готовится — поэтапный индикатор в
- * минималистичном стиле автопроверки (спиннер + текущий шаг, Task 102):
- * сбор данных → сверка ставок → экономика → диаграммы → вёрстка формы.
+ * «Отчёты» — каталог отчётов для бухгалтерии и руководства с настройкой выгрузки.
+ *
+ * Слева — каталог (src/lib/reports/catalog.ts): что можно выгрузить сейчас и что «Скоро»
+ * (для них в платформе пока нет данных — что именно, видно по наведению). Справа — настройка
+ * выбранного отчёта: период, отбор, НДС, группировка, колонки, разделы, шапка и подписи.
+ * Под формой — сколько строк и на какую сумму попадёт в документ (сервер считает по тем же
+ * настройкам), кнопка «Сформировать DOCX» собирает документ на сервере и скачивает его.
+ * Настройки каждого отчёта запоминаются в браузере (кроме периода).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { endOfMonth, startOfMonth, subDays, subMonths } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { CalendarRange, Download, Loader2 } from 'lucide-react'
+import { CalendarRange, Download, Loader2, RotateCcw } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
-import { ErrorBlock, LoadingBlock, SectionHeader, type TabProps } from '@/components/platform/common'
+import { ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusDot, type TabProps } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
-import { rate } from '@/lib/status'
+import {
+  GROUPING_LABEL, REPORTS, VAT_RATES, defaultSettings, reportDef,
+  type ReportDef, type ReportId, type ReportPreview, type ReportSettings,
+} from '@/lib/reports/catalog'
 import { cn, dayOf, fmtDayRu } from '@/lib/utils'
-import { buildPieSvg } from '@/lib/pie-svg'
-import type { ReportPieSlice, ReportSummary } from '@/lib/types'
+import type { CarrierDTO } from '@/lib/types'
 
-const money = (v: number): string => `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Math.round(v))} ₽`
-const pct = (v: number): string => `${v.toFixed(1).replace('.', ',')} %`
-const ton = (v: number): string => `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(v)} т`
-
-/** плитка-показатель внутри проформы */
-function ProTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={cn('mt-1 text-xl font-bold leading-tight tabular-nums', accent ? 'text-emerald-600' : 'text-slate-900')}>
-        {value}
-      </div>
-    </div>
-  )
-}
-
-/** круговая диаграмма на странице — тот же SVG, что уходит в DOCX */
-function PieView({ title, slices, unit, centerHint }: { title: string; slices: ReportPieSlice[]; unit: string; centerHint: string }) {
-  const svg = useMemo(
-    () => buildPieSvg({ title, slices: slices.map((s) => ({ label: s.label, value: s.value })), unit, centerHint }),
-    [title, slices, unit, centerHint],
-  )
-  return (
-    <div
-      className="rounded-xl border border-slate-200 bg-white p-2 [&_svg]:h-auto [&_svg]:w-full"
-      role="img"
-      aria-label={title}
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
-  )
-}
+const STORE_KEY = 'aemz.reports.v1'
+const AUDIENCES: { id: ReportDef['audience']; label: string }[] = [
+  { id: 'accounting', label: 'Для бухгалтерии' },
+  { id: 'management', label: 'Для руководства' },
+]
 
 /** пресеты периода: метка → границы (даты включительно) */
 const PERIOD_PRESETS: { label: string; range: () => DateRange }[] = [
@@ -73,75 +43,196 @@ const PERIOD_PRESETS: { label: string; range: () => DateRange }[] = [
   { label: 'Прошлый месяц', range: () => ({ from: startOfMonth(subMonths(new Date(), 1)), to: endOfMonth(subMonths(new Date(), 1)) }) },
   { label: 'Последние 7 дней', range: () => ({ from: subDays(new Date(), 6), to: new Date() }) },
   { label: 'Последние 30 дней', range: () => ({ from: subDays(new Date(), 29), to: new Date() }) },
+  { label: 'С начала года', range: () => ({ from: new Date(new Date().getFullYear(), 0, 1), to: new Date() }) },
 ]
 
-/** Шаги подготовки отчёта — реальный порядок работы сервера (заявки периода →
- *  сверка рейсов → экономика → диаграммы → вёрстка DOCX). Показываются по одному
- *  с фиксированным тактом: формирование «бумажной» формы — видимый процесс. */
-const GEN_STEPS = [
-  'собираем данные за период',
-  'сверяем ставки и тоннаж по рейсам',
-  'считаем экономию и обороты',
-  'строим круговые диаграммы',
-  'верстаем бумажную форму DOCX',
-] as const
-const GEN_STEP_MS = 900
+/** шаги формирования — порядок работы сервера; показываются по одному, пока идёт запрос */
+const GEN_STEPS = ['собираем данные за период', 'считаем итоги', 'верстаем документ'] as const
+const GEN_STEP_MS = 500
 
-export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
-  const [report, setReport] = useState<ReportSummary | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [switching, setSwitching] = useState(false)
-  const [range, setRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: new Date() }))
-  const [pickerOpen, setPickerOpen] = useState(false)
-  /** какая проформа сейчас формируется на сервере (для поэтапного индикатора) */
-  const [generating, setGenerating] = useState<1 | 2 | null>(null)
-  const [genStep, setGenStep] = useState(0)
-  const generatingRef = useRef<1 | 2 | null>(null)
+const money = (v: number): string => `${new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)} ₽`
+const toDate = (iso: string): Date => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d) }
+
+type Stored = { report?: ReportId; settings?: Partial<Record<ReportId, Partial<ReportSettings>>> }
+function readStore(): Stored {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY) ?? '{}') as Stored } catch { return {} }
+}
+function writeStore(v: Stored): void {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(v)) } catch { /* приватный режим — без запоминания */ }
+}
+
+/* ── мелкие элементы формы ──────────────────────────────────────────────── */
+
+function Row({ label, tip, children }: { label: string; tip?: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-1 gap-1.5 border-b border-slate-100 py-3 last:border-b-0 sm:grid-cols-[180px_minmax(0,1fr)] sm:gap-4">
+      <div className="flex items-center gap-1 pt-1 text-sm text-slate-500">
+        {label}
+        {tip && <InfoTip label={label}>{tip}</InfoTip>}
+      </div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  )
+}
+
+/** переключатель «один из»: кнопки в ряд, выбранная — тёмным контуром */
+function Segmented<T extends string | number>({ value, options, onChange, disabled }: {
+  value: T
+  options: { id: T; label: string }[]
+  onChange: (v: T) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="inline-flex flex-wrap gap-1.5" role="radiogroup">
+      {options.map((o) => (
+        <button
+          key={String(o.id)}
+          type="button"
+          role="radio"
+          aria-checked={value === o.id}
+          disabled={disabled}
+          onClick={() => onChange(o.id)}
+          className={cn(
+            'h-8 rounded-md border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            value === o.id ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** переключатели «несколько из»: выбранные — с галочкой и тёмным контуром */
+function Chips({ selected, options, onToggle, disabled }: {
+  selected: string[]
+  options: { id: string; label: string }[]
+  onToggle: (id: string) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((o) => {
+        const on = selected.includes(o.id)
+        return (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={on}
+            disabled={disabled}
+            onClick={() => onToggle(o.id)}
+            className={cn(
+              'h-8 rounded-md border px-2.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+              on ? 'border-slate-400 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700',
+            )}
+          >
+            {on ? '✓ ' : ''}{o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ── раздел ─────────────────────────────────────────────────────────────── */
+
+export default function ReportsTab({ liveTick }: TabProps) {
   const { toast } = useToast()
-  const periodRef = useRef<{ from?: string; to?: string }>({})
-  /** зеркало range для selectRange: отличаем первый клик выбора от продолжения */
-  const rangeRef = useRef<DateRange | undefined>({ from: startOfMonth(new Date()), to: new Date() })
+  const [userName, setUserName] = useState('')
+  const [carriers, setCarriers] = useState<CarrierDTO[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [ready, setReady] = useState(false)
+  const [reportId, setReportId] = useState<ReportId>('trips-payable')
+  const [all, setAll] = useState<Partial<Record<ReportId, ReportSettings>>>({})
+  const [preview, setPreview] = useState<ReportPreview | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [genStep, setGenStep] = useState(0)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  /** незавершённый выбор в календаре (первый клик); полный период живёт в настройках отчёта */
+  const [picking, setPicking] = useState<DateRange | undefined>(undefined)
 
-  const load = useCallback(async (p?: { from?: string; to?: string }) => {
-    if (!p) setSwitching(true)
-    try {
-      const data = await api.reports(p)
-      periodRef.current = data.period
-      setReport(data)
-      setError(null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Неизвестная ошибка')
-    } finally {
-      setLoading(false)
-      setSwitching(false)
-    }
+  const def = reportDef(reportId) ?? REPORTS[0]
+  const today = dayOf(new Date())
+
+  /** настройки отчёта: сохранённые в браузере поверх настроек по умолчанию; период — текущий месяц */
+  const settingsFor = useCallback((d: ReportDef, name: string): ReportSettings => {
+    const base = defaultSettings(d, { today: dayOf(new Date()), userName: name })
+    const saved = readStore().settings?.[d.id] ?? {}
+    return { ...base, ...saved, from: base.from, to: base.to, preparedName: saved.preparedName || name }
   }, [])
 
-  useEffect(() => { void load() }, [load])
-
-  // real-time: событие из шины WS мгновенно догружает отчёты за выбранный период
+  // кто формирует (подпись «Составил») и список перевозчиков для отбора
   useEffect(() => {
-    if (liveTick > 0) void load(periodRef.current)
-  }, [liveTick, load])
+    let alive = true
+    void (async () => {
+      try {
+        const [me, dir] = await Promise.all([api.me(), api.directory()])
+        if (!alive) return
+        const stored = readStore()
+        const first = stored.report && reportDef(stored.report) ? stored.report : 'trips-payable'
+        setUserName(me.user.name)
+        setCarriers(dir.carriers)
+        setReportId(first)
+        setAll({ [first]: settingsFor(reportDef(first)!, me.user.name) })
+        setReady(true)
+      } catch (e) {
+        if (alive) setLoadError(e instanceof Error ? e.message : 'Неизвестная ошибка')
+      }
+    })()
+    return () => { alive = false }
+  }, [settingsFor])
 
-  /** применить период: обновить календарь и перезагрузить отчёты */
-  const applyPeriod = useCallback((from?: Date, to?: Date) => {
+  const s = all[reportId] ?? (ready ? settingsFor(def, userName) : null)
+
+  const update = (patch: Partial<ReportSettings>) => {
+    if (!s) return
+    const next = { ...s, ...patch }
+    setAll((prev) => ({ ...prev, [reportId]: next }))
+    const stored = readStore()
+    const { from: _f, to: _t, ...keep } = next
+    writeStore({ ...stored, report: reportId, settings: { ...stored.settings, [reportId]: keep } })
+  }
+
+  const selectReport = (id: ReportId) => {
+    setReportId(id)
+    setAll((prev) => (prev[id] ? prev : { ...prev, [id]: settingsFor(reportDef(id)!, userName) }))
+    writeStore({ ...readStore(), report: id })
+  }
+
+  // календарь показывает период выбранного отчёта, пока не начат новый выбор
+  const range: DateRange | undefined = picking ?? (s ? { from: toDate(s.from), to: toDate(s.to) } : undefined)
+
+  // сводка «что попадёт в отчёт»: пересчёт при каждом изменении настроек (с паузой) и по событиям платформы
+  const settingsKey = s && !def.missing ? JSON.stringify(s) : null
+  useEffect(() => {
+    if (!settingsKey) return
+    let alive = true
+    const timer = window.setTimeout(async () => {
+      setPreviewing(true)
+      try {
+        const res = await api.reportPreview(reportId, JSON.parse(settingsKey) as ReportSettings)
+        if (alive) { setPreview(res.preview); setPreviewError(null) }
+      } catch (e) {
+        if (alive) setPreviewError(e instanceof Error ? e.message : 'Не удалось посчитать')
+      } finally {
+        if (alive) setPreviewing(false)
+      }
+    }, 350)
+    return () => { alive = false; window.clearTimeout(timer) }
+  }, [settingsKey, reportId, liveTick])
+
+  const applyPeriod = (from?: Date, to?: Date) => {
     if (!from || !to) return
-    const next = { from, to }
-    rangeRef.current = next
-    setRange(next)
-    void load({ from: dayOf(from), to: dayOf(to) })
-  }, [load])
+    setPicking(undefined)
+    update({ from: dayOf(from), to: dayOf(to) })
+  }
 
-  /**
-   * Выбор диапазона. У react-day-picker v9 клик по дате при уже полном диапазоне
-   * растягивает его одной границей; привычная семантика датапикеров иная — клик
-   * начинает новый выбор. Поэтому один изменённый край трактуем как старт нового
-   * диапазона (ждём второй клик), а полный новый диапазон — применяем сразу.
-   */
+  /** клик по дате при полном диапазоне начинает новый выбор (у react-day-picker v9 он растягивает край) */
   const selectRange = (r: DateRange | undefined) => {
-    const prev = rangeRef.current
+    const prev = range
     let next: DateRange | undefined = r
     if (prev?.from && prev.to && r?.from && r?.to) {
       const sameFrom = r.from.getTime() === prev.from.getTime()
@@ -149,42 +240,23 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       if (sameFrom && !sameTo) next = { from: r.to }
       else if (!sameFrom && sameTo) next = { from: r.from }
     }
-    rangeRef.current = next
-    setRange(next)
     if (next?.from && next?.to) {
       applyPeriod(next.from, next.to)
       setPickerOpen(false)
+    } else {
+      setPicking(next)
     }
   }
 
-  /**
-   * Сформировать и скачать проформу: документ собирается на сервере по выбранному
-   * периоду, прогресс показываем поэтапно (Task 102, стиль автопроверки).
-   * Шаги идут с фиксированным тактом и не обгоняют реальную генерацию: скачивание
-   * стартует после завершения последнего шага. Файл приходит blob'ом, чтобы имя
-   * из Content-Disposition (кириллица, пробелы) сохранилось.
-   */
-  const downloadDocx = useCallback(async (type: 1 | 2) => {
-    if (generatingRef.current) return
-    generatingRef.current = type
-    setGenerating(type)
+  const generate = async () => {
+    if (!s || generating || def.missing) return
+    setGenerating(true)
     setGenStep(0)
-    const stepsDone = new Promise<void>((resolve) => {
-      let i = 0
-      const tick = () => {
-        i += 1
-        if (i >= GEN_STEPS.length) resolve()
-        else {
-          setGenStep(i)
-          window.setTimeout(tick, GEN_STEP_MS)
-        }
-      }
-      window.setTimeout(tick, GEN_STEP_MS)
-    })
+    const timer = window.setInterval(() => setGenStep((i) => Math.min(i + 1, GEN_STEPS.length - 1)), GEN_STEP_MS)
     try {
       const [{ blob, fileName }] = await Promise.all([
-        api.reportDocxBlob(type, periodRef.current),
-        stepsDone,
+        api.reportExport(reportId, s),
+        new Promise((r) => window.setTimeout(r, GEN_STEP_MS * (GEN_STEPS.length - 1))),
       ])
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -194,291 +266,278 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       a.click()
       a.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 4000)
-      toast({
-        title: type === 1 ? 'Проформа № 1 сформирована' : 'Проформа № 2 сформирована',
-        description: type === 1
-          ? `${fileName} · заявок с экономией: ${report?.proforma1.savingsCount ?? 0} · ${money(report?.proforma1.savedTotal ?? 0)}`
-          : `${fileName} · заявок: ${report?.proforma2.requestsCount ?? 0} · рейсов: ${report?.proforma2.confirmedCount ?? 0}`,
-      })
+      toast({ title: 'Отчёт сформирован', description: fileName })
     } catch (e) {
-      toast({
-        title: 'Не удалось сформировать отчёт',
-        description: e instanceof Error ? e.message : 'Попробуйте ещё раз',
-        variant: 'destructive',
-      })
+      toast({ title: 'Не удалось сформировать отчёт', description: e instanceof Error ? e.message : 'Повторите', variant: 'destructive' })
     } finally {
-      generatingRef.current = null
-      setGenerating(null)
+      window.clearInterval(timer)
+      setGenerating(false)
     }
-  }, [toast, report])
+  }
 
-  if (loading && !report) return <LoadingBlock label="Готовим отчёты…" />
-  if (error && !report) return <ErrorBlock message={error} onRetry={() => void load(periodRef.current)} />
+  const resetSettings = () => {
+    const stored = readStore()
+    if (stored.settings) delete stored.settings[reportId]
+    writeStore(stored)
+    setAll((prev) => ({ ...prev, [reportId]: { ...defaultSettings(def, { today, userName }), from: s?.from ?? today, to: s?.to ?? today } }))
+  }
 
-  const p1 = report?.proforma1
-  const p2 = report?.proforma2
-  const p1Rows = p1?.rows ?? []
-  const p2Carriers = p2?.byCarrier ?? []
-  const today = new Date()
+  const carrierOptions = useMemo(() => carriers.map((c) => ({ id: c.id, label: c.name })), [carriers])
+
+  if (loadError) return <ErrorBlock message={loadError} onRetry={() => window.location.reload()} />
+  if (!ready || !s) return <LoadingBlock label="Открываем отчёты…" />
+
+  const has = (c: ReportDef['controls'][number]) => def.controls.includes(c)
+  const off = def.missing !== null
+  const accounting = def.audience === 'accounting'
   const rangeLabel = range?.from && range?.to
     ? (dayOf(range.from) === dayOf(range.to) ? fmtDayRu(range.from) : `${fmtDayRu(range.from)} – ${fmtDayRu(range.to)}`)
-    : range?.from
-      ? `${fmtDayRu(range.from)} – …`
-      : 'Выберите период'
+    : range?.from ? `${fmtDayRu(range.from)} – …` : 'Выберите период'
 
   return (
     <div>
-      <SectionHeader eyebrow="Бумажные проформы" title="Отчёты">
-        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              className="h-10 gap-2 border-slate-300 font-medium text-slate-800"
-              disabled={!report || switching}
-              aria-label="Период отчёта"
-            >
-              <CalendarRange className="h-4 w-4 text-slate-500" aria-hidden />
-              {rangeLabel}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-auto p-0">
-            <div className="flex flex-col sm:flex-row">
-              <div className="flex shrink-0 flex-col gap-0.5 border-b border-slate-100 p-2 sm:w-44 sm:border-b-0 sm:border-r">
-                {PERIOD_PRESETS.map((preset) => (
-                  <Button
-                    key={preset.label}
-                    variant="ghost"
-                    size="sm"
-                    className="justify-start font-normal text-slate-700"
-                    onClick={() => {
-                      const r = preset.range()
-                      if (r.from && r.to) applyPeriod(r.from, r.to)
-                      setPickerOpen(false)
-                    }}
-                  >
-                    {preset.label}
-                  </Button>
-                ))}
-              </div>
-              <Calendar
-                mode="range"
-                numberOfMonths={1}
-                selected={range}
-                onSelect={selectRange}
-                locale={ru}
-                disabled={{ after: today }}
-                defaultMonth={range?.from}
-              />
-            </div>
-          </PopoverContent>
-        </Popover>
-      </SectionHeader>
+      <SectionHeader title="Отчёты" desc="Выберите отчёт, настройте, что в него попадёт, и сформируйте документ DOCX. Настройки каждого отчёта запоминаются." />
 
-      {/* поэтапная подготовка в стиле автопроверки: спиннер + текущий шаг + тонкий прогресс */}
-      {generating !== null && (
-        <div
-          className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-2.5"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-600" aria-hidden />
-            <span className="text-sm font-medium text-slate-700">
-              Формируем «{generating === 1 ? 'Проформа № 1 — Экономия по заявкам' : 'Проформа № 2 — Обороты и привлечённый транспорт'}»
-            </span>
-            <span className="ml-auto shrink-0 text-xs text-slate-400">{GEN_STEPS[genStep]}…</span>
-          </div>
-          <div className="mt-2 h-0.5 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden>
-            <div
-              className="h-full rounded-full bg-slate-700 transition-all duration-700 ease-linear"
-              style={{ width: `${Math.round(((genStep + 1) / GEN_STEPS.length) * 100)}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {error && report && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          Не удалось обновить данные: {error}. Показаны последние загруженные значения.
-        </div>
-      )}
-
-      <div className={cn('space-y-8 transition-opacity', switching && 'pointer-events-none opacity-50')}>
-        {/* ── Проформа № 1 — экономия по заявкам ─────────────────────────── */}
-        <Card className="overflow-hidden border-slate-200 shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 border-b border-slate-100 bg-slate-50/70">
-            <div className="min-w-0 space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="bg-slate-900 text-slate-50 hover:bg-slate-900">Проформа № 1</Badge>
-                <Badge variant="outline" className="border-slate-300 text-slate-600">Форма АЭМЗ-ОП-1</Badge>
-              </div>
-              <CardTitle className="text-lg text-slate-900">Экономия по заявкам</CardTitle>
-              <CardDescription>
-                {p1?.periodLabel ?? '—'} · подтверждено рейсов: {p1?.confirmedCount ?? 0}, из них с экономией: {p1?.savingsCount ?? 0}
-              </CardDescription>
-            </div>
-            <Button
-              className="h-10 shrink-0"
-              onClick={() => void downloadDocx(1)}
-              disabled={generating !== null}
-              title="Скачать бумажную проформу № 1 (DOCX)"
-            >
-              {generating === 1 ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
-              {generating === 1 ? 'Формируем…' : 'Скачать DOCX'}
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-5 p-5">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <ProTile label="Сэкономлено всего" value={money(p1?.savedTotal ?? 0)} accent />
-              <ProTile label={p1?.projectionLabel ?? 'Проекция на месяц'} value={money(p1?.projectionMonth ?? 0)} />
-              <ProTile label="Средняя на заявку" value={money(p1?.avgSaving ?? 0)} />
-              <ProTile label="Снижение ставки" value={pct(p1?.avgSavingPct ?? 0)} />
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <PieView title="Экономия по направлениям" slices={p1?.byDirection ?? []} unit="₽" centerHint="сэкономлено" />
-              <PieView title="Доли заявок в общей экономии" slices={p1?.byRequest ?? []} unit="₽" centerHint="сэкономлено" />
-            </div>
-
-            <div>
-              <div className="mb-2 text-sm font-semibold text-slate-800">Из чего складывается экономия</div>
-              <div className="overflow-hidden rounded-xl border border-slate-200">
-                <div className="max-h-96 overflow-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-50">
-                        <TableHead className="sticky left-0 top-0 z-10 bg-slate-50">№ заявки</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50">Направление</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50">Груз</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50">Ставка, ₽/т</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50 text-right">Экономия</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50 text-right">Снижение</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50">Перевозчик</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {p1Rows.map((r) => (
-                        <TableRow key={r.number}>
-                          <TableCell className="whitespace-nowrap font-bold text-slate-900">№{r.number}</TableCell>
-                          <TableCell className="max-w-[220px] truncate text-slate-700" title={r.direction}>{r.direction}</TableCell>
-                          <TableCell className="max-w-[160px] truncate text-slate-600" title={r.cargo}>{r.cargo}</TableCell>
-                          <TableCell className="whitespace-nowrap tabular-nums text-slate-600">
-                            {new Intl.NumberFormat('ru-RU').format(Math.round(r.startRate))} → <span className="font-semibold text-slate-900">{r.bestRate != null ? new Intl.NumberFormat('ru-RU').format(Math.round(r.bestRate)) : '—'}</span>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums text-emerald-600">{money(r.savings)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-600">{pct(r.pct)}</TableCell>
-                          <TableCell className="max-w-[160px] truncate text-slate-700" title={r.carrier}>{r.carrier}</TableCell>
-                        </TableRow>
-                      ))}
-                      {p1Rows.length > 1 && (
-                        <TableRow className="bg-slate-50 font-semibold">
-                          <TableCell colSpan={4} className="text-slate-700">ИТОГО за период</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-emerald-700">{money(p1?.savedTotal ?? 0)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">{pct(p1?.avgSavingPct ?? 0)}</TableCell>
-                          <TableCell />
-                        </TableRow>
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+        {/* ── каталог ── */}
+        <nav aria-label="Каталог отчётов" className="space-y-5">
+          {AUDIENCES.map((aud) => (
+            <div key={aud.id}>
+              <div className="mb-2 px-1 text-sm text-slate-500">{aud.label}</div>
+              <div className="space-y-1.5">
+                {REPORTS.filter((r) => r.audience === aud.id).map((r) => {
+                  const selected = r.id === reportId
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => selectReport(r.id)}
+                      aria-current={selected ? 'true' : undefined}
+                      className={cn(
+                        'w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
+                        selected ? 'border-slate-300 bg-slate-100 shadow-[inset_3px_0_0_#0f172a]' : 'border-slate-200 bg-white hover:bg-slate-50',
                       )}
-                      {p1Rows.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={7} className="py-8 text-center text-slate-400">
-                            За выбранный период заявок с экономией нет
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
+                    >
+                      <div className={cn('text-sm font-medium', r.missing ? 'text-slate-500' : 'text-slate-900')}>{r.title}</div>
+                      <div className="mt-0.5 text-xs text-slate-500">{r.summary}</div>
+                      <StatusDot dot={r.missing ? 'bg-slate-300' : 'bg-emerald-500'} className="mt-1.5 text-xs text-slate-500">
+                        {r.missing ? 'Скоро' : 'Можно выгрузить'}
+                      </StatusDot>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        {/* ── настройка выбранного отчёта ── */}
+        <Card className="border-slate-200 shadow-sm">
+          <CardContent className="p-4 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4">
+              <div className="min-w-0">
+                <h3 className="text-lg font-semibold text-slate-900">{def.title}</h3>
+                <div className="mt-0.5 text-sm text-slate-500">
+                  {def.summary} · форма {def.formCode}{def.landscape ? ' · альбомный лист' : ''}
                 </div>
               </div>
+              {off ? (
+                <span className="flex items-center gap-1">
+                  <StatusDot dot="bg-slate-300" className="text-slate-500">Скоро</StatusDot>
+                  <InfoTip label="Чего не хватает">{def.missing}</InfoTip>
+                </span>
+              ) : (
+                <Button variant="ghost" size="sm" className="gap-1.5 text-slate-500" onClick={resetSettings}>
+                  <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                  Настройки по умолчанию
+                </Button>
+              )}
             </div>
-          </CardContent>
-        </Card>
 
-        {/* ── Проформа № 2 — обороты и привлечённый транспорт ────────────── */}
-        <Card className="overflow-hidden border-slate-200 shadow-sm">
-          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 border-b border-slate-100 bg-slate-50/70">
-            <div className="min-w-0 space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge className="bg-slate-900 text-slate-50 hover:bg-slate-900">Проформа № 2</Badge>
-                <Badge variant="outline" className="border-slate-300 text-slate-600">Форма АЭМЗ-ОП-2</Badge>
+            <fieldset disabled={off} className="mt-1">
+              {has('period') && (
+                <Row label="Период">
+                  <Popover open={pickerOpen} onOpenChange={(open) => { setPickerOpen(open); if (!open) setPicking(undefined) }}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="h-9 gap-2 border-slate-300 font-normal text-slate-800" disabled={off}>
+                        <CalendarRange className="h-4 w-4 text-slate-500" aria-hidden />
+                        {rangeLabel}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-auto p-0">
+                      <div className="flex flex-col sm:flex-row">
+                        <div className="flex shrink-0 flex-col gap-0.5 border-b border-slate-100 p-2 sm:w-44 sm:border-b-0 sm:border-r">
+                          {PERIOD_PRESETS.map((preset) => (
+                            <Button
+                              key={preset.label}
+                              variant="ghost"
+                              size="sm"
+                              className="justify-start font-normal text-slate-700"
+                              onClick={() => {
+                                const r = preset.range()
+                                applyPeriod(r.from, r.to)
+                                setPickerOpen(false)
+                              }}
+                            >
+                              {preset.label}
+                            </Button>
+                          ))}
+                        </div>
+                        <Calendar mode="range" numberOfMonths={1} selected={range} onSelect={selectRange} locale={ru} disabled={{ after: new Date() }} defaultMonth={range?.from} />
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </Row>
+              )}
+
+              {has('dateBasis') && (
+                <Row label="Дата рейса" tip="По какой дате рейс попадает в период: по дате погрузки или по дате создания заявки">
+                  <Segmented value={s.dateBasis} onChange={(v) => update({ dateBasis: v })} disabled={off}
+                    options={[{ id: 'load', label: 'Погрузки' }, { id: 'created', label: 'Создания заявки' }]} />
+                </Row>
+              )}
+
+              {has('carriers') && (
+                <Row label="Перевозчики">
+                  <div className="flex flex-wrap gap-1.5">
+                    <Chips
+                      selected={s.carrierIds.length === 0 ? ['__all'] : []}
+                      options={[{ id: '__all', label: 'Все' }]}
+                      onToggle={() => update({ carrierIds: [] })}
+                      disabled={off}
+                    />
+                    <Chips
+                      selected={s.carrierIds}
+                      options={carrierOptions}
+                      onToggle={(id) => update({ carrierIds: s.carrierIds.includes(id) ? s.carrierIds.filter((x) => x !== id) : [...s.carrierIds, id] })}
+                      disabled={off}
+                    />
+                  </div>
+                </Row>
+              )}
+
+              {has('scope') && (
+                <Row label="Какие рейсы" tip="Закрытые — рейс выполнен и закрыт логистом. В рейсе — документы подтверждены, машина едет">
+                  <Segmented value={s.scope} onChange={(v) => update({ scope: v })} disabled={off}
+                    options={[{ id: 'closed', label: 'Закрытые' }, { id: 'done', label: 'Закрытые и в рейсе' }]} />
+                </Row>
+              )}
+
+              {has('edoFilter') && (
+                <Row label="Документы">
+                  <Segmented value={s.edoFilter} onChange={(v) => update({ edoFilter: v })} disabled={off}
+                    options={[{ id: 'all', label: 'Все' }, { id: 'unsigned', label: 'Ещё не подписаны' }, { id: 'signed', label: 'Подписаны' }]} />
+                </Row>
+              )}
+
+              {has('vat') && (
+                <Row label="НДС" tip="Как показывать НДС в суммах: не выделять, выделить из суммы (ставки с НДС) или начислить сверху (ставки без НДС)">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Segmented value={s.vat} onChange={(v) => update({ vat: v })} disabled={off}
+                      options={[{ id: 'none', label: 'Не выделять' }, { id: 'included', label: 'В т. ч.' }, { id: 'on-top', label: 'Сверху' }]} />
+                    {s.vat !== 'none' && (
+                      <Segmented value={s.vatRate} onChange={(v) => update({ vatRate: v })} disabled={off}
+                        options={VAT_RATES.map((r) => ({ id: r, label: `${r} %` }))} />
+                    )}
+                  </div>
+                </Row>
+              )}
+
+              {has('grouping') && def.groupings && (
+                <Row label="Группировка">
+                  <Segmented value={s.grouping} onChange={(v) => update({ grouping: v })} disabled={off}
+                    options={def.groupings.map((g) => ({ id: g, label: GROUPING_LABEL[g] }))} />
+                </Row>
+              )}
+
+              {has('columns') && def.columns && (
+                <Row label="Колонки" tip="Номер строки, заявка и суммы в таблице есть всегда">
+                  <Chips
+                    selected={s.columns}
+                    options={def.columns.map((c) => ({ id: c.id, label: c.label }))}
+                    onToggle={(id) => update({ columns: s.columns.includes(id) ? s.columns.filter((x) => x !== id) : [...s.columns, id] })}
+                    disabled={off}
+                  />
+                </Row>
+              )}
+
+              {has('sections') && def.sections && (
+                <Row label="Разделы">
+                  <Chips
+                    selected={s.sections}
+                    options={def.sections.map((c) => ({ id: c.id, label: c.label }))}
+                    onToggle={(id) => update({ sections: s.sections.includes(id) ? s.sections.filter((x) => x !== id) : [...s.sections, id] })}
+                    disabled={off}
+                  />
+                </Row>
+              )}
+
+              {has('signers') && (
+                <>
+                  <Row label="Шапка документа">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Input value={s.organization} onChange={(e) => update({ organization: e.target.value })} placeholder="АО «АЭМЗ»" aria-label="Организация" className="h-9" />
+                      <Input value={s.department} onChange={(e) => update({ department: e.target.value })} placeholder="Отдел логистики" aria-label="Подразделение" className="h-9" />
+                    </div>
+                  </Row>
+                  <Row label={accounting ? 'Составил' : 'Подготовил'}>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Input value={s.preparedPosition} onChange={(e) => update({ preparedPosition: e.target.value })} placeholder="Должность" aria-label="Должность составителя" className="h-9" />
+                      <Input value={s.preparedName} onChange={(e) => update({ preparedName: e.target.value })} placeholder="Фамилия И. О." aria-label="ФИО составителя" className="h-9" />
+                    </div>
+                  </Row>
+                  <Row label={accounting ? 'Проверил' : 'Согласовал'} tip={accounting ? undefined : 'Оставьте пустым, если строка не нужна'}>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Input value={s.checkedPosition} onChange={(e) => update({ checkedPosition: e.target.value })} placeholder="Должность" aria-label="Должность проверяющего" className="h-9" />
+                      <Input value={s.checkedName} onChange={(e) => update({ checkedName: e.target.value })} placeholder="Фамилия И. О. — можно вписать от руки" aria-label="ФИО проверяющего" className="h-9" />
+                    </div>
+                  </Row>
+                </>
+              )}
+            </fieldset>
+
+            {/* ── что попадёт в отчёт и выгрузка ── */}
+            <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+              <div className="min-w-0 flex-1 text-sm" role="status" aria-live="polite">
+                {off ? (
+                  <span className="text-slate-500">Выгрузка появится, когда в платформе будут нужные данные</span>
+                ) : generating ? (
+                  <span className="flex items-center gap-2 text-slate-700">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    {GEN_STEPS[genStep]}…
+                  </span>
+                ) : previewError ? (
+                  <span className="text-red-700">{previewError}</span>
+                ) : preview ? (
+                  <span className={cn('text-slate-700', previewing && 'opacity-60')}>
+                    {preview.empty ? 'За период ничего не найдено' : (
+                      <>
+                        В отчёт попадёт: <span className="font-medium text-slate-900">{preview.rowsLabel}</span>
+                        {preview.amount != null && preview.amountLabel && (
+                          <> · {preview.amountLabel} <span className="font-medium text-slate-900">{money(preview.amount)}</span></>
+                        )}
+                      </>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">Считаем…</span>
+                )}
               </div>
-              <CardTitle className="text-lg text-slate-900">Обороты и привлечённый транспорт</CardTitle>
-              <CardDescription>
-                {p2?.periodLabel ?? '—'} · заявок: {p2?.requestsCount ?? 0}, рейсов на привлечённом транспорте: {p2?.confirmedCount ?? 0}
-              </CardDescription>
-            </div>
-            <Button
-              className="h-10 shrink-0"
-              onClick={() => void downloadDocx(2)}
-              disabled={generating !== null}
-              title="Скачать бумажную проформу № 2 (DOCX)"
-            >
-              {generating === 2 ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
-              {generating === 2 ? 'Формируем…' : 'Скачать DOCX'}
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-5 p-5">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <ProTile label="Заявок за период" value={String(p2?.requestsCount ?? 0)} />
-              <ProTile label="Рейсов подтверждено" value={String(p2?.confirmedCount ?? 0)} />
-              <ProTile label="Оборот" value={money(p2?.turnover ?? 0)} accent />
-              <ProTile label="Средняя ставка" value={rate(p2?.avgRate ?? null)} />
-            </div>
-
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600">
-              <span>Тоннаж заявок: <b className="text-slate-900">{ton(p2?.tonnageTotal ?? 0)}</b></span>
-              <span>Ставок на заявку: <b className="text-slate-900">{String(p2?.avgBids ?? 0).replace('.', ',')}</b></span>
-              <span>Рейсов с ЭТрН: <b className="text-slate-900">{p2?.etrnCount ?? 0} из {p2?.confirmedCount ?? 0}</b></span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <PieView title="Оборот по перевозчикам (привлечённый транспорт)" slices={(p2?.byCarrier ?? []).map((c) => ({ label: c.name, value: c.turnover, share: c.share }))} unit="₽" centerHint="оборот" />
-              <PieView title="Заявки периода по статусам" slices={p2?.byStatus ?? []} unit="шт" centerHint="заявок" />
-            </div>
-
-            <div>
-              <div className="mb-2 text-sm font-semibold text-slate-800">Перевозчики за период</div>
-              <div className="overflow-hidden rounded-xl border border-slate-200">
-                <div className="max-h-96 overflow-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-slate-50">
-                        <TableHead className="sticky left-0 top-0 z-10 bg-slate-50">Перевозчик</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50 text-center">Рейсов</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50 text-right">Оборот</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50 text-right">Средняя ставка</TableHead>
-                        <TableHead className="sticky top-0 z-10 bg-slate-50 text-right">Доля оборота</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {p2Carriers.map((c) => (
-                        <TableRow key={c.name}>
-                          <TableCell className="max-w-[240px] truncate font-medium text-slate-800" title={c.name}>{c.name}</TableCell>
-                          <TableCell className="text-center font-semibold tabular-nums text-slate-800">{c.trips}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">{money(c.turnover)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">{rate(c.avgRate)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">{pct(c.share)}</TableCell>
-                        </TableRow>
-                      ))}
-                      {p2Carriers.length > 1 && (
-                        <TableRow className="bg-slate-50 font-semibold">
-                          <TableCell className="text-slate-700">ИТОГО</TableCell>
-                          <TableCell className="text-center tabular-nums text-slate-800">{p2?.confirmedCount ?? 0}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-900">{money(p2?.turnover ?? 0)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">{rate(p2?.avgRate ?? null)}</TableCell>
-                          <TableCell className="whitespace-nowrap text-right tabular-nums text-slate-700">100 %</TableCell>
-                        </TableRow>
-                      )}
-                      {p2Carriers.length === 0 && (
-                        <TableRow>
-                          <TableCell colSpan={5} className="py-8 text-center text-slate-400">
-                            За выбранный период подтверждённых рейсов нет
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
+              {off ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Button disabled className="gap-2"><Download className="h-4 w-4" aria-hidden />Сформировать DOCX</Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs text-xs">{def.missing}</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Button onClick={() => void generate()} disabled={generating} className="gap-2">
+                  {generating ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
+                  {generating ? 'Формируем…' : 'Сформировать DOCX'}
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
