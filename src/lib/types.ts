@@ -208,6 +208,102 @@ export interface ReportSummary {
   byDirection: { direction: string; count: number; avgRate: number; minRate: number }[]
   savingsByRequest: { number: string; cargo: string; startRate: number; bestRate: number | null; savings: number }[]
   carriers: { name: string; taken: number; avgRate: number; refused: number }[]
+
+  /* ——— Проформы (Task 99): месяц + две бумажные формы с круговыми диаграммами ——— */
+
+  /** доступные месяцы для селектора («2025-10», по убыванию, максимум 6) */
+  months: string[]
+  /** выбранный месяц «2025-10» и подпись «Октябрь 2025» */
+  month: string
+  monthLabel: string
+  /** момент формирования отчёта (ISO) */
+  generatedAt: string
+
+  /** Проформа № 1 — экономия по заявкам за выбранный месяц */
+  proforma1: {
+    monthLabel: string
+    /** подтверждённых рейсов за месяц */
+    confirmedCount: number
+    /** из них с ненулевой экономией */
+    savingsCount: number
+    /** стартовый оборот по подтверждённым рейсам, ₽ */
+    startTotal: number
+    /** итоговый оборот, ₽ */
+    finalTotal: number
+    /** сэкономлено всего, ₽ */
+    savedTotal: number
+    /** средняя экономия на заявку, ₽ */
+    avgSaving: number
+    /** средний процент снижения ставки, % */
+    avgSavingPct: number
+    /** проекция (прогноз) экономии на полный месяц, ₽ */
+    projectionMonth: number
+    /** месяц уже завершён — проекция равна факту */
+    monthComplete: boolean
+    /** круговая: структура экономии по направлениям */
+    byDirection: ReportPieSlice[]
+    /** круговая: доли заявок в общей экономии (топ + «Прочие») */
+    byRequest: ReportPieSlice[]
+    /** расшифровка: экономия каждой заявки */
+    rows: Proforma1Row[]
+  }
+
+  /** Проформа № 2 — обороты и привлечённый транспорт за выбранный месяц */
+  proforma2: {
+    monthLabel: string
+    /** заявок за месяц (без удалённых) */
+    requestsCount: number
+    /** подтверждено рейсов (привлечённый транспорт) */
+    confirmedCount: number
+    /** оборот — итоговые ставки подтверждённых рейсов × тоннаж, ₽ */
+    turnover: number
+    /** средняя ставка подтверждённых рейсов, ₽/т */
+    avgRate: number
+    /** общий тоннаж заявок месяца, т */
+    tonnageTotal: number
+    /** среднее количество ставок на заявку */
+    avgBids: number
+    /** рейсов с ЭТрН */
+    etrnCount: number
+    /** привлечённый транспорт по перевозчикам */
+    byCarrier: Proforma2CarrierRow[]
+    /** круговая: заявки месяца по статусам */
+    byStatus: ReportPieSlice[]
+  }
+}
+
+/** Долька круговой диаграммы проформы */
+export interface ReportPieSlice {
+  label: string
+  value: number
+  /** доля от суммы, % */
+  share: number
+}
+
+/** Строка расшифровки экономии в проформе № 1 */
+export interface Proforma1Row {
+  number: string
+  direction: string
+  cargo: string
+  tonnage: number
+  startRate: number
+  bestRate: number | null
+  /** экономия деньгами: (старт − итог) × тоннаж, ₽ */
+  savings: number
+  /** снижение ставки, % */
+  pct: number
+  /** перевозчик (привлечённый транспорт) */
+  carrier: string
+}
+
+/** Строка перевозчика в проформе № 2 */
+export interface Proforma2CarrierRow {
+  name: string
+  trips: number
+  turnover: number
+  avgRate: number
+  /** доля оборота, % */
+  share: number
 }
 
 export interface EventFeedItem {

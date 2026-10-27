@@ -165,7 +165,11 @@ export const api = {
   updateDirectory: (kind: 'carrier' | 'driver' | 'truck' | 'trailer' | 'cargo', id: string, data: Record<string, unknown>) =>
     fetch('/api/directory', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, id, data }) })).then(json<{ ok: boolean; cargoType?: CargoTypeDTO }>),
 
-  reports: () => fetch('/api/reports', withAuth({ cache: 'no-store' })).then(json<ReportSummary>),
+  reports: (month?: string) =>
+    fetch(`/api/reports${month ? `?month=${encodeURIComponent(month)}` : ''}`, withAuth({ cache: 'no-store' })).then(json<ReportSummary>),
+  /** ссылка на скачивание бумажной проформы (1 — экономия, 2 — обороты); кука сессии — автоматически */
+  reportDocxUrl: (type: 1 | 2, month?: string) =>
+    `/api/reports/docx?type=${type}${month ? `&month=${encodeURIComponent(month)}` : ''}`,
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, withAuth({ cache: 'no-store' })).then(json<{ events: EventFeedItem[] }>),
 
   /** Уведомления колокольчика (Task 69): список + число непрочитанных */

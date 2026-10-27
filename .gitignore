@@ -70,3 +70,6 @@ mini-services/paddle-ocr/.models/
 
 # альбом тестовых фото пользователя (персональные данные) — не для git
 /download/*.pdf
+
+# образцы проформ для пользователя (Task 99)
+/download/*.docx

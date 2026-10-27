@@ -4,3 +4,21 @@ import { twMerge } from "tailwind-merge"
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+/* ── Месяцы для проформ-отчётов (Task 99) — клиентски-безопасный общий код ── */
+
+const MONTHS_RU = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+]
+
+/** «2025-10» из даты */
+export function monthOf(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** «Октябрь 2025» из «2025-10» */
+export function monthLabel(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  return `${MONTHS_RU[(m ?? 1) - 1] ?? ym} ${y}`
+}
