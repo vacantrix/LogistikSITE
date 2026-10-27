@@ -10,16 +10,16 @@
  * Период выбирается календарём (или пресетами) — и данные на странице, и DOCX
  * формируются сервером автоматически по этому периоду. Круговые диаграммы
  * строятся единым кодом с DOCX (lib/pie-svg) — на странице они выглядят так же,
- * как в скачанных файлах. Пока документ готовится, показывается анимация
- * песочных часов (Task 101, components/platform/hourglass-loader).
+ * как в скачанных файлах. Пока документ готовится — поэтапный индикатор в
+ * минималистичном стиле автопроверки (спиннер + текущий шаг, Task 102):
+ * сбор данных → сверка ставок → экономика → диаграммы → вёрстка формы.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { endOfMonth, startOfMonth, subDays, subMonths } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { CalendarRange, Download } from 'lucide-react'
+import { CalendarRange, Download, Loader2 } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
-import { ErrorBlock, SectionHeader, type TabProps } from '@/components/platform/common'
-import { HourglassLoader } from '@/components/platform/hourglass-loader'
+import { ErrorBlock, LoadingBlock, SectionHeader, type TabProps } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -75,6 +75,18 @@ const PERIOD_PRESETS: { label: string; range: () => DateRange }[] = [
   { label: 'Последние 30 дней', range: () => ({ from: subDays(new Date(), 29), to: new Date() }) },
 ]
 
+/** Шаги подготовки отчёта — реальный порядок работы сервера (заявки периода →
+ *  сверка рейсов → экономика → диаграммы → вёрстка DOCX). Показываются по одному
+ *  с фиксированным тактом: формирование «бумажной» формы — видимый процесс. */
+const GEN_STEPS = [
+  'собираем данные за период',
+  'сверяем ставки и тоннаж по рейсам',
+  'считаем экономию и обороты',
+  'строим круговые диаграммы',
+  'верстаем бумажную форму DOCX',
+] as const
+const GEN_STEP_MS = 900
+
 export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const [report, setReport] = useState<ReportSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -82,8 +94,9 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
   const [switching, setSwitching] = useState(false)
   const [range, setRange] = useState<DateRange | undefined>(() => ({ from: startOfMonth(new Date()), to: new Date() }))
   const [pickerOpen, setPickerOpen] = useState(false)
-  /** какая проформа сейчас формируется на сервере (для анимации песочных часов) */
+  /** какая проформа сейчас формируется на сервере (для поэтапного индикатора) */
   const [generating, setGenerating] = useState<1 | 2 | null>(null)
+  const [genStep, setGenStep] = useState(0)
   const generatingRef = useRef<1 | 2 | null>(null)
   const { toast } = useToast()
   const periodRef = useRef<{ from?: string; to?: string }>({})
@@ -146,16 +159,34 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
   }
 
   /**
-   * Скачать проформу: документ формируется на сервере по выбранному периоду,
-   * пока он готовится — экран с песочными часами (Task 101). Файл приходит
-   * blob'ом, чтобы имя из Content-Disposition (кириллица, пробелы) сохранилось.
+   * Сформировать и скачать проформу: документ собирается на сервере по выбранному
+   * периоду, прогресс показываем поэтапно (Task 102, стиль автопроверки).
+   * Шаги идут с фиксированным тактом и не обгоняют реальную генерацию: скачивание
+   * стартует после завершения последнего шага. Файл приходит blob'ом, чтобы имя
+   * из Content-Disposition (кириллица, пробелы) сохранилось.
    */
   const downloadDocx = useCallback(async (type: 1 | 2) => {
     if (generatingRef.current) return
     generatingRef.current = type
     setGenerating(type)
+    setGenStep(0)
+    const stepsDone = new Promise<void>((resolve) => {
+      let i = 0
+      const tick = () => {
+        i += 1
+        if (i >= GEN_STEPS.length) resolve()
+        else {
+          setGenStep(i)
+          window.setTimeout(tick, GEN_STEP_MS)
+        }
+      }
+      window.setTimeout(tick, GEN_STEP_MS)
+    })
     try {
-      const { blob, fileName } = await api.reportDocxBlob(type, periodRef.current)
+      const [{ blob, fileName }] = await Promise.all([
+        api.reportDocxBlob(type, periodRef.current),
+        stepsDone,
+      ])
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -166,7 +197,9 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       window.setTimeout(() => URL.revokeObjectURL(url), 4000)
       toast({
         title: type === 1 ? 'Проформа № 1 сформирована' : 'Проформа № 2 сформирована',
-        description: `${fileName} — скачивание началось`,
+        description: type === 1
+          ? `${fileName} · заявок с экономией: ${report?.proforma1.savingsCount ?? 0} · ${money(report?.proforma1.savedTotal ?? 0)}`
+          : `${fileName} · заявок: ${report?.proforma2.requestsCount ?? 0} · рейсов: ${report?.proforma2.confirmedCount ?? 0}`,
       })
     } catch (e) {
       toast({
@@ -178,16 +211,9 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
       generatingRef.current = null
       setGenerating(null)
     }
-  }, [toast])
+  }, [toast, report])
 
-  if (loading && !report) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border border-slate-200 bg-white px-6 py-14 text-slate-500">
-        <HourglassLoader size={72} />
-        <div className="text-sm font-medium">Готовим отчёты…</div>
-      </div>
-    )
-  }
+  if (loading && !report) return <LoadingBlock label="Готовим отчёты…" />
   if (error && !report) return <ErrorBlock message={error} onRetry={() => void load(periodRef.current)} />
 
   const p1 = report?.proforma1
@@ -249,6 +275,29 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
         </Popover>
       </SectionHeader>
 
+      {/* поэтапная подготовка в стиле автопроверки: спиннер + текущий шаг + тонкий прогресс */}
+      {generating !== null && (
+        <div
+          className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-2.5"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-600" aria-hidden />
+            <span className="text-sm font-medium text-slate-700">
+              Формируем «{generating === 1 ? 'Проформа № 1 — Экономия по заявкам' : 'Проформа № 2 — Обороты и привлечённый транспорт'}»
+            </span>
+            <span className="ml-auto shrink-0 text-xs text-slate-400">{GEN_STEPS[genStep]}…</span>
+          </div>
+          <div className="mt-2 h-0.5 w-full overflow-hidden rounded-full bg-slate-100" aria-hidden>
+            <div
+              className="h-full rounded-full bg-slate-700 transition-all duration-700 ease-linear"
+              style={{ width: `${Math.round(((genStep + 1) / GEN_STEPS.length) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {error && report && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
           Не удалось обновить данные: {error}. Показаны последние загруженные значения.
@@ -275,7 +324,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
               disabled={generating !== null}
               title="Скачать бумажную проформу № 1 (DOCX)"
             >
-              <Download className="h-4 w-4" aria-hidden />
+              {generating === 1 ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
               {generating === 1 ? 'Формируем…' : 'Скачать DOCX'}
             </Button>
           </CardHeader>
@@ -364,7 +413,7 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
               disabled={generating !== null}
               title="Скачать бумажную проформу № 2 (DOCX)"
             >
-              <Download className="h-4 w-4" aria-hidden />
+              {generating === 2 ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Download className="h-4 w-4" aria-hidden />}
               {generating === 2 ? 'Формируем…' : 'Скачать DOCX'}
             </Button>
           </CardHeader>
@@ -435,38 +484,6 @@ export default function ReportsTab({ activeCarrierId: _activeCarrierId, onNaviga
           </CardContent>
         </Card>
       </div>
-
-      {/* анимация подготовки: песочные часы, пока сервер собирает DOCX (Task 101) */}
-      {generating !== null && (
-        <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
-          role="status"
-          aria-live="polite"
-        >
-          <div className="w-full max-w-sm animate-in fade-in zoom-in-95 rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-2xl duration-200">
-            <div className="relative mx-auto flex h-40 w-40 items-center justify-center">
-              <span aria-hidden className="absolute inset-2 animate-pulse rounded-full bg-amber-100 blur-2xl" />
-              <HourglassLoader size={104} className="relative" />
-            </div>
-            <div className="mt-3 text-base font-semibold text-slate-900">Формируем отчёт…</div>
-            <div className="mt-1 text-sm leading-snug text-slate-500">
-              {generating === 1
-                ? 'Проформа № 1 — Экономия по заявкам'
-                : 'Проформа № 2 — Обороты и привлечённый транспорт'}
-            </div>
-            <div className="mt-0.5 text-xs text-slate-400">{rangeLabel}</div>
-            <div className="mt-5 flex items-center justify-center gap-1.5" aria-hidden>
-              {[0, 1, 2].map((i) => (
-                <span
-                  key={i}
-                  className="h-2 w-2 animate-bounce rounded-full bg-amber-500"
-                  style={{ animationDelay: `${i * 0.15}s` }}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
