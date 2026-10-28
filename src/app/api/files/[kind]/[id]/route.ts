@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUserViaRequest } from '@/lib/auth'
+import { isStaff, requireUserViaRequest } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,13 +39,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ kind
       select: { fileName: true, dataUri: true, request: { select: { winnerId: true } } },
     })
     if (!doc) return notFound()
-    if (auth.role !== 'logist' && doc.request.winnerId !== auth.carrierId) return notFound()
+    if (!isStaff(auth.role) && doc.request.winnerId !== auth.carrierId) return notFound()
     fileName = doc.fileName
     dataUri = doc.dataUri
   } else if (kind === 'directory') {
     const photo = await db.directoryPhoto.findUnique({ where: { id } })
     if (!photo) return notFound()
-    if (auth.role !== 'logist') {
+    if (!isStaff(auth.role)) {
       const owner = photo.kind === 'driver'
         ? await db.driver.findUnique({ where: { id: photo.refId }, select: { carrierId: true } })
         : photo.kind === 'truck'

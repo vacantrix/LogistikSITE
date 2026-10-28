@@ -12,7 +12,7 @@
  *    копии удаляются, остаётся самая ранняя (отправленные в Диадок не трогаем).
  */
 import { db } from '@/lib/db'
-import { canonicalPoint } from '@/lib/points'
+import { legacyPointValue } from '@/lib/points'
 
 export async function normalizeLegacyData(): Promise<void> {
   const requests = await db.request.findMany({
@@ -26,8 +26,10 @@ export async function normalizeLegacyData(): Promise<void> {
   let cargo = 0
   for (const r of requests) {
     const data: { fromPoint?: string; toPoint?: string; cargo?: string; cargoTypeId?: string } = {}
-    const from = canonicalPoint(r.fromPoint)
-    const to = canonicalPoint(r.toPoint)
+    // старые короткие значения («Завод», «Порт») → города справочника;
+    // свободные адреса заявок (с запятой/цифрами) не трогаются
+    const from = legacyPointValue(r.fromPoint)
+    const to = legacyPointValue(r.toPoint)
     if (from && from !== r.fromPoint) data.fromPoint = from
     if (to && to !== r.toPoint) data.toPoint = to
     if (!r.cargoTypeId) {

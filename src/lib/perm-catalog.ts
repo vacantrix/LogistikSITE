@@ -84,7 +84,8 @@ export const RISK_LABELS: Record<Exclude<PermRisk, 'normal'>, string> = {
   critical: 'критичное',
 }
 
-const L: Contour[] = ['logist']
+// операционные права внутреннего контура есть и у администрации (максимум прав платформы, Task 113)
+const L: Contour[] = ['logist', 'admin']
 const C: Contour[] = ['carrier']
 const A: Contour[] = ['admin']
 
@@ -103,11 +104,11 @@ export const PERMS: PermItem[] = [
   { key: 'docs:upload', group: 'Документы и рейсы', contours: L, risk: 'normal', label: 'Документы перевозчику', hint: 'Загрузка документов для перевозчика в карточке заявки' },
   { key: 'docs:request', group: 'Документы и ЭДО', contours: C, risk: 'normal', label: 'Доверенность и заявка логисту', hint: 'Загрузка документов по заявке в «Моих заявках»' },
   { key: 'trip:close', group: 'Документы и рейсы', contours: L, risk: 'critical', label: 'Закрытие рейсов', hint: '«Закрыть рейс» в реестре рейсов' },
-  { key: 'edo:sync', group: 'ЭДО', contours: ['logist', 'carrier'], risk: 'normal', label: 'Обновление статусов Диадока', hint: '«Обновить статусы» в разделе ЭДО' },
+  { key: 'edo:sync', group: 'ЭДО', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Обновление статусов Диадока', hint: '«Обновить статусы» в разделе ЭДО' },
   { key: 'edo:send', group: 'ЭДО', contours: L, risk: 'important', label: 'Отправка ЭТрН в Диадок', hint: '«Отправить ЭТрН» в разделе ЭДО' },
-  { key: 'edo:sign', group: 'ЭДО', contours: ['logist', 'carrier'], risk: 'critical', label: 'Подпись документов КЭП', hint: '«Подписать» в разделе ЭДО', labelBy: { logist: 'Подпись КЭП от АЭМЗ', carrier: 'Подпись КЭП от компании' } },
-  { key: 'directory:addManual', group: 'Справочники', contours: ['logist', 'carrier'], risk: 'normal', label: 'Добавление вручную', hint: '«Добавить вручную» в справочниках', labelBy: { carrier: 'Добавление водителей и техники вручную' } },
-  { key: 'directory:edit', group: 'Справочники', contours: ['logist', 'carrier'], risk: 'normal', label: 'Правка справочников', hint: 'Редактирование карточек в справочниках', labelBy: { carrier: 'Правка карточек своей компании' } },
+  { key: 'edo:sign', group: 'ЭДО', contours: ['logist', 'carrier', 'admin'], risk: 'critical', label: 'Подпись документов КЭП', hint: '«Подписать» в разделе ЭДО', labelBy: { logist: 'Подпись КЭП от АЭМЗ', admin: 'Подпись КЭП от АЭМЗ', carrier: 'Подпись КЭП от компании' } },
+  { key: 'directory:addManual', group: 'Справочники', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Добавление вручную', hint: '«Добавить вручную» в справочниках', labelBy: { carrier: 'Добавление водителей и техники вручную' } },
+  { key: 'directory:edit', group: 'Справочники', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Правка справочников', hint: 'Редактирование карточек в справочниках', labelBy: { carrier: 'Правка карточек своей компании' } },
   { key: 'notify:agent', group: 'Справочники', contours: L, risk: 'normal', label: 'Уведомить агента', hint: 'Рассылка перевозчикам об истекающих документах' },
   { key: 'admin:users', group: 'Управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Учётные записи, должности и исключения' },
   { key: 'admin:db', group: 'Управление', contours: A, risk: 'critical', label: 'Редактор базы данных', hint: 'Раздел «База данных»: прямая правка записей' },
@@ -179,7 +180,9 @@ export const TEMPLATE_SEEDS: TemplateSeed[] = [
     perms: ['bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'directory:edit'] },
   { contour: 'carrier', name: 'Диспетчер', description: 'Ставки, экипажи и документы. Без подписи ЭДО.', perms: ['bid:submit', 'crew:assign', 'docs:request', 'directory:edit'] },
   { contour: 'carrier', name: 'Подписант ЭДО', description: 'Подпись ЭТрН и актов КЭП, на которого она оформлена, и документы по заявкам.', perms: ['edo:sign', 'docs:request'] },
-  { contour: 'admin', name: 'Администратор', description: 'Учётные записи и доступы, редактор базы данных, все разделы на просмотр.', isDefault: true,
+  { contour: 'admin', name: 'Администратор', description: 'Максимум прав: весь операционный контур логиста, учётные записи и доступы, база данных.', isDefault: true,
+    perms: allOf('admin') },
+  { contour: 'admin', name: 'Администратор доступа', description: 'Учётные записи, доступы и база данных — без операций с заявками.',
     perms: ['admin:users', 'admin:db', 'reports:view', 'profile:edit'] },
   { contour: 'admin', name: 'Аудитор', description: 'Видит все разделы и отчёты, ничего не меняет.', perms: ['reports:view'] },
 ]

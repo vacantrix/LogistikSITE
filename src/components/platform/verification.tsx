@@ -966,11 +966,11 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                         )}
                       </NoticeLine>
                     ) : selected.status === 'AT_LOGIST' && !can('verify:decide') ? (
-                      /* пакет на сверке без права decide — режим просмотра: решение принимает логист (Task 110/111) */
+                      /* пакет на сверке без права decide — режим просмотра: решение принимает сотрудник с правом (Task 110/111) */
                       <NoticeLine>
                         <div className="font-medium text-slate-900">Пакет на сверке</div>
                         <div className="mt-0.5 text-xs text-slate-600">
-                          Решение (утвердить / на доработку) принимает логист — администрации доступен просмотр и правка данных через «База данных».
+                          Решение (утвердить / на доработку) принимает сотрудник внутреннего контура с правом «Решения сверки».
                         </div>
                       </NoticeLine>
                     ) : (

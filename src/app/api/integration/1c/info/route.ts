@@ -6,10 +6,11 @@ export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/integration/1c/info — параметры подключения для карточки «Интеграция с 1С» (Настройки).
- * Только логист; сам ключ не отдаётся — лишь маска (полный ключ хранится в настройках сервера).
+ * Внутренний контур (логист и администрация); сам ключ не отдаётся — лишь маска
+ * (полный ключ хранится в настройках сервера).
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireUser('logist')
+  const auth = await requireUser('logist', 'admin')
   if (auth instanceof NextResponse) return auth
 
   const origin = req.nextUrl.origin

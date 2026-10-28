@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/auth'
+import { isStaff, requireUser } from '@/lib/auth'
 import {
   formatAddress, formatPlace, issuerTemplates, placeAt, placeRank, regionFromText,
   type PhotonFeature, type SuggestKind, type Suggestion,
@@ -108,9 +108,9 @@ export async function POST(req: NextRequest) {
       const fromText = regionFromText(str(body?.address, 400))
       const region = str(body?.region) || fromText.region
       const county = str(body?.county) || fromText.county
-      // значения, уже введённые в базе: перевозчик видит только своих водителей
+      // значения, уже введённые в базе: внутренний контур видит всех, перевозчик — только своих водителей
       const rows = await db.driver.findMany({
-        where: auth.role === 'logist' ? {} : { carrierId: auth.carrierId ?? '' },
+        where: isStaff(auth.role) ? {} : { carrierId: auth.carrierId ?? '' },
         select: { passportIssuedBy: true },
         take: 3000,
       })

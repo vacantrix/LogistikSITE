@@ -18,8 +18,9 @@ export const dynamic = 'force-dynamic'
  * Уведомления создаются вне транзакции (правило P1008 — здесь транзакции нет вовсе).
  */
 export async function POST() {
-  // рассылка перевозчикам — действие логиста: перевозчик не рассылает уведомления другим компаниям
-  const user = await requireUser('logist')
+  // рассылка перевозчикам — действие внутреннего контура (логист и администрация):
+  // перевозчик не рассылает уведомления другим компаниям
+  const user = await requireUser('logist', 'admin')
   if (user instanceof NextResponse) return user
   // права (Task 111): рассылка — право notify:agent
   if (!(await allowedFor(user, 'notify:agent'))) {

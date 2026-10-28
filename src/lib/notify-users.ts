@@ -2,7 +2,7 @@
  * Персональные уведомления (Task 69) — серверная сторона.
  *
  * Кто какие события получает:
- *  — Логист (все пользователи с ролью logist):
+ *  — Внутренний контур (все пользователи с ролями logist и admin):
  *      BID_PLACED      — перевозчик подал ставку на заявку площадки;
  *      CREW_ASSIGNED   — перевозчик указал/утвердил экипаж по выигранному рейсу;
  *      DOCS_READY      — комплект документов прошёл авто-проверку, заявка на сверке;
@@ -47,9 +47,9 @@ export interface NotifyPayload {
   requestId?: string
 }
 
-/** Создать уведомление всем пользователям с ролью «логист» (внутренний контур) */
+/** Создать уведомление всем пользователям внутреннего контура — логистам и администрации */
 export async function notifyLogists(n: NotifyPayload): Promise<void> {
-  const users = await db.user.findMany({ where: { role: 'logist' }, select: { id: true } })
+  const users = await db.user.findMany({ where: { role: { in: ['logist', 'admin'] } }, select: { id: true } })
   if (users.length === 0) return
   await db.notification.createMany({
     data: users.map((u) => ({ userId: u.id, type: n.type, title: n.title, body: n.body, requestId: n.requestId ?? null })),

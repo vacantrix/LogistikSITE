@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/auth'
+import { isStaff, requireUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   if (!['driver', 'truck', 'trailer'].includes(kind) || !id) {
     return NextResponse.json({ error: 'Нужны kind (driver/truck/trailer) и id' }, { status: 400 })
   }
-  if (auth.role !== 'logist') {
+  if (!isStaff(auth.role)) {
     const owner = kind === 'driver'
       ? await db.driver.findUnique({ where: { id }, select: { carrierId: true } })
       : kind === 'truck'

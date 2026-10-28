@@ -55,7 +55,12 @@ const LEGACY_DEFAULTS: Record<Contour, PermKey[]> = {
     'notify:agent', 'trip:close', 'reports:view',
   ],
   carrier: ['bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'edo:send', 'directory:edit'],
-  admin: ['reports:view', 'profile:edit'],
+  // Task 113 (z.ai): администрация — максимум прав платформы (все права, фильтр по контуру ниже)
+  admin: [
+    'draft:create', 'draft:edit', 'draft:delete', 'request:publish', 'request:delete', 'request:extend',
+    'request:raise', 'request:offer', 'verify:decide', 'docs:upload', 'edo:sync', 'edo:sign', 'edo:send',
+    'directory:addManual', 'directory:edit', 'notify:agent', 'trip:close', 'reports:view', 'profile:edit',
+  ],
 }
 
 const MIGRATION_REASON = 'Перенесено из прежних прав (матрица роли и личные права)'
