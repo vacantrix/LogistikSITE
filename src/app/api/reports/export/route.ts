@@ -16,7 +16,8 @@ export const dynamic = 'force-dynamic'
  * какую сумму попадёт в отчёт), иначе — готовый DOCX. Выгрузка пишется в журнал платформы.
  */
 export async function POST(req: NextRequest) {
-  const user = await requireUser()
+  // выгрузка — только внутренний контур АЭМЗ, как и сам раздел «Отчёты»
+  const user = await requireUser('admin', 'logist')
   if (user instanceof NextResponse) return user
   // права (Task 111): выгрузка отчётов — тем же правом reports:view
   if (!(await allowedFor(user, 'reports:view'))) {

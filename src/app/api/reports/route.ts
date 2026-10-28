@@ -10,7 +10,9 @@ export const dynamic = 'force-dynamic'
  *  Даты включительно; legacy month=YYYY-MM; без параметров — текущий месяц.
  *  Права (Task 111): раздел целиком закрывается правом reports:view. */
 export async function GET(request: NextRequest) {
-  const auth = await requireUser()
+  // отчёты — внутренний контур АЭМЗ: перевозчику не открываются ни при каких правах
+  // (в отчёте ставки и экономия по всем перевозчикам, в том числе конкурентам)
+  const auth = await requireUser('admin', 'logist')
   if (auth instanceof NextResponse) return auth
   if (!(await allowedFor(auth, 'reports:view'))) {
     return NextResponse.json({ error: permDenied('reports:view') }, { status: 403 })
