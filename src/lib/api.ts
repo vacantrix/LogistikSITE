@@ -235,9 +235,9 @@ export const api = {
   /** Профили и доступы (администрация, Task 109) */
   adminUsers: () =>
     fetch('/api/admin/users', withAuth({ cache: 'no-store' })).then(json<{ users: AdminUserDTO[] }>),
-  adminUserCreate: (data: { login: string; name: string; password: string; role: string; carrierId?: string | null; profile?: Partial<ProfileDTO> }) =>
+  adminUserCreate: (data: { login: string; name: string; password: string; role: string; carrierId?: string | null; profile?: Partial<ProfileDTO>; profileEditOwn?: 'allow' | 'deny' | null }) =>
     fetch('/api/admin/users', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
-  adminUserUpdate: (data: { id: string; name?: string; role?: string; carrierId?: string | null; password?: string; profile?: Partial<ProfileDTO> }) =>
+  adminUserUpdate: (data: { id: string; name?: string; role?: string; carrierId?: string | null; password?: string; profile?: Partial<ProfileDTO>; profileEditOwn?: 'allow' | 'deny' | null }) =>
     fetch('/api/admin/users', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
   adminUserDelete: (id: string) =>
     fetch(`/api/admin/users?id=${encodeURIComponent(id)}`, withAuth({ method: 'DELETE' })).then(json<{ ok: boolean }>),

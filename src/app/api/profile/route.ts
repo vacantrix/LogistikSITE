@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { plog } from '@/lib/platform-log'
+import { allowedOwnProfile, permDenied } from '@/lib/permissions'
 import type { ProfileDTO } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -62,6 +63,13 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
+
+  // право «Редактирование своего профиля» (Task 112): по умолчанию только у администрации;
+  // персональное разрешение выдаёт админ в «Профилях и доступах» — без права сервер отклоняет правку
+  const me = await db.user.findUnique({ where: { id: auth.id }, select: { profileEditOwn: true } })
+  if (!(await allowedOwnProfile(auth.role, me?.profileEditOwn))) {
+    return NextResponse.json({ error: permDenied('profile:edit') }, { status: 403 })
+  }
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
   if (!body) return NextResponse.json({ error: 'Неверный формат запроса' }, { status: 400 })

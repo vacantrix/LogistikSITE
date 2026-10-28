@@ -221,52 +221,64 @@ function AttachArea({
   )
 }
 
-/** Сообщение ветки: автор и роль, время, текст и вложения (медиа-превью / скачивание) */
-function MessageCard({ m }: { m: TicketMessageDTO }) {
+/**
+ * Сообщение ветки — пузырь как в мессенджере (Task 112): свои сообщения справа
+ * (тон плашки — как в «Проверке документов»), чужие слева; автор, роль, время,
+ * текст и вложения внутри пузыря.
+ */
+function MessageBubble({ m, own }: { m: TicketMessageDTO; own: boolean }) {
   return (
-    <article className={`rounded-xl border border-slate-200 p-4 ${m.staff ? 'bg-slate-50' : 'bg-white'}`}>
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-sm font-medium text-slate-900">{m.authorName}</span>
-        <span className="text-xs text-slate-400">{m.staff ? 'Поддержка платформы' : 'Перевозчик'}</span>
-        <span className="ml-auto shrink-0 text-xs text-slate-400">{relTime(m.createdAt)}</span>
-      </div>
-      {m.body && <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-800">{m.body}</p>}
-      {m.attachments.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-2">
-          {m.attachments.map((a) => (
-            a.isImage ? (
-              <a
-                key={a.id}
-                href={secureFileUrl(a.url)}
-                target="_blank"
-                rel="noreferrer"
-                title={a.fileName}
-                aria-label={`Открыть изображение ${a.fileName} в новой вкладке`}
-                className="block cursor-zoom-in"
-              >
-                <img
-                  src={secureFileUrl(a.url)}
-                  alt={a.fileName}
-                  loading="lazy"
-                  className="h-24 w-36 rounded-lg border border-slate-200 object-cover"
-                />
-              </a>
-            ) : (
-              <a
-                key={a.id}
-                href={downloadHref(a.url)}
-                download={a.fileName}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs transition-colors hover:border-blue-200"
-              >
-                <FileText className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-                <span className="max-w-[220px] truncate text-blue-700 underline">{a.fileName}</span>
-                <span className="shrink-0 text-slate-400">{fmtSize(a.sizeBytes)}</span>
-              </a>
-            )
-          ))}
+    <div className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
+      <article
+        className={`max-w-[92%] rounded-2xl border px-3.5 py-3 sm:max-w-[85%] ${
+          own
+            ? 'rounded-br-md border-slate-300 bg-slate-100'
+            : 'rounded-bl-md border-slate-200 bg-white shadow-sm'
+        }`}
+      >
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-sm font-medium text-slate-900">{m.authorName}</span>
+          <span className="text-xs text-slate-400">{m.staff ? 'Поддержка платформы' : 'Перевозчик'}</span>
+          <span className="ml-auto shrink-0 text-xs text-slate-400">{relTime(m.createdAt)}</span>
         </div>
-      )}
-    </article>
+        {m.body && <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-800">{m.body}</p>}
+        {m.attachments.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {m.attachments.map((a) => (
+              a.isImage ? (
+                <a
+                  key={a.id}
+                  href={secureFileUrl(a.url)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={a.fileName}
+                  aria-label={`Открыть изображение ${a.fileName} в новой вкладке`}
+                  className="block cursor-zoom-in"
+                >
+                  <img
+                    src={secureFileUrl(a.url)}
+                    alt={a.fileName}
+                    loading="lazy"
+                    className="h-24 w-36 rounded-lg border border-slate-200 object-cover"
+                  />
+                </a>
+              ) : (
+                <a
+                  key={a.id}
+                  href={downloadHref(a.url)}
+                  download={a.fileName}
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs transition-colors hover:border-blue-200"
+                >
+                  <FileText className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                  <span className="max-w-[220px] truncate text-blue-700 underline">{a.fileName}</span>
+                  <span className="shrink-0 text-slate-400">{fmtSize(a.sizeBytes)}</span>
+                </a>
+              )
+            ))}
+          </div>
+        )}
+      </article>
+    </div>
   )
 }
 
@@ -466,6 +478,8 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
   const hasFilters = status !== 'ALL' || q !== ''
   const t = thread?.ticket ?? null
   const tMeta = t ? TICKET_STATUS_META[t.status] : null
+  // сторона сообщения: свои — справа (пузырь), чужие — слева (Task 112)
+  const ownOf = (m: TicketMessageDTO): boolean => (role === 'carrier' ? !m.staff : m.staff)
 
   return (
     <div>
@@ -528,57 +542,60 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
           )}
 
           {tickets !== null && !listError && tickets.length > 0 && (
-            <Card className="border-slate-200 shadow-sm">
-              <CardContent className="p-0">
-                <div className={`max-h-[calc(100vh-260px)] overflow-y-auto p-2 ${THIN_SCROLL}`}>
-                  <div className="divide-y divide-slate-100">
-                    {tickets.map((tk) => {
-                      const meta = TICKET_STATUS_META[tk.status]
-                      // подсветка «есть новое»: платформа ответила перевозчику (синяя) или
-                      // перевозчик ждёт ответа персонала в открытом обращении (янтарная)
-                      const attention = role === 'carrier'
-                        ? !!tk.lastMessage?.staff
-                        : !tk.lastMessage?.staff && tk.status === 'OPEN'
-                      return (
-                        <button
-                          key={tk.id}
-                          type="button"
-                          onClick={() => setOpenId(tk.id)}
-                          aria-label={`Обращение №${tk.number}: ${tk.subject}. Статус: ${meta.label}`}
-                          aria-current={tk.id === openId ? 'true' : undefined}
-                          className={`w-full rounded-lg p-3 text-left transition-colors hover:bg-slate-50 ${
-                            tk.id === openId ? 'bg-slate-100' : ''
-                          } ${attention ? (role === 'carrier' ? 'border-l-2 border-blue-500' : 'border-l-2 border-amber-500') : ''}`}
-                        >
-                          <span className="flex items-center justify-between gap-2">
-                            <span className="flex min-w-0 items-center gap-2">
-                              <span className="shrink-0 font-mono text-xs text-slate-500">№{tk.number}</span>
-                              <span className="truncate text-sm font-medium text-slate-900">{tk.subject}</span>
-                            </span>
-                            <StatusDot dot={meta.dot} tone={meta.tone} className="shrink-0 text-xs">{meta.label}</StatusDot>
-                          </span>
-                          <span className="mt-1 block truncate text-xs text-slate-500">
-                            {TICKET_CATEGORY_META[tk.category]}
-                            {' · '}
-                            {tk.authorName}
-                            {role !== 'carrier' && tk.carrierName ? ` · ${tk.carrierName}` : ''}
-                            {' · '}
-                            {relTime(tk.lastMessageAt)}
-                          </span>
-                          {tk.lastMessage && (
-                            <span className="mt-1 block truncate text-sm text-slate-500">{tk.lastMessage.body}</span>
-                          )}
-                          <span className="mt-1.5 flex items-center gap-1 text-xs text-slate-400">
-                            <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                            {tk.messagesCount}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            // список как в «Проверке документов» (Task 112): отдельные карточки-плашки
+            // с акцентом-вкладкой слева вместо цветной рамки — ничего не наезжает
+            <div className={`max-h-[calc(100vh-260px)] space-y-2 overflow-y-auto pr-1 ${THIN_SCROLL}`}>
+              {tickets.map((tk) => {
+                const meta = TICKET_STATUS_META[tk.status]
+                const active = tk.id === openId
+                // подсветка «есть новое»: платформа ответила перевозчику (синяя) или
+                // перевозчик ждёт ответа персонала в открытом обращении (янтарная)
+                const attention = role === 'carrier'
+                  ? !!tk.lastMessage?.staff
+                  : !tk.lastMessage?.staff && tk.status === 'OPEN'
+                return (
+                  <button
+                    key={tk.id}
+                    type="button"
+                    onClick={() => setOpenId(tk.id)}
+                    aria-label={`Обращение №${tk.number}: ${tk.subject}. Статус: ${meta.label}`}
+                    aria-current={active ? 'true' : undefined}
+                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      active
+                        ? 'border-slate-300 bg-slate-100 shadow-[inset_3px_0_0_#0f172a]'
+                        : attention
+                          ? role === 'carrier'
+                            ? 'border-slate-200 bg-white shadow-[inset_3px_0_0_#2563eb] hover:border-slate-300 hover:bg-slate-50'
+                            : 'border-slate-200 bg-white shadow-[inset_3px_0_0_#d97706] hover:border-slate-300 hover:bg-slate-50'
+                          : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 font-mono text-xs text-slate-500">№{tk.number}</span>
+                        <span className="truncate text-sm font-medium text-slate-900">{tk.subject}</span>
+                      </span>
+                      <StatusDot dot={meta.dot} tone={meta.tone} className="shrink-0 text-xs">{meta.label}</StatusDot>
+                    </span>
+                    <span className="mt-1 block truncate text-xs text-slate-500">
+                      {TICKET_CATEGORY_META[tk.category]}
+                      {' · '}
+                      {tk.authorName}
+                      {role !== 'carrier' && tk.carrierName ? ` · ${tk.carrierName}` : ''}
+                      {' · '}
+                      {relTime(tk.lastMessageAt)}
+                    </span>
+                    {tk.lastMessage && (
+                      <span className="mt-1 block truncate text-sm text-slate-500">{tk.lastMessage.body}</span>
+                    )}
+                    <span className="mt-1.5 flex items-center gap-1 text-xs text-slate-400">
+                      <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                      {tk.messagesCount}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           )}
         </div>
 
@@ -652,7 +669,7 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
                 className={`max-h-[60vh] space-y-3 overflow-y-auto pr-1 ${THIN_SCROLL}`}
                 aria-label={`Переписка по обращению №${t.number}`}
               >
-                {thread.messages.map((m) => <MessageCard key={m.id} m={m} />)}
+                {thread.messages.map((m) => <MessageBubble key={m.id} m={m} own={ownOf(m)} />)}
               </div>
 
               {/* редактор сообщения либо строка о закрытой ветке */}

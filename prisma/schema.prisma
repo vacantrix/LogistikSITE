@@ -49,6 +49,9 @@ model User {
   passwordHash   String // scrypt: "salt:hash"
   role           String // 'admin' | 'logist' | 'carrier'
   carrierId      String?
+  // персональное разрешение «Редактирование своего профиля» (Task 112):
+  // null — как у роли (матрица прав), 'allow' — разрешено лично, 'deny' — запрещено лично
+  profileEditOwn String?
   carrier        Carrier?        @relation("carrierUser", fields: [carrierId], references: [id])
   createdAt      DateTime        @default(now())
   notifications  Notification[]

@@ -52,6 +52,17 @@ export async function allowed(role: Role, key: PermKey): Promise<boolean> {
   return matrix.get(`${role}:${key}`) ?? false
 }
 
+/**
+ * Эффективное право «Редактирование своего профиля» (Task 112): персональное
+ * разрешение администратора (User.profileEditOwn: 'allow' | 'deny' | null) имеет
+ * приоритет над матрицей роли; без персонального — право роли из «Права доступа».
+ */
+export async function allowedOwnProfile(role: Role, override?: string | null): Promise<boolean> {
+  if (override === 'allow') return true
+  if (override === 'deny') return false
+  return allowed(role, 'profile:edit')
+}
+
 /** Сброс кэша после правки матрицы администрацией */
 export function invalidatePermCache(): void {
   cache = null

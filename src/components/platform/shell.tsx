@@ -23,7 +23,7 @@
 import { useState, useEffect, type ComponentType } from 'react'
 import {
   BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
-  History, LayoutGrid, ListChecks, LogOut, MessagesSquare, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
+  History, LayoutGrid, ListChecks, LogOut, Mail, MessagesSquare, MoreHorizontal, Phone, ScanSearch, ShieldCheck, Truck, UserCog, UserPen, UserPlus, Users,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -225,33 +225,43 @@ const roleLabelOf = (role: RoleKind): string =>
 
 /** Данные проформы для плашки аккаунта: ФИО крупнее, ниже — должность и организация.
  *  Без проформы — имя учётки и роль. */
-function pillLines(profile: ProfileDTO | null, user: SessionUserDTO): { title: string; sub: string } {
-  const title = profile?.fullName?.trim() || user.name
-  const position = profile?.position?.trim() || ''
-  const company = profile?.companyName?.trim() || ''
-  // должность слева, затем организация; пустые — замещаем ролью учётной записи
-  const sub = [position, company].filter(Boolean).join(' · ')
-  return { title, sub: sub || roleLabelOf(user.role) }
+function pillLines(profile: ProfileDTO | null, user: SessionUserDTO): { title: string; position: string; company: string } {
+  return {
+    title: profile?.fullName?.trim() || user.name,
+    position: profile?.position?.trim() || '',
+    company: profile?.companyName?.trim() || '',
+  }
 }
+
+/** Строка под ФИО в триггере плашки: должность слева, затем организация (переносится внутри пузыря) */
+const pillSub = (l: { position: string; company: string }, fallback: string): string =>
+  [l.position, l.company].filter(Boolean).join(' · ') || fallback
 
 /**
  * Меню аккаунта (Task 74): текущий пользователь, переключение на сохранённые
  * в браузере аккаунты, «Добавить аккаунт» и выход. Переключение активирует токен
  * другого аккаунта для этой вкладки и перезагружает страницу.
- * Task 111: в плашке — ФИО крупнее, ниже должность и организация (переносятся
- * внутри пузыря, за края не выходят); данные — из проформы профиля.
+ * Task 112: белая плашка меню — полноценная карточка профиля (значок человека, ФИО
+ * крупнее, должность, организация с переносом, телефон и почта) и «Изменить профиль»
+ * для тех, у кого есть право profile:edit; данные обновляются сразу при сохранении проформы.
  */
-function AccountMenu({ user, profile, compact, onLogout, onAddAccount }: {
+function AccountMenu({ user, profile, compact, canEditProfile, onNavigate, onLogout, onAddAccount }: {
   user: SessionUserDTO
   /** проформа текущего пользователя (ФИО, должность, организация) */
   profile: ProfileDTO | null
   /** компактный вид для мобильной шапки (48px) */
   compact?: boolean
+  /** право «Редактирование своего профиля» — показывает «Изменить профиль» (Task 112) */
+  canEditProfile?: boolean
+  /** переход в раздел (для «Изменить профиль») */
+  onNavigate: (t: TabKey) => void
   onLogout: () => void
   onAddAccount: () => void
 }) {
   const others = listAccounts().filter((a) => a.userId !== user.id)
-  const { title: pillName, sub: pillSub } = pillLines(profile, user)
+  const pill = pillLines(profile, user)
+  const phone = profile?.phone?.trim() || ''
+  const email = profile?.email?.trim() || ''
 
   const switchTo = (userId: string) => {
     if (activateAccount(userId)) window.location.reload()
@@ -264,7 +274,7 @@ function AccountMenu({ user, profile, compact, onLogout, onAddAccount }: {
           <button
             type="button"
             aria-label="Меню аккаунта"
-            title={`${user.name} — меню аккаунта`}
+            title={`${pill.title} — меню аккаунта`}
             className="flex h-8 min-w-0 items-center gap-1 rounded-md border border-white/20 bg-white/10 px-1.5 text-xs font-medium text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
           >
             <CircleUserRound className="h-4 w-4 shrink-0" aria-hidden />
@@ -275,29 +285,64 @@ function AccountMenu({ user, profile, compact, onLogout, onAddAccount }: {
           <button
             type="button"
             aria-label="Меню аккаунта"
-            title={`${pillName} — меню аккаунта`}
+            title={`${pill.title} — меню аккаунта`}
             className="flex max-w-full items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-1.5 text-left transition-colors hover:bg-white/20 hover:text-white"
           >
             <CircleUserRound className="h-[22px] w-[22px] shrink-0" aria-hidden />
             <span className="flex min-w-0 max-w-[150px] flex-col leading-tight sm:max-w-[240px]">
-              <span className="truncate text-[15px] font-semibold text-white">{pillName}</span>
+              <span className="truncate text-[15px] font-semibold text-white">{pill.title}</span>
               <span className="line-clamp-2 break-words text-left text-[11px] font-normal leading-snug text-blue-100/85">
-                {pillSub}
+                {pillSub(pill, roleLabelOf(user.role))}
               </span>
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
           </button>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
+      <DropdownMenuContent align="end" className="w-72">
+        {/* профиль в белой плашке меню (Task 112): значок человека, ФИО, должность,
+            организация (переносится внутри пузыря), контакты и учётная запись */}
         <DropdownMenuLabel>
-          <span className="block truncate font-semibold text-slate-900">{pillName}</span>
-          <span className="block break-words text-xs font-normal text-slate-500">{pillSub}</span>
-          <span className="block truncate text-xs font-normal text-slate-500">
+          <div className="flex items-start gap-2.5">
+            <CircleUserRound className="mt-0.5 h-9 w-9 shrink-0 text-slate-300" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <span className="block break-words text-[15px] font-semibold leading-snug text-slate-900">{pill.title}</span>
+              {pill.position && (
+                <span className="mt-0.5 block text-xs font-medium text-slate-700">{pill.position}</span>
+              )}
+              {pill.company && (
+                <span className="mt-0.5 block break-words text-xs leading-snug text-slate-500">{pill.company}</span>
+              )}
+            </div>
+          </div>
+          {(phone || email) && (
+            <div className="mt-2 space-y-0.5 border-t border-slate-100 pt-2">
+              {phone && (
+                <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                  <Phone className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                  <span className="truncate">{phone}</span>
+                </span>
+              )}
+              {email && (
+                <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                  <Mail className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                  <span className="truncate">{email}</span>
+                </span>
+              )}
+            </div>
+          )}
+          <span className="mt-1.5 block truncate text-xs font-normal text-slate-500">
             {user.login} · {roleLabelOf(user.role)}
           </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        {/* правка профиля — только с правом (Task 112): без права пункт отсутствует */}
+        {canEditProfile && (
+          <DropdownMenuItem onSelect={() => onNavigate('profile')} className="gap-2.5">
+            <UserPen className="h-4 w-4" aria-hidden />
+            Изменить профиль
+          </DropdownMenuItem>
+        )}
         {others.length > 0 && (
           <>
             <DropdownMenuLabel className="text-xs font-medium text-slate-500">Сменить аккаунт</DropdownMenuLabel>
@@ -355,6 +400,15 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
     api.getProfile().then((d) => { if (alive) setProfile(d.profile) }).catch(() => { /* плашка покажет имя учётки */ })
     return () => { alive = false }
   }, [user.id])
+  // сохранение проформы в разделе «Профиль» отражается в плашке сразу (Task 112)
+  useEffect(() => {
+    const onProfileUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<ProfileDTO>).detail
+      if (detail) setProfile(detail)
+    }
+    window.addEventListener('aemz:profile-updated', onProfileUpdated)
+    return () => window.removeEventListener('aemz:profile-updated', onProfileUpdated)
+  }, [])
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
@@ -367,7 +421,15 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
             {/* меню аккаунта: смена/добавление/выход (Task 74) */}
-            <AccountMenu user={user} profile={profile} compact onLogout={onLogout} onAddAccount={onAddAccount} />
+            <AccountMenu
+              user={user}
+              profile={profile}
+              compact
+              canEditProfile={can('profile:edit')}
+              onNavigate={onNavigate}
+              onLogout={onLogout}
+              onAddAccount={onAddAccount}
+            />
           </div>
         </div>
 
@@ -386,7 +448,14 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             {/* колокольчик персональных уведомлений (Task 69) */}
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
             {/* меню аккаунта: смена/добавление/выход (Task 74); роль задаётся учётной записью */}
-            <AccountMenu user={user} profile={profile} onLogout={onLogout} onAddAccount={onAddAccount} />
+            <AccountMenu
+              user={user}
+              profile={profile}
+              canEditProfile={can('profile:edit')}
+              onNavigate={onNavigate}
+              onLogout={onLogout}
+              onAddAccount={onAddAccount}
+            />
           </div>
         </div>
         <nav aria-label="Разделы платформы" className="hidden border-t border-white/10 md:block">

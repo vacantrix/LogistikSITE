@@ -1,10 +1,17 @@
 'use client'
 
-/** «Профиль» — проформа своей учётной записи (доступна всем ролям, Task 109) */
+/**
+ * «Профиль» — проформа своей учётной записи (Task 109).
+ * Task 112: заголовок и роль перенесены в белую карточку (весь профиль — одна плашка);
+ * правка личных данных — только с правом profile:edit (по умолчанию лишь у администрации,
+ * выдаётся пользователю в «Профилях и доступах») — без права форма не отображается вовсе,
+ * данные показываются для чтения. После сохранения плашка аккаунта в шапке обновляется
+ * сразу (событие aemz:profile-updated).
+ */
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
-import { Loader2, Save } from 'lucide-react'
+import { CircleUserRound, Loader2, Save } from 'lucide-react'
 import {
-  ErrorBlock, InfoTip, LoadingBlock, SectionHeader, type RoleKind, type TabProps,
+  ErrorBlock, InfoTip, LoadingBlock, NoticeLine, type RoleKind, type TabProps,
 } from '@/components/platform/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
+import { useCan } from '@/components/platform/perms'
 import { api } from '@/lib/api'
 import type { ProfileDTO } from '@/lib/types'
 
@@ -36,8 +44,20 @@ const ROLE_LABEL: Record<RoleKind, string> = {
 const fmtUpdatedAt = (iso: string): string =>
   new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
+/** Строка «подпись — значение» для режима просмотра (без права на правку) */
+function ViewRow({ label, value }: { label: string; value?: string | null }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] text-slate-400">{label}</div>
+      <div className="break-words text-sm font-medium text-slate-800">{value?.trim() || '—'}</div>
+    </div>
+  )
+}
+
 export default function ProfileTab(_props: TabProps) {
   const { toast } = useToast()
+  const can = useCan()
+  const canEdit = can('profile:edit')
   const [profile, setProfile] = useState<ProfileDTO | null>(null)
   const [role, setRole] = useState<RoleKind>('logist')
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -65,6 +85,8 @@ export default function ProfileTab(_props: TabProps) {
       const res = await api.saveProfile(draft)
       setProfile(res.profile)
       setDraft(toDraft(res.profile))
+      // плашка аккаунта в шапке отражает изменения сразу (Task 112)
+      window.dispatchEvent(new CustomEvent<ProfileDTO>('aemz:profile-updated', { detail: res.profile }))
       toast({ title: 'Проформа сохранена' })
     } catch (e) {
       toast({
@@ -85,27 +107,37 @@ export default function ProfileTab(_props: TabProps) {
     setDraft((d) => (d ? { ...d, [key]: e.target.value } : d))
 
   return (
-    <div>
-      <SectionHeader
-        title="Профиль"
-        eyebrow="Проформа учётной записи"
-        desc="Проформа — карточка ваших данных: она видна администрации платформы. У перевозчика реквизиты компании сохраняются и в карточке компании."
-      />
+    // весь профиль — одна белая плашка: заголовок, роль и данные внутри карточки (Task 112)
+    <Card className="border-slate-200 shadow-sm">
+      <CardContent className="p-4 sm:p-6">
+        {/* заголовок внутри плашки */}
+        <div className="flex items-start gap-3 border-b border-slate-100 pb-4">
+          <span className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100" aria-hidden>
+            <CircleUserRound className="h-6 w-6 text-slate-500" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-slate-500">Проформа учётной записи</div>
+            <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
+              Профиль
+              <InfoTip label="О разделе «Профиль»">
+                Проформа — карточка ваших данных: она видна администрации платформы. У перевозчика реквизиты компании
+                сохраняются и в карточке компании.
+              </InfoTip>
+            </h2>
+            <div className="mt-0.5 text-sm text-slate-500">
+              Роль: {ROLE_LABEL[role]}
+              {profile?.updatedAt ? ` · обновлено ${fmtUpdatedAt(profile.updatedAt)}` : ''}
+            </div>
+          </div>
+        </div>
 
-      {/* роль и момент последнего сохранения — приглушённой строкой под заголовком */}
-      <div className="-mt-3 mb-5 text-sm text-slate-500">
-        Роль: {ROLE_LABEL[role]}
-        {profile?.updatedAt ? ` · обновлено ${fmtUpdatedAt(profile.updatedAt)}` : ''}
-      </div>
+        {error && profile && (
+          <div className="mt-4 text-sm text-red-700">Не удалось обновить данные: {error}. Показаны последние загруженные значения.</div>
+        )}
 
-      {error && profile && (
-        <div className="mb-4 text-sm text-red-700">Не удалось обновить данные: {error}. Показаны последние загруженные значения.</div>
-      )}
-
-      <Card className="border-slate-200 shadow-sm">
-        <CardContent className="p-6">
-          {draft && (
-            <div className="grid gap-4">
+        {draft && (
+          canEdit ? (
+            <div className="mt-5 grid gap-4">
               {/* ——— Личные данные (все роли) ——— */}
               <div className="flex items-center gap-2 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-900">
                 Личные данные
@@ -186,9 +218,38 @@ export default function ProfileTab(_props: TabProps) {
                 </Button>
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+          ) : (
+            // нет права — правка целиком отсутствует: данные только для чтения (Task 112)
+            <div className="mt-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ViewRow label="ФИО" value={draft.fullName} />
+                <ViewRow label="Должность" value={draft.position} />
+                <ViewRow label="Телефон" value={draft.phone} />
+                <ViewRow label="Рабочая почта" value={draft.email} />
+              </div>
+              {isCarrier && (
+                <>
+                  <div className="mb-3 mt-5 border-b border-slate-200 pb-2 text-sm font-semibold text-slate-900">Данные компании</div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ViewRow label="Наименование организации" value={draft.companyName} />
+                    <ViewRow label="ИНН" value={draft.inn} />
+                    <ViewRow label="КПП" value={draft.kpp} />
+                    <ViewRow label="Юридический адрес" value={draft.address} />
+                    <ViewRow label="Руководитель" value={draft.director} />
+                    <ViewRow label="Контактное лицо" value={draft.contactName} />
+                  </div>
+                </>
+              )}
+              <div className="mt-5">
+                <ViewRow label="Примечание" value={draft.note} />
+              </div>
+              <NoticeLine className="mt-5" tone="info">
+                Данные профиля изменяет администрация платформы — передайте ей нужные правки через «Обращения».
+              </NoticeLine>
+            </div>
+          )
+        )}
+      </CardContent>
+    </Card>
   )
 }

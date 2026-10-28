@@ -9,16 +9,23 @@ export const dynamic = 'force-dynamic'
 const ROLES: SessionRole[] = ['admin', 'logist', 'carrier']
 const str = (v: unknown, max = 200): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 
+/** Персональное разрешение «Редактирование своего профиля»: null — как у роли (Task 112) */
+const PROFILE_EDIT_OWN: string[] = ['allow', 'deny']
+const overrideOf = (v: unknown): string | null =>
+  typeof v === 'string' && PROFILE_EDIT_OWN.includes(v) ? v : null
+
 /** DTO учётной записи с проформой и компанией */
 function toAdminUserDTO(u: {
-  id: string; login: string; name: string; role: string; carrierId: string | null; createdAt: Date
+  id: string; login: string; name: string; role: string; carrierId: string | null; profileEditOwn: string | null; createdAt: Date
   carrier?: { name: string } | null
   profile?: { userId: string; fullName: string; position: string; phone: string; email: string; companyName: string; inn: string; kpp: string; address: string; director: string; contactName: string; note: string; updatedAt: Date } | null
 }): AdminUserDTO {
   const p = u.profile
   return {
     id: u.id, login: u.login, name: u.name, role: (ROLES.includes(u.role as SessionRole) ? u.role : 'carrier') as SessionRole,
-    carrierId: u.carrierId, carrierName: u.carrier?.name ?? null, createdAt: u.createdAt.toISOString(),
+    carrierId: u.carrierId, carrierName: u.carrier?.name ?? null,
+    profileEditOwn: (u.profileEditOwn === 'allow' || u.profileEditOwn === 'deny') ? u.profileEditOwn : null,
+    createdAt: u.createdAt.toISOString(),
     profile: p ? {
       userId: p.userId, fullName: p.fullName, position: p.position, phone: p.phone, email: p.email,
       companyName: p.companyName, inn: p.inn, kpp: p.kpp, address: p.address,
@@ -83,6 +90,7 @@ export async function POST(req: NextRequest) {
   const user = await db.user.create({
     data: {
       login, name, role, carrierId, passwordHash: hashPassword(password),
+      profileEditOwn: overrideOf(body?.profileEditOwn),
       profile: { create: profileData },
     },
     include: { carrier: { select: { name: true } }, profile: true },
@@ -149,6 +157,9 @@ export async function PUT(req: NextRequest) {
     patch.passwordHash = hashPassword(body.password)
   }
 
+  // персональное разрешение профиля: передано null — сброс к «как у роли»
+  if (body?.profileEditOwn !== undefined) patch.profileEditOwn = overrideOf(body.profileEditOwn)
+
   const profile = (body?.profile ?? null) as Record<string, unknown> | null
   const profileData = profile ? {
     fullName: str(profile.fullName), position: str(profile.position, 120), phone: str(profile.phone, 40),
@@ -171,7 +182,10 @@ export async function PUT(req: NextRequest) {
   await plog({
     type: 'USER_UPDATED', source: 'api/admin/users',
     actor: { login: auth.login, name: auth.name, role: auth.role },
-    message: `Профиль изменён: ${user.name} (логин ${user.login})${typeof body?.password === 'string' && body.password ? ' — пароль сброшен' : ''}`,
+    message: `Профиль изменён: ${user.name} (логин ${user.login})${
+      patch.profileEditOwn !== undefined
+        ? ` — редактирование своего профиля: ${patch.profileEditOwn === 'allow' ? 'разрешено лично' : patch.profileEditOwn === 'deny' ? 'запрещено лично' : 'как у роли'}`
+        : ''}${typeof body?.password === 'string' && body.password ? ' — пароль сброшен' : ''}`,
   })
 
   return NextResponse.json({ user: toAdminUserDTO(user) })

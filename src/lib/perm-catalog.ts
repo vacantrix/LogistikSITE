@@ -34,6 +34,8 @@ export type PermKey =
   | 'trip:close'        // закрытие рейсов
   // — Отчёты —
   | 'reports:view'      // доступ к разделу «Отчёты»
+  // — Профиль и аккаунт —
+  | 'profile:edit'      // редактирование своего профиля (личные данные)
 
 export interface PermItem {
   key: PermKey
@@ -99,6 +101,12 @@ export const PERM_GROUPS: PermGroup[] = [
       { key: 'reports:view', label: 'Раздел «Отчёты»', hint: 'Финансовые отчёты и экономия' },
     ],
   },
+  {
+    title: 'Профиль и аккаунт',
+    items: [
+      { key: 'profile:edit', label: 'Редактирование своего профиля', hint: 'Изменение личных данных в разделе «Профиль»: ФИО, должность, телефон, почта. По умолчанию право только у администрации — отдельно выдаётся пользователю в разделе «Профили и доступы»' },
+    ],
+  },
 ]
 
 export const PERM_KEYS: PermKey[] = PERM_GROUPS.flatMap((g) => g.items.map((i) => i.key))
@@ -110,15 +118,16 @@ const has = (keys: PermKey[]): Record<PermKey, boolean> =>
 
 /** Права по умолчанию — заливаются в БД при первом запуске (ensurePerms) */
 export const PERM_DEFAULTS: Record<PermRole, Record<PermKey, boolean>> = {
-  // Логист — операционный контур: все функции платформы
-  logist: has(PERM_KEYS),
+  // Логист — операционный контур: все функции платформы, КРОМЕ правки своего профиля —
+  // она изначально только у администрации (Task 112), логисту выдаётся отдельно
+  logist: has(PERM_KEYS.filter((k) => k !== 'profile:edit')),
   // Перевозчик/экспедитор — кабинет компании: торги, экипажи, документы, ЭДО, свои карточки
   carrier: has([
     'bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'edo:send', 'directory:edit',
   ]),
-  // Администрация — просмотр всех разделов и управление правами; операционные
-  // функции выключены (при необходимости админ включит их себе сам)
-  admin: has(['reports:view']),
+  // Администрация — просмотр всех разделов, управление правами и свой профиль;
+  // операционные функции выключены (при необходимости админ включит их себе сам)
+  admin: has(['reports:view', 'profile:edit']),
 }
 
 export const ROLE_LABELS: Record<PermRole, string> = {

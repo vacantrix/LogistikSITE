@@ -44,18 +44,27 @@ interface UserDraft {
   position: string
   phone: string
   email: string
+  /** «Редактирование своего профиля»: inherit — как у роли, allow — разрешить, deny — запретить (Task 112) */
+  profileEditOwn: 'inherit' | 'allow' | 'deny'
 }
 
 const emptyDraft = (): UserDraft => ({
   id: null, login: '', name: '', password: '', role: 'carrier', carrierId: '',
-  fullName: '', position: '', phone: '', email: '',
+  fullName: '', position: '', phone: '', email: '', profileEditOwn: 'inherit',
 })
 
 const toDraft = (u: AdminUserDTO): UserDraft => ({
   id: u.id, login: u.login, name: u.name, password: '', role: u.role, carrierId: u.carrierId ?? '',
   fullName: u.profile?.fullName ?? '', position: u.profile?.position ?? '',
   phone: u.profile?.phone ?? '', email: u.profile?.email ?? '',
+  profileEditOwn: u.profileEditOwn ?? 'inherit',
 })
+
+/** Подпись персонального разрешения в таблице */
+const OVERRIDE_LABEL: Record<string, string> = {
+  allow: 'Разрешено',
+  deny: 'Запрещено',
+}
 
 export default function AdminUsersTab(_props: TabProps) {
   const { toast } = useToast()
@@ -108,15 +117,16 @@ export default function AdminUsersTab(_props: TabProps) {
     try {
       const profile = { fullName: draft.fullName, position: draft.position, phone: draft.phone, email: draft.email }
       const carrierId = draft.role === 'carrier' ? draft.carrierId : null
+      const profileEditOwn = draft.profileEditOwn === 'inherit' ? null : draft.profileEditOwn
       if (draft.id === null) {
         await api.adminUserCreate({
-          login: draft.login, name: draft.name, password: draft.password, role: draft.role, carrierId, profile,
+          login: draft.login, name: draft.name, password: draft.password, role: draft.role, carrierId, profile, profileEditOwn,
         })
         toast({ title: 'Профиль создан', description: `${draft.name} — теперь может войти на платформу` })
       } else {
         await api.adminUserUpdate({
           id: draft.id, name: draft.name, role: draft.role, carrierId,
-          ...(draft.password ? { password: draft.password } : {}), profile,
+          ...(draft.password ? { password: draft.password } : {}), profile, profileEditOwn,
         })
         toast({ title: 'Профиль сохранён' })
       }
@@ -182,6 +192,10 @@ export default function AdminUsersTab(_props: TabProps) {
                   <TableHead>Роль</TableHead>
                   <TableHead>Компания</TableHead>
                   <TableHead>Профиль</TableHead>
+                  <TableHead>
+                    Свой профиль
+                    <span className="mt-0.5 block text-[11px] font-normal text-slate-400">право правки</span>
+                  </TableHead>
                   <TableHead>Создан</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
@@ -211,6 +225,9 @@ export default function AdminUsersTab(_props: TabProps) {
                             </div>
                           </InfoTip>
                         ) : '—'}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-slate-600">
+                        {OVERRIDE_LABEL[u.profileEditOwn ?? ''] ?? 'Как у роли'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-slate-600">
                         {new Date(u.createdAt).toLocaleDateString('ru-RU')}
@@ -311,6 +328,35 @@ export default function AdminUsersTab(_props: TabProps) {
                     placeholder={draft.id === null ? 'Минимум 6 символов' : 'Оставьте пустым — не менять'}
                     autoComplete="new-password"
                   />
+                </div>
+              </div>
+
+              {/* ——— Доступы: право на редактирование своего профиля (Task 112) ——— */}
+              <div className="border-t border-slate-200 pt-3">
+                <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                  Право на изменение профиля
+                  <InfoTip label="Право на изменение профиля">
+                    По умолчанию менять данные своего профиля может только администрация. Здесь право выдаётся конкретному
+                    пользователю; матрица роли в разделе «Права доступа» действует, пока стоит «Как у роли».
+                  </InfoTip>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="user-profile-edit">Редактирование своего профиля</Label>
+                  <Select
+                    value={draft.profileEditOwn}
+                    onValueChange={(v) => setDraft((d) => (d ? { ...d, profileEditOwn: v as UserDraft['profileEditOwn'] } : d))}
+                  >
+                    <SelectTrigger id="user-profile-edit" aria-label="Право на редактирование своего профиля">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inherit">Как у роли</SelectItem>
+                      <SelectItem value="allow">Разрешить</SelectItem>
+                      <SelectItem value="deny">Запретить</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 

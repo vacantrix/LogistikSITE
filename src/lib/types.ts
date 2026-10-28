@@ -398,6 +398,8 @@ export interface AdminUserDTO {
   role: SessionRole
   carrierId: string | null
   carrierName: string | null
+  /** персональное разрешение «Редактирование своего профиля» (Task 112): null — как у роли */
+  profileEditOwn: 'allow' | 'deny' | null
   createdAt: string
   profile: ProfileDTO | null
 }
