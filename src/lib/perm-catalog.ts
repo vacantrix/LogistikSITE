@@ -1,145 +1,185 @@
 /**
- * Каталог прав платформы (Task 111) — чистый модуль без серверных зависимостей:
- * импортируется и на клиенте (раздел «Права доступа», подсказки), и на сервере.
- * Серверные проверки (allowed/permMatrix) — в src/lib/permissions.ts.
+ * Каталог прав платформы — чистый модуль без серверных зависимостей:
+ * импортируется и на клиенте (раздел «Профили и доступы», подсказки), и на сервере,
+ * и в сид-скриптах. Проверка прав — в src/lib/permissions.ts.
+ *
+ * Модель доступа «контур → должность → исключения»:
+ *  1. Контур — роль учётной записи (администрация / логист / перевозчик). Определяет,
+ *     какие права для пользователя вообще существуют: право вне контура не выдаётся
+ *     и всегда ложно (админу нельзя дать «Создание черновиков», перевозчику — «Отчёты»).
+ *  2. Должность — именованный набор прав внутри контура (AccessTemplate).
+ *     У каждого пользователя ровно одна; без неё действует должность контура по умолчанию.
+ *  3. Исключение — личное разрешение или запрет одного права сверх должности
+ *     (PermException): с причиной и, по возможности, сроком.
  */
 
-/** Ключи прав (строки — чтобы каталог можно было использовать и на клиенте) */
+/** Ключи прав */
 export type PermKey =
-  // — Заявки и торги —
-  | 'draft:create'      // создание черновиков (кнопки «Создать заявку» / «Новая заявка»)
-  | 'draft:edit'        // правка черновиков
-  | 'draft:delete'      // удаление черновиков
-  | 'request:publish'   // публикация заявок на площадку
-  | 'request:delete'    // удаление заявок с площадки
-  | 'request:extend'    // продление приёма ставок
-  | 'request:raise'     // повышение стартовой ставки
-  | 'request:offer'     // прямое предложение заявки перевозчику (без торгов)
-  | 'bid:submit'        // подача, отзыв ставок (перевозчик)
-  // — Документы и сверка —
-  | 'verify:decide'     // решения сверки документов (передать дальше / вернуть / отказ)
-  | 'docs:upload'       // загрузка документов для перевозчика (логист)
-  | 'docs:request'      // обмен документами по заявке (доверенность / заявка)
-  // — Экипажи —
-  | 'crew:assign'       // назначение экипажей и утверждение
+  // — Заявки и торги (логист) —
+  | 'draft:create'
+  | 'draft:edit'
+  | 'draft:delete'
+  | 'request:publish'
+  | 'request:extend'
+  | 'request:raise'
+  | 'request:offer'
+  | 'request:delete'
+  // — Торги (перевозчик) —
+  | 'bid:submit'
+  // — Документы, экипажи, рейсы —
+  | 'verify:decide'
+  | 'docs:upload'
+  | 'docs:request'
+  | 'crew:assign'
+  | 'trip:close'
   // — ЭДО —
-  | 'edo:sync'          // синхронизация статусов Диадока
-  | 'edo:sign'          // подписание документов КЭП
-  | 'edo:send'          // отправка ЭТрН в Диадок
+  | 'edo:sync'
+  | 'edo:send'
+  | 'edo:sign'
   // — Справочники —
-  | 'directory:addManual' // ручное добавление записей в справочники
-  | 'directory:edit'      // правка своих данных в справочниках
-  | 'notify:agent'        // «Уведомить агента» (рассылка об истекающих документах)
-  // — Рейсы —
-  | 'trip:close'        // закрытие рейсов
-  // — Отчёты —
-  | 'reports:view'      // доступ к разделу «Отчёты»
-  // — Профиль и аккаунт —
-  | 'profile:edit'      // редактирование своего профиля (личные данные)
+  | 'directory:addManual'
+  | 'directory:edit'
+  | 'notify:agent'
+  // — Разделы и профиль —
+  | 'reports:view'
+  | 'profile:edit'
+  // — Управление платформой (администрация) —
+  | 'admin:users'
+  | 'admin:db'
+
+/** Контур — роль учётной записи */
+export type Contour = 'admin' | 'logist' | 'carrier'
+/** @deprecated — то же, что Contour (старое имя) */
+export type PermRole = Contour
+
+/** Насколько опасно право: «важное» и «критичное» помечаются в редакторах */
+export type PermRisk = 'normal' | 'important' | 'critical'
 
 export interface PermItem {
   key: PermKey
+  /** название права */
   label: string
-  hint?: string
+  /** где право появляется в интерфейсе */
+  hint: string
+  group: string
+  risk: PermRisk
+  /** в каких контурах право существует */
+  contours: Contour[]
+  /** название для конкретного контура, если отличается («Подпись КЭП от АЭМЗ» / «от компании») */
+  labelBy?: Partial<Record<Contour, string>>
 }
 
-export interface PermGroup {
-  title: string
-  items: PermItem[]
-}
+export const CONTOURS: Contour[] = ['logist', 'carrier', 'admin']
 
-/** Каталог прав для раздела «Права доступа» и подсказок */
-export const PERM_GROUPS: PermGroup[] = [
-  {
-    title: 'Заявки и торги',
-    items: [
-      { key: 'draft:create', label: 'Создание черновиков', hint: 'Кнопки «Создать заявку» и «Новая заявка»' },
-      { key: 'draft:edit', label: 'Правка черновиков' },
-      { key: 'draft:delete', label: 'Удаление черновиков' },
-      { key: 'request:publish', label: 'Публикация заявок', hint: 'Выставление черновика на площадку с приёмом ставок' },
-      { key: 'request:delete', label: 'Удаление заявок', hint: 'Снятие заявок с площадки и из реестра' },
-      { key: 'request:extend', label: 'Продление приёма ставок' },
-      { key: 'request:raise', label: 'Повышение стартовой ставки' },
-      { key: 'request:offer', label: 'Прямое предложение', hint: '«Предложить напрямую» — передача заявки перевозчику без торгов' },
-      { key: 'bid:submit', label: 'Подача ставок', hint: 'Ставки, отзыв и продление своих ставок' },
-    ],
-  },
-  {
-    title: 'Документы и сверка',
-    items: [
-      { key: 'verify:decide', label: 'Решения сверки', hint: '«Передать дальше», «Перезагрузить», «Отказ» по документам' },
-      { key: 'docs:upload', label: 'Документы перевозчику', hint: 'Загрузка документов логистом в пакет заявки' },
-      { key: 'docs:request', label: 'Обмен документами по заявке', hint: 'Доверенность и заявка от перевозчика, комплект от логиста' },
-    ],
-  },
-  {
-    title: 'Экипажи',
-    items: [
-      { key: 'crew:assign', label: 'Назначение экипажей', hint: 'Указание и утверждение водителя, тягача и прицепа по заявке' },
-    ],
-  },
-  {
-    title: 'ЭДО',
-    items: [
-      { key: 'edo:sync', label: 'Синхронизация Диадока', hint: 'Кнопка «Обновить статусы» в разделе ЭДО' },
-      { key: 'edo:sign', label: 'Подписание документов', hint: 'КЭП-подпись документов в разделе ЭДО' },
-      { key: 'edo:send', label: 'Отправка ЭТрН в Диадок' },
-    ],
-  },
-  {
-    title: 'Справочники',
-    items: [
-      { key: 'directory:addManual', label: 'Ручное добавление', hint: 'Кнопка «Добавить вручную» в справочниках' },
-      { key: 'directory:edit', label: 'Правка своих данных', hint: 'Редактирование карточек своей компании' },
-      { key: 'notify:agent', label: 'Уведомить агента', hint: 'Рассылка перевозчикам об истекающих документах' },
-    ],
-  },
-  {
-    title: 'Рейсы и отчёты',
-    items: [
-      { key: 'trip:close', label: 'Закрытие рейсов' },
-      { key: 'reports:view', label: 'Раздел «Отчёты»', hint: 'Финансовые отчёты и экономия' },
-    ],
-  },
-  {
-    title: 'Профиль и аккаунт',
-    items: [
-      { key: 'profile:edit', label: 'Редактирование своего профиля', hint: 'Изменение личных данных в разделе «Профиль»: ФИО, должность, телефон, почта. По умолчанию право только у администрации — отдельно выдаётся пользователю в разделе «Профили и доступы»' },
-    ],
-  },
-]
-
-export const PERM_KEYS: PermKey[] = PERM_GROUPS.flatMap((g) => g.items.map((i) => i.key))
-
-export type PermRole = 'admin' | 'logist' | 'carrier'
-
-const has = (keys: PermKey[]): Record<PermKey, boolean> =>
-  Object.fromEntries(PERM_KEYS.map((k) => [k, keys.includes(k)])) as Record<PermKey, boolean>
-
-/** Права по умолчанию — заливаются в БД при первом запуске (ensurePerms) */
-export const PERM_DEFAULTS: Record<PermRole, Record<PermKey, boolean>> = {
-  // Логист — операционный контур: все функции платформы, КРОМЕ правки своего профиля —
-  // она изначально только у администрации (Task 112), логисту выдаётся отдельно
-  logist: has(PERM_KEYS.filter((k) => k !== 'profile:edit')),
-  // Перевозчик/экспедитор — кабинет компании: торги, экипажи, документы, ЭДО, свои карточки
-  carrier: has([
-    'bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'edo:send', 'directory:edit',
-  ]),
-  // Администрация — просмотр всех разделов, управление правами и свой профиль;
-  // операционные функции выключены (при необходимости админ включит их себе сам)
-  admin: has(['reports:view', 'profile:edit']),
-}
-
-export const ROLE_LABELS: Record<PermRole, string> = {
-  logist: 'Логист',
+export const CONTOUR_LABELS: Record<Contour, string> = {
+  logist: 'Логист АЭМЗ',
   carrier: 'Перевозчик',
   admin: 'Администрация',
 }
+/** @deprecated — то же, что CONTOUR_LABELS */
+export const ROLE_LABELS = CONTOUR_LABELS
 
-export function permLabel(key: PermKey): string {
-  for (const g of PERM_GROUPS) {
-    const item = g.items.find((i) => i.key === key)
-    if (item) return item.label
-  }
-  return key
+export const RISK_LABELS: Record<Exclude<PermRisk, 'normal'>, string> = {
+  important: 'важное',
+  critical: 'критичное',
 }
+
+const L: Contour[] = ['logist']
+const C: Contour[] = ['carrier']
+const A: Contour[] = ['admin']
+
+export const PERMS: PermItem[] = [
+  { key: 'draft:create', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Создание черновиков', hint: 'Кнопки «Создать заявку» и «Новая заявка»' },
+  { key: 'draft:edit', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Правка черновиков', hint: 'Редактирование черновиков и заявок до начала работы' },
+  { key: 'draft:delete', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Удаление черновиков', hint: 'Корзина в «Черновиках заявок»' },
+  { key: 'request:publish', group: 'Заявки и торги', contours: L, risk: 'important', label: 'Публикация на площадку', hint: '«Опубликовать» — выставить черновик на торги' },
+  { key: 'request:extend', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Продление приёма ставок', hint: '«Продлить» на площадке' },
+  { key: 'request:raise', group: 'Заявки и торги', contours: L, risk: 'important', label: 'Повышение стартовой ставки', hint: '«Повысить ставку» на площадке' },
+  { key: 'request:offer', group: 'Заявки и торги', contours: L, risk: 'critical', label: 'Прямое предложение без торгов', hint: '«Предложить напрямую» — заявка уходит перевозчику без торгов' },
+  { key: 'request:delete', group: 'Заявки и торги', contours: L, risk: 'critical', label: 'Удаление заявок', hint: 'Снятие заявок с площадки и из реестра' },
+  { key: 'bid:submit', group: 'Торги и экипажи', contours: C, risk: 'important', label: 'Ставки', hint: '«Сделать ставку», отзыв ставки' },
+  { key: 'crew:assign', group: 'Торги и экипажи', contours: C, risk: 'normal', label: 'Назначение экипажа', hint: 'Водитель, тягач и прицеп по выигранной заявке' },
+  { key: 'verify:decide', group: 'Документы и рейсы', contours: L, risk: 'important', label: 'Решения сверки', hint: '«Передать дальше», «Вернуть», «Отказ» по документам' },
+  { key: 'docs:upload', group: 'Документы и рейсы', contours: L, risk: 'normal', label: 'Документы перевозчику', hint: 'Загрузка документов для перевозчика в карточке заявки' },
+  { key: 'docs:request', group: 'Документы и ЭДО', contours: C, risk: 'normal', label: 'Доверенность и заявка логисту', hint: 'Загрузка документов по заявке в «Моих заявках»' },
+  { key: 'trip:close', group: 'Документы и рейсы', contours: L, risk: 'critical', label: 'Закрытие рейсов', hint: '«Закрыть рейс» в реестре рейсов' },
+  { key: 'edo:sync', group: 'ЭДО', contours: ['logist', 'carrier'], risk: 'normal', label: 'Обновление статусов Диадока', hint: '«Обновить статусы» в разделе ЭДО' },
+  { key: 'edo:send', group: 'ЭДО', contours: L, risk: 'important', label: 'Отправка ЭТрН в Диадок', hint: '«Отправить ЭТрН» в разделе ЭДО' },
+  { key: 'edo:sign', group: 'ЭДО', contours: ['logist', 'carrier'], risk: 'critical', label: 'Подпись документов КЭП', hint: '«Подписать» в разделе ЭДО', labelBy: { logist: 'Подпись КЭП от АЭМЗ', carrier: 'Подпись КЭП от компании' } },
+  { key: 'directory:addManual', group: 'Справочники', contours: ['logist', 'carrier'], risk: 'normal', label: 'Добавление вручную', hint: '«Добавить вручную» в справочниках', labelBy: { carrier: 'Добавление водителей и техники вручную' } },
+  { key: 'directory:edit', group: 'Справочники', contours: ['logist', 'carrier'], risk: 'normal', label: 'Правка справочников', hint: 'Редактирование карточек в справочниках', labelBy: { carrier: 'Правка карточек своей компании' } },
+  { key: 'notify:agent', group: 'Справочники', contours: L, risk: 'normal', label: 'Уведомить агента', hint: 'Рассылка перевозчикам об истекающих документах' },
+  { key: 'admin:users', group: 'Управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Учётные записи, должности и исключения' },
+  { key: 'admin:db', group: 'Управление', contours: A, risk: 'critical', label: 'Редактор базы данных', hint: 'Раздел «База данных»: прямая правка записей' },
+  { key: 'reports:view', group: 'Разделы и профиль', contours: ['logist', 'admin'], risk: 'normal', label: 'Отчёты', hint: 'Раздел «Отчёты» и выгрузка' },
+  { key: 'profile:edit', group: 'Разделы и профиль', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Правка своего профиля', hint: '«Изменить» в меню аккаунта: ФИО, должность, телефон, почта' },
+]
+
+export const PERM_KEYS: PermKey[] = PERMS.map((p) => p.key)
+
+const BY_KEY = new Map(PERMS.map((p) => [p.key, p]))
+
+export const isPermKey = (key: unknown): key is PermKey => typeof key === 'string' && BY_KEY.has(key as PermKey)
+
+export const isContour = (v: unknown): v is Contour => v === 'admin' || v === 'logist' || v === 'carrier'
+
+/** Существует ли право в контуре */
+export const inContour = (contour: Contour, key: PermKey): boolean => BY_KEY.get(key)?.contours.includes(contour) ?? false
+
+/** Права контура в порядке каталога */
+export const permsFor = (contour: Contour): PermItem[] => PERMS.filter((p) => p.contours.includes(contour))
+
+/** Группы прав контура в порядке каталога */
+export function permGroupsFor(contour: Contour): { title: string; items: PermItem[] }[] {
+  const groups: { title: string; items: PermItem[] }[] = []
+  for (const p of permsFor(contour)) {
+    const g = groups.find((x) => x.title === p.group)
+    if (g) g.items.push(p)
+    else groups.push({ title: p.group, items: [p] })
+  }
+  return groups
+}
+
+/** Название права (с учётом контура, если оно там называется иначе) */
+export function permLabel(key: PermKey, contour?: Contour): string {
+  const p = BY_KEY.get(key)
+  if (!p) return key
+  return (contour && p.labelBy?.[contour]) || p.label
+}
+
+export const permRisk = (key: PermKey): PermRisk => BY_KEY.get(key)?.risk ?? 'normal'
+export const permHint = (key: PermKey): string => BY_KEY.get(key)?.hint ?? ''
+
+// ——— стартовые должности ———
+
+export interface TemplateSeed {
+  contour: Contour
+  name: string
+  description: string
+  perms: PermKey[]
+  /** должность для новых учёток контура */
+  isDefault?: boolean
+}
+
+const allOf = (contour: Contour, except: PermKey[] = []): PermKey[] =>
+  permsFor(contour).map((p) => p.key).filter((k) => !except.includes(k))
+
+/**
+ * Стартовые должности. Наборы повторяют прежнее поведение платформы: «Ведущий логист» —
+ * прежний логист по умолчанию, «Логист» — урезанный набор линейного сотрудника (logist2),
+ * «Руководитель компании» — прежние права перевозчика, «Администратор» — прежняя администрация.
+ * Правка своего профиля по умолчанию только у администрации (Task 112).
+ */
+export const TEMPLATE_SEEDS: TemplateSeed[] = [
+  { contour: 'logist', name: 'Ведущий логист', description: 'Весь операционный контур: торги, сверка, рейсы, ЭДО, отчёты.', perms: allOf('logist', ['profile:edit']) },
+  { contour: 'logist', name: 'Логист', description: 'Черновики заявок, документы перевозчику, справочники. Публикует, сверяет и закрывает ведущий логист.', isDefault: true,
+    perms: ['draft:create', 'draft:edit', 'draft:delete', 'docs:upload', 'directory:addManual', 'directory:edit'] },
+  { contour: 'logist', name: 'Наблюдатель', description: 'Видит разделы логиста, ничего не меняет. Для стажёров и руководства.', perms: [] },
+  { contour: 'carrier', name: 'Руководитель компании', description: 'Торги, экипажи, документы и подпись ЭДО от компании.', isDefault: true,
+    perms: ['bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'directory:edit'] },
+  { contour: 'carrier', name: 'Диспетчер', description: 'Ставки, экипажи и документы. Без подписи ЭДО.', perms: ['bid:submit', 'crew:assign', 'docs:request', 'directory:edit'] },
+  { contour: 'carrier', name: 'Подписант ЭДО', description: 'Подпись ЭТрН и актов КЭП, на которого она оформлена, и документы по заявкам.', perms: ['edo:sign', 'docs:request'] },
+  { contour: 'admin', name: 'Администратор', description: 'Учётные записи и доступы, редактор базы данных, все разделы на просмотр.', isDefault: true,
+    perms: ['admin:users', 'admin:db', 'reports:view', 'profile:edit'] },
+  { contour: 'admin', name: 'Аудитор', description: 'Видит все разделы и отчёты, ничего не меняет.', perms: ['reports:view'] },
+]

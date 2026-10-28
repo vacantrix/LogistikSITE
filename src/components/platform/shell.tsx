@@ -40,6 +40,7 @@ import { useToast } from '@/hooks/use-toast'
 import { NotificationBell } from '@/components/platform/notification-bell'
 import { LogoMark } from '@/components/platform/logo-mark'
 import { useCan } from '@/components/platform/perms'
+import type { PermKey } from '@/lib/perm-catalog'
 import type { RoleKind, TabKey } from '@/components/platform/common'
 import type { ProfileDTO, SessionUserDTO } from '@/lib/types'
 import { activateAccount, api, listAccounts } from '@/lib/api'
@@ -89,6 +90,18 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
 /** Разделы, доступные выбранной роли */
 export function navFor(role: RoleKind): { key: TabKey; label: string }[] {
   return NAV_ALL.filter((n) => n.roles.includes(role)).map(({ key, label }) => ({ key, label }))
+}
+
+/** Разделы, закрытые правом: без права раздел не показывается в меню и не открывается */
+const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
+  reports: 'reports:view',
+  'admin-users': 'admin:users',
+  'admin-db': 'admin:db',
+}
+
+export function sectionAllowed(tab: TabKey, can: (key: PermKey) => boolean): boolean {
+  const key = SECTION_PERM[tab]
+  return !key || can(key)
 }
 
 export function firstTabFor(role: RoleKind): TabKey {
@@ -542,7 +555,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   const can = useCan()
   // разделы роли; «Отчёты» дополнительно закрыты правом reports:view (Task 111) —
   // без права пункт меню исчезает целиком
-  const nav = navFor(role.kind).filter((n) => n.key !== 'reports' || can('reports:view'))
+  const nav = navFor(role.kind).filter((n) => sectionAllowed(n.key, can))
   const userName = user.name
   // проформа для плашки аккаунта: ФИО, должность, организация (Task 111)
   const [profile, setProfile] = useState<ProfileDTO | null>(null)

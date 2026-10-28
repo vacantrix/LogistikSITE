@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PermMatrixRow, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
+  AccessDataDTO, AccessUserInput, AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
 import type { ReportId, ReportPreview, ReportSettings } from '@/lib/reports/catalog'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
@@ -15,6 +15,8 @@ export { activateAccount, beginAddAccount, listAccounts } from '@/lib/accounts'
 
 /** Событие окна: сервер ответил 401 — сессия этой вкладки недействительна, страница показывает экран входа */
 export const UNAUTHORIZED_EVENT = 'aemz:unauthorized'
+/** Событие окна: сервер ответил «нет права» — права пользователя изменились, их надо перечитать */
+export const PERMS_STALE_EVENT = 'aemz:perms-stale'
 
 // ——— токен сессии (мультиаккаунт, Task 74) ———
 // Активный токен хранится в sessionStorage — СВОЙ для каждой вкладки, поэтому две
@@ -97,6 +99,11 @@ async function json<T>(res: Response): Promise<T> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kind: 'api5xx', message: `API ${res.status}: ${res.url}`, url: res.url }),
     })).catch(() => { /* журнал недоступен — не критично */ })
+  }
+  // сервер ответил «нет права» — права в интерфейсе устарели (их изменила администрация):
+  // PermProvider перечитает их, и недоступные кнопки исчезнут без перезагрузки
+  if (res.status === 403 && typeof window !== 'undefined' && String((data as { error?: string }).error ?? '').startsWith('Нет права')) {
+    window.dispatchEvent(new Event(PERMS_STALE_EVENT))
   }
   if (!res.ok) throw new Error((data as { error?: string }).error || `Ошибка запроса (${res.status})`)
   return data as T
@@ -228,16 +235,23 @@ export const api = {
 
   /** Права доступа (Task 111): матрица «роль × право» и её правка администрацией */
   permissions: () =>
-    fetch('/api/permissions', withAuth({ cache: 'no-store' })).then(json<{ perms: PermMatrixRow[]; mine: string[] }>),
-  permissionsUpdate: (updates: { role: string; key: string; allowed: boolean }[]) =>
-    fetch('/api/permissions', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }) })).then(json<{ ok: boolean; perms: PermMatrixRow[] }>),
-
-  /** Профили и доступы (администрация, Task 109) */
+    fetch('/api/permissions', withAuth({ cache: 'no-store' })).then(json<{ mine: string[]; sources: Record<string, 'template' | 'exception'>; templateName: string | null }>),
+  // «Профили и доступы»: должности, исключения, журнал (право admin:users)
+  accessData: () =>
+    fetch('/api/admin/access', withAuth({ cache: 'no-store' })).then(json<AccessDataDTO>),
+  accessTemplateSave: (data: { id?: string; contour?: string; name: string; description: string; perms: string[] }) =>
+    fetch('/api/admin/access', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'template-save', ...data }) })).then(json<AccessDataDTO>),
+  accessTemplateDelete: (id: string) =>
+    fetch('/api/admin/access', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'template-delete', id }) })).then(json<AccessDataDTO>),
+  accessTemplateDefault: (id: string) =>
+    fetch('/api/admin/access', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'template-default', id }) })).then(json<AccessDataDTO>),
+  accessUserSave: (data: AccessUserInput) =>
+    fetch('/api/admin/access', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'user-access', ...data }) })).then(json<AccessDataDTO>),
   adminUsers: () =>
     fetch('/api/admin/users', withAuth({ cache: 'no-store' })).then(json<{ users: AdminUserDTO[] }>),
-  adminUserCreate: (data: { login: string; name: string; password: string; role: string; carrierId?: string | null; profile?: Partial<ProfileDTO>; profileEditOwn?: 'allow' | 'deny' | null; permOverrides?: Record<string, 'allow' | 'deny'> | null }) =>
+  adminUserCreate: (data: { login: string; name: string; password: string; role: string; carrierId?: string | null; templateId?: string | null; profile?: Partial<ProfileDTO> }) =>
     fetch('/api/admin/users', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
-  adminUserUpdate: (data: { id: string; name?: string; role?: string; carrierId?: string | null; password?: string; profile?: Partial<ProfileDTO>; profileEditOwn?: 'allow' | 'deny' | null; permOverrides?: Record<string, 'allow' | 'deny'> | null }) =>
+  adminUserUpdate: (data: { id: string; name?: string; role?: string; carrierId?: string | null; password?: string; profile?: Partial<ProfileDTO> }) =>
     fetch('/api/admin/users', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
   adminUserDelete: (id: string) =>
     fetch(`/api/admin/users?id=${encodeURIComponent(id)}`, withAuth({ method: 'DELETE' })).then(json<{ ok: boolean }>),

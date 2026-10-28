@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { plog } from '@/lib/platform-log'
+import { allowedFor, invalidateAccessCache, permDenied } from '@/lib/permissions'
 import type { AdminDbTableData, AdminDbTableDTO } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -131,6 +132,7 @@ function fmtDate(iso: string): string {
 export async function GET(req: NextRequest) {
   const auth = await requireUser('admin')
   if (auth instanceof NextResponse) return auth
+  if (!(await allowedFor(auth, 'admin:db'))) return NextResponse.json({ error: permDenied('admin:db') }, { status: 403 })
 
   const sp = req.nextUrl.searchParams
   const tableKey = sp.get('table') ?? ''
@@ -197,6 +199,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await requireUser('admin')
   if (auth instanceof NextResponse) return auth
+  if (!(await allowedFor(auth, 'admin:db'))) return NextResponse.json({ error: permDenied('admin:db') }, { status: 403 })
 
   const body = (await req.json().catch(() => null)) as {
     table?: string; op?: string; id?: string; data?: Record<string, unknown>
@@ -214,6 +217,7 @@ export async function POST(req: NextRequest) {
       const id = String(body?.id ?? '')
       if (!id) return NextResponse.json({ error: 'Не указана запись' }, { status: 400 })
       await delegate_.delete({ where: { id } })
+      invalidateAccessCache() // правка учёток (роль, должность) действует сразу
       await plog({
         type: 'DB_ROW_DELETED', source: 'api/admin/db',
         actor: { login: auth.login, name: auth.name, role: auth.role },
@@ -235,6 +239,7 @@ export async function POST(req: NextRequest) {
 
     if (op === 'create') {
       const row = await delegate_.create({ data })
+      invalidateAccessCache()
       await plog({
         type: 'DB_ROW_CREATED', source: 'api/admin/db',
         actor: { login: auth.login, name: auth.name, role: auth.role },
@@ -246,6 +251,7 @@ export async function POST(req: NextRequest) {
     const id = String(body?.id ?? '')
     if (!id) return NextResponse.json({ error: 'Не указана запись' }, { status: 400 })
     await delegate_.update({ where: { id }, data })
+    invalidateAccessCache()
     await plog({
       type: 'DB_ROW_UPDATED', source: 'api/admin/db',
       actor: { login: auth.login, name: auth.name, role: auth.role },

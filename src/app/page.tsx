@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import { Loader2, RefreshCw } from 'lucide-react'
-import { Shell, firstTabFor, navFor, type RoleSelection } from '@/components/platform/shell'
+import { Shell, firstTabFor, navFor, sectionAllowed, type RoleSelection } from '@/components/platform/shell'
 import { RoleNotice, type TabKey } from '@/components/platform/common'
 import { LoginScreen } from '@/components/platform/login-screen'
 import { api, beginAddAccount, getSessionToken, UNAUTHORIZED_EVENT } from '@/lib/api'
@@ -46,6 +46,8 @@ export default function Page() {
   const [tab, setTab] = useState<TabKey>('board')
   // real-time (Task 49): счётчик изменений с сервера
   const [liveTick, setLiveTick] = useState(0)
+  // права пользователя перечитываются, когда администрация меняет должности или исключения
+  const [permTick, setPermTick] = useState(0)
   // обработка потери соединения (Task 52): оверлей «Восстанавливаем соединение»
   // показывается только когда связь БЫЛА установлена и оборвалась — при первом
   // отсутствии сервиса интерфейс продолжает работать на автообновлении
@@ -134,7 +136,10 @@ export default function Page() {
     }
     socket.on('disconnect', onLost)
     socket.on('connect_error', onLost)
-    socket.on('platform:update', () => setLiveTick((t) => t + 1))
+    socket.on('platform:update', (ev?: { type?: string }) => {
+      if (ev?.type === 'PERMS_CHANGED') setPermTick((t) => t + 1)
+      else setLiveTick((t) => t + 1)
+    })
     return () => {
       socket.disconnect()
       wasConnectedRef.current = false
@@ -172,7 +177,7 @@ export default function Page() {
   // внутри проверяют себя через useCan(); пока права не загружены, разделы показываются
   // (сервер всё равно проверит), после загрузки лишние скрываются
   return (
-    <PermProvider>
+    <PermProvider refreshKey={permTick}>
       <PlatformView
         user={user}
         tab={tab}
@@ -201,9 +206,8 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
   const activeCarrierId = role.kind === 'carrier' ? role.carrierId ?? null : null
   const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab, liveTick }
   // защита: раздел недоступен текущей роли — показываем пояснение вместо содержимого;
-  // «Отчёты» дополнительно закрыты правом reports:view (Task 111)
-  const allowed = navFor(role.kind).some((n) => n.key === tab)
-    && (tab !== 'reports' || can('reports:view'))
+  // часть разделов дополнительно закрыта правом (sectionAllowed — общее правило с меню)
+  const allowed = navFor(role.kind).some((n) => n.key === tab) && sectionAllowed(tab, can)
 
   return (
     <Shell tab={tab} onNavigate={setTab} role={role} user={user} onLogout={onLogout} onAddAccount={onAddAccount} liveTick={liveTick}>

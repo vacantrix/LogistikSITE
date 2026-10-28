@@ -49,13 +49,14 @@ model User {
   passwordHash   String // scrypt: "salt:hash"
   role           String // 'admin' | 'logist' | 'carrier'
   carrierId      String?
-  // персональное разрешение «Редактирование своего профиля» (Task 112):
-  // null — как у роли (матрица прав), 'allow' — разрешено лично, 'deny' — запрещено лично
+  // должность (набор прав внутри контура роли); null — должность контура по умолчанию
+  templateId     String?
+  template       AccessTemplate? @relation(fields: [templateId], references: [id])
+  // личные исключения сверх должности (разрешить / запретить одно право)
+  exceptions     PermException[]
+  // УСТАРЕЛО (Task 112/113): прежние личные права. Читаются только один раз — при переносе
+  // в должности и исключения (src/lib/permissions.ts → ensureAccess); удалить в следующей версии.
   profileEditOwn String?
-  // персональные права пользователя (Task 113): JSON { ключПрава: 'allow' | 'deny' } —
-  // перекрывают матрицу роли; пусто/null — работа строго по роли.
-  // Выдаётся администрацией в «Профилях и доступах» (logist1 — почти все права ведущего
-  // специалиста, logist2 — урезанный набор линейного сотрудника).
   permOverrides  String?
   carrier        Carrier?        @relation("carrierUser", fields: [carrierId], references: [id])
   createdAt      DateTime        @default(now())
@@ -63,6 +64,52 @@ model User {
   profile        Profile?
   tickets        Ticket[]
   ticketMessages TicketMessage[]
+}
+
+/**
+ * Должность — набор прав внутри контура (роли учётной записи): «Ведущий логист»,
+ * «Диспетчер», «Аудитор»… Настраивается администрацией в «Профилях и доступах».
+ * Права вне контура в должность не попадают (проверка на сервере).
+ */
+model AccessTemplate {
+  id          String         @id @default(cuid())
+  contour     String // 'admin' | 'logist' | 'carrier'
+  name        String
+  description String         @default("")
+  // должность для новых учёток контура (ровно одна на контур)
+  isDefault   Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  perms       TemplatePerm[]
+  users       User[]
+
+  @@unique([contour, name])
+}
+
+model TemplatePerm {
+  templateId String
+  key        String // ключ права из каталога src/lib/perm-catalog.ts
+  template   AccessTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@id([templateId, key])
+}
+
+/**
+ * Личное исключение: одно право разрешено (allow) или запрещено (deny) пользователю
+ * сверх его должности. Причина обязательна; после expiresAt исключение не действует.
+ */
+model PermException {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key       String
+  effect    String // 'allow' | 'deny'
+  reason    String
+  expiresAt DateTime?
+  createdBy String
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, key])
 }
 
 /**
@@ -501,16 +548,14 @@ model Setting {
 }
 
 /**
- * Права ролей платформы (Task 111): полная матрица «роль × право».
- * Если строки нет или allowed = false — функция целиком скрывается из интерфейса
- * этой роли и блокируется на сервере (проверка в API-маршрутах).
- * Каталог прав и значения по умолчанию — src/lib/permissions.ts; при пустой таблице
- * она автоматически заполняется дефолтами (ensurePerms).
+ * УСТАРЕЛО (Task 111): прежняя матрица «роль × право». Заменена должностями
+ * (AccessTemplate); читается только один раз — при переносе (ensureAccess).
+ * Удалить в следующей версии вместе с User.permOverrides и User.profileEditOwn.
  */
 model RolePerm {
-  role    String // 'admin' | 'logist' | 'carrier'
-  key     String // ключ права из каталога (draft:create, request:delete, edo:sign…)
-  allowed Boolean
+  role      String // 'admin' | 'logist' | 'carrier'
+  key       String // ключ права из каталога (draft:create, request:delete, edo:sign…)
+  allowed   Boolean
   updatedAt DateTime @updatedAt
 
   @@id([role, key])

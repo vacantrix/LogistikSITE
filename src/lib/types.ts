@@ -398,21 +398,80 @@ export interface AdminUserDTO {
   role: SessionRole
   carrierId: string | null
   carrierName: string | null
-  /** персональное разрешение «Редактирование своего профиля» (Task 112): null — как у роли */
-  profileEditOwn: 'allow' | 'deny' | null
-  /** персональные права пользователя (Task 113): ключ → allow|deny; перекрывают роль */
-  permOverrides: Record<string, 'allow' | 'deny'> | null
+  /** должность (набор прав внутри контура роли) */
+  templateId: string | null
   createdAt: string
   profile: ProfileDTO | null
 }
 
-// ——— Права доступа (Task 111) ———
+// ——— Доступ: контур → должность → исключения ———
 
-/** Строка матрицы прав: роль и список её прав (ключ → включено) */
-export interface PermMatrixRow {
+/** Должность — набор прав внутри контура */
+export interface AccessTemplateDTO {
+  id: string
+  contour: SessionRole
+  name: string
+  description: string
+  /** должность для новых учёток контура */
+  isDefault: boolean
+  perms: string[]
+  /** сколько пользователей на должности (включая тех, кому она назначена по умолчанию) */
+  userCount: number
+  updatedAt: string
+}
+
+/** Личное исключение: одно право разрешено или запрещено сверх должности */
+export interface AccessExceptionDTO {
+  key: string
+  effect: 'allow' | 'deny'
+  reason: string
+  /** последний день действия ГГГГ-ММ-ДД; null — бессрочно */
+  expiresAt: string | null
+  /** действует сейчас (срок не истёк) */
+  active: boolean
+  createdBy: string
+  createdAt: string
+}
+
+/** Доступ пользователя: должность, исключения и итог с источником каждого права */
+export interface AccessUserDTO {
+  id: string
+  login: string
+  name: string
   role: SessionRole
-  label: string
-  items: { key: string; allowed: boolean }[]
+  fullName: string
+  position: string
+  carrierName: string | null
+  templateId: string | null
+  templateName: string
+  exceptions: AccessExceptionDTO[]
+  /** итоговые права (ключи) */
+  effective: string[]
+  /** источник каждого права контура: должность или исключение */
+  sources: Record<string, 'template' | 'exception'>
+}
+
+export interface AccessJournalDTO {
+  id: string
+  at: string
+  actorName: string | null
+  message: string
+  reason: string | null
+}
+
+/** Данные раздела «Профили и доступы» */
+export interface AccessDataDTO {
+  meId: string
+  templates: AccessTemplateDTO[]
+  users: AccessUserDTO[]
+  journal: AccessJournalDTO[]
+}
+
+/** Изменение доступа одного пользователя */
+export interface AccessUserInput {
+  userId: string
+  templateId: string
+  exceptions: { key: string; effect: 'allow' | 'deny'; reason: string; expiresAt: string | null }[]
 }
 
 

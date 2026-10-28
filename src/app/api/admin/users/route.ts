@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { hashPassword, requireUser } from '@/lib/auth'
 import { plog } from '@/lib/platform-log'
-import { PERM_KEYS, invalidateUserPermCache, permLabel, type PermOverride } from '@/lib/permissions'
+import { notifyLive } from '@/lib/notify'
+import {
+  allAccess, allowedFor, defaultTemplateId, effective, invalidateAccessCache, permDenied, type Contour,
+} from '@/lib/permissions'
 import type { AdminUserDTO, SessionRole } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -10,47 +13,25 @@ export const dynamic = 'force-dynamic'
 const ROLES: SessionRole[] = ['admin', 'logist', 'carrier']
 const str = (v: unknown, max = 200): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 
-/** Персональное разрешение «Редактирование своего профиля»: null — как у роли (Task 112) */
-const PROFILE_EDIT_OWN: string[] = ['allow', 'deny']
-const overrideOf = (v: unknown): string | null =>
-  typeof v === 'string' && PROFILE_EDIT_OWN.includes(v) ? v : null
-
-/**
- * Персональные права пользователя (Task 113): { ключПрава: allow|deny }.
- * Разрешены только ключи каталога; неизвестные отбрасываются.
- * Возвращает JSON-строку для User.permOverrides (null — персональных прав нет).
- */
-function permOverridesToJson(input: unknown): string | null {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
-  const clean: Record<string, PermOverride> = {}
-  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if ((PERM_KEYS as string[]).includes(key) && (value === 'allow' || value === 'deny')) {
-      clean[key] = value
-    }
+/** Раздел «Профили и доступы» — администрация с правом admin:users */
+async function guard() {
+  const auth = await requireUser('admin')
+  if (auth instanceof NextResponse) return auth
+  if (!(await allowedFor(auth, 'admin:users'))) {
+    return NextResponse.json({ error: permDenied('admin:users') }, { status: 403 })
   }
-  return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
+  return auth
 }
 
-/** JSON-строку User.permOverrides — в объект для DTO */
-function parsePermOverrides(raw: string | null): Record<string, PermOverride> | null {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const clean: Record<string, PermOverride> = {}
-    for (const [key, value] of Object.entries(parsed)) {
-      if ((PERM_KEYS as string[]).includes(key) && (value === 'allow' || value === 'deny')) {
-        clean[key] = value
-      }
-    }
-    return Object.keys(clean).length > 0 ? clean : null
-  } catch {
-    return null
-  }
+/** Кто сейчас может управлять доступом, если убрать пользователя userId (удаление, смена роли) */
+async function holdersWithout(userId: string): Promise<number> {
+  const list = await allAccess()
+  return list.filter((x) => x.row.id !== userId && x.access?.contour === 'admin' && effective(x.access, 'admin:users').on).length
 }
 
-/** DTO учётной записи с проформой, компанией и персональными правами */
+/** DTO учётной записи с проформой, компанией и должностью */
 function toAdminUserDTO(u: {
-  id: string; login: string; name: string; role: string; carrierId: string | null; profileEditOwn: string | null; permOverrides: string | null; createdAt: Date
+  id: string; login: string; name: string; role: string; carrierId: string | null; templateId: string | null; createdAt: Date
   carrier?: { name: string } | null
   profile?: { userId: string; fullName: string; position: string; phone: string; email: string; companyName: string; inn: string; kpp: string; address: string; director: string; contactName: string; note: string; updatedAt: Date } | null
 }): AdminUserDTO {
@@ -58,8 +39,7 @@ function toAdminUserDTO(u: {
   return {
     id: u.id, login: u.login, name: u.name, role: (ROLES.includes(u.role as SessionRole) ? u.role : 'carrier') as SessionRole,
     carrierId: u.carrierId, carrierName: u.carrier?.name ?? null,
-    profileEditOwn: (u.profileEditOwn === 'allow' || u.profileEditOwn === 'deny') ? u.profileEditOwn : null,
-    permOverrides: parsePermOverrides(u.permOverrides),
+    templateId: u.templateId,
     createdAt: u.createdAt.toISOString(),
     profile: p ? {
       userId: p.userId, fullName: p.fullName, position: p.position, phone: p.phone, email: p.email,
@@ -73,7 +53,7 @@ function toAdminUserDTO(u: {
  * GET /api/admin/users — все учётные записи с проформами (только администрация).
  */
 export async function GET() {
-  const auth = await requireUser('admin')
+  const auth = await guard()
   if (auth instanceof NextResponse) return auth
 
   const users = await db.user.findMany({
@@ -88,7 +68,7 @@ export async function GET() {
  * { login, name, password, role, carrierId?, profile? }
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireUser('admin')
+  const auth = await guard()
   if (auth instanceof NextResponse) return auth
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
@@ -114,6 +94,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `Логин «${login}» уже занят` }, { status: 400 })
   }
 
+  // должность: выбранная (только своего контура) или по умолчанию для контура
+  let templateId: string | null = typeof body?.templateId === 'string' && body.templateId ? body.templateId : null
+  if (templateId) {
+    const tpl = await db.accessTemplate.findUnique({ where: { id: templateId } })
+    if (!tpl || tpl.contour !== role) return NextResponse.json({ error: 'Выберите должность того же контура, что и роль' }, { status: 400 })
+  } else {
+    templateId = await defaultTemplateId(role as Contour)
+  }
+
   const profile = (body?.profile ?? {}) as Record<string, unknown>
   const profileData = {
     fullName: str(profile.fullName), position: str(profile.position, 120), phone: str(profile.phone, 40),
@@ -124,18 +113,17 @@ export async function POST(req: NextRequest) {
 
   const user = await db.user.create({
     data: {
-      login, name, role, carrierId, passwordHash: hashPassword(password),
-      profileEditOwn: overrideOf(body?.profileEditOwn),
-      permOverrides: permOverridesToJson(body?.permOverrides),
+      login, name, role, carrierId, templateId, passwordHash: hashPassword(password),
       profile: { create: profileData },
     },
-    include: { carrier: { select: { name: true } }, profile: true },
+    include: { carrier: { select: { name: true } }, profile: true, template: { select: { name: true } } },
   })
+  invalidateAccessCache()
 
   await plog({
     type: 'USER_CREATED', source: 'api/admin/users',
     actor: { login: auth.login, name: auth.name, role: auth.role },
-    message: `Создан профиль «${name}» (логин ${login}, роль ${role})`,
+    message: `Создан профиль «${name}» (логин ${login}, роль ${role}, должность «${user.template?.name ?? '—'}»)`,
   })
 
   return NextResponse.json({ user: toAdminUserDTO(user) }, { status: 201 })
@@ -146,7 +134,7 @@ export async function POST(req: NextRequest) {
  * { id, name?, role?, carrierId?, password?, profile? }
  */
 export async function PUT(req: NextRequest) {
-  const auth = await requireUser('admin')
+  const auth = await guard()
   if (auth instanceof NextResponse) return auth
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
@@ -162,12 +150,16 @@ export async function PUT(req: NextRequest) {
   if (body?.role !== undefined) {
     const role = ROLES.includes(body.role as SessionRole) ? (body.role as SessionRole) : null
     if (!role) return NextResponse.json({ error: 'Неизвестная роль' }, { status: 400 })
-    // защита: нельзя снять последнего администратора
-    if (existing.role === 'admin' && role !== 'admin') {
-      const admins = await db.user.count({ where: { role: 'admin' } })
-      if (admins <= 1) return NextResponse.json({ error: 'Нельзя снять роль у последнего администратора' }, { status: 400 })
+    if (role !== existing.role) {
+      if (existing.id === auth.id) return NextResponse.json({ error: 'Нельзя сменить роль себе: вы потеряете доступ к этому разделу' }, { status: 400 })
+      // защита: не остаться без того, кто управляет доступом
+      if (existing.role === 'admin' && (await holdersWithout(existing.id)) === 0) {
+        return NextResponse.json({ error: 'Нельзя сменить роль: больше ни у кого нет права «Профили и доступы»' }, { status: 400 })
+      }
+      // новая роль — новый контур: должность по умолчанию контура, прежние исключения снимаются
+      patch.role = role
+      patch.templateId = await defaultTemplateId(role as Contour)
     }
-    patch.role = role
   }
 
   if (body?.carrierId !== undefined) {
@@ -193,25 +185,6 @@ export async function PUT(req: NextRequest) {
     patch.passwordHash = hashPassword(body.password)
   }
 
-  // персональное разрешение профиля: передано null — сброс к «как у роли»
-  if (body?.profileEditOwn !== undefined) patch.profileEditOwn = overrideOf(body.profileEditOwn)
-
-  // персональные права (Task 113): { ключ: allow|deny } — перекрывают матрицу роли;
-  // право profile:edit синхронизируется в legacy-поле profileEditOwn для единообразия
-  let overridesSummary = ''
-  if (body?.permOverrides !== undefined) {
-    const json = permOverridesToJson(body.permOverrides)
-    patch.permOverrides = json
-    const parsed = parsePermOverrides(json)
-    if (parsed && parsed['profile:edit']) patch.profileEditOwn = parsed['profile:edit']
-    const changed = parsed
-      ? Object.entries(parsed).map(([k, v]) => `${permLabel(k as never)} — ${v === 'allow' ? 'разрешено' : 'запрещено'}`)
-      : []
-    overridesSummary = changed.length > 0
-      ? ` — персональные права: ${changed.slice(0, 8).join('; ')}${changed.length > 8 ? '…' : ''}`
-      : ' — персональные права сброшены к роли'
-  }
-
   const profile = (body?.profile ?? null) as Record<string, unknown> | null
   const profileData = profile ? {
     fullName: str(profile.fullName), position: str(profile.position, 120), phone: str(profile.phone, 40),
@@ -220,25 +193,29 @@ export async function PUT(req: NextRequest) {
     contactName: str(profile.contactName), note: str(profile.note, 1000),
   } : null
 
-  const user = await db.user.update({
-    where: { id },
-    data: {
-      ...patch,
-      ...(profileData ? { profile: existing.profile
-        ? { update: profileData }
-        : { create: profileData } } : {}),
-    },
-    include: { carrier: { select: { name: true } }, profile: true },
+  const roleChanged = patch.role !== undefined
+  const user = await db.$transaction(async (tx) => {
+    if (roleChanged) await tx.permException.deleteMany({ where: { userId: id } })
+    return tx.user.update({
+      where: { id },
+      data: {
+        ...patch,
+        ...(profileData ? { profile: existing.profile
+          ? { update: profileData }
+          : { create: profileData } } : {}),
+      },
+      include: { carrier: { select: { name: true } }, profile: true, template: { select: { name: true } } },
+    })
   })
-  invalidateUserPermCache(id)
+  invalidateAccessCache()
+  if (roleChanged) notifyLive({ type: 'PERMS_CHANGED' })
 
   await plog({
-    type: 'USER_UPDATED', source: 'api/admin/users',
+    type: roleChanged ? 'ACCESS_CHANGED' : 'USER_UPDATED', source: 'api/admin/users',
     actor: { login: auth.login, name: auth.name, role: auth.role },
-    message: `Профиль изменён: ${user.name} (логин ${user.login})${overridesSummary}${
-      patch.profileEditOwn !== undefined && !overridesSummary
-        ? ` — редактирование своего профиля: ${patch.profileEditOwn === 'allow' ? 'разрешено лично' : patch.profileEditOwn === 'deny' ? 'запрещено лично' : 'как у роли'}`
-        : ''}${typeof body?.password === 'string' && body.password ? ' — пароль сброшен' : ''}`,
+    message: `Профиль изменён: ${user.name} (логин ${user.login})${
+      roleChanged ? ` — роль ${existing.role} → ${user.role}, должность «${user.template?.name ?? '—'}», личные исключения сняты` : ''}${
+      typeof body?.password === 'string' && body.password ? ' — пароль сброшен' : ''}`,
   })
 
   return NextResponse.json({ user: toAdminUserDTO(user) })
@@ -249,7 +226,7 @@ export async function PUT(req: NextRequest) {
  * Нельзя удалить собственную учётку и последнего администратора.
  */
 export async function DELETE(req: NextRequest) {
-  const auth = await requireUser('admin')
+  const auth = await guard()
   if (auth instanceof NextResponse) return auth
 
   const id = req.nextUrl.searchParams.get('id') ?? ''
@@ -258,9 +235,8 @@ export async function DELETE(req: NextRequest) {
 
   const existing = await db.user.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Учётная запись не найдена' }, { status: 404 })
-  if (existing.role === 'admin') {
-    const admins = await db.user.count({ where: { role: 'admin' } })
-    if (admins <= 1) return NextResponse.json({ error: 'Нельзя удалить последнего администратора' }, { status: 400 })
+  if (existing.role === 'admin' && (await holdersWithout(existing.id)) === 0) {
+    return NextResponse.json({ error: 'Нельзя удалить: больше ни у кого нет права «Профили и доступы»' }, { status: 400 })
   }
 
   // связанные записи чистятся перед удалением: уведомления, проформа,
@@ -271,8 +247,8 @@ export async function DELETE(req: NextRequest) {
   await db.ticketMessage.deleteMany({ where: { authorId: id } })
   await db.notification.deleteMany({ where: { userId: id } })
   await db.profile.deleteMany({ where: { userId: id } })
-  await db.user.delete({ where: { id } })
-  invalidateUserPermCache(id)
+  await db.user.delete({ where: { id } }) // исключения удалятся каскадом
+  invalidateAccessCache()
 
   await plog({
     type: 'USER_DELETED', source: 'api/admin/users',
