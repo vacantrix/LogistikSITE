@@ -6,7 +6,7 @@ import { REQUEST_INCLUDE, toRequestDTO } from '@/lib/serialize'
 import { finalizeExpired, money, parseRuDate, requestWhereFor } from '@/lib/requests'
 import { notifyLive } from '@/lib/notify'
 import { plog, plogError } from '@/lib/platform-log'
-import { canonicalPoint } from '@/lib/points'
+import { normalizePoint } from '@/lib/points'
 import { allowedFor, permDenied } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
@@ -75,9 +75,10 @@ export async function POST(req: NextRequest) {
   // права (Task 111): создание — draft:create; немедленная публикация ещё и request:publish
   if (!(await allowedFor(auth, 'draft:create'))) return NextResponse.json({ error: permDenied('draft:create') }, { status: 403 })
   if (!isDraft && !(await allowedFor(auth, 'request:publish'))) return NextResponse.json({ error: permDenied('request:publish') }, { status: 403 })
-  // точки — только из справочника: в заявку пишется город («Абинск → Сочи»)
-  const fromPoint = canonicalPoint(str(body.fromPoint, 300))
-  const toPoint = canonicalPoint(str(body.toPoint, 300))
+  // точки: точное совпадение со справочником — справочное значение, иначе свободный адрес как есть;
+  // поиск по ключевым словам не применяется — «ул. Портовая» в Ейске не порт Петербурга
+  const fromPoint = normalizePoint(body.fromPoint)
+  const toPoint = normalizePoint(body.toPoint)
   const cargoTypeId = str(body.cargoTypeId, 64) || null
   const truckType = str(body.truckType, 40) || 'Тент'
   const loadWindow = str(body.loadWindow, 40) || '08:00–12:00'
@@ -93,9 +94,8 @@ export async function POST(req: NextRequest) {
   if (!cargoType) return NextResponse.json({ error: 'Выберите груз из справочника грузов' }, { status: 400 })
   const cargoName = cargoType.name
 
-  if (!fromPoint || !toPoint) {
-    return NextResponse.json({ error: 'Выберите точки погрузки и выгрузки из справочника точек' }, { status: 400 })
-  }
+  if (!fromPoint) return NextResponse.json({ error: 'Укажите точку погрузки' }, { status: 400 })
+  if (!toPoint) return NextResponse.json({ error: 'Укажите точку выгрузки' }, { status: 400 })
   if (!MODES.includes(mode)) return NextResponse.json({ error: 'Вид тендера: AUCTION или CLOSED' }, { status: 400 })
   // у черновика ставку можно не указывать (0 — «не задана»), к публикации она обязательна
   const rateOptional = isDraft && (body.startRate == null || body.startRate === '' || startRate === 0)

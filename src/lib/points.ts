@@ -183,23 +183,30 @@ export const POINT_DIRECTORY: { value: string; info: PointInfo }[] = [
 
 /** Разворачивает точку маршрута из заявки в полное название и адрес */
 export function pointInfo(raw: string): PointInfo {
-  const v = (raw ?? '').trim().toLowerCase()
+  const label = (raw ?? '').trim()
+  const v = label.toLowerCase()
   const exact = POINT_DIRECTORY.find((p) => p.value.toLowerCase() === v)
   if (exact) return exact.info
-  // старые значения заявок («Завод», «Порт», «Новороссийск (порт)») — по ключевым словам
-  if (v.includes('завод') || v.includes('аэмз') || v.includes('абинск')) return FACTORY
-  // Сначала конкретные города (иначе «Новороссийск (порт)» ложно матчится
-  // как петербургский порт по слову «порт»)
-  for (const { keys, idx } of SPOT_KEYS) {
-    if (keys.some((k) => v.includes(k))) return SPOTS[idx]
+  // Свободный адрес из формы и из 1С («Ейск, ул. Портовая, 1») показывается как есть:
+  // поиск по ключевым словам — только для старых коротких значений заявок
+  // («Завод», «Порт», «Новороссийск (порт)») — строк без запятой и без цифр,
+  // иначе слова адреса («ул. Портовая», «ул. Заводская») подменяли бы точку
+  // демо-адресом («Ейск, ул. Портовая, 1» показывался как Терминал Святого Петра).
+  const legacy = !v.includes(',') && !/\d/.test(v)
+  if (legacy) {
+    if (v.includes('завод') || v.includes('аэмз') || v.includes('абинск')) return FACTORY
+    // Сначала конкретные города (иначе «Новороссийск (порт)» ложно матчится
+    // как петербургский порт по слову «порт»)
+    for (const { keys, idx } of SPOT_KEYS) {
+      if (keys.some((k) => v.includes(k))) return SPOTS[idx]
+    }
+    if (
+      v.includes('порт') || v.includes('терминал') || v.includes('свят') ||
+      v.includes('петр') || v.includes('спб') || v.includes('санкт') ||
+      v.includes('канонер')
+    ) return TERMINAL_ST_PETER
+    if (v.includes('склад')) return WAREHOUSE_SPB
   }
-  if (
-    v.includes('порт') || v.includes('терминал') || v.includes('свят') ||
-    v.includes('петр') || v.includes('спб') || v.includes('санкт') ||
-    v.includes('канонер')
-  ) return TERMINAL_ST_PETER
-  if (v.includes('склад')) return WAREHOUSE_SPB
-  const label = (raw ?? '').trim()
   return {
     short: label,
     name: label,
@@ -223,10 +230,30 @@ export function routeMapUrl(from: string, to: string): string {
 }
 
 /**
- * Значение точки для записи в заявку: город из справочника (POINT_DIRECTORY)
- * или null, если точки в справочнике нет. Старые «Завод»/«Порт» приводятся к городу.
+ * Значение точки для записи в заявку (ввод формы и 1С):
+ *  — строка точно совпала со значением справочника (без учёта регистра) — справочное значение;
+ *  — иначе — введённый текст как есть (свободный адрес, до 300 символов);
+ *  — пустая строка — null (сервер отвечает «Укажите точку»).
+ * Поиск по ключевым словам для ввода не применяется: «ул. Портовая» в Ейске —
+ * не петербургский порт, «ул. Заводская» в Москве — не АЭМЗ.
  */
-export function canonicalPoint(raw: string): string | null {
+export function normalizePoint(raw: unknown): string | null {
+  const label = typeof raw === 'string' ? raw.trim().slice(0, 300) : ''
+  if (!label) return null
+  const v = label.toLowerCase()
+  const exact = POINT_DIRECTORY.find((p) => p.value.toLowerCase() === v)
+  return exact ? exact.value : label
+}
+
+/**
+ * Приведение старых коротких значений заявок к справочнику (data-fixes, при старте):
+ * «Завод» → «Абинск», «Порт» → «Санкт-Петербург», «Новороссийск (порт)» → «Новороссийск».
+ * Только строки без запятой и без цифр — свободные адреса заявок («Ейск, ул. Портовая, 1»,
+ * адреса из 1С) не трогаются. Не совпало — null.
+ */
+export function legacyPointValue(raw: string): string | null {
+  const v = (raw ?? '').trim().toLowerCase()
+  if (!v || v.includes(',') || /\d/.test(v)) return null
   const info = pointInfo(raw)
   if (!info.known) return null
   return POINT_DIRECTORY.find((p) => p.info === info)?.value ?? null

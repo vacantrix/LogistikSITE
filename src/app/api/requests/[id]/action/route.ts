@@ -4,7 +4,7 @@ import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
 import { plog, plogError } from '@/lib/platform-log'
-import { canonicalPoint } from '@/lib/points'
+import { normalizePoint } from '@/lib/points'
 import {
   applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
@@ -465,8 +465,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           for (const key of ['fromPoint', 'toPoint'] as const) {
             const raw = body[key]
             if (typeof raw !== 'string' || !raw.trim()) continue
-            const point = canonicalPoint(raw)
-            if (!point) fail('Выберите точку из справочника точек')
+            // точное совпадение со справочником — справочное значение, иначе свободный адрес как есть
+            const point = normalizePoint(raw)
+            if (!point) continue
             patch[key] = point
           }
           if (r.status === 'DRAFT' && (body.mode === 'AUCTION' || body.mode === 'CLOSED')) patch.mode = body.mode
