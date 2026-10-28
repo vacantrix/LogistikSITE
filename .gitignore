@@ -57,6 +57,7 @@ server.log
 # данные и служебные файлы — не для публичного репозитория
 /db/*.db
 /db/*.db-journal
+/db/backups/
 /upload/
 /skills/
 .zscripts/dev.pid
