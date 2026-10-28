@@ -63,7 +63,6 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'] },
   { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'] },
   { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'] },
-  { key: 'perms', label: 'Права доступа', roles: ['admin'] },
   { key: 'admin-db', label: 'База данных', roles: ['admin'] },
   { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'] },
 ]
@@ -83,7 +82,6 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   reports: { Icon: BarChart3, short: 'Отчёты' },
   journal: { Icon: History, short: 'Журнал' },
   'admin-users': { Icon: UserCog, short: 'Профили' },
-  'perms': { Icon: ShieldCheck, short: 'Права' },
   'admin-db': { Icon: Database, short: 'База' },
   support: { Icon: MessagesSquare, short: 'Обращения' },
 }
