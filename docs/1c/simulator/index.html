@@ -3,444 +3,340 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Логистика АЭМЗ (1С:Предприятие) — демо-симулятор</title>
+<title>АЭМЗ / Учет металла (1С:Предприятие) — демо-симулятор</title>
 <style>
-  /* Внешний вид — интерфейс «Такси» 1С:Предприятия 8.3 */
+  /* Форма «Заказы грузоотправителей» конфигурации «АЭМЗ / Учет металла», интерфейс «Такси» 1С 8.3 */
   :root {
     --font: Arial, Helvetica, sans-serif;
     --text: #333333;
     --label: #4d4d4d;
     --muted: #8c8c8c;
-    --line: #d9d9d9;
-    --field: #a9a9a9;
-    --focus: #d6b100;
-    --yellow-top: #fff2a6;
-    --yellow: #fadc5a;
-    --yellow-border: #c9a227;
-    --sel: #fbeaa3;
+    --line: #dcdcdc;
+    --grid: #e3e3e3;
+    --field: #b9b9b9;
+    --focus: #e0b800;
+    --head: #fcf3c9;
+    --head-line: #e6d796;
+    --yellow-top: #ffe970;
+    --yellow: #f7d23a;
+    --yellow-border: #c9a414;
+    --green-row: #a3f0a3;
+    --peach-row: #fdeee5;
+    --current-row: #e9e9e9;
+    --sel: #fbe7a1;
+    --link: #2a5caa;
+    --magenta: #c4148f;
     --req: #e0403a;
-    --link: #1c5fb0;
-    --bg: #f2f2f2;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
-  body { margin: 0; font: 13px/1.35 var(--font); color: var(--text); background: var(--bg); }
-  button { font: 13px var(--font); }
+  body { margin: 0; font: 13px/1.3 var(--font); color: var(--text); background: #fff; }
+  button { font: 13px var(--font); color: var(--text); }
   svg { display: block; }
-
-  .app { display: flex; flex-direction: column; height: 100vh; min-height: 540px; }
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
 
   /* шапка основного окна */
-  .hdr { flex: none; height: 42px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: #fff; border-bottom: 1px solid var(--line); }
-  .logo { flex: none; width: 28px; height: 28px; border-radius: 50%; background: #ffd400; color: #d4161c; font-weight: bold; font-size: 12px; display: grid; place-items: center; }
-  .hdr-title { font-size: 15px; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hdr-title span { color: var(--muted); }
-  .hdr-tools { margin-left: auto; display: flex; align-items: center; gap: 16px; color: #8a8a8a; }
-  .hdr-user { color: var(--label); white-space: nowrap; }
+  .hdr { flex: none; display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; background: var(--head); border-bottom: 1px solid var(--head-line); }
+  .logo { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 20px; border-radius: 3px; background: #fbd000; color: #c8161d; font: bold 13px var(--font); letter-spacing: -.5px; }
+  .burger { flex: none; color: #555; }
+  .hdr-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #333; font-size: 13.5px; }
+  .hdr-title span { color: #777; }
+  .hdr-search { margin-left: auto; flex: 0 1 300px; display: flex; align-items: center; gap: 6px; height: 21px; padding: 0 6px; background: #fffbe5; border: 1px solid var(--head-line); color: #9a9a9a; font-size: 12px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .hdr-tools { display: flex; align-items: center; gap: 12px; color: #6a6a6a; }
+  .hdr-user { white-space: nowrap; color: #444; font-size: 12.5px; }
+  .win { display: flex; gap: 14px; color: #555; font-size: 14px; padding-left: 6px; }
 
-  .main { flex: 1; display: flex; min-height: 0; }
+  .form { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0 8px 8px; }
+  .form-head { display: flex; align-items: center; gap: 8px; padding: 10px 2px 4px; }
+  .arrows { display: flex; gap: 2px; }
+  .arrows span { width: 22px; height: 20px; display: grid; place-items: center; border: 1px solid #d0d0d0; border-radius: 2px; color: #9a9a9a; font-size: 10px; background: #fafafa; }
+  .star { color: #f2b705; font-size: 19px; line-height: 1; }
+  .form-title { margin: 0; font-size: 19px; font-weight: normal; color: #333; }
+  .head-tools { margin-left: auto; display: flex; gap: 12px; color: #9a9a9a; font-size: 15px; }
+  .form-cmd { display: flex; justify-content: flex-end; padding: 2px 0 6px; }
 
-  /* панель разделов */
-  .sections { flex: none; width: 196px; padding: 8px 0; background: #f7f7f7; border-right: 1px solid var(--line); overflow: auto; }
-  .sec { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 14px; border: 0; background: none; color: var(--label); text-align: left; cursor: default; }
-  .sec svg { width: 22px; height: 22px; flex: none; }
-  .sec.active { background: var(--sel); color: #222; }
-  .sec.link { cursor: pointer; }
-  .sec.link:hover { background: #ececec; }
-
-  .work { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #fff; }
-
-  /* панель открытых окон */
-  .tabs { flex: none; display: flex; gap: 2px; padding: 5px 8px 0; background: #e6e6e6; border-bottom: 1px solid #cdcdcd; overflow-x: auto; }
-  .tab { display: flex; align-items: center; gap: 6px; max-width: 360px; padding: 5px 8px 5px 10px; background: #dadada; border: 1px solid #c9c9c9; border-bottom: 0; border-radius: 3px 3px 0 0; color: var(--label); cursor: pointer; white-space: nowrap; }
-  .tab span { overflow: hidden; text-overflow: ellipsis; }
-  .tab.active { position: relative; top: 1px; background: #fff; color: #222; }
-  .tab[hidden] { display: none; }
-  .tab .x { width: 16px; height: 16px; padding: 0; border: 0; background: none; color: #888; cursor: pointer; line-height: 16px; }
-  .tab .x:hover { color: #222; }
-
-  .pane { flex: 1; min-height: 0; overflow: auto; display: none; }
-  .pane.active { display: block; }
-
-  /* заголовок и командная панель формы */
-  .form-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 6px; }
-  .arrows { display: flex; gap: 2px; color: #b0b0b0; }
-  .arrows span { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #dadada; border-radius: 2px; font-size: 11px; }
-  .star { color: #c6c6c6; font-size: 17px; }
-  .form-title { margin: 0; font-size: 20px; font-weight: normal; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .head-tools { margin-left: auto; display: flex; gap: 10px; color: #a0a0a0; font-size: 16px; }
-
-  .cmdbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 16px 10px; }
-  .cmdbar .right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-  .b { height: 25px; padding: 0 11px; color: #333; background: linear-gradient(#ffffff, #e9e9e9); border: 1px solid #b4b4b4; border-radius: 3px; cursor: pointer; white-space: nowrap; }
-  .b:hover { background: linear-gradient(#ffffff, #dedede); border-color: #959595; }
-  .b.def { background: linear-gradient(var(--yellow-top), var(--yellow)); border-color: var(--yellow-border); }
-  .b.def:hover { background: linear-gradient(#ffec8f, #f4d140); }
-  .b:disabled { opacity: .55; cursor: progress; }
-  .b.icon { width: 27px; padding: 0; }
-  .sep { width: 1px; height: 20px; background: #d2d2d2; }
-  .menu-wrap { position: relative; }
-  .menu { position: absolute; right: 0; top: 28px; z-index: 30; min-width: 230px; padding: 4px 0; background: #fff; border: 1px solid #b9b9b9; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); display: none; }
-  .menu.open { display: block; }
-  .menu button { display: block; width: 100%; padding: 6px 14px; border: 0; background: none; text-align: left; cursor: pointer; color: #333; }
-  .menu button:hover { background: var(--sel); }
-  .menu.quick { left: -1px; right: -1px; top: 25px; min-width: 0; }
-
-  /* поля формы: подпись слева с двоеточием, как в 1С */
-  .form-body { padding: 2px 16px 16px; max-width: 1000px; }
-  .frow { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
-  .lbl { flex: none; width: 150px; color: var(--label); }
-  .lbl.short { width: auto; margin-left: 10px; }
-  .fld { position: relative; flex: 1; min-width: 0; display: flex; height: 25px; background: #fff; border: 1px solid var(--field); border-radius: 2px; }
-  .fld:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px #f2db6a; }
-  .fld input, .fld select { flex: 1; min-width: 0; height: 100%; padding: 0 6px; border: 0; outline: 0; background: transparent; color: #222; font: 13px var(--font); }
+  /* поля и кнопки */
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 4px 0; }
+  .lbl { color: var(--label); white-space: nowrap; }
+  .lbl.link { color: var(--link); }
+  .fld { position: relative; display: inline-flex; align-items: stretch; height: 24px; background: #fff; border: 1px solid var(--field); border-radius: 2px; }
+  .fld:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px #f5df73; }
+  .fld input, .fld select { min-width: 0; height: 100%; padding: 0 5px; border: 0; outline: 0; background: transparent; font: 13px var(--font); color: #222; }
   .fld select { appearance: none; cursor: pointer; }
   .fld.num input { text-align: right; }
-  .fld.ro { background: #f6f6f6; }
-  .fld.ro input { color: #555; }
-  .fld.w-num { flex: none; width: 150px; }
-  .fld.w-date { flex: none; width: 150px; }
-  .fld.w-dt { flex: none; width: 190px; }
-  .fb { flex: none; width: 22px; padding: 0; border: 0; border-left: 1px solid #dedede; background: #f8f8f8; color: #666; cursor: pointer; font-size: 11px; }
-  .fb:hover { background: #ededed; }
+  .fld.hl { border-color: #e6c84a; background: #fffbe8; }
+  .fb { flex: none; width: 21px; padding: 0; border: 0; border-left: 1px solid #e1e1e1; background: #f7f7f7; color: #666; font-size: 11px; cursor: pointer; }
+  .fb:hover { background: #ececec; }
   .fb svg { margin: auto; }
-  .fld.need::after { content: ''; position: absolute; left: 4px; right: 4px; bottom: 2px; height: 1px; background: repeating-linear-gradient(90deg, var(--req) 0 3px, transparent 3px 5px); pointer-events: none; }
-  .fld.mark { border-color: var(--req); }
-  .picker { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 26px; }
-  .comment { flex: 1; min-height: 52px; padding: 4px 6px; border: 1px solid var(--field); border-radius: 2px; font: 13px var(--font); color: #222; resize: vertical; outline: 0; }
-  .comment:focus { border-color: var(--focus); box-shadow: 0 0 0 1px #f2db6a; }
-  .frow.top { align-items: flex-start; }
-  .frow.top .lbl { padding-top: 5px; }
+  .w-60 { width: 60px; } .w-80 { width: 80px; } .w-100 { width: 100px; } .w-120 { width: 120px; } .w-150 { width: 150px; } .w-180 { width: 180px; } .w-260 { width: 260px; } .w-380 { width: 380px; }
+  .fld input.w-fill { flex: 1; }
+  .magenta { color: var(--magenta) !important; }
+  .b { display: inline-flex; align-items: center; gap: 5px; height: 25px; padding: 0 10px; background: linear-gradient(#ffffff, #ebebeb); border: 1px solid #b3b3b3; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+  .b:hover { background: linear-gradient(#ffffff, #dfdfdf); border-color: #929292; }
+  .b.ico { width: 27px; padding: 0; justify-content: center; }
+  .b.def { background: linear-gradient(var(--yellow-top), var(--yellow)); border-color: var(--yellow-border); }
+  .b.def:hover { background: linear-gradient(#ffe25a, #efc61e); }
+  .b.web { background: linear-gradient(#f1f8ff, #d6e8fb); border-color: #7fa7d6; color: #163f73; font-weight: bold; }
+  .b.web:hover { background: linear-gradient(#e7f2ff, #c6def8); }
+  .b:disabled { opacity: .55; cursor: progress; }
+  .gap { flex: 1; }
+  .menu-wrap { position: relative; }
+  .menu { position: absolute; right: 0; top: 27px; z-index: 30; min-width: 270px; padding: 4px 0; background: #fff; border: 1px solid #b9b9b9; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); display: none; }
+  .menu.open { display: block; }
+  .menu button { display: block; width: 100%; padding: 6px 14px; border: 0; background: none; text-align: left; cursor: pointer; }
+  .menu button:hover { background: var(--sel); }
+  .chk { display: inline-flex; align-items: center; gap: 5px; color: var(--label); white-space: nowrap; cursor: pointer; }
 
-  .group-h { display: inline-flex; align-items: center; gap: 6px; margin: 14px 0 2px; padding: 0; border: 0; background: none; color: var(--label); font-weight: bold; cursor: pointer; }
-  .group-h .tri { font-size: 10px; color: #777; }
-  .group-b.closed { display: none; }
+  /* таблицы */
+  .table-wrap { overflow: auto; border: 1px solid #c9c9c9; background: #fff; }
+  .top-table { height: 46vh; min-height: 260px; }
+  .bottom-table { height: 30vh; min-height: 190px; }
+  table { border-collapse: separate; border-spacing: 0; min-width: 100%; }
+  th { position: sticky; top: 0; z-index: 1; padding: 5px 6px; background: #f2f2f2; border-right: 1px solid #dadada; border-bottom: 1px solid #cfcfcf; color: var(--label); font-weight: normal; text-align: left; white-space: nowrap; }
+  td { padding: 4px 6px; border-right: 1px solid var(--grid); border-bottom: 1px solid #ececec; white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  td.c { text-align: center; }
+  td.cb, th.cb { width: 28px; text-align: center; padding: 0 4px; }
+  td.cb input { margin: 0; vertical-align: middle; accent-color: #8a8a8a; }
+  tr.leaf td { background: var(--green-row); }
+  tr.peach td { background: var(--peach-row); }
+  tr.cur td { background: var(--current-row); }
+  tr.sel td { background: var(--sel) !important; }
+  .tree { display: inline-flex; align-items: center; gap: 4px; }
+  .toggle { width: 13px; height: 13px; display: inline-grid; place-items: center; border: 1px solid #9c9c9c; border-radius: 50%; font-size: 9px; line-height: 1; color: #555; background: #fff; cursor: pointer; padding: 0; }
+  .wl { font-weight: bold; }
+  .wl-draft { color: #8a5d00; }
+  .wl-pub { color: #1a5fb4; }
+  .wl-won { color: #17803a; }
+  .wl-none { color: #9a9a9a; font-weight: normal; }
+  .split { height: 8px; }
 
-  /* сообщения формы */
-  .messages { margin: 14px 16px 16px; border-top: 1px solid #d6d6d6; display: none; }
-  .messages.open { display: block; }
-  .messages-h { display: flex; align-items: center; padding: 6px 0 4px; color: var(--label); }
-  .messages-h button { margin-left: auto; border: 0; background: none; color: #888; cursor: pointer; font-size: 15px; }
-  .msg { display: flex; gap: 8px; align-items: flex-start; width: 100%; padding: 3px 0; border: 0; background: none; text-align: left; color: #333; cursor: pointer; }
-  .msg:hover span { text-decoration: underline; }
-  .msg i { flex: none; width: 16px; height: 16px; border-radius: 50%; background: #e0403a; color: #fff; font: bold 11px/16px var(--font); text-align: center; font-style: normal; }
-
-  /* список документов */
-  .list-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 4px 16px 10px; }
-  .search { display: flex; width: 240px; height: 25px; margin-left: auto; border: 1px solid var(--field); border-radius: 2px; }
-  .search input { flex: 1; min-width: 0; padding: 0 6px; border: 0; outline: 0; font: 13px var(--font); }
-  .table-wrap { margin: 0 16px 16px; border: 1px solid #d3d3d3; overflow: auto; }
-  table.list { width: 100%; border-collapse: collapse; }
-  .list th { position: sticky; top: 0; padding: 5px 7px; background: #f2f2f2; border-right: 1px solid #dcdcdc; border-bottom: 1px solid #d0d0d0; color: var(--label); font-weight: normal; text-align: left; white-space: nowrap; }
-  .list td { padding: 4px 7px; border-bottom: 1px solid #ededed; white-space: nowrap; max-width: 190px; overflow: hidden; text-overflow: ellipsis; cursor: default; }
-  .list td.n { text-align: right; }
-  .list tr.sel td { background: var(--sel); }
-  .list .empty td { padding: 18px; color: var(--muted); text-align: center; }
-  .st-draft { color: #8a6d00; }
-  .st-pub { color: #1d7a2f; }
-
-  /* окна: предупреждение, настройки, выбор, журнал */
-  .overlay { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: rgba(40, 40, 40, .28); }
+  /* окна */
+  .overlay { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 12px; background: rgba(40, 40, 40, .28); }
   .overlay.open { display: flex; }
-  .dlg { width: min(540px, 94vw); max-height: 90vh; display: flex; flex-direction: column; background: #fff; border: 1px solid #b2b2b2; border-radius: 3px; box-shadow: 0 8px 28px rgba(0, 0, 0, .28); }
-  .dlg.wide { width: min(760px, 96vw); }
-  .dlg-h { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid #e3e3e3; font-size: 15px; color: #333; }
+  .dlg { width: min(560px, 96vw); max-height: 92vh; display: flex; flex-direction: column; background: #fff; border: 1px solid #b2b2b2; border-radius: 3px; box-shadow: 0 8px 28px rgba(0, 0, 0, .28); }
+  .dlg.wide { width: min(780px, 96vw); }
+  .dlg-h { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid #e3e3e3; font-size: 15px; }
   .dlg-h button { margin-left: auto; border: 0; background: none; color: #888; font-size: 18px; cursor: pointer; line-height: 1; }
   .dlg-b { padding: 14px 16px; overflow: auto; }
   .dlg-f { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 12px 12px; }
   .warn { display: flex; gap: 12px; }
   .warn .ic { flex: none; width: 32px; height: 32px; }
   .warn-text { white-space: pre-line; }
-  .hint { margin: 6px 0 0 158px; color: var(--muted); font-size: 12px; }
-  .check { display: flex; align-items: center; gap: 6px; margin: 8px 0 0 158px; color: var(--label); }
-  .ping-result { margin: 10px 0 0 158px; min-height: 18px; }
+  .frow { display: flex; align-items: center; gap: 8px; margin: 7px 0; }
+  .frow .lbl { width: 140px; flex: none; }
+  .frow .fld { flex: 1; }
+  .hint { margin: 6px 0 0 148px; color: var(--muted); font-size: 12px; }
+  .ping-result { margin: 10px 0 0 148px; min-height: 18px; white-space: pre-line; }
   .ping-result.ok { color: #1d7a2f; }
   .ping-result.err { color: #c0322c; }
   code { padding: 0 4px; background: #f1f1f1; border-radius: 2px; font: 12px Consolas, 'Courier New', monospace; word-break: break-all; }
-  .choice { max-height: 320px; overflow: auto; border: 1px solid #d3d3d3; }
-  .choice button { display: block; width: 100%; padding: 6px 8px; border: 0; border-bottom: 1px solid #efefef; background: #fff; text-align: left; cursor: pointer; color: #222; }
-  .choice button:hover, .choice button:focus { background: var(--sel); outline: 0; }
-  .kv { display: grid; grid-template-columns: 170px 1fr; gap: 6px 10px; }
-  .kv dt { color: var(--label); }
-  .kv dd { margin: 0; }
+  .send-list { margin: 8px 0 0; padding-left: 18px; }
+  .send-list li { margin: 3px 0; }
+  .send-list small { color: var(--muted); }
   pre.log { margin: 0; max-height: 60vh; overflow: auto; padding: 10px; background: #f7f7f7; border: 1px solid #e1e1e1; font: 12px/1.45 Consolas, 'Courier New', monospace; white-space: pre-wrap; word-break: break-word; }
-
-  /* оповещения в правом нижнем углу (ПоказатьОповещениеПользователя) */
   .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px; }
-  .toast { position: relative; width: 330px; padding: 10px 30px 10px 46px; background: #fff; border: 1px solid #c4c4c4; box-shadow: 0 4px 16px rgba(0, 0, 0, .2); }
+  .toast { position: relative; width: 340px; padding: 10px 30px 10px 46px; background: #fff; border: 1px solid #c4c4c4; box-shadow: 0 4px 16px rgba(0, 0, 0, .2); }
   .toast .ic { position: absolute; left: 12px; top: 11px; width: 24px; height: 24px; }
   .toast b { display: block; margin-bottom: 3px; }
-  .toast .t { color: var(--link); }
+  .toast .t { color: var(--link); white-space: pre-line; }
   .toast .x { position: absolute; right: 8px; top: 6px; border: 0; background: none; color: #999; cursor: pointer; font-size: 15px; }
 
-  @media (max-width: 900px) {
-    .sections { display: none; }
-    .cols { grid-template-columns: 1fr; }
-  }
-  @media (max-width: 560px) {
-    .hdr-tools .deco, .cmdbar .sep { display: none; }
-    .frow { flex-wrap: wrap; gap: 3px 8px; }
-    .lbl, .lbl.short { width: 100%; margin-left: 0; }
-    .fld.w-num, .fld.w-date, .fld.w-dt { flex: 1; width: auto; }
-    .hint, .check, .ping-result { margin-left: 0; }
-    .search { width: 100%; }
-    .form-title { font-size: 17px; }
+  @media (max-width: 760px) {
+    .hdr-search, .hdr-user, .win, .hdr-tools .deco { display: none; }
+    .top-table { height: 40vh; }
+    .frow { flex-wrap: wrap; }
+    .frow .lbl { width: 100%; }
+    .hint, .ping-result { margin-left: 0; }
     .toast { width: calc(100vw - 32px); }
+    .w-380, .w-260 { width: 100%; }
   }
 </style>
 </head>
 <body>
 <div class="app">
   <header class="hdr">
-    <div class="logo" aria-hidden="true">1С</div>
-    <div class="hdr-title">Логистика АЭМЗ <span>(1С:Предприятие) · демо-симулятор</span></div>
+    <span class="logo" aria-hidden="true">1С</span>
+    <svg class="burger" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    <div class="hdr-title">АЭМЗ / Учет металла <span>(1С:Предприятие) · демо-симулятор</span></div>
+    <div class="hdr-search" aria-hidden="true">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      Поиск Ctrl+Shift+F
+    </div>
     <div class="hdr-tools">
-      <svg class="deco" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21h4"/></svg>
-      <svg class="deco" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-      <svg class="deco" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3l2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.4l-5.5 2.9 1-6.2L3 9.7l6.2-.9z"/></svg>
+      <svg class="deco" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21h4"/></svg>
+      <svg class="deco" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      <svg class="deco" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 3l2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.4l-5.5 2.9 1-6.2L3 9.7l6.2-.9z"/></svg>
       <span class="hdr-user">Логист АЭМЗ</span>
     </div>
+    <div class="win" aria-hidden="true"><span>≡</span><span>–</span><span>▢</span><span>×</span></div>
   </header>
 
-  <div class="main">
-    <nav class="sections" aria-label="Разделы">
-      <div class="sec" title="В демо доступен раздел «Логистика»"><svg viewBox="0 0 24 24" fill="none" stroke="#3f7fbf" stroke-width="1.8"><path d="M3 11l9-7 9 7v9H15v-6H9v6H3z"/></svg>Главное</div>
-      <button type="button" class="sec link active" id="secLogistics"><svg viewBox="0 0 24 24" fill="none" stroke="#d98a00" stroke-width="1.8"><path d="M2 6h11v9H2z"/><path d="M13 9h4l3 3v3h-7z"/><circle cx="6" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>Логистика</button>
-      <div class="sec" title="В демо доступен раздел «Логистика»"><svg viewBox="0 0 24 24" fill="none" stroke="#5f9a35" stroke-width="1.8"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>Склад</div>
-      <div class="sec" title="В демо доступен раздел «Логистика»"><svg viewBox="0 0 24 24" fill="none" stroke="#8a62b3" stroke-width="1.8"><path d="M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z"/></svg>Справочники</div>
-      <button type="button" class="sec link" id="secAdmin"><svg viewBox="0 0 24 24" fill="none" stroke="#777" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Администрирование</button>
-    </nav>
-
-    <div class="work">
-      <div class="tabs" role="tablist">
-        <div class="tab" id="tabList" role="tab"><span>Заявки на перевозку</span></div>
-        <div class="tab" id="tabDoc" role="tab" hidden><span id="tabDocTitle">Заявка на перевозку (создание)</span><button type="button" class="x" id="tabDocClose" aria-label="Закрыть">×</button></div>
+  <main class="form">
+    <div class="form-head">
+      <div class="arrows" aria-hidden="true"><span>◀</span><span>▶</span></div>
+      <span class="star" aria-hidden="true">★</span>
+      <h1 class="form-title">Заказы грузоотправителей</h1>
+      <div class="head-tools" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+        <span>⋮</span><span>×</span>
       </div>
-
-      <!-- список документов -->
-      <section class="pane" id="paneList">
-        <div class="form-head">
-          <div class="arrows" aria-hidden="true"><span>◀</span><span>▶</span></div>
-          <span class="star" aria-hidden="true">☆</span>
-          <h1 class="form-title">Заявки на перевозку</h1>
-        </div>
-        <div class="list-tools">
-          <button type="button" class="b def" id="listCreate">Создать</button>
-          <button type="button" class="b" id="listStatus">Статус на платформе</button>
-          <div class="search"><input id="listSearch" placeholder="Поиск (Ctrl+F)" aria-label="Поиск"></div>
-          <div class="menu-wrap">
-            <button type="button" class="b" data-menu="listMenu">Ещё ▾</button>
-            <div class="menu" id="listMenu">
-              <button type="button" data-cmd="settings">Настройка обмена с веб-платформой…</button>
-              <button type="button" data-cmd="log">Журнал обмена…</button>
-            </div>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table class="list">
-            <thead><tr><th></th><th>Дата</th><th>Номер</th><th>Адрес погрузки</th><th>Адрес выгрузки</th><th>Груз</th><th>Вес, т</th><th>№ на платформе</th><th>Статус на платформе</th></tr></thead>
-            <tbody id="listBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <!-- форма документа -->
-      <section class="pane" id="paneDoc">
-        <div class="form-head">
-          <div class="arrows" aria-hidden="true"><span>◀</span><span>▶</span></div>
-          <span class="star" aria-hidden="true">☆</span>
-          <h1 class="form-title" id="docTitle">Заявка на перевозку (создание)</h1>
-          <div class="head-tools" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>⋮</span></div>
-        </div>
-        <div class="cmdbar">
-          <button type="button" class="b def" id="cmdPostClose">Провести и закрыть</button>
-          <button type="button" class="b" id="cmdWrite">Записать</button>
-          <button type="button" class="b" id="cmdPost">Провести</button>
-          <span class="sep"></span>
-          <button type="button" class="b" id="cmdStatus">Статус на платформе</button>
-          <div class="right">
-            <div class="menu-wrap">
-              <button type="button" class="b" data-menu="docMenu">Ещё ▾</button>
-              <div class="menu" id="docMenu">
-                <button type="button" data-cmd="settings">Настройка обмена с веб-платформой…</button>
-                <button type="button" data-cmd="log">Журнал обмена…</button>
-              </div>
-            </div>
-            <button type="button" class="b icon" id="cmdHelp" aria-label="Справка">?</button>
-          </div>
-        </div>
-
-        <div class="form-body">
-          <div class="frow">
-            <label class="lbl" for="fNumber">Номер:</label>
-            <div class="fld ro w-num"><input id="fNumber" readonly></div>
-            <label class="lbl short" for="fDate">от:</label>
-            <div class="fld ro w-dt"><input id="fDate" readonly></div>
-          </div>
-
-          <div class="frow">
-            <label class="lbl" for="fFrom">Адрес погрузки:</label>
-            <div class="fld" data-req="Адрес погрузки"><input id="fFrom"></div>
-          </div>
-          <div class="frow">
-            <label class="lbl" for="fTo">Адрес выгрузки:</label>
-            <div class="fld" data-req="Адрес выгрузки"><input id="fTo"></div>
-          </div>
-          <div class="frow">
-            <label class="lbl" for="fCargo">Груз:</label>
-            <div class="fld" data-req="Груз">
-              <input id="fCargo" list="cargoList">
-              <button type="button" class="fb" id="cargoDrop" aria-label="Показать список грузов">▾</button>
-              <button type="button" class="fb" id="cargoChoose" aria-label="Выбрать из справочника">…</button>
-              <div class="menu quick" id="cargoQuick" role="listbox"></div>
-            </div>
-          </div>
-
-          <div class="cols">
-            <div class="frow">
-              <label class="lbl" for="fTonnage">Вес груза, т:</label>
-              <div class="fld num w-num" data-req="Вес груза"><input id="fTonnage" inputmode="decimal"></div>
-            </div>
-            <div class="frow">
-              <label class="lbl" for="fTruck">Тип кузова:</label>
-              <div class="fld w-num">
-                <select id="fTruck"><option>Тент</option><option>Борт</option></select>
-                <button type="button" class="fb" tabindex="-1" id="truckDrop" aria-hidden="true">▾</button>
-              </div>
-            </div>
-            <div class="frow">
-              <label class="lbl" for="fLoadDate">Дата погрузки:</label>
-              <div class="fld w-date" data-req="Дата погрузки">
-                <input id="fLoadDate" placeholder="  .  .    " inputmode="numeric">
-                <button type="button" class="fb" id="loadDateBtn" aria-label="Выбрать дату"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#777" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="1"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>
-                <input type="date" class="picker" id="loadDatePicker" tabindex="-1" aria-hidden="true">
-              </div>
-            </div>
-            <div class="frow">
-              <label class="lbl" for="fWindow">Окно погрузки:</label>
-              <div class="fld w-num"><input id="fWindow"></div>
-            </div>
-            <div class="frow">
-              <label class="lbl" for="fRate">Ставка, руб/т:</label>
-              <div class="fld num w-num"><input id="fRate" inputmode="decimal"></div>
-            </div>
-          </div>
-
-          <button type="button" class="group-h" id="platformToggle" aria-expanded="true"><span class="tri">▼</span>Веб-платформа</button>
-          <div class="group-b" id="platformGroup">
-            <div class="cols">
-              <div class="frow">
-                <label class="lbl" for="pNumber">№ на платформе:</label>
-                <div class="fld ro w-num"><input id="pNumber" readonly></div>
-              </div>
-              <div class="frow">
-                <label class="lbl" for="pStatus">Статус:</label>
-                <div class="fld ro"><input id="pStatus" readonly></div>
-              </div>
-            </div>
-            <div class="frow">
-              <label class="lbl" for="pId">Идентификатор:</label>
-              <div class="fld ro"><input id="pId" readonly></div>
-            </div>
-          </div>
-
-          <div class="frow top">
-            <label class="lbl" for="fComment">Комментарий:</label>
-            <textarea class="comment" id="fComment" rows="2"></textarea>
-          </div>
-        </div>
-
-        <div class="messages" id="messages" role="alert">
-          <div class="messages-h">Сообщения:<button type="button" id="messagesClose" aria-label="Скрыть сообщения">×</button></div>
-          <div id="messagesList"></div>
-        </div>
-      </section>
     </div>
-  </div>
+    <div class="form-cmd">
+      <div class="menu-wrap">
+        <button type="button" class="b" data-menu="formMenu">Еще ▾</button>
+        <div class="menu" id="formMenu">
+          <button type="button" data-cmd="settings">Настройка обмена с Веб-Логистик…</button>
+          <button type="button" data-cmd="log">Журнал обмена…</button>
+          <button type="button" data-cmd="reset">Сбросить демо-данные</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- отбор и параметры планирования -->
+    <div class="row">
+      <span class="lbl">Период:</span>
+      <span class="fld hl w-150"><input id="fPeriod" value="Сегодня" readonly aria-label="Период"><button type="button" class="fb demo" aria-label="Выбрать период">…</button></span>
+      <span class="lbl">Транспортная компания:</span>
+      <span class="fld w-260"><select id="fTk" aria-label="Транспортная компания" class="w-fill"><option value="">&nbsp;</option></select><button type="button" class="fb" tabindex="-1" aria-hidden="true">▾</button><button type="button" class="fb demo" aria-label="Открыть">⧉</button></span>
+      <span class="lbl">Число машин:</span>
+      <span class="fld num w-60"><input id="fMachines" value="0" readonly aria-label="Число машин"></span>
+      <span class="lbl">Число рейсов:</span>
+      <span class="fld num w-60"><input id="fTrips" value="1" inputmode="numeric" aria-label="Число рейсов"></span>
+      <span class="lbl link">Вес машины:</span>
+      <span class="lbl">Прокат:</span>
+      <span class="fld num w-100"><input id="wRolled" value="21,000" inputmode="decimal" aria-label="Вес машины, прокат"><button type="button" class="fb demo" aria-label="Калькулятор">▦</button></span>
+      <span class="lbl">Катанка:</span>
+      <span class="fld num w-100"><input id="wRod" value="24,000" inputmode="decimal" aria-label="Вес машины, катанка"><button type="button" class="fb demo" aria-label="Калькулятор">▦</button></span>
+      <span class="gap"></span>
+      <button type="button" class="b ico demo" aria-label="Настройки формы"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg></button>
+    </div>
+
+    <!-- командная панель заказов -->
+    <div class="row">
+      <button type="button" class="b ico" id="topRefresh" aria-label="Обновить"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2e9b3c" stroke-width="2.6"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+      <button type="button" class="b demo"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#2e9b3c" stroke-width="2.6"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>Авто</button>
+      <button type="button" class="b ico demo" aria-label="Сортировка по возрастанию">⇅</button>
+      <button type="button" class="b ico demo" aria-label="Сортировка по убыванию">⇵</button>
+      <button type="button" class="b ico" id="topMarkAll" aria-label="Отметить все строки номенклатуры"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d7d3d" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 12l3 3 7-7"/></svg></button>
+      <button type="button" class="b ico" id="topUnmark" aria-label="Снять отметки"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><rect x="3" y="3" width="13" height="13" rx="1"/><rect x="8" y="8" width="13" height="13" rx="1"/></svg></button>
+      <button type="button" class="b" id="fill" title="Запланировать рейсы по отмеченным строкам с учётом веса машины"><svg width="14" height="14" viewBox="0 0 24 24" fill="#2a6fd6"><path d="M12 20l-7-8h4V4h6v8h4z"/></svg>Заполнить</button>
+      <span class="lbl">Статус продукции:</span>
+      <span class="fld w-180"><select aria-label="Статус продукции" class="w-fill"><option>&nbsp;</option><option>В наличии</option><option>В производстве</option></select><button type="button" class="fb" tabindex="-1" aria-hidden="true">▾</button><button type="button" class="fb demo" aria-label="Очистить">×</button></span>
+      <button type="button" class="b demo">Ок</button>
+      <span class="fld w-180"><input placeholder="Группа" aria-label="Группа" class="w-fill"><button type="button" class="fb" tabindex="-1" aria-hidden="true">▾</button></span>
+      <button type="button" class="b ico demo" aria-label="Вверх"><svg width="13" height="13" viewBox="0 0 24 24" fill="#2a6fd6"><path d="M12 4l7 8h-4v8H9v-8H5z"/></svg></button>
+      <button type="button" class="b ico demo" aria-label="Вниз"><svg width="13" height="13" viewBox="0 0 24 24" fill="#2a6fd6"><path d="M12 20l-7-8h4V4h6v8h4z"/></svg></button>
+      <span class="gap"></span>
+      <button type="button" class="b demo">Еще ▾</button>
+    </div>
+
+    <div class="table-wrap top-table">
+      <table>
+        <thead><tr><th class="cb"></th><th>Контрагент/ Заказчик/ Спецификация/Пункт разгрузки</th><th>Номенклатура</th><th>Комментарий</th><th>Грузополучатель</th><th>Заказ ТС</th><th>На начало</th><th>На вывоз</th><th>В</th><th>Е</th><th>Остаток</th></tr></thead>
+        <tbody id="topBody"></tbody>
+      </table>
+    </div>
+
+    <div class="split"></div>
+
+    <!-- командная панель рейсов: рядом с «Путевые листы» — «в Веб-Логистик» -->
+    <div class="row">
+      <button type="button" class="b ico" id="botRefresh" aria-label="Обновить"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2e9b3c" stroke-width="2.6"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+      <button type="button" class="b ico" id="botMarkAll" aria-label="Отметить все рейсы"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3d7d3d" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 12l3 3 7-7"/></svg></button>
+      <button type="button" class="b ico" id="botUnmark" aria-label="Снять отметки"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><rect x="3" y="3" width="13" height="13" rx="1"/><rect x="8" y="8" width="13" height="13" rx="1"/></svg></button>
+      <button type="button" class="b" id="markN">Отметить N</button>
+      <button type="button" class="b def" id="waybills"><svg width="12" height="12" viewBox="0 0 24 24" fill="#1f9d2f"><path d="M6 4l14 8-14 8z"/></svg>"Путевые листы"</button>
+      <button type="button" class="b web" id="toWeb" title="Отправить отмеченные рейсы на веб-платформу АЭМЗ Логистика: найти перевозчика через торги"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a5fb4" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/></svg>в Веб-Логистик</button>
+      <button type="button" class="b demo">Добавить</button>
+      <div class="menu-wrap">
+        <button type="button" class="b" data-menu="botMenu">Еще ▾</button>
+        <div class="menu" id="botMenu">
+          <button type="button" data-cmd="status">Обновить статусы Веб-Логистик</button>
+          <button type="button" data-cmd="settings">Настройка обмена с Веб-Логистик…</button>
+          <button type="button" data-cmd="log">Журнал обмена…</button>
+        </div>
+      </div>
+      <span class="lbl">Дата путевого листа:</span>
+      <span class="fld w-100"><input id="wbDate" placeholder="  .  .    " aria-label="Дата путевого листа"><button type="button" class="fb demo" aria-label="Календарь"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#777" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="1"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button></span>
+      <span class="lbl">Машин:</span>
+      <span class="fld num w-60"><input id="sumMachines" readonly aria-label="Машин"></span>
+      <span class="lbl">Кол-во:</span>
+      <span class="fld num w-80"><input id="sumQty" readonly aria-label="Количество"></span>
+      <span class="lbl">Контактное лицо:</span>
+      <span class="fld w-180"><input class="magenta w-fill" value="8 (900) 100-20-30 Павел Владимирович; 8 (900) 100-40-50 Олег Сергеевич" readonly aria-label="Контактное лицо"></span>
+      <label class="chk"><input type="checkbox" id="onlyOpen"> Не выполненные</label>
+    </div>
+
+    <div class="table-wrap bottom-table">
+      <table>
+        <thead><tr><th class="cb"></th><th>п/п</th><th title="Путевой лист сформирован">Н</th><th>Дата погрузки</th><th>Дата выгрузки</th><th>Веб-Логистик</th><th>Транспортная компания</th><th>Номер ТС</th><th>Прицеп</th><th>Водитель</th><th>Контрагент</th><th>Заказчик</th><th>Спецификация</th><th>Пункт разгрузки</th><th>Продукция</th><th>Кол-во</th></tr></thead>
+        <tbody id="botBody"></tbody>
+      </table>
+    </div>
+  </main>
 </div>
 
-<datalist id="cargoList"></datalist>
-
-<!-- окно-предупреждение (ПоказатьПредупреждение) -->
+<!-- предупреждение (ПоказатьПредупреждение) -->
 <div class="overlay" id="warnDlg">
   <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="warnTitle">
     <div class="dlg-h"><span id="warnTitle">1С:Предприятие</span><button type="button" data-close aria-label="Закрыть">×</button></div>
-    <div class="dlg-b">
-      <div class="warn">
-        <svg class="ic" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 30 28H2z" fill="#f6c343" stroke="#c9952a"/><path d="M16 12v8" stroke="#5a3d00" stroke-width="2.6" stroke-linecap="round"/><circle cx="16" cy="24" r="1.6" fill="#5a3d00"/></svg>
-        <div class="warn-text" id="warnText"></div>
-      </div>
-    </div>
+    <div class="dlg-b"><div class="warn">
+      <svg class="ic" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 30 28H2z" fill="#f6c343" stroke="#c9952a"/><path d="M16 12v8" stroke="#5a3d00" stroke-width="2.6" stroke-linecap="round"/><circle cx="16" cy="24" r="1.6" fill="#5a3d00"/></svg>
+      <div class="warn-text" id="warnText"></div>
+    </div></div>
     <div class="dlg-f"><button type="button" class="b def" data-close>ОК</button></div>
   </div>
 </div>
 
-<!-- вопрос (ПоказатьВопрос) -->
-<div class="overlay" id="askDlg">
-  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="askTitle">
-    <div class="dlg-h"><span id="askTitle">1С:Предприятие</span></div>
+<!-- подтверждение отправки в Веб-Логистик -->
+<div class="overlay" id="sendDlg">
+  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="sendTitle">
+    <div class="dlg-h"><span id="sendTitle">Отправка в Веб-Логистик</span><button type="button" data-close aria-label="Закрыть">×</button></div>
     <div class="dlg-b">
       <div class="warn">
         <svg class="ic" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="#3b82c4"/><path d="M12.5 12.5a3.6 3.6 0 1 1 5 3.3c-1 .5-1.5 1.2-1.5 2.4v.8" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="16" cy="23.5" r="1.6" fill="#fff"/></svg>
-        <div class="warn-text" id="askText"></div>
+        <div>
+          <div id="sendText"></div>
+          <ul class="send-list" id="sendList"></ul>
+          <p style="margin:10px 0 0;color:var(--muted);font-size:12px">На платформе появятся черновики заявок; логист опубликует их на торги. Повторная отправка рейса не создаёт дубль.</p>
+        </div>
       </div>
     </div>
-    <div class="dlg-f">
-      <button type="button" class="b def" data-answer="yes">Да</button>
-      <button type="button" class="b" data-answer="no">Нет</button>
-      <button type="button" class="b" data-answer="cancel">Отмена</button>
+    <div class="dlg-f"><button type="button" class="b def" id="sendOk">Отправить</button><button type="button" class="b" data-close>Отмена</button></div>
+  </div>
+</div>
+
+<!-- отметить N -->
+<div class="overlay" id="markDlg">
+  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="markTitle">
+    <div class="dlg-h"><span id="markTitle">Отметить N</span><button type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="dlg-b">
+      <div class="frow"><label class="lbl" for="markCount">Отметить первые:</label><span class="fld num w-80" style="flex:none"><input id="markCount" value="3" inputmode="numeric"></span><span class="lbl">рейсов без транспорта</span></div>
     </div>
+    <div class="dlg-f"><button type="button" class="b def" id="markOk">ОК</button><button type="button" class="b" data-close>Отмена</button></div>
   </div>
 </div>
 
 <!-- настройка обмена -->
 <div class="overlay" id="setDlg">
   <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="setTitle">
-    <div class="dlg-h"><span id="setTitle">Настройка обмена с веб-платформой</span><button type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="dlg-h"><span id="setTitle">Настройка обмена с Веб-Логистик</span><button type="button" data-close aria-label="Закрыть">×</button></div>
     <div class="dlg-b">
-      <div class="frow">
-        <label class="lbl" for="sUrl">Адрес платформы:</label>
-        <div class="fld"><input id="sUrl" type="url" placeholder="https://logistika.example.ru" autocomplete="url"></div>
-      </div>
-      <div class="frow">
-        <label class="lbl" for="sKey">API-ключ:</label>
-        <div class="fld"><input id="sKey" type="password" placeholder="значение ONEC_API_KEY" autocomplete="off"></div>
-      </div>
-      <label class="check"><input type="checkbox" id="sRemember"> Запомнить ключ в этом браузере</label>
+      <div class="frow"><label class="lbl" for="sUrl">Адрес платформы:</label><span class="fld"><input id="sUrl" class="w-fill" type="url" placeholder="https://logistika.example.ru" autocomplete="url"></span></div>
+      <div class="frow"><label class="lbl" for="sKey">API-ключ:</label><span class="fld"><input id="sKey" class="w-fill" type="password" placeholder="значение ONEC_API_KEY" autocomplete="off"></span></div>
+      <label class="chk" style="margin-left:148px"><input type="checkbox" id="sRemember"> Запомнить ключ в этом браузере</label>
       <div class="hint">Ключ в файл страницы не записывается: страница публичная.<br>Адрес этой страницы для ONEC_CORS_ORIGINS на сервере: <code id="sOrigin"></code></div>
       <div class="ping-result" id="pingResult" role="status"></div>
     </div>
-    <div class="dlg-f">
-      <button type="button" class="b def" id="sOk">ОК</button>
-      <button type="button" class="b" id="sPing">Проверить связь</button>
-      <button type="button" class="b" data-close>Отмена</button>
-    </div>
-  </div>
-</div>
-
-<!-- выбор груза из справочника -->
-<div class="overlay" id="cargoDlg">
-  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="cargoTitle">
-    <div class="dlg-h"><span id="cargoTitle">Грузы</span><button type="button" data-close aria-label="Закрыть">×</button></div>
-    <div class="dlg-b"><div class="choice" id="cargoChoice"></div></div>
-    <div class="dlg-f"><button type="button" class="b" data-close>Закрыть</button></div>
-  </div>
-</div>
-
-<!-- статус заявки на платформе -->
-<div class="overlay" id="statusDlg">
-  <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="statusTitle">
-    <div class="dlg-h"><span id="statusTitle">Заявка на веб-платформе</span><button type="button" data-close aria-label="Закрыть">×</button></div>
-    <div class="dlg-b"><dl class="kv" id="statusKv"></dl></div>
-    <div class="dlg-f"><button type="button" class="b def" data-close>ОК</button></div>
+    <div class="dlg-f"><button type="button" class="b def" id="sOk">ОК</button><button type="button" class="b" id="sPing">Проверить связь</button><button type="button" class="b" data-close>Отмена</button></div>
   </div>
 </div>
 
 <!-- журнал обмена -->
 <div class="overlay" id="logDlg">
   <div class="dlg wide" role="dialog" aria-modal="true" aria-labelledby="logTitle">
-    <div class="dlg-h"><span id="logTitle">Журнал обмена с веб-платформой</span><button type="button" data-close aria-label="Закрыть">×</button></div>
+    <div class="dlg-h"><span id="logTitle">Журнал обмена с Веб-Логистик</span><button type="button" data-close aria-label="Закрыть">×</button></div>
     <div class="dlg-b"><pre class="log" id="logText">Обменов ещё не было.</pre></div>
     <div class="dlg-f"><button type="button" class="b" id="logClear">Очистить</button><button type="button" class="b def" data-close>Закрыть</button></div>
   </div>
@@ -450,24 +346,16 @@
 
 <script>
 // Адрес веб-платформы по умолчанию (без /api/…). Можно оставить пустым и задать в
-// «Настройке обмена» или ссылкой вида index.html?api=https://logistika.example.ru
+// «Еще → Настройка обмена» или ссылкой вида index.html?api=https://logistika.example.ru
 const API_URL = '';
 // API-ключа в файле нет намеренно: страница на GitHub Pages публичная, а с ключом
 // интеграции 1С читаются справочники с паспортными данными водителей.
 const API_PATH = '/api/integration/1c';
-
-const CARGOS = [
-  'Перевозка готовой продукции - арматура',
-  'Перевозка готовой продукции - катанка',
-  'Перевозка готовой продукции - проволока',
-  'Перевозка готовой продукции - моток',
-  'Перевозка готовой продукции - пруток',
-  'Перевозка металлолома',
-  'Автоуслуги для собственных подразделений',
-];
+// Точка погрузки — завод
+const FROM_POINT = 'Краснодарский край, г. Абинск, ул. Промышленная, д. 4';
+const LOAD_WINDOW = '08:00–17:00';
 
 const $ = (id) => document.getElementById(id);
-
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* хранилище недоступно */ } },
@@ -475,81 +363,119 @@ const store = {
 
 // ——— форматы 1С ———
 const pad = (n) => String(n).padStart(2, '0');
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const ruDate = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
-const ruDateTime = (d) => `${ruDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-const isoFromRu = (s) => { const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; };
-const ruFromIso = (s) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s); return m ? `${m[3]}.${m[2]}.${m[1]}` : ''; };
+const isoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const fmtQty = (v) => v ? v.toLocaleString('ru-RU', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '';
 const parseNum = (s) => { const v = Number(String(s).replace(/[\s ]/g, '').replace(',', '.')); return Number.isFinite(v) ? v : NaN; };
-const fmtNum = (v, digits) => Number.isFinite(v) ? v.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : '';
-function validRuDate(s) {
-  const iso = isoFromRu(s);
-  if (!iso) return null;
-  const d = new Date(`${iso}T00:00:00`);
-  return d.getDate() === Number(s.slice(0, 2)) ? d : null;
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+// префикс ключа рейса — свой у каждого браузера, чтобы демо с разных компьютеров не пересекались
+let prefix = store.get('wl-sim:prefix');
+if (!prefix) { prefix = `Д${Math.floor(100 + Math.random() * 900)}`; store.set('wl-sim:prefix', prefix); }
+
+// ——— демо-данные (вымышленные компании, водители и номера) ———
+const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
+const D = (n) => ruDate(addDays(TODAY, n));
+
+function demoOrders() {
+  return [
+    { spec: 'Спец. ТК-7457 от 15.10.2026', points: [
+      { point: 'Динская ст, ул. Промышленная, 5', lines: [
+        { nom: 'Моток 10-А240С', comment: '', consignee: 'ООО «ЮгСтройКомплект»', order: 'Заказ на ТС 000003489', toShip: 22, remain: 0 },
+        { nom: 'Пруток 2ф-МД1-20х11700-ОМ1-А500С', comment: '', consignee: 'ООО «ЮгСтройКомплект»', order: 'Заказ на ТС 000003489', toShip: 114, remain: 54 },
+        { nom: 'Пруток МД1-10х11700-А240С', comment: '', consignee: 'ООО «ЮгСтройКомплект»', order: 'Заказ на ТС 000003489', toShip: 23, remain: 23 },
+      ] },
+    ] },
+    { spec: 'Спец. ТК-7389 от 14.10.2026', points: [
+      { point: 'Краснодарский край, Динской район, ст. Новотитаровская, ул. Ленина, 2', lines: [
+        { nom: 'Пруток 2ф-МД1-25х11700-ОМ1-ОВ2-А500СЕ', comment: '', consignee: 'АО «ДонЭнергоСтрой»', order: 'Заказ на ТС 000003490', toShip: 40, remain: 40 },
+      ] },
+    ] },
+    { spec: 'Спец. ТК-7881 от 27.10.2026', points: [
+      { point: 'аул Тахтамукай, ул. Адыгейская, 17', lines: [
+        { nom: 'Пруток 2ф-10х11700-ОМ1-ОВ2-А550СК', comment: '', consignee: 'ООО «Бизнес-Путь»', order: 'Заказ на ТС 000003488', toShip: 82, remain: 82 },
+      ] },
+    ] },
+    { spec: 'Спец. ТК-7820 от 26.10.2026', points: [
+      { point: 'Краснодар, п. Плодородный, д. 12/1', lines: [
+        { nom: 'Пруток 2ф-МД1-32х11700-ОМ1-ОВ2-А500СЕ', comment: 'везём с ТК-7445 и ТК-7446', consignee: 'ООО «КраснодарМонтаж»', order: 'Заказ на ТС 000003466', start: 8, toShip: 8, remain: 8 },
+      ] },
+    ] },
+    { spec: 'Спец. ТК-7845 от 27.10.2026', points: [
+      { point: 'Геленджик г., Портовая ул. 1', lines: [
+        { nom: 'Пруток МД1-10х11700-А240С', comment: 'везём с ТК-7850', consignee: 'ООО «Велес-Строй»', order: 'Заказ на ТС 000003494', toShip: 12, remain: 12 },
+        { nom: 'Пруток 2ф-МД1-8х11700-ОМ1-ОВ2-А500СН', comment: '', consignee: 'ООО «Велес-Строй»', order: 'Заказ на ТС 000003494', toShip: 2.1, remain: 2.1 },
+      ] },
+    ] },
+    { spec: 'Спец. ТК-7885 от 27.10.2026', points: [
+      { point: 'г. Таганрог, пр-кт Большой, д. 16', lines: [
+        { nom: 'Пруток 2ф-МД1-25х11700-ОМ1-А500С', comment: 'ломовозы принимают', consignee: 'АО «ГК Азов»', order: 'Заказ на ТС 000003496', toShip: 22, remain: 22 },
+      ] },
+    ] },
+  ];
 }
 
-// ——— документы: хранятся в этом браузере, как записи информационной базы ———
-let docs = [];
-try { docs = JSON.parse(store.get('onec-sim:docs') || '[]'); } catch { docs = []; }
-const saveDocs = () => store.set('onec-sim:docs', JSON.stringify(docs.slice(0, 200)));
-
-// префикс номера случайный для браузера: у разных демонстраций номера не совпадут
-let numberPrefix = store.get('onec-sim:prefix');
-if (!numberPrefix) { numberPrefix = `Д${Math.floor(100 + Math.random() * 900)}`; store.set('onec-sim:prefix', numberPrefix); }
-let seq = Number(store.get('onec-sim:seq')) || 0;
-function nextNumber() {
-  seq += 1;
-  store.set('onec-sim:seq', String(seq));
-  return `${numberPrefix}-${String(seq).padStart(6, '0')}`;
+// рейс = одна машина; строки — продукция рейса
+function demoTrips() {
+  const own = (n, d1, d2, plate, trailer, driver, lines) => ({ n, d1: D(d1), d2: D(d2), tk: 'АЭМЗ ООО', plate, trailer, driver, lines, done: false });
+  const ext = (n, d1, d2, tk, plate, trailer, driver, lines) => ({ n, d1: D(d1), d2: D(d2), tk, plate, trailer, driver, lines, done: false });
+  const free = (n, d1, d2, lines) => ({ n, d1: D(d1), d2: D(d2), tk: '', plate: '', trailer: '', driver: '', lines, done: false });
+  return [
+    ext(1, 0, 2, 'ООО «Магистраль-Т»', 'Н 134 УК 32', 'АН 5097 32', 'Савельев Алексей Петрович', [
+      { contragent: 'АО «Метиз-Брянск»', customer: '', spec: 'Спецификация (к договору) 6М от 09.10.2026', point: '302030, г. Орёл, ул. Кромская, 5', product: 'Проволока 3,4-С-I-Б/бухты', qty: 20.5 },
+    ]),
+    own(2, 0, 1, 'Н 288 СВ 123', 'МВ 7387 23', 'Тарасов Дмитрий Сергеевич', [
+      { contragent: 'ООО «СтальМетиз»', customer: 'ООО «ПромТехОпт»', spec: 'Спецификация (к договору) ПМТК-002358 от 22.09.2026', point: 'Волгодонск г, 7-я Заводская ул., 12', product: 'Проволока 2,5-Св-08А', qty: 10 },
+      { contragent: 'ООО «СтальМетиз»', customer: 'ООО «ПромТехОпт»', spec: 'Спецификация (к договору) ПМТК-002358 от 22.09.2026', point: 'Волгодонск г, 7-я Заводская ул., 12', product: 'Проволока 3,0-Св-08А', qty: 10.4 },
+    ]),
+    own(3, 0, 2, 'М 576 ХВ 67', 'АН 2646 67', 'Мартынов Евгений Сергеевич', [
+      { contragent: 'ООО «СтальМетиз»', customer: 'ООО «СнабМеталл-М»', spec: 'Спецификация (к договору) ПМТК-002443 от 29.09.2026', point: 'Московская обл., п. Михнево, ул. Строительная, 3', product: 'Проволока 1,2-Св-08Г2С', qty: 11 },
+      { contragent: 'ООО «СтальМетиз»', customer: 'ООО «СнабМеталл-М»', spec: 'Спецификация (к договору) ПМТК-002443 от 29.09.2026', point: 'Московская обл., п. Михнево, ул. Строительная, 3', product: 'Проволока 1,6-Св-08Г2С', qty: 9.6 },
+    ]),
+    free(4, 1, 2, [
+      { contragent: 'ООО «Велес-Строй»', customer: 'ООО «Велес-Строй»', spec: 'Спец. ТК-7845 от 27.10.2026', point: 'Геленджик г., Портовая ул. 1', product: 'Пруток МД1-10х11700-А240С', qty: 12 },
+      { contragent: 'ООО «Велес-Строй»', customer: 'ООО «Велес-Строй»', spec: 'Спец. ТК-7845 от 27.10.2026', point: 'Геленджик г., Портовая ул. 1', product: 'Пруток 2ф-МД1-8х11700-ОМ1-ОВ2-А500СН', qty: 2.1 },
+    ]),
+    free(5, 1, 3, [
+      { contragent: 'АО «ДонЭнергоСтрой»', customer: 'АО «ДонЭнергоСтрой»', spec: 'Спец. ТК-7389 от 14.10.2026', point: 'Краснодарский край, Динской район, ст. Новотитаровская, ул. Ленина, 2', product: 'Пруток 2ф-МД1-25х11700-ОМ1-ОВ2-А500СЕ', qty: 21 },
+    ]),
+    free(6, 2, 3, [
+      { contragent: 'ООО «КраснодарМонтаж»', customer: 'ООО «КраснодарМонтаж»', spec: 'Спец. ТК-7820 от 26.10.2026', point: 'Краснодар, п. Плодородный, д. 12/1', product: 'Пруток 2ф-МД1-32х11700-ОМ1-ОВ2-А500СЕ', qty: 8 },
+    ]),
+  ];
 }
-// ключ документа для платформы — как КлючДокумента() в модуле 1С: номер + дата
-const docKey = (doc) => `${doc.number} от ${ruDate(new Date(doc.date))}`;
 
-let current = null;      // открытый документ
-let modified = false;
-let selectedKey = null;  // текущая строка списка
+// ——— состояние: рейсы и статусы обмена хранятся в браузере ———
+const STATE_KEY = 'wl-sim:state:' + isoDate(TODAY);
+let orders = demoOrders();
+let trips;
+let web = {}; // ключ рейса → { id, number, status, statusRu, carrier?, crew? }
+try {
+  const saved = JSON.parse(store.get(STATE_KEY) || 'null');
+  trips = saved?.trips ?? demoTrips();
+  web = saved?.web ?? {};
+} catch { trips = demoTrips(); }
+const save = () => store.set(STATE_KEY, JSON.stringify({ trips, web }));
+const marked = new Set();      // отмеченные рейсы (по номеру п/п)
+const topMarked = new Set();   // отмеченные строки заказов
+let current = null;            // текущая строка рейсов
+const collapsed = new Set();
+
+// ключ рейса для платформы (oneC_number): номер п/п и дата погрузки — как в модуле 1С
+const tripKey = (t) => `${prefix} Рейс №${t.n} от ${t.d1}`;
 
 // ——— окна ———
-function openDlg(id) {
-  $(id).classList.add('open');
-  $(id).querySelector('input:not([type=checkbox]), .choice button, .b.def')?.focus();
-}
+function openDlg(id) { $(id).classList.add('open'); $(id).querySelector('input:not([type=checkbox]), .b.def')?.focus(); }
 function closeDlg(id) { $(id).classList.remove('open'); }
-document.querySelectorAll('.overlay').forEach((o) => {
-  o.addEventListener('click', (e) => { if (e.target === o || e.target.closest('[data-close]')) closeDlg(o.id); });
-});
+document.querySelectorAll('.overlay').forEach((o) => o.addEventListener('click', (e) => { if (e.target === o || e.target.closest('[data-close]')) closeDlg(o.id); }));
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   const open = [...document.querySelectorAll('.overlay.open')].pop();
-  if (open?.id === 'askDlg') answer('cancel');
-  else if (open) closeDlg(open.id);
+  if (open) closeDlg(open.id);
   closeMenus();
 });
-
-// вопрос с ответами Да / Нет / Отмена
-let answer = () => {};
-function ask(text) {
-  $('askText').textContent = text;
-  openDlg('askDlg');
-  return new Promise((resolve) => {
-    answer = (a) => { closeDlg('askDlg'); answer = () => {}; resolve(a); };
-  });
-}
-document.querySelectorAll('[data-answer]').forEach((b) => b.addEventListener('click', () => answer(b.dataset.answer)));
-
-// изменённый документ: записать, бросить или остаться — false, если закрывать нельзя
-async function leaveModified() {
-  if (!current || !modified) return true;
-  const a = await ask('Данные были изменены. Сохранить изменения?');
-  if (a === 'cancel') return false;
-  if (a === 'yes') return writeFromForm();
-  return true;
-}
-
-function warn(text) {
-  $('warnText').textContent = text;
-  openDlg('warnDlg');
-}
+function warn(text) { $('warnText').textContent = text; openDlg('warnDlg'); }
 
 function toast(title, text, kind = 'info', ttl = 7000) {
   const t = document.createElement('div');
@@ -557,13 +483,9 @@ function toast(title, text, kind = 'info', ttl = 7000) {
   t.innerHTML = kind === 'info'
     ? '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#3b82c4"/><path d="M12 10.5v7" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="7" r="1.5" fill="#fff"/></svg>'
     : '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#9a9a9a"/><path d="M12 6v6l4 2" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
-  const b = document.createElement('b');
-  b.textContent = title;
-  const s = document.createElement('div');
-  s.className = 't';
-  s.textContent = text;
-  const x = document.createElement('button');
-  x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.setAttribute('aria-label', 'Закрыть');
+  const b = document.createElement('b'); b.textContent = title;
+  const s = document.createElement('div'); s.className = 't'; s.textContent = text;
+  const x = document.createElement('button'); x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.setAttribute('aria-label', 'Закрыть');
   x.onclick = () => t.remove();
   t.append(b, s, x);
   $('toasts').append(t);
@@ -571,386 +493,205 @@ function toast(title, text, kind = 'info', ttl = 7000) {
   return t;
 }
 
-// ——— меню «Ещё» ———
 function closeMenus() { document.querySelectorAll('.menu.open').forEach((m) => m.classList.remove('open')); }
-document.querySelectorAll('[data-menu]').forEach((btn) => {
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const m = $(btn.dataset.menu);
-    const was = m.classList.contains('open');
-    closeMenus();
-    if (!was) m.classList.add('open');
-  });
-});
+document.querySelectorAll('[data-menu]').forEach((btn) => btn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const m = $(btn.dataset.menu); const was = m.classList.contains('open');
+  closeMenus(); if (!was) m.classList.add('open');
+}));
 document.addEventListener('click', closeMenus);
 document.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('click', () => {
   closeMenus();
-  if (b.dataset.cmd === 'settings') openSettings();
-  if (b.dataset.cmd === 'log') openDlg('logDlg');
+  const cmd = b.dataset.cmd;
+  if (cmd === 'settings') openSettings();
+  if (cmd === 'log') openDlg('logDlg');
+  if (cmd === 'status') busy(refreshStatuses);
+  if (cmd === 'reset') { trips = demoTrips(); web = {}; marked.clear(); topMarked.clear(); save(); renderAll(); toast('Демо-данные', 'Рейсы и статусы обмена сброшены'); }
 }));
+document.querySelectorAll('.demo').forEach((b) => b.addEventListener('click', () => toast('Демо-симулятор', 'Эта команда в симуляторе не выполняется', 'wait', 3500)));
 
-// ——— вкладки ———
-function showPane(which) {
-  $('paneList').classList.toggle('active', which === 'list');
-  $('paneDoc').classList.toggle('active', which === 'doc');
-  $('tabList').classList.toggle('active', which === 'list');
-  $('tabDoc').classList.toggle('active', which === 'doc');
-}
-$('tabList').addEventListener('click', () => showPane('list'));
-$('tabDoc').addEventListener('click', (e) => { if (!e.target.closest('.x')) showPane('doc'); });
-$('tabDocClose').addEventListener('click', async () => { if (await leaveModified()) closeDoc(); });
-$('secLogistics').addEventListener('click', () => showPane('list'));
-$('secAdmin').addEventListener('click', () => openSettings());
-
-// ——— список ———
-function renderList() {
-  const q = $('listSearch').value.trim().toLowerCase();
-  const body = $('listBody');
-  body.replaceChildren();
-  const rows = docs.filter((d) => !q || [d.number, d.fromPoint, d.toPoint, d.cargo, d.platform?.number].join(' ').toLowerCase().includes(q));
-  if (!rows.length) {
-    const tr = document.createElement('tr');
-    tr.className = 'empty';
-    const td = document.createElement('td');
-    td.colSpan = 9;
-    td.textContent = docs.length ? 'Ничего не найдено' : 'Документов пока нет — нажмите «Создать»';
-    tr.append(td);
-    body.append(tr);
-    return;
-  }
-  for (const d of rows) {
-    const tr = document.createElement('tr');
-    if (d.number === selectedKey) tr.className = 'sel';
-    const icon = d.posted
-      ? '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 1h7l3 3v11H3z" fill="#fff" stroke="#8a8a8a"/><path d="M5.5 9l2 2 3.5-4" stroke="#2f9a3a" stroke-width="1.8" fill="none"/></svg>'
-      : '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 1h7l3 3v11H3z" fill="#fff" stroke="#8a8a8a"/><path d="M5 7h6M5 10h6" stroke="#b5b5b5"/></svg>';
-    const cells = [
-      null,
-      ruDateTime(new Date(d.date)),
-      d.number,
-      d.fromPoint,
-      d.toPoint,
-      d.cargo,
-      fmtNum(d.tonnage, 3),
-      d.platform?.number ?? '',
-      d.platform?.statusRu ?? (d.posted ? '' : 'не отправлена'),
-    ];
-    cells.forEach((v, i) => {
-      const td = document.createElement('td');
-      if (i === 0) td.innerHTML = icon;
-      else td.textContent = v;
-      if (i === 6) td.className = 'n';
-      if (i === 8 && d.platform) td.className = d.platform.status === 'DRAFT' ? 'st-draft' : 'st-pub';
-      td.title = i ? String(v) : (d.posted ? 'Проведён' : 'Записан');
-      tr.append(td);
+// ——— дерево заказов ———
+function renderTop() {
+  const body = $('topBody');
+  const rows = [];
+  orders.forEach((o, oi) => {
+    const sid = `s${oi}`;
+    const total = o.points.reduce((s, p) => s + p.lines.reduce((a, l) => a + l.toShip, 0), 0);
+    const rem = o.points.reduce((s, p) => s + p.lines.reduce((a, l) => a + l.remain, 0), 0);
+    const start = o.points.reduce((s, p) => s + p.lines.reduce((a, l) => a + (l.start || 0), 0), 0);
+    rows.push(`<tr><td class="cb"><input type="checkbox" disabled aria-label="Отметка"></td><td><span class="tree" style="padding-left:18px"><button type="button" class="toggle" data-toggle="${sid}" aria-label="Свернуть">${collapsed.has(sid) ? '+' : '−'}</button>${esc(o.spec)}</span></td><td></td><td></td><td></td><td></td><td class="n">${fmtQty(start)}</td><td class="n">${fmtQty(total)}</td><td class="c">..</td><td></td><td class="n">${fmtQty(rem)}</td></tr>`);
+    if (collapsed.has(sid)) return;
+    o.points.forEach((p, pi) => {
+      const pid = `${sid}p${pi}`;
+      if (o.points.length > 1 || p.lines.length > 1) {
+        const pt = p.lines.reduce((a, l) => a + l.toShip, 0), pr = p.lines.reduce((a, l) => a + l.remain, 0);
+        rows.push(`<tr><td class="cb"><input type="checkbox" disabled aria-label="Отметка"></td><td><span class="tree" style="padding-left:36px"><button type="button" class="toggle" data-toggle="${pid}" aria-label="Свернуть">${collapsed.has(pid) ? '+' : '−'}</button>${esc(p.point)}</span></td><td></td><td></td><td></td><td></td><td></td><td class="n">${fmtQty(pt)}</td><td class="c">..</td><td></td><td class="n">${fmtQty(pr)}</td></tr>`);
+        if (collapsed.has(pid)) return;
+      }
+      p.lines.forEach((l, li) => {
+        const id = `${oi}.${pi}.${li}`;
+        rows.push(`<tr class="leaf"><td class="cb"><input type="checkbox" data-top="${id}" ${topMarked.has(id) ? 'checked' : ''} aria-label="Отметить ${esc(l.nom)}"></td><td style="padding-left:${p.lines.length > 1 ? 58 : 40}px" title="${esc(p.point)}">${esc(p.point)}</td><td title="${esc(l.nom)}">${esc(l.nom)}</td><td>${esc(l.comment)}</td><td>${esc(l.consignee)}</td><td>${esc(l.order)} от ${D(0)}</td><td class="n">${fmtQty(l.start || 0)}</td><td class="n">${fmtQty(l.toShip)}</td><td class="c">..</td><td></td><td class="n">${fmtQty(l.remain)}</td></tr>`);
+      });
     });
-    tr.addEventListener('click', () => { selectedKey = d.number; renderList(); });
-    tr.addEventListener('dblclick', async () => { if (await leaveModified()) openDoc(d); });
-    body.append(tr);
-  }
-}
-$('listSearch').addEventListener('input', renderList);
-$('listCreate').addEventListener('click', async () => { if (await leaveModified()) openDoc(null); });
-$('listStatus').addEventListener('click', () => {
-  const d = docs.find((x) => x.number === selectedKey);
-  if (!d) { warn('Выберите заявку в списке.'); return; }
-  busy(() => requestStatus(d));
-});
-
-// ——— форма документа ———
-const REQUIRED = [['fFrom', 'Адрес погрузки'], ['fTo', 'Адрес выгрузки'], ['fCargo', 'Груз'], ['fTonnage', 'Вес груза'], ['fLoadDate', 'Дата погрузки']];
-
-function newDoc() {
-  return {
-    number: '',
-    date: new Date().toISOString(),
-    fromPoint: 'Москва, ул. Заводская, 1',
-    toPoint: 'Санкт-Петербург, пр. Ленина, 100',
-    cargo: CARGOS[0],
-    tonnage: 20.5,
-    truckType: 'Тент',
-    loadDate: ruDate(new Date(Date.now() + 2 * 86400000)),
-    loadWindow: '09:00–18:00',
-    startRate: 8400,
-    comment: 'Демо из симулятора 1С',
-    posted: false,
-    platform: null,
-  };
-}
-
-function openDoc(doc) {
-  current = doc ? { ...doc } : newDoc();
-  $('fNumber').value = current.number;
-  $('fDate').value = ruDateTime(new Date(current.date));
-  $('fFrom').value = current.fromPoint;
-  $('fTo').value = current.toPoint;
-  $('fCargo').value = current.cargo;
-  $('fTonnage').value = fmtNum(current.tonnage, 3);
-  $('fTruck').value = current.truckType;
-  $('fLoadDate').value = current.loadDate;
-  $('fWindow').value = current.loadWindow;
-  $('fRate').value = fmtNum(current.startRate, 2);
-  $('fComment').value = current.comment;
-  fillPlatform();
-  clearMessages();
-  modified = false;
-  $('tabDoc').hidden = false;
-  updateTitle();
-  markRequired();
-  showPane('doc');
-}
-
-function closeDoc() {
-  current = null;
-  modified = false;
-  $('tabDoc').hidden = true;
-  showPane('list');
-  renderList();
-}
-
-function fillPlatform() {
-  const p = current.platform;
-  $('pNumber').value = p?.number ?? '';
-  $('pStatus').value = p ? `${p.statusRu}` : '';
-  $('pId').value = p?.id ?? '';
-}
-
-function updateTitle() {
-  const name = current.number
-    ? `Заявка на перевозку ${current.number} от ${ruDateTime(new Date(current.date))}`
-    : 'Заявка на перевозку (создание)';
-  const title = `${name}${modified ? ' *' : ''}`;
-  $('docTitle').textContent = title;
-  $('tabDocTitle').textContent = title;
-}
-
-function markRequired() {
-  for (const [id] of REQUIRED) $(id).closest('.fld').classList.toggle('need', !$(id).value.trim());
-}
-
-document.querySelectorAll('#paneDoc input:not([readonly]), #paneDoc select, #paneDoc textarea').forEach((el) => {
-  el.addEventListener('input', () => { modified = true; updateTitle(); markRequired(); el.closest('.fld')?.classList.remove('mark'); });
-  el.addEventListener('change', () => { modified = true; updateTitle(); });
-});
-$('fTonnage').addEventListener('blur', (e) => { const v = parseNum(e.target.value); if (Number.isFinite(v)) e.target.value = fmtNum(v, 3); });
-$('fRate').addEventListener('blur', (e) => { const v = parseNum(e.target.value); if (Number.isFinite(v)) e.target.value = fmtNum(v, 2); });
-
-// дата погрузки: ввод ДД.ММ.ГГГГ или календарь
-$('loadDateBtn').addEventListener('click', () => {
-  const p = $('loadDatePicker');
-  p.value = isoFromRu($('fLoadDate').value) || '';
-  if (typeof p.showPicker === 'function') { try { p.showPicker(); return; } catch { /* недоступно */ } }
-  $('fLoadDate').focus();
-});
-$('loadDatePicker').addEventListener('change', (e) => {
-  $('fLoadDate').value = ruFromIso(e.target.value);
-  $('fLoadDate').dispatchEvent(new Event('input'));
-});
-$('truckDrop').addEventListener('click', () => $('fTruck').focus());
-
-// груз: список и окно выбора из справочника
-$('cargoList').replaceChildren(...CARGOS.map((c) => Object.assign(document.createElement('option'), { value: c })));
-$('cargoQuick').replaceChildren(...CARGOS.map((c) => {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.setAttribute('role', 'option');
-  b.textContent = c;
-  b.addEventListener('click', () => {
-    $('fCargo').value = c;
-    $('fCargo').dispatchEvent(new Event('input'));
-    closeMenus();
-    $('fCargo').focus();
   });
-  return b;
-}));
-$('cargoDrop').addEventListener('click', (e) => {
-  e.stopPropagation();
-  const m = $('cargoQuick');
-  const was = m.classList.contains('open');
-  closeMenus();
-  if (!was) m.classList.add('open');
+  body.innerHTML = rows.join('');
+}
+$('topBody').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-toggle]');
+  if (!t) return;
+  const id = t.dataset.toggle;
+  collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id);
+  renderTop();
 });
-$('cargoChoose').addEventListener('click', () => {
-  const list = $('cargoChoice');
-  list.replaceChildren(...CARGOS.map((c) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = c;
-    b.addEventListener('click', () => {
-      $('fCargo').value = c;
-      $('fCargo').dispatchEvent(new Event('input'));
-      closeDlg('cargoDlg');
-      $('fCargo').focus();
+$('topBody').addEventListener('change', (e) => {
+  const id = e.target.dataset.top;
+  if (!id) return;
+  e.target.checked ? topMarked.add(id) : topMarked.delete(id);
+});
+$('topMarkAll').addEventListener('click', () => {
+  orders.forEach((o, oi) => o.points.forEach((p, pi) => p.lines.forEach((l, li) => { if (l.remain > 0) topMarked.add(`${oi}.${pi}.${li}`); })));
+  renderTop();
+});
+$('topUnmark').addEventListener('click', () => { topMarked.clear(); renderTop(); });
+$('topRefresh').addEventListener('click', () => renderTop());
+
+// «Заполнить»: по отмеченным строкам планируются рейсы без транспорта — по весу машины
+$('fill').addEventListener('click', () => {
+  if (!topMarked.size) { warn('Отметьте строки номенклатуры, по которым нужно запланировать рейсы.'); return; }
+  const rolled = parseNum($('wRolled').value), rod = parseNum($('wRod').value);
+  if (!(rolled > 0) || !(rod > 0)) { warn('Укажите вес машины: прокат и катанка.'); return; }
+  let n = trips.reduce((m, t) => Math.max(m, t.n), 0), added = 0;
+  for (const id of topMarked) {
+    const [oi, pi, li] = id.split('.').map(Number);
+    const o = orders[oi], p = o.points[pi], l = p.lines[li];
+    let left = l.remain;
+    const cap = /катанк/i.test(l.nom) ? rod : rolled;
+    while (left > 0.0001) {
+      const q = Math.min(cap, left);
+      trips.push({ n: ++n, d1: D(1), d2: D(2), tk: '', plate: '', trailer: '', driver: '', done: false, lines: [
+        { contragent: l.consignee, customer: l.consignee, spec: o.spec, point: p.point, product: l.nom, qty: Math.round(q * 1000) / 1000 },
+      ] });
+      left -= q; added++;
+    }
+    l.remain = 0;
+  }
+  topMarked.clear();
+  save(); renderTop(); renderBottom();
+  toast('Заполнение', `Запланировано рейсов: ${added}. Транспорт не назначен — отметьте их и нажмите «в Веб-Логистик».`);
+});
+
+// ——— рейсы ———
+function webCell(t) {
+  const w = web[tripKey(t)];
+  if (!w) return '<span class="wl wl-none">—</span>';
+  const cls = w.status === 'DRAFT' ? 'wl-draft' : w.carrier ? 'wl-won' : 'wl-pub';
+  return `<span class="wl ${cls}">${esc(w.number)} · ${esc(w.statusRu)}</span>`;
+}
+function renderBottom() {
+  const only = $('onlyOpen').checked;
+  const rows = [];
+  let group = 0;
+  for (const t of trips) {
+    if (only && t.done) continue;
+    group++;
+    const tone = current === t.n ? 'cur' : group % 2 === 0 ? 'peach' : '';
+    t.lines.forEach((l, i) => {
+      const first = i === 0;
+      rows.push(`<tr class="${marked.has(t.n) ? 'sel' : tone}" data-trip="${t.n}">
+        <td class="cb">${first ? `<input type="checkbox" data-mark="${t.n}" ${marked.has(t.n) ? 'checked' : ''} aria-label="Отметить рейс ${t.n}">` : ''}</td>
+        <td class="n">${t.n}</td><td class="c">${t.done ? '✓' : ''}</td>
+        <td>${esc(t.d1)}</td><td>${esc(t.d2)}</td>
+        <td>${first ? webCell(t) : ''}</td>
+        <td title="${esc(t.tk)}">${esc(t.tk)}</td><td>${esc(t.plate)}</td><td>${esc(t.trailer)}</td><td title="${esc(t.driver)}">${esc(t.driver)}</td>
+        <td title="${esc(l.contragent)}">${esc(l.contragent)}</td><td title="${esc(l.customer)}">${esc(l.customer)}</td><td title="${esc(l.spec)}">${esc(l.spec)}</td><td title="${esc(l.point)}">${esc(l.point)}</td><td title="${esc(l.product)}">${esc(l.product)}</td><td class="n">${fmtQty(l.qty)}</td>
+      </tr>`);
     });
-    return b;
-  }));
-  openDlg('cargoDlg');
-});
-
-$('platformToggle').addEventListener('click', (e) => {
-  const g = $('platformGroup');
-  const closed = g.classList.toggle('closed');
-  e.currentTarget.setAttribute('aria-expanded', String(!closed));
-  e.currentTarget.querySelector('.tri').textContent = closed ? '►' : '▼';
-});
-
-function readForm() {
-  return {
-    ...current,
-    fromPoint: $('fFrom').value.trim(),
-    toPoint: $('fTo').value.trim(),
-    cargo: $('fCargo').value.trim(),
-    tonnage: parseNum($('fTonnage').value),
-    truckType: $('fTruck').value,
-    loadDate: $('fLoadDate').value.trim(),
-    loadWindow: $('fWindow').value.trim(),
-    startRate: $('fRate').value.trim() === '' ? 0 : parseNum($('fRate').value),
-    comment: $('fComment').value.trim(),
-  };
-}
-
-// ——— сообщения формы (Сообщить) ———
-function clearMessages() {
-  $('messagesList').replaceChildren();
-  $('messages').classList.remove('open');
-  document.querySelectorAll('#paneDoc .fld.mark').forEach((f) => f.classList.remove('mark'));
-}
-$('messagesClose').addEventListener('click', clearMessages);
-function showMessages(items) {
-  clearMessages();
-  for (const [id, text] of items) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'msg';
-    b.innerHTML = '<i>!</i>';
-    const s = document.createElement('span');
-    s.textContent = text;
-    b.append(s);
-    b.addEventListener('click', () => $(id).focus());
-    $('messagesList').append(b);
-    $(id).closest('.fld')?.classList.add('mark');
   }
-  $('messages').classList.add('open');
-  $(items[0][0]).focus();
+  $('botBody').innerHTML = rows.join('') || '<tr><td colspan="16" style="padding:14px;color:#8c8c8c">Рейсов нет</td></tr>';
+  $('sumMachines').value = String(trips.length);
+  $('sumQty').value = fmtQty(trips.reduce((s, t) => s + t.lines.reduce((a, l) => a + l.qty, 0), 0));
+  $('fMachines').value = String(trips.filter((t) => !t.tk).length);
 }
-
-// ПроверкаЗаполнения: тексты как у платформы 1С
-function checkFilling(doc) {
-  const errors = [];
-  for (const [id, name] of REQUIRED) if (!$(id).value.trim()) errors.push([id, `Поле "${name}" не заполнено`]);
-  if ($('fTonnage').value.trim() && !(doc.tonnage > 0 && doc.tonnage <= 200)) errors.push(['fTonnage', 'Вес груза должен быть больше 0 и не больше 200 т']);
-  if (doc.loadDate) {
-    const d = validRuDate(doc.loadDate);
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    if (!d) errors.push(['fLoadDate', 'Дата погрузки указана неверно (формат ДД.ММ.ГГГГ)']);
-    else if (d < today) errors.push(['fLoadDate', 'Дата погрузки уже прошла']);
-  }
-  if (!(doc.startRate >= 0)) errors.push(['fRate', 'Ставка указана неверно']);
-  return errors;
-}
-
-function writeDoc(doc) {
-  if (!doc.number) { doc.number = nextNumber(); doc.date = new Date().toISOString(); }
-  const i = docs.findIndex((d) => d.number === doc.number);
-  if (i >= 0) docs[i] = doc; else docs.unshift(doc);
-  saveDocs();
-  current = doc;
-  modified = false;
-  selectedKey = doc.number;
-  $('fNumber').value = doc.number;
-  $('fDate').value = ruDateTime(new Date(doc.date));
-  updateTitle();
-  renderList();
-}
-
-function writeFromForm() {
-  const doc = readForm();
-  const errors = checkFilling(doc);
-  if (errors.length) { showPane('doc'); showMessages(errors); return false; }
-  clearMessages();
-  writeDoc(doc);
-  toast('Изменение', `Заявка на перевозку ${doc.number} от ${ruDateTime(new Date(doc.date))}`);
-  return true;
-}
-$('cmdWrite').addEventListener('click', writeFromForm);
-$('cmdPost').addEventListener('click', () => busy(() => post(false)));
-$('cmdPostClose').addEventListener('click', () => busy(() => post(true)));
-$('cmdStatus').addEventListener('click', () => {
-  if (!current.number) { warn('Документ ещё не записан и не отправлялся на платформу.'); return; }
-  busy(() => requestStatus(current));
+$('botBody').addEventListener('change', (e) => {
+  const n = Number(e.target.dataset.mark);
+  if (!n) return;
+  e.target.checked ? marked.add(n) : marked.delete(n);
+  renderBottom();
 });
-$('cmdHelp').addEventListener('click', () => warn(
-  'Демо-симулятор документа 1С «Заявка на перевозку».\n\n'
-  + '«Провести» — отправить заявку на веб-платформу АЭМЗ (черновик для логиста).\n'
-  + '«Провести и закрыть» — то же и вернуться к списку.\n'
-  + '«Статус на платформе» — что с заявкой сейчас: черновик, торги, перевозчик, экипаж.\n\n'
-  + 'Повторное проведение того же документа заявку на платформе не дублирует.',
-));
+$('botBody').addEventListener('click', (e) => {
+  if (e.target.closest('input')) return;
+  const tr = e.target.closest('tr[data-trip]');
+  if (!tr) return;
+  current = Number(tr.dataset.trip);
+  renderBottom();
+});
+$('onlyOpen').addEventListener('change', renderBottom);
+$('botMarkAll').addEventListener('click', () => { trips.forEach((t) => marked.add(t.n)); renderBottom(); });
+$('botUnmark').addEventListener('click', () => { marked.clear(); renderBottom(); });
+$('botRefresh').addEventListener('click', () => renderBottom());
+$('markN').addEventListener('click', () => openDlg('markDlg'));
+$('markOk').addEventListener('click', () => {
+  const n = Math.max(0, Math.floor(parseNum($('markCount').value) || 0));
+  marked.clear();
+  trips.filter((t) => !t.tk).slice(0, n).forEach((t) => marked.add(t.n));
+  closeDlg('markDlg'); renderBottom();
+  if (!marked.size) toast('Отметить N', 'Рейсов без транспорта нет');
+});
+$('waybills').addEventListener('click', () => {
+  const sel = trips.filter((t) => marked.has(t.n));
+  if (!sel.length) { warn('Отметьте рейсы, по которым нужно сформировать путевые листы.'); return; }
+  const noTk = sel.filter((t) => !t.tk);
+  if (noTk.length) { warn(`У рейсов ${noTk.map((t) => '№' + t.n).join(', ')} не назначен транспорт — путевой лист не сформировать.\nНайдите перевозчика кнопкой «в Веб-Логистик».`); return; }
+  sel.forEach((t) => { t.done = true; });
+  save(); renderBottom();
+  toast('Путевые листы', `Сформировано путевых листов: ${sel.length} (демо)`);
+});
 
-// ——— обмен с веб-платформой ———
-// адрес — из ссылки ?api=, из прошлого раза или API_URL; ключ — только если его попросили запомнить
+// ——— обмен с Веб-Логистик ———
 const urlFromLink = new URLSearchParams(location.search).get('api');
-let sessionUrl = normalizeBase(urlFromLink || store.get('onec-sim:url') || API_URL || '');
-let sessionKey = store.get('onec-sim:key') || '';
-if (urlFromLink) store.set('onec-sim:url', sessionUrl);
-const settings = () => ({ base: sessionUrl, key: sessionKey });
-
-function normalizeBase(u) { return u.trim().replace(/\/+$/, '').replace(/\/api\/integration\/1c$/, ''); }
+const normalizeBase = (u) => (u || '').trim().replace(/\/+$/, '').replace(/\/api\/integration\/1c$/, '');
+let sessionUrl = normalizeBase(urlFromLink || store.get('wl-sim:url') || API_URL);
+let sessionKey = store.get('wl-sim:key') || '';
+if (urlFromLink) store.set('wl-sim:url', sessionUrl);
 
 function settingsError(base, key) {
   if (!/^https?:\/\/[^/]+/.test(base)) return 'Укажите адрес платформы, начиная с https://';
-  if (location.protocol === 'https:' && base.startsWith('http://')) return 'Страница открыта по https, а платформа указана по http — браузер заблокирует такой запрос. Укажите https-адрес платформы.';
+  if (location.protocol === 'https:' && base.startsWith('http://')) return 'Страница открыта по https, а платформа указана по http — браузер заблокирует запрос. Укажите https-адрес платформы.';
   if (key.length < 24) return 'Введите API-ключ — значение ONEC_API_KEY с сервера платформы (не короче 24 символов).';
   return null;
 }
-
 function openSettings(message) {
-  const s = settings();
-  $('sUrl').value = s.base;
-  $('sKey').value = s.key;
-  $('sRemember').checked = !!store.get('onec-sim:key');
+  $('sUrl').value = sessionUrl; $('sKey').value = sessionKey;
+  $('sRemember').checked = !!store.get('wl-sim:key');
   $('sOrigin').textContent = location.origin;
-  const r = $('pingResult');
-  r.className = 'ping-result' + (message ? ' err' : '');
-  r.textContent = message || '';
+  const r = $('pingResult'); r.className = 'ping-result' + (message ? ' err' : ''); r.textContent = message || '';
   openDlg('setDlg');
 }
 function applySettings() {
-  const base = normalizeBase($('sUrl').value);
-  const key = $('sKey').value.trim();
+  const base = normalizeBase($('sUrl').value), key = $('sKey').value.trim();
   const err = settingsError(base, key);
   if (err) { const r = $('pingResult'); r.className = 'ping-result err'; r.textContent = err; return null; }
-  sessionUrl = base;
-  sessionKey = key;
-  store.set('onec-sim:url', base);
-  store.set('onec-sim:key', $('sRemember').checked ? key : null);
+  sessionUrl = base; sessionKey = key;
+  store.set('wl-sim:url', base); store.set('wl-sim:key', $('sRemember').checked ? key : null);
   return { base, key };
 }
 $('sOk').addEventListener('click', () => { if (applySettings()) closeDlg('setDlg'); });
 $('sPing').addEventListener('click', async () => {
-  const conn = applySettings();
-  if (!conn) return;
-  const r = $('pingResult');
-  r.className = 'ping-result';
-  r.textContent = 'Проверка связи…';
+  const conn = applySettings(); if (!conn) return;
+  const r = $('pingResult'); r.className = 'ping-result'; r.textContent = 'Проверка связи…';
   const res = await call('GET', '/ping', null, conn);
   if (!res) { r.className = 'ping-result err'; r.textContent = networkHint(); return; }
   if (res.ok && res.data?.ok) { r.className = 'ping-result ok'; r.textContent = `Связь есть, ключ принят: ${res.data.service}, версия API ${res.data.version}`; }
   else { r.className = 'ping-result err'; r.textContent = errorText(res); }
 });
-
 function connection() {
-  const s = settings();
-  const err = settingsError(s.base, s.key);
+  const err = settingsError(sessionUrl, sessionKey);
   if (err) { openSettings(err); return null; }
-  return s;
+  return { base: sessionUrl, key: sessionKey };
 }
 
 const exchangeLog = [];
-function log(entry) {
-  exchangeLog.unshift(entry);
-  $('logText').textContent = exchangeLog.join('\n\n');
-}
+function log(entry) { exchangeLog.unshift(entry); $('logText').textContent = exchangeLog.join('\n\n'); }
 $('logClear').addEventListener('click', () => { exchangeLog.length = 0; $('logText').textContent = 'Обменов ещё не было.'; });
 
 async function call(method, path, body, conn) {
@@ -962,119 +703,127 @@ async function call(method, path, body, conn) {
     const text = await res.text();
     let data = null;
     try { data = JSON.parse(text); } catch { /* не JSON */ }
-    log(`[${stamp}] ${method} ${API_PATH}${path} → HTTP ${res.status}\n`
-      + (body ? `Отправлено: ${JSON.stringify(body, null, 2)}\n` : '')
-      + `Ответ: ${data ? JSON.stringify(data, null, 2) : text.slice(0, 1000)}`);
+    log(`[${stamp}] ${method} ${API_PATH}${path} → HTTP ${res.status}\n` + (body ? `Отправлено: ${JSON.stringify(body, null, 2)}\n` : '') + `Ответ: ${data ? JSON.stringify(data, null, 2) : text.slice(0, 1000)}`);
     return { status: res.status, ok: res.ok, data, text };
   } catch (e) {
     log(`[${stamp}] ${method} ${API_PATH}${path} → нет ответа (${e.message})`);
     return null;
   }
 }
-
-function networkHint() {
-  return 'Браузер не получил ответ от платформы. Проверьте:\n'
-    + '• адрес платформы и что сервер запущен;\n'
-    + `• в ONEC_CORS_ORIGINS на сервере есть адрес этой страницы: ${location.origin} (после правки .env — перезапуск);\n`
-    + '• страница по https обращается к платформе только по https.';
-}
+const networkHint = () => 'Браузер не получил ответ от платформы. Проверьте:\n• адрес платформы и что сервер запущен;\n'
+  + `• в ONEC_CORS_ORIGINS на сервере есть адрес этой страницы: ${location.origin} (после правки .env — перезапуск);\n• страница по https обращается к платформе только по https.`;
 function errorText(r) {
   const text = r.data?.error || (r.text || '').slice(0, 300) || 'неизвестная ошибка';
   if (r.status === 401) return `Ошибка 401: ${text}\nКлюч не совпадает с ONEC_API_KEY на сервере.`;
   return `Ошибка ${r.status}: ${text}`;
 }
-
 async function busy(fn) {
   const buttons = document.querySelectorAll('.b');
   buttons.forEach((b) => { b.disabled = true; });
-  const t = toast('Обмен с веб-платформой', 'Выполняется…', 'wait', 0);
+  const t = toast('Обмен с Веб-Логистик', 'Выполняется…', 'wait', 0);
   try { await fn(); } finally { t.remove(); buttons.forEach((b) => { b.disabled = false; }); }
 }
 
-async function post(close) {
-  const doc = readForm();
-  const errors = checkFilling(doc);
-  if (errors.length) { showMessages(errors); return; }
-  clearMessages();
-  const conn = connection();
-  if (!conn) return;
-  const wasModified = modified;
-  writeDoc(doc); // номер присваивается при записи — он ключ от повторной отправки
+// груз платформы по номенклатуре: справочник грузов «Перевозка готовой продукции - …»
+function cargoOf(product) {
+  const p = product.toLowerCase();
+  for (const [word, name] of [['пруток', 'пруток'], ['проволок', 'проволока'], ['моток', 'моток'], ['катанк', 'катанка'], ['арматур', 'арматура']]) {
+    if (p.includes(word)) return `Перевозка готовой продукции - ${name}`;
+  }
+  return 'Перевозка готовой продукции - пруток';
+}
+const qtyOf = (t) => Math.round(t.lines.reduce((s, l) => s + l.qty, 0) * 1000) / 1000;
+const ruToIso = (s) => { const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(s); return m ? `${m[3]}-${m[2]}-${m[1]}` : ''; };
 
-  const r = await call('POST', '/requests', {
-    oneC_number: docKey(doc),
-    fromPoint: doc.fromPoint,
-    toPoint: doc.toPoint,
-    cargo: doc.cargo,
-    tonnage: doc.tonnage,
-    truckType: doc.truckType,
-    loadDate: isoFromRu(doc.loadDate), // ГГГГ-ММ-ДД, как Формат(..., "ДФ=yyyy-MM-dd")
-    loadWindow: doc.loadWindow,
-    startRate: doc.startRate, // руб. за тонну
-    comment: doc.comment,
-  }, conn);
-  if (!r) { warn(`Не удалось отправить заявку на веб-платформу.\n\n${networkHint()}`); return; }
-  if ((r.status === 201 || r.status === 200) && r.data?.data) {
-    const d = r.data.data;
-    doc.posted = true;
-    doc.platform = { id: d.id, number: d.number, status: d.status, statusRu: d.statusRu };
-    writeDoc(doc);
-    fillPlatform();
-    if (d.duplicate) {
-      toast('Заявка уже на веб-платформе', `№ ${d.number} · ${d.statusRu}. Повторно не создана`
-        + (wasModified ? '; изменения вносит логист на платформе.' : '.'));
+function payloadOf(t) {
+  const first = t.lines[0];
+  const points = [...new Set(t.lines.map((l) => l.point))];
+  return {
+    oneC_number: tripKey(t),
+    fromPoint: FROM_POINT,
+    toPoint: first.point,
+    cargo: cargoOf(first.product),
+    tonnage: qtyOf(t),
+    loadDate: ruToIso(t.d1),
+    loadWindow: LOAD_WINDOW,
+    startRate: 0, // ставку за тонну задаст логист при публикации
+    comment: [
+      t.lines.map((l) => `${l.product} — ${fmtQty(l.qty)} т`).join('; '),
+      `грузополучатель ${first.customer || first.contragent}`,
+      first.spec,
+      `выгрузка ${t.d2}`,
+      points.length > 1 ? `ещё пункты: ${points.slice(1).join('; ')}` : '',
+    ].filter(Boolean).join('. '),
+  };
+}
+
+$('toWeb').addEventListener('click', () => {
+  const sel = trips.filter((t) => marked.has(t.n));
+  if (!sel.length) { warn('Отметьте рейсы, которые нужно отправить в Веб-Логистик (флажок слева или «Отметить N»).'); return; }
+  $('sendText').textContent = `Будет отправлено рейсов: ${sel.length}.`;
+  $('sendList').innerHTML = sel.map((t) => {
+    const w = web[tripKey(t)];
+    return `<li><b>№${t.n}</b> · ${esc(t.d1)} · ${esc(t.lines[0].point)} · ${fmtQty(qtyOf(t))} т<br><small>${esc(t.lines.map((l) => l.product).join(', '))}${t.tk ? ` · транспорт уже указан: ${esc(t.tk)}` : ''}${w ? ` · уже на платформе: ${esc(w.number)}` : ''}</small></li>`;
+  }).join('');
+  openDlg('sendDlg');
+});
+$('sendOk').addEventListener('click', () => { closeDlg('sendDlg'); busy(sendMarked); });
+
+async function sendMarked() {
+  const conn = connection(); if (!conn) return;
+  const sel = trips.filter((t) => marked.has(t.n));
+  const created = [], dup = [], failed = [];
+  for (const t of sel) {
+    const r = await call('POST', '/requests', payloadOf(t), conn);
+    if (!r) { warn(`Не удалось отправить рейсы.\n\n${networkHint()}`); break; }
+    if ((r.status === 201 || r.status === 200) && r.data?.data) {
+      const d = r.data.data;
+      web[tripKey(t)] = { ...(web[tripKey(t)] || {}), id: d.id, number: d.number, status: d.status, statusRu: d.statusRu };
+      (d.duplicate ? dup : created).push(`№${t.n} → ${d.number}`);
     } else {
-      toast('Заявка отправлена на веб-платформу', `№ ${d.number} · ${d.statusRu}. Логист опубликует её на площадке.`
-        + (d.cargoCreated ? ` Груз «${d.cargo}» добавлен в справочник платформы.` : ''));
+      failed.push(`Рейс №${t.n}: ${errorText(r)}`);
     }
-    if (close) closeDoc();
-  } else {
-    warn(`Веб-платформа не приняла заявку.\n\n${errorText(r)}`);
   }
+  save(); renderBottom();
+  if (created.length || dup.length) {
+    toast('Веб-Логистик', [
+      created.length ? `Создано черновиков: ${created.length} (${created.join(', ')})` : '',
+      dup.length ? `Уже были на платформе: ${dup.join(', ')}` : '',
+      'Логист опубликует заявки на торги.',
+    ].filter(Boolean).join('\n'));
+  }
+  if (failed.length) warn(`Часть рейсов не отправлена:\n\n${failed.join('\n')}`);
 }
 
-async function requestStatus(doc) {
-  const conn = connection();
-  if (!conn) return;
-  const r = await call('GET', `/requests?onecRef=${encodeURIComponent(docKey(doc))}`, null, conn);
-  if (!r) { warn(networkHint()); return; }
-  if (!r.ok || !Array.isArray(r.data?.data)) { warn(errorText(r)); return; }
-  const row = r.data.data[0];
-  if (!row) { warn(`На платформе нет заявки по документу ${doc.number}.\nПроведите документ — он будет отправлен.`); return; }
-
-  doc.platform = { id: row.id, number: row.number, status: row.status, statusRu: row.statusRu };
-  const i = docs.findIndex((d) => d.number === doc.number);
-  if (i >= 0) { docs[i] = { ...docs[i], platform: doc.platform }; saveDocs(); }
-  if (current && current.number === doc.number) { current.platform = doc.platform; fillPlatform(); }
-  renderList();
-
-  const rows = [
-    ['Номер на платформе', row.number],
-    ['Статус', row.statusRu],
-    ['Маршрут', `${row.route.from} → ${row.route.to}`],
-    ['Груз', `${row.cargo}, ${fmtNum(row.tonnage, 3)} т, ${row.truckType}`],
-    ['Погрузка', `${row.loadDate}, ${row.loadWindow}`],
-    ['Стартовая ставка', row.rates.start ? `${fmtNum(row.rates.start, 2)} руб/т` : 'задаст логист'],
-  ];
-  if (row.rates.best != null) rows.push(['Лучшая ставка', `${fmtNum(row.rates.best, 2)} руб/т`]);
-  rows.push(['Перевозчик', row.winner ? `${row.winner.name}, ИНН ${row.winner.inn}` : '—']);
-  if (row.crew) rows.push(['Экипаж', `${row.crew.driver.fullName}${row.crew.truck ? `, ${row.crew.truck.brand} ${row.crew.truck.plate}` : ''}`]);
-  rows.push(['ЭТрН', row.etrn.statusRu]);
-  const kv = $('statusKv');
-  kv.replaceChildren();
-  for (const [k, v] of rows) {
-    const dt = document.createElement('dt'); dt.textContent = `${k}:`;
-    const dd = document.createElement('dd'); dd.textContent = v;
-    kv.append(dt, dd);
+// статусы: если платформа выбрала перевозчика и экипаж — переносим их в рейс
+async function refreshStatuses() {
+  const conn = connection(); if (!conn) return;
+  const sent = trips.filter((t) => web[tripKey(t)]);
+  if (!sent.length) { warn('В Веб-Логистик ещё не отправлено ни одного рейса.'); return; }
+  let changed = 0;
+  for (const t of sent) {
+    const r = await call('GET', `/requests?onecRef=${encodeURIComponent(tripKey(t))}`, null, conn);
+    if (!r) { warn(networkHint()); return; }
+    if (!r.ok || !Array.isArray(r.data?.data)) { warn(errorText(r)); return; }
+    const row = r.data.data[0];
+    if (!row) continue;
+    const prev = web[tripKey(t)] || {};
+    const before = `${prev.status}|${prev.carrier || ''}`;
+    web[tripKey(t)] = { id: row.id, number: row.number, status: row.status, statusRu: row.statusRu, carrier: row.winner?.name || '' };
+    if (row.winner && !t.tk) t.tk = row.winner.name;
+    if (row.crew) {
+      t.driver = row.crew.driver?.fullName || t.driver;
+      if (row.crew.truck) t.plate = row.crew.truck.plate || t.plate;
+      if (row.crew.trailer) t.trailer = row.crew.trailer.plate || t.trailer;
+    }
+    if (`${row.status}|${row.winner?.name || ''}` !== before) changed++;
   }
-  $('statusTitle').textContent = `Заявка ${doc.number} на веб-платформе`;
-  openDlg('statusDlg');
+  save(); renderBottom();
+  toast('Веб-Логистик', changed ? `Обновлено рейсов: ${changed}. Перевозчик и экипаж с платформы перенесены в рейсы.` : 'Изменений на платформе нет.');
 }
 
-// ——— старт: пустая база — сразу новая заявка, как в демо-сценарии ———
-renderList();
-if (docs.length) { selectedKey = docs[0].number; renderList(); showPane('list'); }
-else { showPane('list'); openDoc(null); }
+function renderAll() { renderTop(); renderBottom(); }
+renderAll();
 </script>
 </body>
 </html>
