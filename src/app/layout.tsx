@@ -17,7 +17,7 @@ export const metadata: Metadata = {
   title: "АЭМЗ Логистика",
   description: "Закрытая площадка для агентов-перевозчиков: торги по заявкам, документы, проверка нейросетью, единый реестр рейсов в 1С:ERP.",
   keywords: ["логистика", "АЭМЗ", "перевозки", "торги", "1С:ERP", "платформа"],
-  authors: [{ name: "Z.ai Team" }],
+  authors: [{ name: "ООО «АЭМЗ»" }],
   // знак LogistikSITE: SVG для современных браузеров, ICO/PNG — для старых и закладок
   icons: {
     icon: [
@@ -26,17 +26,18 @@ export const metadata: Metadata = {
     ],
     apple: "/apple-touch-icon.png",
   },
+  // превью ссылки в мессенджерах и почте
   openGraph: {
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
-    url: "https://chat.z.ai",
-    siteName: "Z.ai",
+    title: "АЭМЗ Логистика",
+    description: "Закрытая площадка АЭМЗ для перевозчиков: торги по заявкам, документы и реестр рейсов.",
+    siteName: "АЭМЗ Логистика",
+    locale: "ru_RU",
     type: "website",
   },
   twitter: {
-    card: "summary_large_image",
-    title: "Z.ai Code Scaffold",
-    description: "AI-powered development with modern React stack",
+    card: "summary",
+    title: "АЭМЗ Логистика",
+    description: "Закрытая площадка АЭМЗ для перевозчиков: торги по заявкам, документы и реестр рейсов.",
   },
 };
 

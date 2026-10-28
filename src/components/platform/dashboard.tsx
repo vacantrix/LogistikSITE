@@ -23,7 +23,7 @@ import {
   type TabProps,
 } from '@/components/platform/common'
 import { api } from '@/lib/api'
-import { REQUEST_STATUS_META, fmtDateTime, rate } from '@/lib/status'
+import { REQUEST_STATUS_META, fmtDateTime, money } from '@/lib/status'
 import type { EventFeedItem, ReportSummary, RequestDTO, RequestStatus } from '@/lib/types'
 
 const PIPELINE: RequestStatus[] = ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED']
@@ -86,9 +86,9 @@ export default function DashboardTab({ onNavigate }: TabProps) {
             <KpiCard
               icon={<Banknote className="h-5 w-5" aria-hidden />}
               label="Экономия к стартовым ставкам"
-              value={rate(kpi.savingsMonth)}
+              value={money(kpi.savingsMonth)}
               tone="green"
-              hint="Разница стартовой и итоговой ставки"
+              hint="Подтверждённые и закрытые рейсы: (стартовая − итоговая ставка) × тоннаж"
             />
             <KpiCard
               icon={<ScanSearch className="h-5 w-5" aria-hidden />}

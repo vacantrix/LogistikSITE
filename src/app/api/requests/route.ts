@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { isStaff, requireUser, viewerOf } from '@/lib/auth'
 import { REQUEST_INCLUDE, toRequestDTO } from '@/lib/serialize'
-import { finalizeExpired, money, parseRuDate, requestWhereFor } from '@/lib/requests'
+import { finalizeExpired, money, parseRuDate, requestWhereFor, TRUCK_TYPES } from '@/lib/requests'
 import { notifyLive } from '@/lib/notify'
 import { plog, plogError } from '@/lib/platform-log'
 import { normalizePoint } from '@/lib/points'
@@ -97,6 +97,7 @@ export async function POST(req: NextRequest) {
   if (!fromPoint) return NextResponse.json({ error: 'Укажите точку погрузки' }, { status: 400 })
   if (!toPoint) return NextResponse.json({ error: 'Укажите точку выгрузки' }, { status: 400 })
   if (!MODES.includes(mode)) return NextResponse.json({ error: 'Вид тендера: AUCTION или CLOSED' }, { status: 400 })
+  if (!TRUCK_TYPES.includes(truckType)) return NextResponse.json({ error: `Тип ТС — ${TRUCK_TYPES.join(' или ')}` }, { status: 400 })
   // у черновика ставку можно не указывать (0 — «не задана»), к публикации она обязательна
   const rateOptional = isDraft && (body.startRate == null || body.startRate === '' || startRate === 0)
   if (!rateOptional && (!Number.isFinite(startRate) || startRate <= 0 || startRate > 10_000_000)) {
@@ -115,6 +116,8 @@ export async function POST(req: NextRequest) {
     if (d < today) return NextResponse.json({ error: 'Дата погрузки уже прошла' }, { status: 400 })
     loadDate = loadDateRaw
   }
+  // на площадку — только с датой погрузки: перевозчик ставит под конкретный день
+  if (!isDraft && loadDate === '—') return NextResponse.json({ error: 'Укажите дату погрузки — без неё заявку не опубликовать' }, { status: 400 })
 
   // срок приёма ставок обязателен: по нему автоматически определяется победитель.
   // Принимаем deadlineHours (часы) или deadline (ISO) — интерфейс отправлял второе, а сервер читал только первое

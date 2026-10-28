@@ -162,7 +162,7 @@ async function main() {
     carrierV: 'Литвинов Артём Владимирович',
     carrierG: 'Ткачёв Николай Андреевич',
   }
-  const AEMZ = 'АО «АЭМЗ»'
+  const AEMZ = 'ООО «АЭМЗ»'
   const hashPassword = (password: string): string => {
     const salt = randomBytes(16).toString('hex')
     return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
@@ -259,7 +259,7 @@ async function main() {
     data: {
       number: 'Z-1042', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 8400, bestRate: 7900,
-      status: 'PUBLISHED', loadDate: '20.10.2026', loadWindow: '08:00–12:00', createdBy: FIO.logist1,
+      status: 'PUBLISHED', loadDate: dateInDays(2), loadWindow: '08:00–12:00', createdBy: FIO.logist1,
       deadline: inHours(2.25),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 8 400 ₽/т, торги до срока', createdAt: hoursAgo(26) } },
     },
@@ -281,7 +281,7 @@ async function main() {
     data: {
       number: 'Z-1043', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - пруток', cargoTypeId: cargoBar.id,
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 6800, bestRate: null,
-      status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00', createdBy: FIO.logist2,
+      status: 'PUBLISHED', loadDate: dateInDays(3), loadWindow: '09:00–13:00', createdBy: FIO.logist2,
       deadline: inHours(26),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 6 800 ₽/т', createdAt: hoursAgo(20) } },
     },
@@ -291,7 +291,7 @@ async function main() {
     data: {
       number: 'Z-1044', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 11500, bestRate: null,
-      status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '08:00–11:00', createdBy: FIO.logist1,
+      status: 'PUBLISHED', loadDate: dateInDays(4), loadWindow: '08:00–11:00', createdBy: FIO.logist1,
       deadline: inHours(28),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: закрытые ставки, участники не видят цены друг друга', createdAt: hoursAgo(14) } },
     },
@@ -301,7 +301,7 @@ async function main() {
     data: {
       number: 'Z-1045', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 9200, bestRate: null,
-      status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '13:00–17:00', createdBy: FIO.logist2,
+      status: 'PUBLISHED', loadDate: dateInDays(4), loadWindow: '13:00–17:00', createdBy: FIO.logist2,
       deadline: inHours(5.5),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 9 200 ₽/т', createdAt: hoursAgo(6) } },
     },
@@ -311,7 +311,7 @@ async function main() {
     data: {
       number: 'Z-1046', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 3200, bestRate: null,
-      status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00', createdBy: FIO.logist1,
+      status: 'PUBLISHED', loadDate: dateInDays(5), loadWindow: '10:00–14:00', createdBy: FIO.logist1,
       deadline: inHours(20),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 3 200 ₽/т', createdAt: hoursAgo(3) } },
     },
@@ -322,7 +322,7 @@ async function main() {
     data: {
       number: 'Z-1047', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - моток', cargoTypeId: cargoCoil.id,
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 8800, bestRate: 8200,
-      status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00', createdBy: FIO.logist1,
+      status: 'AWARDED', loadDate: dateInDays(2), loadWindow: '08:00–12:00', createdBy: FIO.logist1,
       winnerId: carrierB.id,
       createdAt: hoursAgo(30), updatedAt: hoursAgo(8),
       bids: { create: [{ carrierId: carrierB.id, amount: 8200, isWinner: true, createdAt: hoursAgo(12) }] },
@@ -338,7 +338,7 @@ async function main() {
     data: {
       number: 'Z-1048', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 4100, bestRate: 3850,
-      status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00', createdBy: FIO.logist2,
+      status: 'AWARDED', loadDate: dateInDays(3), loadWindow: '09:00–13:00', createdBy: FIO.logist2,
       winnerId: carrierB.id,
       createdAt: hoursAgo(28), updatedAt: hoursAgo(7),
       bids: { create: [{ carrierId: carrierB.id, amount: 3850, isWinner: true, createdAt: hoursAgo(10) }] },
@@ -360,7 +360,7 @@ async function main() {
     data: {
       number: 'Z-1039', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - катанка', cargoTypeId: cargoWireRod.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 10500, bestRate: 9800,
-      status: 'AT_LOGIST', loadDate: '16.10.2026', loadWindow: '08:00–12:00', createdBy: FIO.logist1,
+      status: 'AT_LOGIST', loadDate: dateInDays(1), loadWindow: '08:00–12:00', createdBy: FIO.logist1,
       winnerId: carrierA.id, driverId: driverA?.id, truckId: truckA?.id, trailerId: trailerA?.id,
       createdAt: hoursAgo(52), updatedAt: hoursAgo(4),
       bids: { create: [{ carrierId: carrierA.id, amount: 9800, isWinner: true, createdAt: hoursAgo(48) }] },
@@ -445,7 +445,8 @@ async function main() {
         number: r.number, fromPoint: r.route[0], toPoint: r.route[1], cargo: r.cargo.split(',')[0], cargoTypeId: r.cargoId,
         tonnage: Number(r.cargo.split('т')[0].match(/(\d+)\s*$/)?.[1] ?? 20),
         truckType: 'Тент', mode: 'AUCTION', createdBy: i % 2 === 0 ? FIO.logist1 : FIO.logist2,
-        startRate: r.start, bestRate: r.best, status: r.status, loadDate: r.load, loadWindow: '08:00–12:00',
+        // погрузка — за сутки до подтверждения рейса, от даты заполнения базы (r.load — дата из исходного макета)
+        startRate: r.start, bestRate: r.best, status: r.status, loadDate: dateInDays(-Math.ceil(r.h / 24) - 1), loadWindow: '08:00–12:00',
         winnerId: r.carrier.id, passPackage: r.pass, etrnStatus: r.etrn,
         createdAt: hoursAgo(r.h + 24), updatedAt: hoursAgo(r.h),
         bids: { create: [{ carrierId: r.carrier.id, amount: r.best, isWinner: true, createdAt: hoursAgo(r.h + 12) }] },

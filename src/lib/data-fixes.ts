@@ -59,6 +59,8 @@ export async function normalizeLegacyData(): Promise<void> {
     data: { body: 'Логист сверил пакет — рейс выполняется: пропуск готовится, ЭТрН придёт на подпись в Диадок' },
   })
   const org = await db.$executeRaw`UPDATE "EdoDocument" SET payload = REPLACE(payload, 'АО «АЭМЗ»', 'ООО «АЭМЗ»') WHERE payload LIKE '%АО «АЭМЗ»%'`
+    // профили сотрудников — та же организационно-правовая форма, что в документах
+    + await db.$executeRaw`UPDATE "Profile" SET "companyName" = 'ООО «АЭМЗ»' WHERE "companyName" = 'АО «АЭМЗ»'`
   // поручение экспедитору нумеруется ПОР-…, а не ЗАК-… (как заказ-заявка перевозчику)
   const orderNo = await db.$executeRaw`UPDATE "EdoDocument" SET number = 'ПОР-' || SUBSTR(number, 5) WHERE kind = 'ORDER' AND party = 'EXPEDITOR' AND number LIKE 'ЗАК-%'`
   const texts = events.count + etrn.count + notes.count + org + orderNo

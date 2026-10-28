@@ -47,6 +47,8 @@ model User {
   login          String          @unique
   name           String
   passwordHash   String // scrypt: "salt:hash"
+  // версия сессий: растёт при сбросе пароля, смене роли или компании — прежние входы сразу недействительны
+  sessionVersion Int             @default(0)
   role           String // 'admin' | 'logist' | 'carrier'
   carrierId      String?
   // должность (набор прав внутри контура роли); null — должность контура по умолчанию

@@ -75,10 +75,12 @@ export async function buildReport(periodParams: { from?: string; to?: string; mo
 
   /* ——— Глобальный KPI (без изменений — используется дашбордом) ——— */
 
-  const active = requests.filter((r) => !['CLOSED'].includes(r.status))
+  // в работе — заявки на площадке и рейсы до подтверждения (без черновиков, удалённых и завершённых)
+  const active = requests.filter((r) => ['PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST'].includes(r.status))
   const confirmedOrClosed = requests.filter((r) => ['CONFIRMED', 'CLOSED'].includes(r.status))
 
-  const savingsMonth = confirmedOrClosed.reduce((s, r) => s + (r.bestRate != null && r.bestRate < r.startRate ? r.startRate - r.bestRate : 0), 0)
+  // экономия в рублях: (стартовая − итоговая ставка) × тоннаж; сумма ставок за тонну по разным рейсам смысла не имеет
+  const savingsMonth = confirmedOrClosed.reduce((s, r) => s + (r.bestRate != null && r.bestRate < r.startRate ? (r.startRate - r.bestRate) * r.tonnage : 0), 0)
 
   const withBids = requests.filter((r) => r.bids.length > 0)
   const avgBidsAll = withBids.length ? withBids.reduce((s, r) => s + r.bids.length, 0) / withBids.length : 0
@@ -101,7 +103,7 @@ export async function buildReport(periodParams: { from?: string; to?: string; mo
 
   const carMap = new Map<string, { taken: number; sum: number; n: number }>()
   for (const r of requests) {
-    if (!r.winner) continue
+    if (!r.winner || r.status === 'DELETED') continue
     const cur = carMap.get(r.winner.name) ?? { taken: 0, sum: 0, n: 0 }
     cur.taken++
     if (r.bestRate) { cur.sum += r.bestRate; cur.n++ }
@@ -109,7 +111,7 @@ export async function buildReport(periodParams: { from?: string; to?: string; mo
   }
   const allCarriers = await db.carrier.findMany({ include: { _count: { select: { wonRequests: true, bids: true } } } })
   for (const c of allCarriers) {
-    if (!carMap.has(c.name)) carMap.set(c.name, { taken: c._count.wonRequests, sum: 0, n: 0 })
+    if (!carMap.has(c.name)) carMap.set(c.name, { taken: 0, sum: 0, n: 0 }) // без рейсов (удалённые не в счёт)
   }
 
   /* ——— Выбранный период ——— */

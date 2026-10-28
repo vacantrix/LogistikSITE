@@ -15,6 +15,12 @@ import { allowedFor, permDenied, type PermKey } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * Подпись без Диадока — отметка в платформе, а не квалифицированная подпись:
+ * так и пишем, чтобы журнал и раздел ЭДО не выдавали отметку за КЭП.
+ */
+const signMark = (kep: string): string => (diadocEnabled() ? kep : 'отметка в платформе (Диадок не подключён)')
+
 const isEdoKind = (v: string): v is EdoKind => v === 'POA' || v === 'ORDER' || v === 'ETRN' || v === 'ACT'
 /** документы раздела: доверенность от АЭМЗ (POA) больше не используется — старые записи скрыты */
 const VISIBLE_KINDS = ['ORDER', 'ETRN', 'ACT']
@@ -232,13 +238,14 @@ export async function POST(req: NextRequest) {
     const kindMeta = { ...EDO_KIND_META[doc.kind], title: edoTitle(doc.kind, doc.party) }
     const party = doc.party === 'EXPEDITOR' ? 'EXPEDITOR' : 'CARRIER'
     if (isStaff(auth.role)) {
-      if (doc.aemzSigned) return NextResponse.json({ error: 'Со стороны АЭМЗ документ уже подписан' }, { status: 400 })
-      await db.edoDocument.update({
-        where: { id: doc.id },
-        data: { aemzSigned: true, aemzSignedAt: now, aemzSigner: `${auth.name} · КЭП АЭМЗ` },
+      // условная запись: двойной клик не создаёт второе событие и уведомление
+      const marked = await db.edoDocument.updateMany({
+        where: { id: doc.id, aemzSigned: false },
+        data: { aemzSigned: true, aemzSignedAt: now, aemzSigner: `${auth.name} · ${signMark('КЭП АЭМЗ')}` },
       })
+      if (marked.count === 0) return NextResponse.json({ error: 'Со стороны АЭМЗ документ уже подписан' }, { status: 400 })
       await db.event.create({
-        data: { requestId, type: 'EDO_SIGNED_AEMZ', message: `${kindMeta.title} №${doc.number}: подписано со стороны АЭМЗ (${auth.name}, КЭП)` },
+        data: { requestId, type: 'EDO_SIGNED_AEMZ', message: `${kindMeta.title} №${doc.number}: подписано со стороны АЭМЗ (${auth.name}, ${signMark('КЭП')})` },
       })
       await plog({
         type: 'EDO_SIGNED', source: 'api/edo',
@@ -253,13 +260,13 @@ export async function POST(req: NextRequest) {
         requestId,
       })
     } else {
-      if (doc.partySigned) return NextResponse.json({ error: 'Со стороны контрагента документ уже подписан' }, { status: 400 })
       // исполнитель подписывает КЭП своей компании — перевозчик или экспедитор
-      const partySigner = `${carrierName} · КЭП ${party === 'EXPEDITOR' ? 'экспедитора' : 'перевозчика'}`
-      await db.edoDocument.update({
-        where: { id: doc.id },
+      const partySigner = `${carrierName} · ${signMark(`КЭП ${party === 'EXPEDITOR' ? 'экспедитора' : 'перевозчика'}`)}`
+      const marked = await db.edoDocument.updateMany({
+        where: { id: doc.id, partySigned: false },
         data: { partySigned: true, partySignedAt: now, partySigner },
       })
+      if (marked.count === 0) return NextResponse.json({ error: 'Со стороны контрагента документ уже подписан' }, { status: 400 })
       await db.event.create({
         data: { requestId, type: 'EDO_SIGNED_PARTY', message: `${kindMeta.title} №${doc.number}: подписано контрагентом (${partySigner})` },
       })

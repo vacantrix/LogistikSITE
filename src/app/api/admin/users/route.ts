@@ -194,6 +194,10 @@ export async function PUT(req: NextRequest) {
   } : null
 
   const roleChanged = patch.role !== undefined
+  // новый пароль, роль или компания — прежние сессии учётки завершаются сразу (см. lib/auth)
+  const endSessions = roleChanged || patch.passwordHash !== undefined
+    || (patch.carrierId !== undefined && patch.carrierId !== existing.carrierId)
+  if (endSessions) patch.sessionVersion = { increment: 1 }
   const user = await db.$transaction(async (tx) => {
     if (roleChanged) await tx.permException.deleteMany({ where: { userId: id } })
     return tx.user.update({

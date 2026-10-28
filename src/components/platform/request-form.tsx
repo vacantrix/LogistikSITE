@@ -132,7 +132,8 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
   const rateOk = form.startRate.trim() !== '' && Number.isFinite(rateNum) && rateNum > 0
   const baseOk = form.cargoTypeId !== '' && form.fromPoint !== '' && form.toPoint !== ''
   const canDraft = baseOk && (form.startRate.trim() === '' || rateOk)
-  const canPublish = baseOk && rateOk
+  // на площадку — только с датой погрузки (сервер тоже не опубликует без неё)
+  const canPublish = baseOk && rateOk && !!form.loadDate
   // правка заявки на площадке требует ставку, черновик можно сохранить и без неё
   const canSave = editing && (isDraft ? canDraft : canPublish)
 
@@ -400,7 +401,7 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
               <Button
                 onClick={() => void submit('published')}
                 disabled={!canPublish || saving !== null}
-                title={canPublish ? 'Опубликовать заявку на площадке' : 'Выберите груз, точки А и Б и укажите стартовую ставку'}
+                title={canPublish ? 'Опубликовать заявку на площадке' : 'Выберите груз, точки А и Б, дату погрузки и укажите стартовую ставку'}
               >
                 {saving === 'published' ? 'Публикуем…' : 'Опубликовать'}
               </Button>

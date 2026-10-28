@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { notifyLive } from '@/lib/notify'
+import { notifyLogists } from '@/lib/notify-users'
 import { applyCrew, inTx, validateCrew } from '@/lib/requests'
 import { allowedFor, permDenied } from '@/lib/permissions'
 
@@ -89,6 +90,13 @@ export async function POST(req: NextRequest) {
       taken.trailers.set(outcome.trailer.id, request.number)
       results.push({ requestId, number: request.number, ok: true })
       notifyLive({ type: 'DRIVER_ASSIGNED', requestId })
+      // логисту — как при назначении по одной заявке (Task 69)
+      await notifyLogists({
+        type: 'CREW_ASSIGNED',
+        title: `Экипаж указан · №${request.number}`,
+        body: `${outcome.driver.fullName}, ${outcome.truck.brand} (${outcome.truck.plate}) + ${outcome.trailer.plate} — массовая подача из Excel`,
+        requestId,
+      }).catch((e) => console.error('notification error CREW_ASSIGNED (bulk)', e))
     } catch (e) {
       console.error('bulk-assign error', requestId, e)
       results.push({ requestId, number: request.number, ok: false, error: 'Не удалось назначить — повторите' })

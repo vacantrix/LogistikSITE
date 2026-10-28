@@ -17,6 +17,10 @@
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
+  // «сегодня», сроки техосмотра, дата погрузки и исключений прав считаются по часам сервера:
+  // на сервере в UTC с 00:00 до 03:00 МСК вчерашняя дата ещё считалась бы сегодняшней.
+  // Платформа работает по Москве — часовой пояс процесса задаём явно (APP_TZ — если нужен другой)
+  process.env.TZ = process.env.APP_TZ || 'Europe/Moscow'
   // старые «Завод → Порт» и грузы без справочника — к справочникам (идемпотентно)
   await import('@/lib/data-fixes')
     .then(({ normalizeLegacyData }) => normalizeLegacyData())

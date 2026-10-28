@@ -72,25 +72,51 @@ const b64url = (v: Buffer | string): string =>
 const sign = (payload: string): string =>
   createHmac('sha256', secret()).update(payload).digest('base64url')
 
-export function createSessionToken(user: SessionUser): string {
-  const body = b64url(JSON.stringify({ ...user, exp: Date.now() + SESSION_TTL_MS }))
+/** sessionVersion — версия сессий учётки на момент входа (см. User.sessionVersion) */
+export function createSessionToken(user: SessionUser, sessionVersion = 0): string {
+  const body = b64url(JSON.stringify({ ...user, sv: sessionVersion, exp: Date.now() + SESSION_TTL_MS }))
   return `${body}.${sign(body)}`
 }
 
-export function readSessionToken(token: string | undefined | null): SessionUser | null {
+const isRole = (v: unknown): v is Role => v === 'admin' || v === 'logist' || v === 'carrier'
+
+/** Подпись и срок токена (без обращения к базе) */
+function readToken(token: string | undefined | null): (SessionUser & { sv: number }) | null {
   if (!token) return null
   const [body, sig] = token.split('.')
   if (!body || !sig) return null
   const expected = sign(body)
   if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
   try {
-    const data = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionUser & { exp: number }
+    const data = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionUser & { exp: number; sv?: number }
     if (!data.exp || data.exp < Date.now()) return null
-    if (data.role !== 'admin' && data.role !== 'logist' && data.role !== 'carrier') return null
-    return { id: data.id, login: data.login, name: data.name, role: data.role, carrierId: data.carrierId ?? null }
+    if (!isRole(data.role)) return null
+    return { id: data.id, login: data.login, name: data.name, role: data.role, carrierId: data.carrierId ?? null, sv: Number(data.sv ?? 0) }
   } catch {
     return null
   }
+}
+
+/** Кто записан в токене — только для журнала (выход); доступ проверяет getSessionUser/requireUser */
+export function readSessionToken(token: string | undefined | null): SessionUser | null {
+  const t = readToken(token)
+  return t ? { id: t.id, login: t.login, name: t.name, role: t.role, carrierId: t.carrierId } : null
+}
+
+/**
+ * Токен подписан, но решает база: учётка удалена, сменились роль или компания, сброшен
+ * пароль (sessionVersion вырос) — сессия недействительна сразу, а не через 7 дней.
+ * Роль, компания и имя берутся из базы, а не из токена.
+ */
+async function sessionFromToken(token: string | undefined | null): Promise<SessionUser | null> {
+  const t = readToken(token)
+  if (!t) return null
+  const u = await db.user.findUnique({
+    where: { id: t.id },
+    select: { login: true, name: true, role: true, carrierId: true, sessionVersion: true },
+  })
+  if (!u || u.sessionVersion !== t.sv || !isRole(u.role)) return null
+  return { id: t.id, login: u.login, name: u.name, role: u.role, carrierId: u.carrierId }
 }
 
 /**
@@ -104,12 +130,12 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const h = await headers()
   const authz = h.get('authorization')
   if (authz?.toLowerCase().startsWith('bearer ')) {
-    return readSessionToken(authz.slice(7).trim())
+    return sessionFromToken(authz.slice(7).trim())
   }
   // Фолбэк для контекстов, где клиент не хранит токен (переход по прямой ссылке,
   // <img> без t) — общая кука браузера, как до мультиаккаунта.
   const store = await cookies()
-  return readSessionToken(store.get(SESSION_COOKIE)?.value)
+  return sessionFromToken(store.get(SESSION_COOKIE)?.value)
 }
 
 /** Роли с доступом к внутреннему контуру (всё, кроме кабинета перевозчика) */
@@ -153,7 +179,7 @@ export async function requireUser(...roles: Role[]): Promise<SessionUser | NextR
  * (тот же подписанный токен сессии; клиент добавляет его через secureFileUrl()).
  */
 export async function requireUserViaRequest(req: NextRequest, ...roles: Role[]): Promise<SessionUser | NextResponse> {
-  const fromQuery = readSessionToken(req.nextUrl.searchParams.get('t'))
+  const fromQuery = await sessionFromToken(req.nextUrl.searchParams.get('t'))
   if (fromQuery) return accessChecked(fromQuery, roles)
   return requireUser(...roles)
 }

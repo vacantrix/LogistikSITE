@@ -111,9 +111,10 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
         .filter((f) => isLogist || f.uploadedBy === 'logist' || isWinner)
         .map(toRequestFileDTO)
       : [],
-    passPackage: r.passPackage,
-    etrnStatus: r.etrnStatus,
-    verifyComment: r.verifyComment,
+    // ход рейса (пропуск, ЭТрН, комментарий сверки) — только логисту и победителю
+    passPackage: seesTrip ? r.passPackage : false,
+    etrnStatus: seesTrip ? r.etrnStatus : 'NONE',
+    verifyComment: seesTrip ? r.verifyComment : null,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     savings,

@@ -14,6 +14,9 @@ import { BUSY_STATUSES, busyReason } from '@/lib/busy'
 import { REQUEST_INCLUDE, type RequestFull } from '@/lib/serialize'
 import type { RequestDTO } from '@/lib/types'
 
+/** Типы ТС площадки (Task 109: только борт и тент) */
+export const TRUCK_TYPES = ['Тент', 'Борт']
+
 export const money = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽/т`
 
 type Tx = Prisma.TransactionClient
@@ -78,6 +81,7 @@ export async function minActiveBid(tx: Tx, requestId: string): Promise<number | 
  * условие status = PUBLISHED.
  */
 export async function finalizeExpired(now = new Date()): Promise<void> {
+  await moveOverdueToDrafts(now)
   await moveUnansweredToDrafts(now)
   const due = await db.request.findMany({
     where: { status: 'PUBLISHED', deadline: { lte: now }, bids: { some: { withdrawn: false } } },
@@ -180,6 +184,58 @@ export async function sweepAuctions(): Promise<void> {
 }
 
 /**
+ * Дата погрузки прошла, а заявка ещё на торгах: рейс в этот день уже не выполнить —
+ * заявка уходит в «Черновики заявок» (логист поправит дату и опубликует заново),
+ * логисты и участники торгов получают уведомление. Иначе на площадке висели бы
+ * заявки с прошедшей погрузкой, а победитель определялся бы на несуществующий рейс.
+ */
+async function moveOverdueToDrafts(now: Date): Promise<void> {
+  const today = new Date(now)
+  today.setHours(0, 0, 0, 0)
+  const published = await db.request.findMany({
+    where: { status: 'PUBLISHED' },
+    select: { id: true, number: true, fromPoint: true, toPoint: true, loadDate: true },
+  })
+  for (const r of published) {
+    const load = parseRuDate(r.loadDate)
+    if (!load || load >= today) continue
+    try {
+      const bidders = await inTx(async (tx) => {
+        const res = await tx.request.updateMany({ where: { id: r.id, status: 'PUBLISHED' }, data: { status: 'DRAFT', bestRate: null } })
+        if (res.count === 0) return null
+        const active = await tx.bid.findMany({ where: { requestId: r.id, withdrawn: false }, select: { carrierId: true }, distinct: ['carrierId'] })
+        await tx.bid.updateMany({ where: { requestId: r.id }, data: { withdrawn: true, isWinner: false } })
+        await tx.event.create({
+          data: { requestId: r.id, type: 'MOVED_TO_DRAFT', message: `Дата погрузки ${r.loadDate} прошла — заявка снята с торгов и перенесена в «Черновики заявок»` },
+        })
+        return active.map((b) => b.carrierId)
+      })
+      if (!bidders) continue
+      notifyLive({ type: 'MOVED_TO_DRAFT', requestId: r.id })
+      await notifyLogists({
+        type: 'MOVED_TO_DRAFT',
+        title: `Дата погрузки прошла · №${r.number}`,
+        body: `${r.fromPoint} → ${r.toPoint}: погрузка ${r.loadDate} уже прошла — заявка снята с торгов, в «Черновиках заявок». Поправьте дату и опубликуйте заново`,
+        requestId: r.id,
+      }).catch((e) => console.error('notification error MOVED_TO_DRAFT (overdue)', e))
+      for (const carrierId of bidders) {
+        await notifyCarrier(carrierId, {
+          type: 'REQUEST_DELETED',
+          title: `Заявка снята с торгов · №${r.number}`,
+          body: `${r.fromPoint} → ${r.toPoint}: дата погрузки ${r.loadDate} прошла — ваша ставка больше не действует`,
+          requestId: r.id,
+        }).catch((e) => console.error('notification error overdue carrier', e))
+      }
+    } catch (e) {
+      await plogError('lib/requests/finalizeExpired', e, {
+        type: 'FINALIZE_FAILED', source: 'lib/requests/finalizeExpired', requestId: r.id,
+        message: 'Сбой снятия с торгов заявки с прошедшей датой погрузки — повтор при следующей проверке',
+      })
+    }
+  }
+}
+
+/**
  * Торги без откликов: срок приёма ставок вышел, а активных ставок нет (или все
  * участники потеряли доступ к площадке) — заявка уходит в «Черновики заявок».
  * Перевозчики её больше не видят, логист получает уведомление.
@@ -267,9 +323,18 @@ export interface CrewOk {
  *  — никто из экипажа не закреплён за другой заявкой в работе (правило занятости).
  * Возвращает найденные записи или текст ошибки.
  */
+/** «Полуприцеп тент», «шторный» → Тент; «бортовой» → Борт; прочее (реф, контейнеровоз…) — не определяем */
+function trailerKind(type: string): string | null {
+  const v = (type ?? '').toLowerCase()
+  const tent = v.includes('тент') || v.includes('штор')
+  const bort = v.includes('борт')
+  if (tent === bort) return null
+  return tent ? 'Тент' : 'Борт'
+}
+
 export async function validateCrew(
   tx: Tx,
-  request: { id: string; winnerId: string | null; loadDate: string },
+  request: { id: string; winnerId: string | null; loadDate: string; truckType?: string },
   input: CrewInput,
   /** экипаж, уже выбранный в этой же пачке (массовое назначение из Excel) */
   takenInBatch?: { drivers: Map<string, string>; trucks: Map<string, string>; trailers: Map<string, string> },
@@ -288,6 +353,12 @@ export async function validateCrew(
   if (!driver || driver.carrierId !== request.winnerId) return 'Водитель не найден в базе перевозчика-победителя'
   if (!truck || truck.carrierId !== request.winnerId) return 'Тягач не найден в базе перевозчика-победителя'
   if (!trailer || trailer.carrierId !== request.winnerId) return 'Прицеп не найден в базе перевозчика-победителя'
+
+  // тип прицепа — под тип ТС заявки: на тент не ставим борт и наоборот (неочевидные типы не блокируем)
+  const kind = trailerKind(trailer.type)
+  if (kind && request.truckType && TRUCK_TYPES.includes(request.truckType) && kind !== request.truckType) {
+    return `Заявка на «${request.truckType}», а прицеп ${trailer.plate} — «${trailer.type}». Выберите прицеп под тип ТС заявки`
+  }
 
   // сроки документов — на день погрузки
   const on = checkDate(request.loadDate)

@@ -230,7 +230,7 @@ export interface ReportSettings {
   checkedName: string
 }
 
-export const DEFAULT_ORGANIZATION = 'АО «АЭМЗ»'
+export const DEFAULT_ORGANIZATION = 'ООО «АЭМЗ»'
 
 /** Что попадёт в отчёт при текущих настройках — показывается под формой до выгрузки */
 export interface ReportPreview {

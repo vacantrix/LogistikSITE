@@ -5,8 +5,9 @@ import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
 import { plog, plogError } from '@/lib/platform-log'
 import { normalizePoint } from '@/lib/points'
+import { diadocEnabled } from '@/lib/diadoc/config'
 import {
-  applyCrew, finalizeExpired, inTx, loadRequestFor, losingBidders, lostNotice, minActiveBid, money, parseRuDate, validateCrew,
+  applyCrew, finalizeExpired, inTx, loadRequestFor, losingBidders, lostNotice, minActiveBid, money, parseRuDate, TRUCK_TYPES, validateCrew,
 } from '@/lib/requests'
 import { allowedFor, permDenied, type PermKey } from '@/lib/permissions'
 
@@ -164,10 +165,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (r.status !== 'PUBLISHED') fail('Заявка недоступна для ставок')
           if (!r.deadline) fail('У заявки не задан срок приёма ставок — обратитесь к логисту')
           if (r.deadline! <= now) fail('Приём ставок по заявке завершён')
+          const loadDay = parseRuDate(r.loadDate)
+          const today = new Date(now)
+          today.setHours(0, 0, 0, 0)
+          if (loadDay && loadDay < today) fail(`Дата погрузки ${r.loadDate} прошла — ставки по заявке не принимаются`)
           const min = await minActiveBid(tx, id)
           if (r.mode === 'AUCTION') {
             const floor = min ?? r.startRate
             if (amt >= floor) fail(`Ставка должна быть ниже текущей лучшей (${money(floor)})`)
+          } else if (amt > r.startRate) {
+            // закрытый тендер: стартовая ставка — потолок цены, выше неё заявка не уходит
+            fail(`Ставка не может быть выше стартовой (${money(r.startRate)})`)
           }
           // чью лучшую ставку перебили (для уведомления BID_OUTBID, Task 69)
           const prevBest = await tx.bid.findFirst({
@@ -392,9 +400,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           await tx.request.update({ where: { id }, data: { status: 'CLOSED', ...(viaDiadoc ? {} : { etrnStatus: 'SIGNED' }) } })
           // ЭДО (Task 76): рейс закрыт — накладная подписана обеими сторонами,
           // акт оказанных услуг добирается автоматически в разделе «Подписать ЭДО»
+          // без Диадока подписи нет — ставим отметку «закрыто без ЭДО» только недостающей стороне,
+          // не выдаём её за КЭП и не затираем тех, кто уже отметил подписание в разделе ЭДО
+          const mark = diadocEnabled()
+            ? 'отметка при закрытии рейса (ЭТрН не отправлялась в Диадок)'
+            : 'отметка при закрытии рейса (Диадок не подключён)'
           await tx.edoDocument.updateMany({
-            where: { requestId: id, kind: 'ETRN', diadocMessageId: null },
-            data: { aemzSigned: true, partySigned: true, aemzSignedAt: now, partySignedAt: now, aemzSigner: 'КЭП АЭМЗ', partySigner: 'КЭП перевозчика' },
+            where: { requestId: id, kind: 'ETRN', diadocMessageId: null, aemzSigned: false },
+            data: { aemzSigned: true, aemzSignedAt: now, aemzSigner: mark },
+          })
+          await tx.edoDocument.updateMany({
+            where: { requestId: id, kind: 'ETRN', diadocMessageId: null, partySigned: false },
+            data: { partySigned: true, partySignedAt: now, partySigner: mark },
           })
           await event('TRIP_CLOSED', 'Рейс закрыт: данные в реестре, отчёты сходятся с бухгалтерией')
           notes.push({
@@ -454,7 +471,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const load = parseRuDate(r.loadDate)
           const today = new Date(now)
           today.setHours(0, 0, 0, 0)
-          if (load && load < today) fail(`Дата погрузки ${r.loadDate} уже прошла — измените её в черновике`)
+          if (!load) fail('Укажите дату погрузки в черновике — без неё заявку не опубликовать')
+          if (load! < today) fail(`Дата погрузки ${r.loadDate} уже прошла — измените её в черновике`)
           // старые ставки (отозванные) в новых торгах не участвуют
           await tx.bid.updateMany({ where: { requestId: id }, data: { withdrawn: true, isWinner: false } })
           await tx.request.update({
@@ -486,9 +504,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             patch[key] = point
           }
           if (r.status === 'DRAFT' && (body.mode === 'AUCTION' || body.mode === 'CLOSED')) patch.mode = body.mode
-          if (typeof body.loadDate === 'string' && body.loadDate.trim()) {
+          if (typeof body.loadDate === 'string' && body.loadDate.trim() && body.loadDate.trim() !== r.loadDate) {
             const d = parseRuDate(body.loadDate.trim())
             if (!d) fail('Дата погрузки — в формате ДД.ММ.ГГГГ')
+            const today = new Date(now)
+            today.setHours(0, 0, 0, 0)
+            if (d! < today) fail('Дата погрузки уже прошла')
             patch.loadDate = body.loadDate.trim()
           }
           if (typeof body.loadWindow === 'string' && body.loadWindow.trim()) patch.loadWindow = body.loadWindow.trim().slice(0, 40)
@@ -498,13 +519,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             if (!Number.isFinite(t) || t <= 0 || t > 200) fail('Тоннаж — число от 0 до 200 т')
             patch.tonnage = t
           }
-          if (typeof body.truckType === 'string' && body.truckType.trim()) patch.truckType = body.truckType.trim().slice(0, 40)
+          if (typeof body.truckType === 'string' && body.truckType.trim() && body.truckType.trim() !== r.truckType) {
+            if (!TRUCK_TYPES.includes(body.truckType.trim())) fail(`Тип ТС — ${TRUCK_TYPES.join(' или ')}`)
+            patch.truckType = body.truckType.trim()
+          }
           if (body.startRate != null && body.startRate !== '') {
             const s = Number(body.startRate)
             if (!Number.isFinite(s) || s <= 0 || s > MAX_RATE) fail('Стартовая ставка — положительное число, ₽/т')
             patch.startRate = Math.round(s)
           }
+          // форма присылает все поля — неизменённые не считаем правкой
+          for (const k of Object.keys(patch)) if (patch[k] === (r as Record<string, unknown>)[k]) delete patch[k]
           if (Object.keys(patch).length === 0) fail('Нет изменений для сохранения')
+          // ставки сделаны под условия заявки: пока они есть, условия не меняются —
+          // иначе ставка за рейс в Сочи молча стала бы ставкой за другой маршрут или тоннаж
+          if (r.status === 'PUBLISHED' && Object.keys(patch).some((k) => k !== 'comment')) {
+            const bids = await tx.bid.count({ where: { requestId: id, withdrawn: false } })
+            if (bids > 0) {
+              fail('По заявке уже есть ставки — маршрут, груз, тоннаж, дату и ставку менять нельзя. Можно поправить комментарий, продлить приём или повысить ставку; для других условий удалите заявку и опубликуйте новую')
+            }
+          }
           await tx.request.update({ where: { id }, data: patch })
           const changed = [...new Set(Object.keys(patch).map((k) => EDIT_FIELD_LABEL[k] ?? k))].join(', ')
           await event('REQUEST_UPDATED', `Заявка отредактирована логистом ${auth.name}: ${changed}`)

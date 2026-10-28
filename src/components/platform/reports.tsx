@@ -476,7 +476,7 @@ export default function ReportsTab({ liveTick }: TabProps) {
                 <>
                   <Row label="Шапка документа">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <Input value={s.organization} onChange={(e) => update({ organization: e.target.value })} placeholder="АО «АЭМЗ»" aria-label="Организация" className="h-9" />
+                      <Input value={s.organization} onChange={(e) => update({ organization: e.target.value })} placeholder="ООО «АЭМЗ»" aria-label="Организация" className="h-9" />
                       <Input value={s.department} onChange={(e) => update({ department: e.target.value })} placeholder="Отдел логистики" aria-label="Подразделение" className="h-9" />
                     </div>
                   </Row>
