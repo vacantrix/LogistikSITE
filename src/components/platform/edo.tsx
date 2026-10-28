@@ -98,6 +98,8 @@ export default function EdoTab({ role, liveTick }: TabProps) {
   const [syncing, setSyncing] = useState(false)
 
   const isLogist = role === 'logist'
+  // администрация видит комплекты ЭДО в режиме просмотра: подписи/отправки в Диадок — за сторонами (Task 110)
+  const isAdmin = role === 'admin'
 
   const load = useCallback(async () => {
     try {
@@ -156,7 +158,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
   return (
     <div>
       <SectionHeader
-        eyebrow={isLogist ? 'Внутренний контур АЭМЗ' : 'Кабинет перевозчика'}
+        eyebrow={isLogist ? 'Внутренний контур АЭМЗ' : isAdmin ? 'Администрация платформы' : 'Кабинет перевозчика'}
         title="Подписать ЭДО"
         desc={
           <ul className="list-disc space-y-1 pl-4">
@@ -175,10 +177,17 @@ export default function EdoTab({ role, liveTick }: TabProps) {
               <span className="text-sm text-slate-500">{diadoc.stand.charAt(0).toUpperCase() + diadoc.stand.slice(1)}</span>
               {/* время последней сверки — по наведению на кнопку */}
               <WithTip tip={diadoc.lastSyncAt ? `Статусы ЭТрН сверены с Диадоком ${fmtDateTime(diadoc.lastSyncAt)}` : 'Сверить статусы ЭТрН с Диадоком'}>
-                <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
-                  <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden />
-                  Обновить статусы
-                </Button>
+                {isLogist ? (
+                  <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
+                    <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden />
+                    Обновить статусы
+                  </Button>
+                ) : (
+                  <span tabIndex={0} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-500">
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                    Обновить статусы — сверяет логист
+                  </span>
+                )}
               </WithTip>
             </>
           )}
@@ -349,7 +358,8 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
             // через Диадок идёт накладная рейса в работе или уже отправленная; у закрытых
             // до подключения Диадока рейсов накладная подписана в платформе — показываем её подписи
             const viaDiadoc = diadocEnabled && doc.kind === 'ETRN' && (Boolean(doc.diadoc) || pack.request.status === 'CONFIRMED')
-            const canSign = !viaDiadoc && !mySideDone && !(doc.aemzSigned && doc.partySigned)
+            // администрация не подписывает — только просмотр статусов (Task 110)
+            const canSign = !viaDiadoc && !mySideDone && !(doc.aemzSigned && doc.partySigned) && role !== 'admin'
             return (
               <div key={doc.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -387,7 +397,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                     </Button>
                   </div>
                 )}
-                {viaDiadoc && doc.diadoc && !doc.partySigned && !isLogist && (
+                {viaDiadoc && doc.diadoc && !doc.partySigned && role === 'carrier' && (
                   <WithTip tip="Подпишите титул перевозчика Т2 в своём Диадоке — платформа увидит подпись автоматически">
                     <span tabIndex={0} className="mt-2 inline-flex">
                       <StatusDot dot="bg-amber-500" tone="warning">Ждёт вашей подписи Т2 в Диадоке</StatusDot>

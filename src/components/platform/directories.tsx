@@ -276,6 +276,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   // рассылка «Уведомить агента» по срокам документов техники (Task 108)
   const [notifying, setNotifying] = useState(false)
   const isLogist = role === 'logist'
+  // персонал видит весь парк перевозчиков; правка записей — логист и владелец-перевозчик (Task 110)
+  const isStaff = isLogist || role === 'admin'
   // ——— фильтры справочника: текстовый поиск + срок документов + перевозчик (логисту) ———
   const [dirQuery, setDirQuery] = useState('')
   const [dirExpiry, setDirExpiry] = useState<'all' | 'soon' | 'expired'>('all')
@@ -306,8 +308,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
 
   // перевозчику доступен только его собственный парк — данные конкурентов скрыты
   const visibleCarriers = useMemo(
-    () => (isLogist ? (carriers ?? []) : (carriers ?? []).filter((c) => c.id === activeCarrierId)),
-    [carriers, isLogist, activeCarrierId],
+    () => (isStaff ? (carriers ?? []) : (carriers ?? []).filter((c) => c.id === activeCarrierId)),
+    [carriers, isStaff, activeCarrierId],
   )
 
   const load = useCallback(async () => {
@@ -365,8 +367,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
     [dirExpiry],
   )
   const dirByCarrier = useCallback(
-    (carrierId: string) => !isLogist || dirCarrier === 'all' || carrierId === dirCarrier,
-    [isLogist, dirCarrier],
+    (carrierId: string) => !isStaff || dirCarrier === 'all' || carrierId === dirCarrier,
+    [isStaff, dirCarrier],
   )
   const dirByOwnership = useCallback(
     (type: OwnershipType) => dirOwnership === 'all' || type === dirOwnership,
@@ -566,7 +568,9 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
               <InfoTip label="Кадры и техника">
                 {isLogist
                   ? 'Водители и техника, добавленные перевозчиками — агентами АЭМЗ.'
-                  : 'Добавляется через «Подать документы» после допуска или кнопкой «Добавить вручную» в разделах ниже.'}
+                  : role === 'admin'
+                    ? 'Кадры и техника всех перевозчиков — просмотр. Правка данных — через «База данных».'
+                    : 'Добавляется через «Подать документы» после допуска карточек.'}
               </InfoTip>
             </div>
           </div>
@@ -583,12 +587,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                       <button
                         type="button"
                         onClick={() => setOpen(r.tab)}
-                        title={`${r.kindLabel} — добавлен ${fmtCreated(r.createdAt)}${isLogist ? ` · ${r.carrierName}` : ''}`}
+                        title={`${r.kindLabel} — добавлен ${fmtCreated(r.createdAt)}${isStaff ? ` · ${r.carrierName}` : ''}`}
                         className="flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                       >
                         <Icon className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
                         <span className="max-w-[200px] truncate font-medium">{r.title}</span>
-                        {isLogist && <span className="hidden max-w-[140px] truncate text-slate-400 sm:inline">· {r.carrierName}</span>}
+                        {isStaff && <span className="hidden max-w-[140px] truncate text-slate-400 sm:inline">· {r.carrierName}</span>}
                         <span className="shrink-0 text-slate-400">· {fmtCreated(r.createdAt)}</span>
                       </button>
                     </li>
@@ -617,6 +621,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
               )}
               <InfoTip label="Цвета сроков">Точка у срока: красная — срок истёк, янтарная — осталось до 30 дней, серая — до 90 дней.</InfoTip>
             </div>
+            {/* рассылка «Уведомить агента» — операционное действие логиста (Task 108) */}
             {isLogist && expiryItems.length > 0 && (
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="outline" onClick={notifyAgents} disabled={notifying}>
@@ -643,7 +648,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                   <li key={item.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2">
                     <Icon className={`h-4 w-4 shrink-0 ${item.info.state === 'expired' ? 'text-red-500' : 'text-amber-500'}`} aria-hidden />
                     <span className="text-sm font-medium text-slate-800">{item.title}</span>
-                    {isLogist && <span className="text-xs text-slate-400">{item.carrierName}</span>}
+                    {isStaff && <span className="text-xs text-slate-400">{item.carrierName}</span>}
                     <span className="text-xs text-slate-500">{item.docLabel}</span>
                     <ExpiryBadge date={item.info.date} className="ml-auto" />
                     <button
@@ -756,16 +761,19 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                 <h2 className="text-base font-bold text-slate-900">{KIND_TITLES[section.kind]}</h2>
                 <Badge variant="outline" className="border-slate-300 bg-slate-50 text-slate-600">{total}</Badge>
                 <div className="ml-auto flex flex-wrap items-center gap-2">
-                  {!isLogist && open === 'drivers' && (
+                  {!isLogist && role === 'carrier' && open === 'drivers' && (
                     <Button size="sm" variant="outline" className="h-9 gap-1.5" onClick={() => onNavigate('apply')}>
                       Подать документы
                       <ArrowRight className="h-3.5 w-3.5" aria-hidden />
                     </Button>
                   )}
-                  <Button size="sm" className="h-9 gap-1.5" onClick={() => openAdd(section.kind)}>
-                    <Plus className="h-4 w-4" aria-hidden />
-                    Добавить вручную
-                  </Button>
+                  {/* «Добавить вручную» — только логист; перевозчик пополняет базу через «Подать документы» (Task 110) */}
+                  {isLogist && (
+                    <Button size="sm" className="h-9 gap-1.5" onClick={() => openAdd(section.kind)}>
+                      <Plus className="h-4 w-4" aria-hidden />
+                      Добавить вручную
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
@@ -791,7 +799,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                       <SelectItem value="LEASE">Аренда и лизинг</SelectItem>
                     </SelectContent>
                   </Select>
-                  {isLogist && (
+                  {isStaff && (
                     <Select value={dirCarrier} onValueChange={setDirCarrier}>
                       <SelectTrigger className="h-9 w-[230px]" aria-label="Фильтр по перевозчику">
                         <SelectValue />
@@ -813,18 +821,18 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                         <TableHeader>
                           <TableRow className="bg-slate-50">
                             <TableHead>ФИО</TableHead>
-                            {isLogist && <TableHead>Перевозчик</TableHead>}
+                            {isStaff && <TableHead>Перевозчик</TableHead>}
                             <TableHead>Дата рождения</TableHead>
                             <TableHead>Паспорт</TableHead>
                             <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
-                            {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                            {role === 'carrier' && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {driversFlat.map(({ d, carrierName }) => (
-                            <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('driver', d.id, {
+                            <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isStaff} onEdit={() => openEdit('driver', d.id, {
                               fullName: d.fullName, birthDate: d.birthDate, passport: d.passport,
                               ownershipType: d.ownershipType,
                               ownerName: d.ownerName === '—' ? '' : d.ownerName,
@@ -842,7 +850,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                         <TableHeader>
                           <TableRow className="bg-slate-50">
                             <TableHead>Марка</TableHead>
-                            {isLogist && <TableHead>Перевозчик</TableHead>}
+                            {isStaff && <TableHead>Перевозчик</TableHead>}
                             <TableHead>Госномер</TableHead>
                             <TableHead>СТС</TableHead>
                             <TableHead>Техосмотр до</TableHead>
@@ -850,12 +858,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
-                            {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                            {role === 'carrier' && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {trucksFlat.map(({ t, carrierName }) => (
-                            <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('truck', t.id, {
+                            <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isStaff} onEdit={() => openEdit('truck', t.id, {
                               brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
                               techTill: t.techTill === '—' ? '' : t.techTill, owner: t.owner,
                               ownershipType: t.ownershipType,
@@ -863,7 +871,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             })} onPhotos={() => setPhotoView({ kind: 'truck', id: t.id, title: `${t.brand} · ${t.plate}`, expiry: { techTill: t.techTill } })} />
                           ))}
                           {trucksFlat.length === 0 && (
-                            <TableRow><TableCell colSpan={isLogist ? 9 : 10} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={isStaff ? 9 : 10} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                           )}
                         </TableBody>
                       </>
@@ -873,7 +881,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                         <TableHeader>
                           <TableRow className="bg-slate-50">
                             <TableHead>Госномер</TableHead>
-                            {isLogist && <TableHead>Перевозчик</TableHead>}
+                            {isStaff && <TableHead>Перевозчик</TableHead>}
                             <TableHead>Тип</TableHead>
                             <TableHead>СТС</TableHead>
                             <TableHead>Техосмотр до</TableHead>
@@ -881,12 +889,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
-                            {!isLogist && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                            {role === 'carrier' && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {trailersFlat.map(({ z, carrierName }) => (
-                            <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isLogist} onEdit={() => openEdit('trailer', z.id, {
+                            <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isStaff} onEdit={() => openEdit('trailer', z.id, {
                               plate: z.plate, type: z.type, sts: z.sts, techTill: z.techTill === '—' ? '' : z.techTill,
                               owner: z.owner === '—' ? '' : z.owner,
                               ownershipType: z.ownershipType,
@@ -894,7 +902,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             })} onPhotos={() => setPhotoView({ kind: 'trailer', id: z.id, title: `${z.type} · ${z.plate}`, expiry: { techTill: z.techTill } })} />
                           ))}
                           {trailersFlat.length === 0 && (
-                            <TableRow><TableCell colSpan={isLogist ? 9 : 10} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
+                            <TableRow><TableCell colSpan={isStaff ? 9 : 10} className="text-center text-slate-400">Записей нет</TableCell></TableRow>
                           )}
                         </TableBody>
                       </>

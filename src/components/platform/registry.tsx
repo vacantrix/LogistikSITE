@@ -13,10 +13,13 @@
  * Кнопка «Авто в порт» — Excel в форме порта (19 колонок) по рейсам в работе: экипажи для пропуска.
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, CircleCheck, Eye, FileSpreadsheet, ScrollText, Search } from 'lucide-react'
+import {
+  ChevronRight, CircleCheck, Download, Eye, FileSpreadsheet, FileText, Files,
+  Image as ImageIcon, ScrollText, Search,
+} from 'lucide-react'
 import * as XLSX from 'xlsx'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusDot, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusDot, WithTip, type TabProps,
 } from '@/components/platform/common'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -35,15 +38,114 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
-import { api } from '@/lib/api'
+import { api, secureFileUrl } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
+import { formatKm, routeDistanceKm } from '@/lib/geo'
+import { RouteButton } from '@/components/platform/route-dialog'
 import { PORT_COL_WIDTHS, buildPortRows, type PortExportEntry } from '@/lib/port-excel'
 import {
   REGISTRY_STEPS, fmtDateTime, num, rate, registryStepIndex,
 } from '@/lib/status'
-import type { DriverDTO, RequestDTO, TrailerDTO, TruckDTO } from '@/lib/types'
+import {
+  REQUEST_FILE_META, TRANSPORT_OWNERSHIP_META,
+  type DriverDTO, type ExecutorRole, type RequestDTO, type TrailerDTO, type TruckDTO,
+} from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
+
+/** Размер файла в списках обмена: до 1 МБ — килобайты, крупнее — мегабайты */
+const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} КБ` : `${(n / 1024 / 1024).toFixed(1)} МБ`)
+
+/** Подписи исполнителя по заявке (Task 109): заказ-заявка перевозчику или поручение экспедитору */
+const EXECUTOR_ROLE_LABEL: Record<ExecutorRole, string> = { CARRIER: 'Перевозчик', FORWARDER: 'Экспедитор' }
+
+/** Адрес точки маршрута: из справочника либо «по данным заявки» с сырым значением */
+const pointAddress = (raw: string): string => {
+  const info = pointInfo(raw)
+  return info.known ? info.address : `Адрес по данным заявки: ${raw}`
+}
+
+/**
+ * Панель маршрута в карточке рейса (Task 110-c): полные названия и адреса точек
+ * погрузки/выгрузки, расстояние по прямой и переход к автомобильному маршруту
+ * в Яндекс.Картах. Точка, которой нет в справочнике, показывается «по данным заявки».
+ */
+function RoutePanel({ from, to, number }: { from: string; to: string; number: string }) {
+  const km = routeDistanceKm(from, to)
+  const points = [
+    { label: 'Погрузка', raw: from, info: pointInfo(from) },
+    { label: 'Выгрузка', raw: to, info: pointInfo(to) },
+  ]
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-medium text-slate-500">Маршрут</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <WithTip tip="Расстояние по прямой между точками погрузки и выгрузки (по справочнику точек платформы)">
+            <span tabIndex={0} className="flex items-baseline gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1">
+              <span className="text-[11px] text-slate-500">по прямой</span>
+              <span className="text-sm font-semibold text-slate-900">{km != null ? formatKm(km) : '—'}</span>
+            </span>
+          </WithTip>
+          <RouteButton from={from} to={to} number={number} />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {points.map(({ label, raw, info }) => {
+          const Icon = info.icon
+          return (
+            <div key={label} className="flex gap-2.5">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100" aria-hidden>
+                <Icon className="h-3.5 w-3.5 text-slate-500" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[11px] leading-tight text-slate-500">
+                  {label}{info.known && ` · ${info.short}`}
+                </div>
+                <div className="text-sm font-semibold leading-snug text-slate-900">{info.known ? info.name : raw}</div>
+                <div className={`mt-0.5 text-[13px] leading-snug ${info.known ? 'text-slate-600' : 'text-slate-500'}`}>
+                  {pointAddress(raw)}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Файлы обмена перевозчик ↔ логист по заявке (Task 109): вид, автор, дата, размер, «Скачать» */
+function RequestFilesList({ files }: { files: RequestDTO['files'] }) {
+  return (
+    <ul className="space-y-1.5">
+      {files.map((f) => {
+        const FileIcon = f.isImage ? ImageIcon : FileText
+        return (
+          <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <FileIcon className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-slate-900">{f.fileName}</span>
+              <span className="block text-[11px] text-slate-500">
+                {REQUEST_FILE_META[f.kind].label} · {f.uploadedByName} · {fmtDateTime(f.createdAt)}
+              </span>
+            </span>
+            <span className="shrink-0 text-[11px] tabular-nums text-slate-400">{kb(f.sizeBytes)}</span>
+            <a
+              href={secureFileUrl(f.url)}
+              download={f.fileName}
+              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              aria-label={`Скачать ${f.fileName}`}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              Скачать
+            </a>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
 type TripGroup = 'work' | 'closed'
 type SortOrder = 'desc' | 'asc'
@@ -455,11 +557,10 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
               <div className="space-y-4">
                 <Pipeline status={detail.status} passPackage={detail.passPackage} etrnStatus={detail.etrnStatus} />
 
+                {/* Маршрут (Task 110-c): полные адреса точек, расстояние, построение маршрута */}
+                <RoutePanel from={detail.fromPoint} to={detail.toPoint} number={detail.number} />
+
                 <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <div>
-                    <div className="text-[11px] text-slate-500">Направление</div>
-                    <div className="text-sm font-medium text-slate-800">{detail.fromPoint} → {detail.toPoint}</div>
-                  </div>
                   <div>
                     <div className="text-[11px] text-slate-500">Груз</div>
                     <div className="text-sm font-medium text-slate-800">{detail.cargo}, {num(detail.tonnage)} т · {detail.truckType}</div>
@@ -504,10 +605,58 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     <div className="text-[11px] text-slate-500">Документы</div>
                     <div className="mt-0.5"><DocBadges r={detail} /></div>
                   </div>
+                  <div>
+                    <div className="text-[11px] text-slate-500">Создатель</div>
+                    <div className="text-sm font-medium text-slate-800">{detail.createdBy || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                      Исполнитель по заявке
+                      {detail.executorRole === null && (
+                        <InfoTip label="Исполнитель по заявке">
+                          Перевозчик не выбирал исполнителя по этой заявке — работа ведётся по роли компании
+                        </InfoTip>
+                      )}
+                    </div>
+                    <div className="text-sm font-medium text-slate-800">
+                      {detail.executorRole ? EXECUTOR_ROLE_LABEL[detail.executorRole] : 'По роли компании'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-slate-500">Транспорт по заявке</div>
+                    <div className="text-sm font-medium text-slate-800">
+                      {TRANSPORT_OWNERSHIP_META[detail.transportOwnership].label}
+                    </div>
+                  </div>
                 </div>
 
+                {/* комментарий для исполнителя и комментарий сверки (Task 110-c) */}
+                {detail.comment && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="text-[11px] text-muted-foreground">Комментарий для исполнителя</div>
+                    <p className="mt-1 whitespace-pre-line text-sm text-slate-800">{detail.comment}</p>
+                  </div>
+                )}
+                {detail.verifyComment && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="text-[11px] text-muted-foreground">Комментарий сверки</div>
+                    <p className="mt-1 whitespace-pre-line text-sm text-slate-800">{detail.verifyComment}</p>
+                  </div>
+                )}
+
+                {/* обмен документами по заявке (Task 109) */}
+                <section className="border-t border-slate-100 pt-3">
+                  <h4 className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                    <Files className="h-3.5 w-3.5" aria-hidden />
+                    Обмен документами по заявке
+                  </h4>
+                  {detail.files.length === 0
+                    ? <p className="mt-2 text-sm text-slate-400">Обмена документами не было</p>
+                    : <div className="mt-2"><RequestFilesList files={detail.files} /></div>}
+                </section>
+
                 {/* журнал событий */}
-                <div>
+                <div className="border-t border-slate-100 pt-3">
                   <div className="mb-2 text-xs font-medium text-slate-500">Журнал событий</div>
                   <div className={`max-h-60 space-y-2 overflow-y-auto rounded-xl border border-slate-200 p-3 ${THIN_SCROLL}`}>
                     {[...detail.events]

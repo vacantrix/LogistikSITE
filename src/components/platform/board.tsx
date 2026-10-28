@@ -216,10 +216,12 @@ function SortableTh({ k, label, sort, onSort, title }: {
  * уходит минимальной ставке (при равных — более ранней). Логист может продлить срок,
  * поднять стартовую ставку или предложить заявку напрямую.
  */
-function AuctionDesk({ request, now, busy, onExtend, onOffer, onRaise }: {
+function AuctionDesk({ request, now, busy, readOnly = false, onExtend, onOffer, onRaise }: {
   request: RequestDTO
   now: number | null
   busy: boolean
+  /** администрация смотрит стенд без решений: продлить/поднять/предложить — только логист */
+  readOnly?: boolean
   onExtend: () => void
   onOffer: () => void
   onRaise: () => void
@@ -322,19 +324,28 @@ function AuctionDesk({ request, now, busy, onExtend, onOffer, onRaise }: {
             </span>
           </WithTip>
         ) : (
-          <Button size="sm" disabled={busy} onClick={onRaise}>
-            <TrendingUp className="h-4 w-4" aria-hidden />
-            Поднять стартовую ставку
-          </Button>
+          !readOnly && (
+            <Button size="sm" disabled={busy} onClick={onRaise}>
+              <TrendingUp className="h-4 w-4" aria-hidden />
+              Поднять стартовую ставку
+            </Button>
+          )
         )}
-        <Button size="sm" variant="outline" disabled={busy} onClick={onExtend}>
-          <ClockPlus className="h-4 w-4" aria-hidden />
-          Продлить торги на 2 часа
-        </Button>
-        <Button size="sm" variant="outline" disabled={busy} onClick={onOffer}>
-          <Send className="h-4 w-4" aria-hidden />
-          Предложить напрямую
-        </Button>
+        {!readOnly && (
+          <>
+            <Button size="sm" variant="outline" disabled={busy} onClick={onExtend}>
+              <ClockPlus className="h-4 w-4" aria-hidden />
+              Продлить торги на 2 часа
+            </Button>
+            <Button size="sm" variant="outline" disabled={busy} onClick={onOffer}>
+              <Send className="h-4 w-4" aria-hidden />
+              Предложить напрямую
+            </Button>
+          </>
+        )}
+        {readOnly && (
+          <span className="text-xs text-slate-500">Режим администрации — торги смотрятся без решений, действия выполняет логист</span>
+        )}
         {busy && <span className="text-xs text-slate-400">Выполняется…</span>}
       </div>
     </div>
@@ -430,7 +441,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   const [now, setNow] = useState<number | null>(null)
   // сортировка таблицы (Task 49): null — как пришло с сервера (новые сверху)
   const [sort, setSort] = useState<SortState>(null)
+  // персонал (логист и администрация) видит площадку целиком; решения — только логист (Task 110)
   const isLogist = role === 'logist'
+  const isStaff = isLogist || role === 'admin'
 
   /** клик по заголовку: asc → desc → сброс */
   const toggleSort = useCallback((k: SortKey) => {
@@ -439,14 +452,14 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
 
   /** Пункты фильтра статуса: у перевозчика добавляется «Мои отклики» */
   const statusFilters = useMemo(
-    () => (isLogist ? MODE_FILTERS : [...MODE_FILTERS, MY_BIDS_FILTER]),
-    [isLogist],
+    () => (isStaff ? MODE_FILTERS : [...MODE_FILTERS, MY_BIDS_FILTER]),
+    [isStaff],
   )
 
-  // если роль сменилась на логиста — сбрасываем «Мои отклики»
+  // если роль сменилась на персональную — сбрасываем «Мои отклики»
   useEffect(() => {
-    if (isLogist && mode === 'MY_BIDS') setMode('ALL')
-  }, [isLogist, mode])
+    if (isStaff && mode === 'MY_BIDS') setMode('ALL')
+  }, [isStaff, mode])
 
   // диалоги: держим только id, свежие данные берём из списка
   const [detailId, setDetailId] = useState<string | null>(null)
@@ -479,7 +492,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     try {
       const d = await api.listRequests()
       setRequests(d.requests)
-      if (isLogist) {
+      if (isStaff) {
         const ev = await api.events(12)
         setEvents(ev.events)
       }
@@ -489,7 +502,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     } finally {
       setLoading(false)
     }
-  }, [isLogist])
+  }, [isStaff])
 
   // первичная загрузка + автообновление каждые 15 секунд (кнопки «Обновить» больше нет — Task 63)
   useEffect(() => {
@@ -538,8 +551,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     return list.filter((r) => {
       // черновики живут в отдельном разделе «Черновики заявок» — на площадку не выходят
       if (r.status === 'DRAFT') return false
-      // Логист видит всю площадку целиком — ему нужен полный контроль над заявками
-      if (isLogist) {
+      // Персонал (логист и администрация) видит всю площадку целиком — полный контроль и просмотр
+      if (isStaff) {
         if (mode !== 'ALL' && r.mode !== mode) return false
       } else if (mode === 'MY_BIDS') {
         // «Мои отклики»: исключительно заявки, куда агент уже подал отклик;
@@ -559,7 +572,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         a.name, a.address, b.name, b.address,
       ].some((v) => v.toLowerCase().includes(needle))
     })
-  }, [requests, q, mode, myBidOf, isLogist])
+  }, [requests, q, mode, myBidOf, isStaff])
 
   /** выборка после сортировки (Task 49): пустые значения всегда в конце, вне зависимости от направления */
   const sorted = useMemo(() => {
@@ -579,13 +592,16 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     })
   }, [filtered, sort])
 
-  /** Точки для карты доставки — по текущей (отфильтрованной и отсортированной) выборке заявок.
-   *  Перевозчик откликается прямо с карты: заявка на торгах, срок не вышел, его отклика ещё нет */
+  /** Точки для карты доставки — ТОЛЬКО по активным заявкам: открыты для ставок и срок не вышел.
+   *  Завершённые и ушедшие в работу заявки карту не захламляют. Перевозчик откликается прямо с карты:
+   *  заявка на торгах, его отклика ещё нет */
   const mapPoints = useMemo(
-    () => buildMapPoints(sorted, (r) =>
-      !isLogist && r.status === 'PUBLISHED' && !myBidOf(r)
-      && r.deadline !== null && new Date(r.deadline).getTime() > Date.now()),
-    [sorted, isLogist, myBidOf],
+    () => buildMapPoints(sorted.filter((r) =>
+      r.status === 'PUBLISHED' && r.deadline !== null && new Date(r.deadline).getTime() > Date.now()),
+      (r) =>
+        role === 'carrier' && r.status === 'PUBLISHED' && !myBidOf(r)
+        && r.deadline !== null && new Date(r.deadline).getTime() > Date.now()),
+    [sorted, role, myBidOf],
   )
   const deliveryCount = mapPoints.filter((p) => p.kind === 'delivery').length
 
@@ -705,9 +721,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     }
   }, [load, toast])
 
-  /** клик по строке: у логиста раскрытие торгов, иначе — детали заявки */
+  /** клик по строке: у персонала раскрытие торгов, иначе — детали заявки */
   const onRowClick = (r: RequestDTO) => {
-    if (isLogist && r.status === 'PUBLISHED') {
+    if (isStaff && r.status === 'PUBLISHED') {
       setExpandedId((cur) => (cur === r.id ? null : r.id))
     } else {
       setDetailId(r.id)
@@ -779,7 +795,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
 
   // ——— полоса «Требует внимания»: только реальная работа (вместо удалённой «Сводки») ———
   const attention = useMemo(() => {
-    if (!isLogist || !requests) return []
+    if (!isStaff || !requests) return []
     const items: { key: string; icon: LucideIcon; text: string; onClick: () => void }[] = []
     const published = requests.filter((r) => r.status === 'PUBLISHED')
     const closingSoon = published.filter((r) => {
@@ -815,7 +831,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       items.push({ key: 'fix', icon: Undo2, text: `У агента на исправлении — ${needFix}`, onClick: () => onNavigate('verify') })
     }
     return items
-  }, [requests, isLogist, now, onNavigate])
+  }, [requests, isStaff, now, onNavigate])
 
   return (
     <section aria-label="Площадка заявок">
@@ -828,7 +844,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         )}
       </SectionHeader>
 
-      {!isLogist && !activeCarrierId && (
+      {!isStaff && !activeCarrierId && (
         <NoticeLine tone="warning" className="mb-4">Выберите перевозчика в шапке, чтобы действовать от его имени</NoticeLine>
       )}
 
@@ -838,7 +854,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       {!loading && !error && requests && (
         <div className="space-y-4">
           {/* Полоса «Требует внимания» — появляется только когда есть работа */}
-          {isLogist && attention.length > 0 && (
+          {isStaff && attention.length > 0 && (
             <div
               className="flex flex-wrap items-center gap-2 border-y border-slate-200 py-2.5"
               role="status"
@@ -951,7 +967,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                       {sorted.map((r) => {
                         const my = myBidOf(r)
                         const km = routeDistanceKm(r.fromPoint, r.toPoint)
-                        const expanded = isLogist && expandedId === r.id && r.status === 'PUBLISHED'
+                        const expanded = isStaff && expandedId === r.id && r.status === 'PUBLISHED'
                         return (
                           <Fragment key={r.id}>
                           <tr
@@ -1001,9 +1017,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                           <td className="border-b border-slate-100 py-3 pr-3"><RateCell request={r} /></td>
                           <td className="border-b border-slate-100 py-3 pr-3"><DeadlineCell request={r} now={now} /></td>
                           <td className="border-b border-slate-100 py-3" onClick={(e) => e.stopPropagation()}>
-                            {isLogist ? (
-                              // логист: разворачивает торговый стенд прямо в строке или смотрит статус;
-                              // рядом — удаление текущей заявки (Task 65, RBAC: delete_current_orders)
+                            {isStaff ? (
+                              // персонал: раскрывает торговый стенд прямо в строке или смотрит статус;
+                              // удаление — только логист (Task 65, RBAC: delete_current_orders), админ смотрит
                               <div className="flex items-center justify-end gap-1.5">
                                 {r.status === 'PUBLISHED' ? (
                                   <Button
@@ -1021,7 +1037,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 ) : (
                                   <StatusBadge status={r.status} />
                                 )}
-                                {DELETABLE_STATUSES.includes(r.status) && (
+                                {isLogist && DELETABLE_STATUSES.includes(r.status) && (
                                   <Button
                                     size="icon"
                                     variant="ghost"
@@ -1073,6 +1089,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 request={r}
                                 now={now}
                                 busy={busyId === r.id}
+                                readOnly={!isLogist}
                                 onExtend={() => void runAction(r.id, 'extend', {}, 'Торги продлены', `№${r.number}: срок увеличен на 2 часа`)}
                                 onOffer={() => void openOffer(r)}
                                 onRaise={() => openRaise(r)}
@@ -1091,7 +1108,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
           </Card>
 
           {/* Журнал событий — компактный перенос из удалённой «Сводки» */}
-          {isLogist && (
+          {isStaff && (
             <Card className="border-slate-200 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
@@ -1486,8 +1503,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
             </DialogTitle>
             {/* описание — только для экранного диктора, на экране его нет */}
             <DialogDescription className="sr-only">
-              Пункт погрузки и точки выгрузки по текущей выборке: {filtered.length}{' '}
-              {pluralRu(filtered.length, ['заявка', 'заявки', 'заявок'])}
+              Активные заявки на карте: {mapPoints.reduce((n, p) => n + p.requests.length, 0)}{' '}
+              {pluralRu(mapPoints.reduce((n, p) => n + p.requests.length, 0), ['заявка', 'заявки', 'заявок'])}. Точки появляются, когда заявка открыта для ставок и срок не вышел.
             </DialogDescription>
           </DialogHeader>
           <div className="flex min-h-0 flex-col gap-3 md:flex-row">
@@ -1496,6 +1513,11 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
               className="flex max-h-44 w-full shrink-0 flex-col gap-1.5 overflow-y-auto pr-1 md:max-h-none md:w-64 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
               aria-label="Точки доставки"
             >
+              {mapPoints.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-xs leading-snug text-slate-500">
+                  Активных заявок нет — на карте появятся точки заявок, открытых для ставок (срок приёма ещё не вышел).
+                </div>
+              )}
               {mapPoints.map((p) => (
                 <button
                   key={p.id}
@@ -1527,14 +1549,14 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
               <DeliveryMap
                 points={mapPoints}
                 focusId={focusPointId}
-                onBid={isLogist ? undefined : (id) => {
+                onBid={role === 'carrier' ? (id) => {
                   // карта закрывается, поверх открывается обычное окно ставки по заявке
                   setMapOpen(false)
                   setFocusPointId(null)
                   setBidAmount('')
                   setBidStep('form')
                   setBidId(id)
-                }}
+                } : undefined}
               />
             </div>
           </div>

@@ -39,19 +39,21 @@ import { activateAccount, listAccounts } from '@/lib/api'
 
 /** Полный список разделов с пометкой ролей: A — администрация, L — логист, C — перевозчик.
  *  Система прав (Task 109): три роли — администрация (профили, база данных), логист (внутренний
- *  контур), перевозчик/экспедитор (кабинет). Профиль и обращения — у всех ролей. */
+ *  контур), перевозчик/экспедитор (кабинет). Профиль и обращения — у всех ролей.
+ *  Task 110: администрации доступны ВСЕ разделы логиста — на просмотр и правку данных
+ *  (операционные решения внутри разделов остаются логисту). */
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier', 'admin'] },
-  { key: 'drafts', label: 'Черновики заявок', roles: ['logist'] },
+  { key: 'drafts', label: 'Черновики заявок', roles: ['logist', 'admin'] },
   { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
   { key: 'apply', label: 'Подать документы', roles: ['carrier'] },
   { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'] },
-  { key: 'verify', label: 'Проверка документов', roles: ['logist'] },
+  { key: 'verify', label: 'Проверка документов', roles: ['logist', 'admin'] },
   { key: 'requests', label: 'Реестр заявок', roles: ['logist', 'admin'] },
   { key: 'registry', label: 'Реестр рейсов', roles: ['logist', 'admin'] },
-  { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier'] },
-  { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier'] },
-  { key: 'reports', label: 'Отчёты', roles: ['logist'] },
+  { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier', 'admin'] },
+  { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier', 'admin'] },
+  { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'] },
   { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'] },
   { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'] },
   { key: 'admin-db', label: 'База данных', roles: ['admin'] },

@@ -50,7 +50,7 @@ function loadDatePassed(loadDate: string): boolean {
   return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) < today
 }
 
-export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
+export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -61,6 +61,8 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
   const [busy, setBusy] = useState(false)
   const [publishHours, setPublishHours] = useState('4')
   const [publishRate, setPublishRate] = useState('')
+  // администрация смотрит черновики без решений: публикация/правка/удаление — логист (Task 110)
+  const isLogist = role === 'logist'
 
   const load = useCallback(async () => {
     try {
@@ -129,11 +131,19 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
         title="Черновики заявок"
         desc="Заявки, которые не на площадке: сохранённые без публикации и торги, по которым за время приёма ставок не было ни одной ставки. Перевозчики черновики не видят."
       >
-        <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
-          <Plus className="h-4 w-4" aria-hidden />
-          Новая заявка
-        </Button>
+        {isLogist && (
+          <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
+            <Plus className="h-4 w-4" aria-hidden />
+            Новая заявка
+          </Button>
+        )}
       </SectionHeader>
+
+      {!isLogist && (
+        <NoticeLine className="mb-4">
+          Раздел логиста — администрация видит черновики в режиме просмотра. Правка данных — через «База данных».
+        </NoticeLine>
+      )}
 
       {requests === null && !error && <LoadingBlock label="Загружаем черновики…" />}
       {error && <ErrorBlock message={error} onRetry={() => void load()} />}
@@ -186,16 +196,20 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
                         Стартовая ставка: <b>{r.startRate > 0 ? rate(r.startRate) : 'не задана'}</b>
                       </span>
                       <div className="ml-auto flex items-center gap-1.5">
-                        <Button size="sm" className="gap-1.5" onClick={() => openPublish(r)}>
-                          <Send className="h-4 w-4" aria-hidden />
-                          Опубликовать
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => setEditId(r.id)} aria-label={`Изменить черновик ${r.number}`} title="Изменить">
-                          <Pencil className="h-4 w-4" aria-hidden />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => setDeleteId(r.id)} aria-label={`Удалить черновик ${r.number}`} title="Удалить">
-                          <Trash2 className="h-4 w-4" aria-hidden />
-                        </Button>
+                        {isLogist && (
+                          <>
+                            <Button size="sm" className="gap-1.5" onClick={() => openPublish(r)}>
+                              <Send className="h-4 w-4" aria-hidden />
+                              Опубликовать
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => setEditId(r.id)} aria-label={`Изменить черновик ${r.number}`} title="Изменить">
+                              <Pencil className="h-4 w-4" aria-hidden />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => setDeleteId(r.id)} aria-label={`Удалить черновик ${r.number}`} title="Удалить">
+                              <Trash2 className="h-4 w-4" aria-hidden />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </CardContent>
@@ -206,8 +220,8 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
         )
       )}
 
-      {/* новая заявка: опубликованная уходит на площадку, черновик — в этот список */}
-      {createOpen && (
+      {/* новая заявка: опубликованная уходит на площадку, черновик — в этот список (только логист) */}
+      {isLogist && createOpen && (
         <RequestFormDialog
           open
           onOpenChange={setCreateOpen}
@@ -223,7 +237,7 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
         />
       )}
 
-      {editTarget && (
+      {isLogist && editTarget && (
         <RequestFormDialog
           key={editTarget.id}
           open

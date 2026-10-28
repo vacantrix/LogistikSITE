@@ -24,6 +24,7 @@ import {
 import {
   AgentStatusBadge, EmptyState, ErrorBlock, InfoTip, LoadingBlock, NoticeLine, SectionHeader, type TabProps,
 } from '@/components/platform/common'
+import { SearchSelect } from '@/components/platform/search-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -673,60 +674,57 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                     <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3">
                       <div className="min-w-0 space-y-2">
                         <div className="text-xs font-semibold text-slate-500">Водитель</div>
-                        <Select value={s.driverId ?? ''} onValueChange={(v) => pickDriver(r.id, v)}>
-                          <SelectTrigger className="w-full" aria-label={`Выбор водителя по заявке ${r.number}`}>
-                            <SelectValue placeholder="Выберите водителя" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {freeFirst(drivers, busyCrew.drivers, r.id).map((d) => {
-                              const b = busyElsewhere(busyCrew.drivers, d.id, r.id)
-                              return (
-                                <SelectItem key={d.id} value={d.id} className={b ? 'text-slate-400' : undefined}>
-                                  {d.fullName}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
-                                </SelectItem>
-                              )
-                            })}
-                          </SelectContent>
-                        </Select>
+                        <SearchSelect
+                          value={s.driverId ?? ''}
+                          options={freeFirst(drivers, busyCrew.drivers, r.id).map((d) => {
+                            const b = busyElsewhere(busyCrew.drivers, d.id, r.id)
+                            return {
+                              value: d.id,
+                              label: `${d.fullName}${b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}`,
+                              muted: Boolean(b),
+                            }
+                          })}
+                          onChange={(v) => pickDriver(r.id, v)}
+                          placeholder="Выберите водителя"
+                          ariaLabel={`Выбор водителя по заявке ${r.number}`}
+                        />
                         {driver ? <DriverCell d={driver} /> : <span className="text-[11px] text-slate-300">—</span>}
                       </div>
                       <div className="min-w-0 space-y-2">
                         <div className="text-xs font-semibold text-slate-500">Тягач</div>
-                        <Select value={s.truckId ?? ''} onValueChange={(v) => pickTruck(r.id, v)}>
-                          <SelectTrigger className="w-full" aria-label={`Выбор тягача по заявке ${r.number}`}>
-                            <SelectValue placeholder="Выберите тягач" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {freeFirst(trucks, busyCrew.trucks, r.id).map((t) => {
-                              const b = busyElsewhere(busyCrew.trucks, t.id, r.id)
-                              return (
-                                <SelectItem key={t.id} value={t.id} className={b ? 'text-slate-400' : undefined}>
-                                  {t.brand} · {t.plate}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
-                                </SelectItem>
-                              )
-                            })}
-                          </SelectContent>
-                        </Select>
+                        <SearchSelect
+                          value={s.truckId ?? ''}
+                          options={freeFirst(trucks, busyCrew.trucks, r.id).map((t) => {
+                            const b = busyElsewhere(busyCrew.trucks, t.id, r.id)
+                            return {
+                              value: t.id,
+                              label: `${t.brand} · ${t.plate}${b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}`,
+                              muted: Boolean(b),
+                            }
+                          })}
+                          onChange={(v) => pickTruck(r.id, v)}
+                          placeholder="Выберите тягач"
+                          ariaLabel={`Выбор тягача по заявке ${r.number}`}
+                        />
                         {truck ? <TruckCell t={truck} /> : <span className="text-[11px] text-slate-300">—</span>}
                       </div>
                       <div className="min-w-0 space-y-2">
                         <div className="text-xs font-semibold text-slate-500">Прицеп</div>
-                        <Select value={s.trailerId ?? ''} onValueChange={(v) => pickTrailer(r.id, v)}>
-                          <SelectTrigger className="w-full" aria-label={`Выбор прицепа по заявке ${r.number}`}>
-                            <SelectValue placeholder="Выберите прицеп" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {/* Прицеп обязателен: только реальные прицепы из базы, без варианта «Без прицепа» */}
-                            {freeFirst(trailers, busyCrew.trailers, r.id).map((z) => {
-                              const b = busyElsewhere(busyCrew.trailers, z.id, r.id)
-                              return (
-                                <SelectItem key={z.id} value={z.id} className={b ? 'text-slate-400' : undefined}>
-                                  {z.plate} · {z.type}{b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}
-                                </SelectItem>
-                              )
-                            })}
-                          </SelectContent>
-                        </Select>
+                        {/* Прицеп обязателен: только реальные прицепы из базы, без варианта «Без прицепа» */}
+                        <SearchSelect
+                          value={s.trailerId ?? ''}
+                          options={freeFirst(trailers, busyCrew.trailers, r.id).map((z) => {
+                            const b = busyElsewhere(busyCrew.trailers, z.id, r.id)
+                            return {
+                              value: z.id,
+                              label: `${z.plate} · ${z.type}${b ? ` · занят (${busyReason(b.status)}, ${b.number})` : ''}`,
+                              muted: Boolean(b),
+                            }
+                          })}
+                          onChange={(v) => pickTrailer(r.id, v)}
+                          placeholder="Выберите прицеп"
+                          ariaLabel={`Выбор прицепа по заявке ${r.number}`}
+                        />
                         {trailer ? <TrailerCell z={trailer} /> : <span className="text-[11px] text-slate-300">—</span>}
                       </div>
                     </div>

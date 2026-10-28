@@ -10,16 +10,21 @@
  * Действия по правам: Просмотр — всем, Редактировать и Удалить — логисту,
  * причём удаление доступно только для текущих (не завершённых) заявок.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
+  Download,
   Eye,
+  FileText,
+  Files,
+  Gavel,
+  Image as ImageIcon,
   Pencil,
   ScrollText,
   Search,
   Trash2,
 } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusDot, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusDot, WithTip, type TabProps,
 } from '@/components/platform/common'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -38,19 +43,177 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
-import { api } from '@/lib/api'
+import { api, secureFileUrl } from '@/lib/api'
+import { formatKm, routeDistanceKm } from '@/lib/geo'
 import { pointInfo } from '@/lib/points'
+import { RouteButton } from '@/components/platform/route-dialog'
 import { RequestFormDialog } from '@/components/platform/request-form'
 import {
-  DELETABLE_STATUSES, REQUEST_GROUP_META, REQUEST_STATUS_META,
+  DELETABLE_STATUSES, MODE_META, REQUEST_GROUP_META, REQUEST_STATUS_META,
   fmtDateTime, num, rate, requestGroupOf, type RequestGroup,
 } from '@/lib/status'
-import type { RequestDTO } from '@/lib/types'
+import {
+  REQUEST_FILE_META, TRANSPORT_OWNERSHIP_META,
+  type ExecutorRole, type RequestDTO,
+} from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
 
 type GroupFilter = 'ALL' | RequestGroup
 type SortOrder = 'desc' | 'asc'
+
+/** Размер файла в списках обмена: до 1 МБ — килобайты, крупнее — мегабайты */
+const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} КБ` : `${(n / 1024 / 1024).toFixed(1)} МБ`)
+
+/** Подписи исполнителя по заявке (Task 109): заказ-заявка перевозчику или поручение экспедитору */
+const EXECUTOR_ROLE_LABEL: Record<ExecutorRole, string> = { CARRIER: 'Перевозчик', FORWARDER: 'Экспедитор' }
+
+/** Адрес точки маршрута: из справочника либо «по данным заявки» с сырым значением */
+const pointAddress = (raw: string): string => {
+  const info = pointInfo(raw)
+  return info.known ? info.address : `Адрес по данным заявки: ${raw}`
+}
+
+/**
+ * Панель маршрута в карточке заявки (Task 110-c): полные названия и адреса точек
+ * погрузки/выгрузки, расстояние по прямой и переход к автомобильному маршруту
+ * в Яндекс.Картах. Точка, которой нет в справочнике, показывается «по данным заявки».
+ */
+function RoutePanel({ from, to, number }: { from: string; to: string; number: string }) {
+  const km = routeDistanceKm(from, to)
+  const points = [
+    { label: 'Погрузка', raw: from, info: pointInfo(from) },
+    { label: 'Выгрузка', raw: to, info: pointInfo(to) },
+  ]
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-medium text-slate-500">Маршрут</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <WithTip tip="Расстояние по прямой между точками погрузки и выгрузки (по справочнику точек платформы)">
+            <span tabIndex={0} className="flex items-baseline gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1">
+              <span className="text-[11px] text-slate-500">по прямой</span>
+              <span className="text-sm font-semibold text-slate-900">{km != null ? formatKm(km) : '—'}</span>
+            </span>
+          </WithTip>
+          <RouteButton from={from} to={to} number={number} />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {points.map(({ label, raw, info }) => {
+          const Icon = info.icon
+          return (
+            <div key={label} className="flex gap-2.5">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100" aria-hidden>
+                <Icon className="h-3.5 w-3.5 text-slate-500" />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[11px] leading-tight text-slate-500">
+                  {label}{info.known && ` · ${info.short}`}
+                </div>
+                <div className="text-sm font-semibold leading-snug text-slate-900">{info.known ? info.name : raw}</div>
+                <div className={`mt-0.5 text-[13px] leading-snug ${info.known ? 'text-slate-600' : 'text-slate-500'}`}>
+                  {pointAddress(raw)}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Ячейка «Параметров»: подпись сверху, значение полужирным, пояснение — по наведению */
+function InfoCell({ label, value, sub, tip }: {
+  label: string
+  value: ReactNode
+  sub?: ReactNode
+  tip?: string
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
+      <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        {label}
+        {tip && <InfoTip label={label}>{tip}</InfoTip>}
+      </div>
+      <div className="mt-0.5 text-sm font-semibold text-slate-900">{value}</div>
+      {sub && <div className="mt-0.5 text-[11px] leading-snug text-slate-500">{sub}</div>}
+    </div>
+  )
+}
+
+/**
+ * Ставки по заявке: активные — по возрастанию ставки, отозванные — внизу приглушённо
+ * с пометкой «отозвана»; победитель — точкой и словом «Победитель».
+ */
+function BidsTable({ bids }: { bids: RequestDTO['bids'] }) {
+  const sorted = [...bids].sort((a, b) =>
+    (a.withdrawn ? 1 : 0) - (b.withdrawn ? 1 : 0) ||
+    (a.withdrawn ? a.createdAt.localeCompare(b.createdAt) : a.amount - b.amount))
+  return (
+    <div className={`max-h-60 overflow-y-auto rounded-lg border border-slate-200 ${THIN_SCROLL}`}>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Перевозчик</TableHead>
+            <TableHead>Ставка</TableHead>
+            <TableHead>Время</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sorted.map((b) => (
+            <TableRow key={b.id} className={b.withdrawn ? 'text-slate-400' : undefined}>
+              <TableCell>
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className={b.withdrawn ? undefined : 'font-medium text-slate-900'}>{b.carrierName}</span>
+                  {b.withdrawn && <span className="text-xs">отозвана</span>}
+                  {b.isWinner && !b.withdrawn && (
+                    <StatusDot dot="bg-emerald-500" className="text-xs text-slate-500">Победитель</StatusDot>
+                  )}
+                </span>
+              </TableCell>
+              <TableCell className={b.withdrawn ? undefined : 'font-semibold text-slate-900'}>{rate(b.amount)}</TableCell>
+              <TableCell className="whitespace-nowrap text-slate-500">{fmtDateTime(b.createdAt)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+/** Файлы обмена перевозчик ↔ логист по заявке (Task 109): вид, автор, дата, размер, «Скачать» */
+function RequestFilesList({ files }: { files: RequestDTO['files'] }) {
+  return (
+    <ul className="space-y-1.5">
+      {files.map((f) => {
+        const FileIcon = f.isImage ? ImageIcon : FileText
+        return (
+          <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <FileIcon className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-slate-900">{f.fileName}</span>
+              <span className="block text-[11px] text-slate-500">
+                {REQUEST_FILE_META[f.kind].label} · {f.uploadedByName} · {fmtDateTime(f.createdAt)}
+              </span>
+            </span>
+            <span className="shrink-0 text-[11px] tabular-nums text-slate-400">{kb(f.sizeBytes)}</span>
+            <a
+              href={secureFileUrl(f.url)}
+              download={f.fileName}
+              className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              aria-label={`Скачать ${f.fileName}`}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              Скачать
+            </a>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
 
 export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
@@ -294,12 +457,13 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
 
       {/* Карточка заявки */}
       <Dialog open={!!detail} onOpenChange={(o) => { if (!o) setDetailId(null) }}>
-        <DialogContent className={`max-h-[88vh] overflow-y-auto sm:max-w-2xl ${THIN_SCROLL}`}>
+        <DialogContent className={`max-h-[88vh] overflow-y-auto sm:max-w-3xl ${THIN_SCROLL}`}>
           {detail && (
             <>
               <DialogHeader>
-                <DialogTitle className="flex flex-wrap items-center gap-2">
-                  Заявка <span className="text-slate-900">{detail.number}</span>
+                <DialogTitle className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  Заявка <span className="font-bold text-slate-900">№{detail.number}</span>
+                  {/* статус-пузырь один — группа; точный статус — рядом словом (Task 67) */}
                   <StatusDot dot={REQUEST_GROUP_META[requestGroupOf(detail.status)].dot} className="font-normal">
                     {REQUEST_GROUP_META[requestGroupOf(detail.status)].label}
                   </StatusDot>
@@ -311,33 +475,80 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   Создана {fmtDateTime(detail.createdAt)} · {detail.createdBy}
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {[
-                  { label: 'Груз', value: `${detail.cargo}, ${num(detail.tonnage)} т` },
-                  { label: 'Точка А (погрузка)', value: `${pointInfo(detail.fromPoint).short} — ${pointInfo(detail.fromPoint).address}` },
-                  { label: 'Точка Б (выгрузка)', value: `${pointInfo(detail.toPoint).short} — ${pointInfo(detail.toPoint).address}` },
-                  { label: 'Желаемые сроки', value: `${detail.loadDate}, ${detail.loadWindow}` },
-                  { label: 'Перевозчик', value: detail.winnerName ?? '—' },
-                  { label: 'Стартовая ставка', value: detail.startRate > 0 ? rate(detail.startRate) : 'не задана' },
-                  { label: 'Лучшая ставка', value: detail.bestRate != null ? rate(detail.bestRate) : '—' },
-                ].map((f) => (
-                  <div key={f.label} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
-                    <div className="text-[11px] text-muted-foreground">{f.label}</div>
-                    <div className="mt-0.5 text-sm font-semibold text-slate-900">{f.value}</div>
-                  </div>
-                ))}
-              </div>
+
+              {/* Маршрут (Task 110-c): полные адреса точек, расстояние, построение маршрута */}
+              <RoutePanel from={detail.fromPoint} to={detail.toPoint} number={detail.number} />
+
+              {/* Параметры заявки */}
+              <section className="border-t border-slate-100 pt-3">
+                <h4 className="text-xs font-medium text-slate-500">Параметры</h4>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  <InfoCell
+                    label="Груз"
+                    value={`${detail.cargo}, ${num(detail.tonnage)} т`}
+                    sub={detail.cargoCategory ? `Категория: ${detail.cargoCategory}` : undefined}
+                  />
+                  <InfoCell label="Тип ТС" value={detail.truckType} />
+                  <InfoCell label="Вид тендера" value={MODE_META[detail.mode].label} />
+                  <InfoCell label="Погрузка" value={`${detail.loadDate} · ${detail.loadWindow}`} />
+                  <InfoCell label="Приём ставок до" value={detail.deadline ? fmtDateTime(detail.deadline) : '—'} />
+                  <InfoCell
+                    label="Исполнитель по заявке"
+                    value={detail.executorRole ? EXECUTOR_ROLE_LABEL[detail.executorRole] : 'По роли компании'}
+                    tip={detail.executorRole === null
+                      ? 'Перевозчик не выбирал исполнителя по этой заявке — работа ведётся по роли компании'
+                      : undefined}
+                  />
+                  <InfoCell
+                    label="Транспорт по заявке"
+                    value={TRANSPORT_OWNERSHIP_META[detail.transportOwnership].label}
+                  />
+                  <InfoCell label="Перевозчик" value={detail.winnerName ?? '—'} />
+                  <InfoCell label="Стартовая ставка" value={detail.startRate > 0 ? rate(detail.startRate) : 'не задана'} />
+                  <InfoCell label="Лучшая ставка" value={detail.bestRate != null ? rate(detail.bestRate) : '—'} />
+                </div>
+              </section>
+
+              {/* Ставки по заявке (логисту — все, перевозчику — только свои) */}
+              <section className="border-t border-slate-100 pt-3">
+                <h4 className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                  <Gavel className="h-3.5 w-3.5" aria-hidden />
+                  Ставки ({detail.bids.length})
+                </h4>
+                {detail.bids.length === 0
+                  ? <p className="mt-2 text-sm text-slate-400">Ставок не было</p>
+                  : <div className="mt-2"><BidsTable bids={detail.bids} /></div>}
+              </section>
+
+              {/* Обмен документами по заявке (Task 109) */}
+              <section className="border-t border-slate-100 pt-3">
+                <h4 className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                  <Files className="h-3.5 w-3.5" aria-hidden />
+                  Обмен документами по заявке
+                </h4>
+                {detail.files.length === 0
+                  ? <p className="mt-2 text-sm text-slate-400">Обмена документами не было</p>
+                  : <div className="mt-2"><RequestFilesList files={detail.files} /></div>}
+              </section>
+
               {detail.comment && (
                 <div className="rounded-lg border border-slate-200 bg-white p-3">
                   <div className="text-[11px] text-muted-foreground">Комментарий для исполнителя</div>
                   <p className="mt-1 whitespace-pre-line text-sm text-slate-800">{detail.comment}</p>
                 </div>
               )}
+              {detail.verifyComment && (
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="text-[11px] text-muted-foreground">Комментарий сверки</div>
+                  <p className="mt-1 whitespace-pre-line text-sm text-slate-800">{detail.verifyComment}</p>
+                </div>
+              )}
+
               {/* вложения (Task 64) */}
               {detail.documents.length > 0 && (
-                <div>
-                  <h4 className="mb-2 text-sm font-semibold text-slate-900">Вложения ({detail.documents.length})</h4>
-                  <div className="flex flex-wrap gap-2">
+                <section className="border-t border-slate-100 pt-3">
+                  <h4 className="text-xs font-medium text-slate-500">Вложения ({detail.documents.length})</h4>
+                  <div className="mt-2 flex flex-wrap gap-2">
                     {detail.documents.map((d) => (
                       <a
                         key={d.id}
@@ -350,7 +561,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                       </a>
                     ))}
                   </div>
-                </div>
+                </section>
               )}
             </>
           )}

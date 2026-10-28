@@ -5,7 +5,9 @@
  *  — новая заявка: «Опубликовать» (сразу на площадку) или «Сохранить в черновики»
  *    (заявка остаётся у логиста, перевозчики её не видят);
  *  — правка черновика или заявки, которая ещё на площадке.
- * Груз выбирается только из справочника грузов, точки — из справочника точек.
+ * Груз выбирается только из справочника грузов; точки А/Б — быстрый выбор «АЭМЗ»,
+ * точка справочника или любой адрес вручную (сохраняется в заявке как есть).
+ * Тип ТС — только «Борт» и «Тент» (Task 110: старые «Реф»/«Изотерм» убраны из выбора).
  * Параметры торгов всегда на виду: ставка и срок приёма ставок решают исход торгов.
  * Монтируется на время показа (родитель рендерит её только открытой, с key заявки):
  * форма заполняется один раз при открытии — данными заявки или автосохранением.
@@ -22,10 +24,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { InfoTip } from '@/components/platform/common'
 import { PointSelect } from '@/components/platform/point-autocomplete'
+import { SearchSelect } from '@/components/platform/search-select'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { fileToCompressedDataUri } from '@/lib/demo-media'
-import { canonicalPoint } from '@/lib/points'
 import type { CargoTypeDTO, RequestDTO, RequestMode } from '@/lib/types'
 
 /** Ключ автосохранения новой заявки в localStorage: случайно закрытое окно не теряет данные */
@@ -33,7 +35,9 @@ const CREATE_AUTOSAVE_KEY = 'aemz_request_form_v2'
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024
 const MAX_FILES = 8
-const TRUCK_TYPES = ['Тент', 'Реф', 'Изотерм', 'Борт']
+/* Только борт и тент (Task 110): «Реф»/«Изотерм» из выбора убраны; если в правимой
+ * заявке остался прежний тип, он временно добавляется первым с пометкой «прежний тип» */
+const TRUCK_TYPES = ['Борт', 'Тент']
 export const DEADLINE_OPTIONS: [string, string][] = [
   ['2', '2 часа'], ['4', '4 часа'], ['8', '8 часов'], ['24', '1 сутки'], ['48', '2 суток'], ['72', '3 суток'],
 ]
@@ -65,8 +69,9 @@ const ruToIsoDate = (s: string): string => {
 function formFromRequest(r: RequestDTO): FormState {
   return {
     cargoTypeId: r.cargoTypeId ?? '',
-    fromPoint: canonicalPoint(r.fromPoint) ?? '',
-    toPoint: canonicalPoint(r.toPoint) ?? '',
+    // точки — сырыми строками заявки: справочный город или свободный адрес как есть
+    fromPoint: r.fromPoint,
+    toPoint: r.toPoint,
     loadDate: ruToIsoDate(r.loadDate),
     loadWindow: r.loadWindow === '—' ? '08:00–12:00' : r.loadWindow,
     comment: r.comment ?? '',
@@ -198,6 +203,12 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
     }
   }
 
+  // тип ТС: только борт/тент; прежний тип старой заявки временно первым, чтобы Select не показывал пустоту
+  const truckTypeOptions: { value: string; label: string }[] = [
+    ...(!TRUCK_TYPES.includes(form.truckType) ? [{ value: form.truckType, label: `${form.truckType} (прежний тип)` }] : []),
+    ...TRUCK_TYPES.map((t) => ({ value: t, label: t })),
+  ]
+
   const sectionTitle = (n: number, text: string) => (
     <h4 className="flex items-center gap-2 text-xs font-medium text-slate-500">
       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-100 text-[11px] font-semibold text-slate-600" aria-hidden>{n}</span>
@@ -228,23 +239,27 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
             {sectionTitle(1, 'Груз и маршрут')}
             <div className="space-y-1.5">
               <Label htmlFor="rf-cargo">Груз — из справочника грузов {req}</Label>
-              <Select value={form.cargoTypeId} onValueChange={pickCargo} disabled={!cargoTypes}>
-                <SelectTrigger id="rf-cargo" className="w-full">
-                  <SelectValue placeholder={cargoTypes ? 'Выберите груз' : 'Загружаем справочник…'} />
-                </SelectTrigger>
-                <SelectContent className="max-h-80">
-                  {(cargoTypes ?? []).map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                value={form.cargoTypeId}
+                options={(cargoTypes ?? []).map((c) => ({ value: c.id, label: c.name, sub: c.category }))}
+                onChange={pickCargo}
+                placeholder={cargoTypes ? 'Выберите груз' : 'Загружаем справочник…'}
+                ariaLabel="Груз"
+                disabled={!cargoTypes}
+              />
               {cargoTypes && cargoTypes.length === 0 && (
                 <p className="text-xs text-amber-700">Справочник грузов пуст — добавьте груз в «Справочниках»</p>
               )}
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="rf-from">Точка А — погрузка {req}</Label>
+                <Label htmlFor="rf-from" className="flex items-center gap-1.5">
+                  Точка А — погрузка {req}
+                  <InfoTip label="Точки маршрута">
+                    АЭМЗ — быстрый выбор из списка. Можно вписать и любой другой адрес вручную —
+                    он сохранится в заявке как есть; расстояние КМ считается по точкам справочника.
+                  </InfoTip>
+                </Label>
                 <PointSelect id="rf-from" value={form.fromPoint} onChange={(v) => set('fromPoint', v)} ariaLabel="Точка А — погрузка" />
               </div>
               <div className="space-y-1.5">
@@ -274,7 +289,7 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
                 <Select value={form.truckType} onValueChange={(v) => set('truckType', v)}>
                   <SelectTrigger id="rf-truck" className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {TRUCK_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                    {truckTypeOptions.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

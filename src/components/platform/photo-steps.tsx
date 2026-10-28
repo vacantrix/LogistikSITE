@@ -7,7 +7,7 @@
  * 2 — СТС лицевая, 3 — СТС оборот. Сразу после загрузки фото проверяется на размер, резкость
  * и темноту (lib/photo-quality): плохой снимок помечается до нейросети.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { Check, ImagePlus, Lock, X } from 'lucide-react'
 import { StatusDot, WithTip } from '@/components/platform/common'
 import { fileToCompressedDataUri, sleep } from '@/lib/demo-media'
@@ -135,6 +135,30 @@ export function PhotoSteps<K extends string>({
   // открыт первый незагруженный шаг; пустые шаги после него закрыты
   const current = steps.findIndex((s) => !files[s.key])
   const blocked = lock || loading !== null
+  const [dragOverKey, setDragOverKey] = useState<K | null>(null)
+
+  /** приём фото перетаскиванием: активные зоны подсвечиваются, в drop берём первую картинку;
+   * заблокированные шаги (lock/чужая загрузка) файлы не принимают */
+  const dropHandlers = (key: K) =>
+    blocked
+      ? {}
+      : {
+          onDragOver: (e: DragEvent<HTMLLabelElement>) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setDragOverKey(key)
+          },
+          onDragLeave: (e: DragEvent<HTMLLabelElement>) => {
+            // не снимаем подсветку при переходе на своих детей — иначе мигание
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOverKey(null)
+          },
+          onDrop: (e: DragEvent<HTMLLabelElement>) => {
+            e.preventDefault()
+            setDragOverKey(null)
+            const f = e.dataTransfer.files?.[0]
+            if (f && f.type.startsWith('image/')) onPick(key, f)
+          },
+        }
 
   const input = (key: K) => (
     <input
@@ -197,17 +221,18 @@ export function PhotoSteps<K extends string>({
 
             {/* замена фото идёт с тем же кружком, что и первая загрузка */}
             {isLoading ? (
-              <div className="mt-1 flex h-16 items-center justify-center gap-2 rounded border border-slate-200 bg-white">
+              <div className="mt-1 flex h-24 items-center justify-center gap-2 rounded border border-slate-200 bg-white">
                 <UploadRing progress={loading.progress} />
                 <span className="text-[11px] text-slate-500">{file ? 'Заменяем…' : 'Загружаем…'}</span>
               </div>
             ) : file ? (
               <>
                 {lock ? (
-                  <img src={file.dataUri} alt={`Фото: ${s.label}`} className="mt-1.5 h-16 w-full rounded border border-slate-200 bg-white object-contain" />
+                  <img src={file.dataUri} alt={`Фото: ${s.label}`} className="mt-1.5 h-24 w-full rounded border border-slate-200 bg-white object-contain" />
                 ) : (
-                  <label title="Заменить фото" className={`mt-1.5 block ${blocked ? 'pointer-events-none' : 'cursor-pointer'}`}>
-                    <img src={file.dataUri} alt={`Фото: ${s.label}`} className="h-16 w-full rounded border border-slate-200 bg-white object-contain transition-colors hover:border-blue-400" />
+                  <label title="Заменить фото" {...dropHandlers(s.key)} className={`mt-1.5 block ${blocked ? 'pointer-events-none' : 'cursor-pointer'}`}>
+                    {/* перетаскивание на превью — нейтральная подсветка без синего */}
+                    <img src={file.dataUri} alt={`Фото: ${s.label}`} className={`h-24 w-full rounded border object-contain transition-colors ${dragOverKey === s.key ? 'border-slate-500 bg-slate-100' : 'border-slate-200 bg-white hover:border-blue-400'}`} />
                     {input(s.key)}
                   </label>
                 )}
@@ -230,7 +255,7 @@ export function PhotoSteps<K extends string>({
             ) : locked ? (
               <div
                 title={`Сначала загрузите шаг ${current + 1}`}
-                className="mt-1 flex h-16 flex-col items-center justify-center gap-0.5 rounded border border-dashed border-slate-200 bg-white/40 text-slate-400"
+                className="mt-1 flex h-24 flex-col items-center justify-center gap-0.5 rounded border border-dashed border-slate-200 bg-white/40 text-slate-400"
               >
                 <Lock className="h-3.5 w-3.5" aria-hidden />
                 <span className="text-[10px] font-medium">Шаг {i + 1}</span>
@@ -238,10 +263,18 @@ export function PhotoSteps<K extends string>({
             ) : (
               <label
                 title="JPG или PNG"
-                className={`mt-1 flex h-16 flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-white/70 text-center ${blocked ? 'pointer-events-none opacity-60' : 'cursor-pointer'} ${miss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'}`}
+                {...dropHandlers(s.key)}
+                className={`mt-1 flex h-24 flex-col items-center justify-center gap-0.5 rounded border border-dashed text-center ${blocked ? 'pointer-events-none opacity-60' : 'cursor-pointer'} ${
+                  dragOverKey === s.key
+                    ? `bg-slate-100 ${miss ? 'border-red-400' : 'border-slate-500'}`
+                    : `bg-white/70 ${miss ? 'border-red-300 hover:border-red-400' : 'border-slate-300 hover:border-slate-400 hover:bg-slate-50'}`
+                }`}
               >
                 <ImagePlus className={`h-4 w-4 ${miss ? 'text-red-500' : 'text-slate-400'}`} aria-hidden />
-                <span className={`text-[11px] font-medium ${miss ? 'text-red-600' : 'text-slate-600'}`}>Загрузить фото</span>
+                <span className={`text-[11px] font-medium ${miss ? 'text-red-600' : 'text-slate-600'}`}>
+                  {dragOverKey === s.key ? 'Отпустите фото здесь' : 'Загрузить фото'}
+                </span>
+                <span className="text-[10px] text-slate-400">или перетащите файл сюда</span>
                 {input(s.key)}
               </label>
             )}

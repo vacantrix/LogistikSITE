@@ -240,7 +240,7 @@ function queueState(
   return flagged ? 'pending' : 'new'
 }
 
-export default function VerificationTab({ activeCarrierId: _activeCarrierId, onNavigate, liveTick }: TabProps) {
+export default function VerificationTab({ activeCarrierId: _activeCarrierId, role, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [carriersLoaded, setCarriersLoaded] = useState(false)
@@ -263,6 +263,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   const [returnComment, setReturnComment] = useState('')
   // скрытый input обмена документами (Task 109): загрузка файла для перевозчика
   const exchangeInput = useRef<HTMLInputElement | null>(null)
+  // решения по пакету (утвердить/доработка) и выкладывание документов — только логист (Task 110)
+  const isLogist = role === 'logist'
 
   const load = useCallback(async () => {
     try {
@@ -358,7 +360,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   const truck = selected ? truckMap.get(selected.truckId ?? '') ?? null : null
   const trailer = selected ? trailerMap.get(selected.trailerId ?? '') ?? null : null
 
-  const isEditable = selected?.status === 'AT_LOGIST'
+  const isEditable = selected?.status === 'AT_LOGIST' && isLogist
 
   const doConfirm = async (r: RequestDTO) => {
     setBusy(r.id)
@@ -840,17 +842,19 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                                 <Download className="h-3.5 w-3.5" aria-hidden />
                                 Скачать
                               </a>
-                              <button
-                                type="button"
-                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-600 disabled:opacity-50"
-                                aria-label={`Удалить файл ${f.fileName}`}
-                                disabled={busy !== null}
-                                onClick={() => void removeRequestFile(selected, f.id)}
-                              >
-                                {busy === `${selected.id}:xfd:${f.id}`
-                                  ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                                  : <Trash2 className="h-4 w-4" aria-hidden />}
-                              </button>
+                              {isLogist && (
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-600 disabled:opacity-50"
+                                  aria-label={`Удалить файл ${f.fileName}`}
+                                  disabled={busy !== null}
+                                  onClick={() => void removeRequestFile(selected, f.id)}
+                                >
+                                  {busy === `${selected.id}:xfd:${f.id}`
+                                    ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                    : <Trash2 className="h-4 w-4" aria-hidden />}
+                                </button>
+                              )}
                             </li>
                           )
                         })}
@@ -869,19 +873,21 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                       }}
                     />
                     <div className="mt-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        disabled={busy !== null}
-                        onClick={() => exchangeInput.current?.click()}
-                        aria-label={`Загрузить документ для перевозчика по заявке №${selected.number}`}
-                      >
-                        {busy === `${selected.id}:xf`
-                          ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                          : <Upload className="h-4 w-4" aria-hidden />}
-                        Загрузить документ для перевозчика
-                      </Button>
+                      {isLogist && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={busy !== null}
+                          onClick={() => exchangeInput.current?.click()}
+                          aria-label={`Загрузить документ для перевозчика по заявке №${selected.number}`}
+                        >
+                          {busy === `${selected.id}:xf`
+                            ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                            : <Upload className="h-4 w-4" aria-hidden />}
+                          Загрузить документ для перевозчика
+                        </Button>
+                      )}
                     </div>
                   </div>
 
@@ -956,6 +962,14 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                         ) : (
                           <div className="mt-0.5 text-xs text-slate-500">Пропуск подготовлен, ЭТрН — в разделе «Подписать ЭДО»</div>
                         )}
+                      </NoticeLine>
+                    ) : selected.status === 'AT_LOGIST' && !isLogist ? (
+                      /* администрация смотрит пакет на сверке без решений — решает логист (Task 110) */
+                      <NoticeLine>
+                        <div className="font-medium text-slate-900">Пакет на сверке</div>
+                        <div className="mt-0.5 text-xs text-slate-600">
+                          Решение (утвердить / на доработку) принимает логист — администрации доступен просмотр и правка данных через «База данных».
+                        </div>
                       </NoticeLine>
                     ) : (
                       /* возвращено агенту — строка с янтарной иконкой */

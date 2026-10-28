@@ -8,6 +8,9 @@
  * только в браузере и обращается к window при инициализации.
  * На карте нет подписей: вместо строки «Leaflet | © OpenStreetMap» — маленький
  * значок «©», полный текст по наведению (лицензия OpenStreetMap требует указания источника).
+ *
+ * Тайлы идут через наш прокси /api/map-tile/{z}/{x}/{y}: в окружении предпросмотра
+ * браузеру недоступен tile.openstreetmap.org напрямую — без прокси карта серая.
  */
 
 import { useEffect, useRef } from 'react'
@@ -127,7 +130,7 @@ export default function DeliveryMap({ points, focusId, onBid }: {
     if (!el || mapRef.current) return
     // стандартная строка «Leaflet | © OpenStreetMap» отключена — вместо неё значок «©»
     const map = L.map(el, { center: [48.5, 38.0], zoom: 4, attributionControl: false })
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map)
+    L.tileLayer('/api/map-tile/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map)
     new MapCredit({ position: 'bottomright' }).addTo(map)
     // Leaflet гасит всплытие кликов из карточки — обработчик «Откликнуться» вешаем при открытии
     map.on('popupopen', (e: L.PopupEvent) => {

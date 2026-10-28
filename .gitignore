@@ -73,3 +73,6 @@ mini-services/paddle-ocr/.models/
 
 # образцы проформ для пользователя (Task 99)
 /download/*.docx
+
+# Рабочие заметки субагентов
+agent-ctx/
