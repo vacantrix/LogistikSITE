@@ -52,6 +52,11 @@ model User {
   // персональное разрешение «Редактирование своего профиля» (Task 112):
   // null — как у роли (матрица прав), 'allow' — разрешено лично, 'deny' — запрещено лично
   profileEditOwn String?
+  // персональные права пользователя (Task 113): JSON { ключПрава: 'allow' | 'deny' } —
+  // перекрывают матрицу роли; пусто/null — работа строго по роли.
+  // Выдаётся администрацией в «Профилях и доступах» (logist1 — почти все права ведущего
+  // специалиста, logist2 — урезанный набор линейного сотрудника).
+  permOverrides  String?
   carrier        Carrier?        @relation("carrierUser", fields: [carrierId], references: [id])
   createdAt      DateTime        @default(now())
   notifications  Notification[]

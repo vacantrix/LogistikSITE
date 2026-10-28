@@ -20,10 +20,10 @@
  *  «Добавить аккаунт» (вход под новой учёткой без выбрасывания текущих сессий)
  *  и выход — затрагивающий только аккаунт этой вкладки.
  */
-import { useState, useEffect, type ComponentType } from 'react'
+import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
   BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
-  History, LayoutGrid, ListChecks, LogOut, Mail, MessagesSquare, MoreHorizontal, Phone, ScanSearch, ShieldCheck, Truck, UserCog, UserPen, UserPlus, Users,
+  History, LayoutGrid, ListChecks, LogOut, Mail, MessagesSquare, MoreHorizontal, Phone, ScanSearch, ShieldCheck, Truck, UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -244,6 +244,9 @@ const pillSub = (l: { position: string; company: string }, fallback: string): st
  * Task 112: белая плашка меню — полноценная карточка профиля (значок человека, ФИО
  * крупнее, должность, организация с переносом, телефон и почта) и «Изменить профиль»
  * для тех, у кого есть право profile:edit; данные обновляются сразу при сохранении проформы.
+ * Task 113: строка «логин · роль» в плашке не показывается — только ФИО, должность
+ * и организация; сразу после сохранения проформы рядом с ФИО появляется значок
+ * человека «Профиль обновлён» (гаснет через несколько секунд).
  */
 function AccountMenu({ user, profile, compact, canEditProfile, onNavigate, onLogout, onAddAccount }: {
   user: SessionUserDTO
@@ -262,6 +265,21 @@ function AccountMenu({ user, profile, compact, canEditProfile, onNavigate, onLog
   const pill = pillLines(profile, user)
   const phone = profile?.phone?.trim() || ''
   const email = profile?.email?.trim() || ''
+  // значок человека при изменении профиля (Task 113): событие из раздела «Профиль»
+  const [justUpdated, setJustUpdated] = useState(false)
+  const updatedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    const onProfileUpdated = () => {
+      setJustUpdated(true)
+      if (updatedTimer.current) clearTimeout(updatedTimer.current)
+      updatedTimer.current = setTimeout(() => setJustUpdated(false), 8000)
+    }
+    window.addEventListener('aemz:profile-updated', onProfileUpdated)
+    return () => {
+      window.removeEventListener('aemz:profile-updated', onProfileUpdated)
+      if (updatedTimer.current) clearTimeout(updatedTimer.current)
+    }
+  }, [])
 
   const switchTo = (userId: string) => {
     if (activateAccount(userId)) window.location.reload()
@@ -300,15 +318,21 @@ function AccountMenu({ user, profile, compact, canEditProfile, onNavigate, onLog
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72">
-        {/* профиль в белой плашке меню (Task 112): значок человека, ФИО, должность,
-            организация (переносится внутри пузыря), контакты и учётная запись */}
+        {/* профиль в белой плашке меню (Task 112): значок человека, ФИО крупно, должность,
+            организация (переносится внутри пузыря), контакты; учётная запись не показывается (Task 113) */}
         <DropdownMenuLabel>
           <div className="flex items-start gap-2.5">
-            <CircleUserRound className="mt-0.5 h-9 w-9 shrink-0 text-slate-300" aria-hidden />
+            <CircleUserRound className="mt-0.5 h-10 w-10 shrink-0 text-slate-300" aria-hidden />
             <div className="min-w-0 flex-1">
-              <span className="block break-words text-[15px] font-semibold leading-snug text-slate-900">{pill.title}</span>
+              <span className="block break-words text-base font-bold leading-snug text-slate-900">{pill.title}</span>
+              {justUpdated && (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                  <UserRoundCheck className="h-3 w-3" aria-hidden />
+                  Профиль обновлён
+                </span>
+              )}
               {pill.position && (
-                <span className="mt-0.5 block text-xs font-medium text-slate-700">{pill.position}</span>
+                <span className="mt-1 block text-xs font-medium text-slate-700">{pill.position}</span>
               )}
               {pill.company && (
                 <span className="mt-0.5 block break-words text-xs leading-snug text-slate-500">{pill.company}</span>
@@ -331,9 +355,6 @@ function AccountMenu({ user, profile, compact, canEditProfile, onNavigate, onLog
               )}
             </div>
           )}
-          <span className="mt-1.5 block truncate text-xs font-normal text-slate-500">
-            {user.login} · {roleLabelOf(user.role)}
-          </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {/* правка профиля — только с правом (Task 112): без права пункт отсутствует */}
@@ -408,6 +429,16 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
     }
     window.addEventListener('aemz:profile-updated', onProfileUpdated)
     return () => window.removeEventListener('aemz:profile-updated', onProfileUpdated)
+  }, [])
+  // проформа может быть отредактирована админом в «Профилях и доступах» — обновляем по возврату на вкладку
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        api.getProfile().then((d) => setProfile(d.profile)).catch(() => { /* плашка покажет прошлые данные */ })
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
 
   return (

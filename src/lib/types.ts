@@ -400,6 +400,8 @@ export interface AdminUserDTO {
   carrierName: string | null
   /** персональное разрешение «Редактирование своего профиля» (Task 112): null — как у роли */
   profileEditOwn: 'allow' | 'deny' | null
+  /** персональные права пользователя (Task 113): ключ → allow|deny; перекрывают роль */
+  permOverrides: Record<string, 'allow' | 'deny'> | null
   createdAt: string
   profile: ProfileDTO | null
 }

@@ -7,7 +7,7 @@ import { plog } from '@/lib/platform-log'
 import { loadRequestFor } from '@/lib/requests'
 import { imageDataUriError, isPdfDataUri } from '@/lib/settings'
 import { toRequestDTO } from '@/lib/serialize'
-import { allowed as hasPerm, permDenied, type PermKey } from '@/lib/permissions'
+import { allowedFor as hasPerm, permDenied, type PermKey } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // права (Task 111): сотрудник выкладывает документы перевозчику (docs:upload),
   // перевозчик передаёт доверенность/заявку (docs:request)
   const needPerm: PermKey = isStaff(auth.role) ? 'docs:upload' : 'docs:request'
-  if (!(await hasPerm(auth.role, needPerm))) {
+  if (!(await hasPerm(auth, needPerm))) {
     return NextResponse.json({ error: permDenied(needPerm) }, { status: 403 })
   }
 
@@ -128,7 +128,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   }
   // права (Task 111): тот же набор, что и на загрузку
   const delPerm: PermKey = isStaff(auth.role) ? 'docs:upload' : 'docs:request'
-  if (!(await hasPerm(auth.role, delPerm))) {
+  if (!(await hasPerm(auth, delPerm))) {
     return NextResponse.json({ error: permDenied(delPerm) }, { status: 403 })
   }
 

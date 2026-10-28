@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser, type Role } from '@/lib/auth'
 import { plog } from '@/lib/platform-log'
 import {
-  PERM_GROUPS, PERM_DEFAULTS, ROLE_LABELS, allowedOwnProfile, invalidatePermCache, permLabel,
-  permMatrix, type PermKey,
+  PERM_GROUPS, PERM_DEFAULTS, ROLE_LABELS, invalidatePermCache, invalidateUserPermCache, permLabel,
+  permMatrix, userPermOverrides, type PermKey,
 } from '@/lib/permissions'
 import { db } from '@/lib/db'
 
@@ -27,18 +27,19 @@ export async function GET() {
   if (auth instanceof NextResponse) return auth
 
   const matrix = await permMatrix()
+  // эффективные права пользователя (Task 113): персональные оверрайды перекрывают роль
+  const overrides = await userPermOverrides(auth.id)
   const mine = PERM_GROUPS.flatMap((g) => g.items)
-    .filter((i) => matrix.get(`${auth.role}:${i.key}`) === true)
+    .filter((i) => {
+      const own = overrides[i.key]
+      if (own) return own === 'allow'
+      return matrix.get(`${auth.role}:${i.key}`) === true
+    })
     .map((i) => i.key as string)
-
-  // персональное разрешение «Редактирование своего профиля» (Task 112) перекрывает право роли
-  const me = await db.user.findUnique({ where: { id: auth.id }, select: { profileEditOwn: true } })
-  const ownProfile = await allowedOwnProfile(auth.role, me?.profileEditOwn)
-  const mineEffective = mine.filter((k) => k !== 'profile:edit').concat(ownProfile ? ['profile:edit'] : [])
 
   return NextResponse.json({
     perms: permsView(matrix),
-    mine: mineEffective,
+    mine,
     defaults: Object.fromEntries(
       Object.entries(PERM_DEFAULTS).map(([role, keys]) => [role, keys]),
     ),

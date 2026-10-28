@@ -32,6 +32,12 @@ async function main() {
   const scrap = cargo.find((c) => c.name.includes('металлолом'))
   if (scrap) CG['металлолом'] = scrap
 
+  // создатели заявок — логисты АЭМЗ (Task 113): чередуем ведущего специалиста и линейного
+  const users = await db.user.findMany({ where: { login: { in: ['logist1', 'logist2'] } } })
+  const createdBy = (i) => (i % 2 === 0
+    ? (users.find((u) => u.login === 'logist1')?.name ?? '—')
+    : (users.find((u) => u.login === 'logist2')?.name ?? '—'))
+
   // ——— 1. Водители (+12) ———
   const driversSeed = [
     ['А', 'Мельников Артём Валерьевич', '12.04.1990', '53 10 221456', '53 10 221456', d(22, 3, 2029), 'C, CE', '+7 (918) 311-45-22', 'г. Абинск', 'РФ', 'ОУФМС по Краснодарскому краю', '20.05.2014', 'Водитель'],
@@ -125,7 +131,7 @@ async function main() {
     'Z-1063': [['А', 4800, 7, 10], ['В', 4700, 7, 12], ['Б', 4650, 7, 15]],
   }
 
-  for (const [number, fromPoint, toPoint, cargoKey, tonnage, truckType, mode, status, startRate, bestRate, winnerKey, crewKey, etrnStatus, passPackage, loadDate, deadlineDay, createdDay] of reqSeed) {
+  for (const [ri, [number, fromPoint, toPoint, cargoKey, tonnage, truckType, mode, status, startRate, bestRate, winnerKey, crewKey, etrnStatus, passPackage, loadDate, deadlineDay, createdDay]] of reqSeed.entries()) {
     const cg = CG[cargoKey]
     const winner = winnerKey ? C[winnerKey] : null
     const req = await db.request.create({
@@ -134,6 +140,7 @@ async function main() {
         cargo: cg ? cg.name : cargoKey,
         cargoTypeId: cg ? cg.id : null,
         tonnage, truckType, mode, startRate, bestRate, status,
+        createdBy: createdBy(ri),
         loadDate, loadWindow: '08:00–12:00',
         deadline: deadlineDay ? dt(deadlineDay, 18) : null,
         winnerId: winner ? winner.id : null,

@@ -7,7 +7,7 @@ import { finalizeExpired, money, parseRuDate, requestWhereFor } from '@/lib/requ
 import { notifyLive } from '@/lib/notify'
 import { plog, plogError } from '@/lib/platform-log'
 import { canonicalPoint } from '@/lib/points'
-import { allowed, permDenied } from '@/lib/permissions'
+import { allowedFor, permDenied } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,8 +73,8 @@ export async function POST(req: NextRequest) {
   // черновик: заявка хранится у логиста, на площадку не выходит — срок и ставка необязательны
   const isDraft = body.draft === true
   // права (Task 111): создание — draft:create; немедленная публикация ещё и request:publish
-  if (!(await allowed(auth.role, 'draft:create'))) return NextResponse.json({ error: permDenied('draft:create') }, { status: 403 })
-  if (!isDraft && !(await allowed(auth.role, 'request:publish'))) return NextResponse.json({ error: permDenied('request:publish') }, { status: 403 })
+  if (!(await allowedFor(auth, 'draft:create'))) return NextResponse.json({ error: permDenied('draft:create') }, { status: 403 })
+  if (!isDraft && !(await allowedFor(auth, 'request:publish'))) return NextResponse.json({ error: permDenied('request:publish') }, { status: 403 })
   // точки — только из справочника: в заявку пишется город («Абинск → Сочи»)
   const fromPoint = canonicalPoint(str(body.fromPoint, 300))
   const toPoint = canonicalPoint(str(body.toPoint, 300))

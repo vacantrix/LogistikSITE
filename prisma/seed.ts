@@ -33,9 +33,13 @@ const dateInDays = (d: number): string => {
 }
 
 async function main() {
+  // порядок важен: сначала дочерние таблицы заявок (FK), затем сами заявки
   await db.event.deleteMany()
   await db.document.deleteMany()
   await db.bid.deleteMany()
+  await db.requestFile.deleteMany()
+  await db.edoDocument.deleteMany()
+  await db.notification.deleteMany()
   await db.request.deleteMany()
   await db.cargoType.deleteMany()
   await db.driver.deleteMany()
@@ -144,29 +148,95 @@ async function main() {
     },
   })
 
-  // ---------- Пользователи платформы (вход по логину, /api/auth/*) ----------
+  // ——— Пользователи платформы (вход по логину, /api/auth/*) ———
   // Демо-контур: пароль один, логины разные. Пароль — из SEED_PASSWORD, иначе случайный
   // (печатается один раз в консоль). Учётки перевозчиков связаны со своими компаниями.
+  // Task 113 — персонажи платформы: у каждой учётки есть ФИО, должность и организация —
+  // они показываются в плашке аккаунта вместо логина и подписи роли.
+  const FIO = {
+    admin: 'Громова Елена Викторовна',
+    logist1: 'Соколов Дмитрий Алексеевич',
+    logist2: 'Морозова Анна Сергеевна',
+    carrierA: 'Ковалёв Игорь Петрович',
+    carrierB: 'Богданов Сергей Михайлович',
+    carrierV: 'Литвинов Артём Владимирович',
+    carrierG: 'Ткачёв Николай Андреевич',
+  }
+  const AEMZ = 'АО «АЭМЗ»'
   const hashPassword = (password: string): string => {
     const salt = randomBytes(16).toString('hex')
     return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
   }
   const userAccounts = [
-    { login: 'admin', name: 'Администратор', role: 'admin', carrierId: null as string | null },
-    { login: 'logist1', name: 'Логист 1', role: 'logist', carrierId: null as string | null },
-    { login: 'logist2', name: 'Логист 2', role: 'logist', carrierId: null as string | null },
-    { login: 'carrier-a', name: 'ООО «Перевозчик А»', role: 'carrier', carrierId: carrierA.id },
-    { login: 'carrier-b', name: 'ООО «Перевозчик Б»', role: 'carrier', carrierId: carrierB.id },
-    { login: 'carrier-v', name: 'ООО «Перевозчик В»', role: 'carrier', carrierId: carrierV.id },
-    { login: 'carrier-g', name: 'ООО «Перевозчик Г»', role: 'carrier', carrierId: carrierG.id },
+    { login: 'admin', name: FIO.admin, role: 'admin', carrierId: null as string | null },
+    { login: 'logist1', name: FIO.logist1, role: 'logist', carrierId: null as string | null },
+    { login: 'logist2', name: FIO.logist2, role: 'logist', carrierId: null as string | null },
+    { login: 'carrier-a', name: FIO.carrierA, role: 'carrier', carrierId: carrierA.id },
+    { login: 'carrier-b', name: FIO.carrierB, role: 'carrier', carrierId: carrierB.id },
+    { login: 'carrier-v', name: FIO.carrierV, role: 'carrier', carrierId: carrierV.id },
+    { login: 'carrier-g', name: FIO.carrierG, role: 'carrier', carrierId: carrierG.id },
   ]
   const seedPassword = process.env.SEED_PASSWORD || randomBytes(9).toString('base64url')
   if (!process.env.SEED_PASSWORD) console.log(`Пароль демо-пользователей (сохраните): ${seedPassword}`)
   for (const u of userAccounts) {
-    await db.user.upsert({
+    const existing = await db.user.upsert({
       where: { login: u.login },
       update: { name: u.name, role: u.role, carrierId: u.carrierId, passwordHash: hashPassword(seedPassword) },
       create: { ...u, passwordHash: hashPassword(seedPassword) },
+    })
+    // проформа (плашка аккаунта): ФИО, должность, организация, контакты (Task 113)
+    const profileData = ({
+      admin: { fullName: FIO.admin, position: 'Администратор платформы', phone: '+7 (86131) 5-02-01', email: 'e.gromova@aemz.ru', companyName: AEMZ },
+      logist1: { fullName: FIO.logist1, position: 'Ведущий специалист по логистике', phone: '+7 (86131) 5-03-12', email: 'd.sokolov@aemz.ru', companyName: AEMZ },
+      logist2: { fullName: FIO.logist2, position: 'Специалист по логистике', phone: '+7 (86131) 5-03-15', email: 'a.morozova@aemz.ru', companyName: AEMZ },
+      'carrier-a': { fullName: FIO.carrierA, position: 'Руководитель отдела перевозок', phone: '+7 (918) 402-11-05', email: 'kovalev@perevoz-a.ru', companyName: carrierA.name, inn: carrierA.inn },
+      'carrier-b': { fullName: FIO.carrierB, position: 'Директор', phone: '+7 (903) 411-22-18', email: 'bogdanov@perevoz-b.ru', companyName: carrierB.name, inn: carrierB.inn },
+      'carrier-v': { fullName: FIO.carrierV, position: 'Руководитель экспедиции', phone: '+7 (495) 621-33-90', email: 'litvinov@perevoz-v.ru', companyName: carrierV.name, inn: carrierV.inn },
+      'carrier-g': { fullName: FIO.carrierG, position: 'Директор по логистике', phone: '+7 (863) 250-44-27', email: 'tkachev@perevoz-g.ru', companyName: carrierG.name, inn: carrierG.inn },
+    } as Record<string, { fullName: string; position: string; phone: string; email: string; companyName: string; inn?: string }>)[u.login]
+    if (!profileData) continue
+    const profileUpsert = {
+      fullName: profileData.fullName, position: profileData.position, phone: profileData.phone,
+      email: profileData.email, companyName: profileData.companyName,
+      ...(profileData.inn ? { inn: profileData.inn } : {}),
+    }
+
+    await db.profile.upsert({
+      where: { userId: existing.id },
+      update: profileUpsert,
+      create: { userId: existing.id, ...profileUpsert },
+    })
+  }
+
+  // ——— Персональные права (Task 113) ———
+  // logist1 — ведущий специалист: работает по роли логиста (почти все права платформы).
+  // logist2 — линейный сотрудник: урезанный набор — готовит заявки и документы,
+  // но без операционных решений: публикации, удалений, продлений и повышений ставок,
+  // прямых предложений, решений сверки, ЭДО, рассылки агентам, закрытия рейсов и отчётов.
+  const logist1User = await db.user.findUnique({ where: { login: 'logist1' } })
+  const logist2User = await db.user.findUnique({ where: { login: 'logist2' } })
+  if (logist1User) {
+    await db.user.update({ where: { id: logist1User.id }, data: { permOverrides: null, profileEditOwn: null } })
+  }
+  if (logist2User) {
+    await db.user.update({
+      where: { id: logist2User.id },
+      data: {
+        permOverrides: JSON.stringify({
+          'request:publish': 'deny',
+          'request:delete': 'deny',
+          'request:extend': 'deny',
+          'request:raise': 'deny',
+          'request:offer': 'deny',
+          'verify:decide': 'deny',
+          'edo:sync': 'deny',
+          'edo:sign': 'deny',
+          'edo:send': 'deny',
+          'notify:agent': 'deny',
+          'trip:close': 'deny',
+          'reports:view': 'deny',
+        } satisfies Record<string, 'allow' | 'deny'>),
+      },
     })
   }
 
@@ -189,7 +259,7 @@ async function main() {
     data: {
       number: 'Z-1042', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 8400, bestRate: 7900,
-      status: 'PUBLISHED', loadDate: '20.10.2026', loadWindow: '08:00–12:00',
+      status: 'PUBLISHED', loadDate: '20.10.2026', loadWindow: '08:00–12:00', createdBy: FIO.logist1,
       deadline: inHours(2.25),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 8 400 ₽/т, торги до срока', createdAt: hoursAgo(26) } },
     },
@@ -211,7 +281,7 @@ async function main() {
     data: {
       number: 'Z-1043', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - пруток', cargoTypeId: cargoBar.id,
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 6800, bestRate: null,
-      status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00',
+      status: 'PUBLISHED', loadDate: '21.10.2026', loadWindow: '09:00–13:00', createdBy: FIO.logist2,
       deadline: inHours(26),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 6 800 ₽/т', createdAt: hoursAgo(20) } },
     },
@@ -221,7 +291,7 @@ async function main() {
     data: {
       number: 'Z-1044', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 11500, bestRate: null,
-      status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '08:00–11:00',
+      status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '08:00–11:00', createdBy: FIO.logist1,
       deadline: inHours(28),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: закрытые ставки, участники не видят цены друг друга', createdAt: hoursAgo(14) } },
     },
@@ -231,7 +301,7 @@ async function main() {
     data: {
       number: 'Z-1045', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 9200, bestRate: null,
-      status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '13:00–17:00',
+      status: 'PUBLISHED', loadDate: '22.10.2026', loadWindow: '13:00–17:00', createdBy: FIO.logist2,
       deadline: inHours(5.5),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 9 200 ₽/т', createdAt: hoursAgo(6) } },
     },
@@ -241,7 +311,7 @@ async function main() {
     data: {
       number: 'Z-1046', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 3200, bestRate: null,
-      status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00',
+      status: 'PUBLISHED', loadDate: '23.10.2026', loadWindow: '10:00–14:00', createdBy: FIO.logist1,
       deadline: inHours(20),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 3 200 ₽/т', createdAt: hoursAgo(3) } },
     },
@@ -252,7 +322,7 @@ async function main() {
     data: {
       number: 'Z-1047', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - моток', cargoTypeId: cargoCoil.id,
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 8800, bestRate: 8200,
-      status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00',
+      status: 'AWARDED', loadDate: '24.10.2026', loadWindow: '08:00–12:00', createdBy: FIO.logist1,
       winnerId: carrierB.id,
       createdAt: hoursAgo(30), updatedAt: hoursAgo(8),
       bids: { create: [{ carrierId: carrierB.id, amount: 8200, isWinner: true, createdAt: hoursAgo(12) }] },
@@ -268,7 +338,7 @@ async function main() {
     data: {
       number: 'Z-1048', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург, склад «Южный»', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 4100, bestRate: 3850,
-      status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00',
+      status: 'AWARDED', loadDate: '25.10.2026', loadWindow: '09:00–13:00', createdBy: FIO.logist2,
       winnerId: carrierB.id,
       createdAt: hoursAgo(28), updatedAt: hoursAgo(7),
       bids: { create: [{ carrierId: carrierB.id, amount: 3850, isWinner: true, createdAt: hoursAgo(10) }] },
@@ -290,7 +360,7 @@ async function main() {
     data: {
       number: 'Z-1039', fromPoint: 'Абинск', toPoint: 'Санкт-Петербург', cargo: 'Перевозка готовой продукции - катанка', cargoTypeId: cargoWireRod.id,
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 10500, bestRate: 9800,
-      status: 'AT_LOGIST', loadDate: '16.10.2026', loadWindow: '08:00–12:00',
+      status: 'AT_LOGIST', loadDate: '16.10.2026', loadWindow: '08:00–12:00', createdBy: FIO.logist1,
       winnerId: carrierA.id, driverId: driverA?.id, truckId: truckA?.id, trailerId: trailerA?.id,
       createdAt: hoursAgo(52), updatedAt: hoursAgo(4),
       bids: { create: [{ carrierId: carrierA.id, amount: 9800, isWinner: true, createdAt: hoursAgo(48) }] },
@@ -369,12 +439,12 @@ async function main() {
     { number: 'Z-1035', status: 'CLOSED', carrier: carrierA, start: 2600, best: 2600, load: '02.10.2026', cargo: 'Автоуслуги для собственных подразделений', cargoId: cargoAuto.id, route: ['Абинск', 'Санкт-Петербург, склад «Южный»'], pass: true, etrn: 'SIGNED', h: 330 },
     { number: 'Z-1034', status: 'CLOSED', carrier: carrierV, start: 7600, best: 7300, load: '29.09.2026', cargo: 'Перевозка готовой продукции - катанка', cargoId: cargoWireRod.id, route: ['Абинск', 'Санкт-Петербург'], pass: false, etrn: 'SIGNED', h: 400 },
   ]
-  for (const r of regRows) {
+  for (const [i, r] of regRows.entries()) {
     await db.request.create({
       data: {
         number: r.number, fromPoint: r.route[0], toPoint: r.route[1], cargo: r.cargo.split(',')[0], cargoTypeId: r.cargoId,
         tonnage: Number(r.cargo.split('т')[0].match(/(\d+)\s*$/)?.[1] ?? 20),
-        truckType: 'Тент', mode: 'AUCTION',
+        truckType: 'Тент', mode: 'AUCTION', createdBy: i % 2 === 0 ? FIO.logist1 : FIO.logist2,
         startRate: r.start, bestRate: r.best, status: r.status, loadDate: r.load, loadWindow: '08:00–12:00',
         winnerId: r.carrier.id, passPackage: r.pass, etrnStatus: r.etrn,
         createdAt: hoursAgo(r.h + 24), updatedAt: hoursAgo(r.h),
@@ -383,6 +453,47 @@ async function main() {
       },
     })
   }
+
+  // ---------- Заявки от лица логистов: черновики и новые выходы на площадку (Task 113) ----------
+  // Номера 1050–1063 занимает prisma/seed-more.js — черновики идут после них
+  await db.request.create({
+    data: {
+      number: 'Z-1064', fromPoint: 'Абинск', toPoint: 'Краснодар, распределительный центр', cargo: 'Перевозка готовой продукции - проволока', cargoTypeId: cargoWire.id,
+      tonnage: 12, truckType: 'Тент', mode: 'AUCTION', startRate: 5300,
+      status: 'DRAFT', loadDate: dateInDays(4), loadWindow: '08:00–11:00', createdBy: FIO.logist2,
+      comment: 'Черновик подготовила Морозова — на публикацию согласовать с ведущим специалистом',
+      createdAt: hoursAgo(3),
+      events: { create: { type: 'DRAFT_CREATED', message: `Черновик создан: ${FIO.logist2}`, createdAt: hoursAgo(3) } },
+    },
+  })
+  await db.request.create({
+    data: {
+      number: 'Z-1065', fromPoint: 'Абинск', toPoint: 'Новороссийск, терминал', cargo: 'Перевозка металлолома', cargoTypeId: cargoScrap.id,
+      tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 4700,
+      status: 'DRAFT', loadDate: dateInDays(5), loadWindow: '13:00–16:00', createdBy: FIO.logist1,
+      comment: 'Закрытые ставки — лом на терминал, старт пониже после прошлого рейса',
+      createdAt: hoursAgo(5),
+      events: { create: { type: 'DRAFT_CREATED', message: `Черновик создан: ${FIO.logist1}`, createdAt: hoursAgo(5) } },
+    },
+  })
+  await db.request.create({
+    data: {
+      number: 'Z-1066', fromPoint: 'Абинск', toPoint: 'Ростов-на-Дону', cargo: 'Перевозка готовой продукции - катанка', cargoTypeId: cargoWireRod.id,
+      tonnage: 22, truckType: 'Борт', mode: 'AUCTION', startRate: 9100, bestRate: null,
+      status: 'PUBLISHED', loadDate: dateInDays(3), loadWindow: '08:00–12:00', createdBy: FIO.logist2,
+      deadline: inHours(30),
+      events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована: стартовая ставка 9 100 ₽/т (${FIO.logist2})`, createdAt: hoursAgo(2) } },
+    },
+  })
+  await db.request.create({
+    data: {
+      number: 'Z-1067', fromPoint: 'Абинск', toPoint: 'Сочи, стройплощадка «Матарами»', cargo: 'Перевозка готовой продукции - арматура', cargoTypeId: cargoRebar.id,
+      tonnage: 12, truckType: 'Тент', mode: 'CLOSED', startRate: 9900, bestRate: null,
+      status: 'PUBLISHED', loadDate: dateInDays(4), loadWindow: '09:00–13:00', createdBy: FIO.logist1,
+      deadline: inHours(44),
+      events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована: закрытые ставки (${FIO.logist1})`, createdAt: hoursAgo(1) } },
+    },
+  })
 
   console.log('Seed complete:',
     await db.carrier.count(), 'carriers,',

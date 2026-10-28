@@ -1,8 +1,10 @@
 'use client'
 
-/** «Профили и доступы» — учётные записи платформы (только администрация, Task 109) */
+/** «Профили и доступы» — учётные записи платформы (только администрация, Task 109).
+ *  Task 113: у каждого пользователя — персональные права (перекрывают роль):
+ *  так ведущему специалисту выдаётся почти весь набор, а линейному — урезанный. */
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react'
-import { Loader2, Pencil, Trash2, UserPlus } from 'lucide-react'
+import { Loader2, Pencil, ShieldCheck, Trash2, UserPlus } from 'lucide-react'
 import {
   ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusDot, type RoleKind, type TabProps,
 } from '@/components/platform/common'
@@ -23,6 +25,7 @@ import {
 } from '@/components/ui/table'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
+import { PERM_GROUPS, PERM_KEYS } from '@/lib/perm-catalog'
 import type { AdminUserDTO } from '@/lib/types'
 
 /** Роль: точка и слово в списке и варианты в окне создания */
@@ -32,7 +35,10 @@ const ROLE_META: Record<RoleKind, { label: string; dot: string }> = {
   carrier: { label: 'Перевозчик', dot: 'bg-emerald-500' },
 }
 
-/** Черновик окна создания/редактирования: учётка + поля проформы */
+/** Состояние одного персонального права: inherit — как у роли, allow/deny — перекрыть (Task 113) */
+type PermState = 'inherit' | 'allow' | 'deny'
+
+/** Черновик окна создания/редактирования: учётка + поля проформы + персональные права */
 interface UserDraft {
   id: string | null // null — создание
   login: string
@@ -44,26 +50,38 @@ interface UserDraft {
   position: string
   phone: string
   email: string
-  /** «Редактирование своего профиля»: inherit — как у роли, allow — разрешить, deny — запретить (Task 112) */
-  profileEditOwn: 'inherit' | 'allow' | 'deny'
+  /** персональные права по ключам каталога; отсутствие ключа = «как у роли» (Task 113) */
+  permOverrides: Record<string, PermState>
 }
+
+const emptyOverrides = (): Record<string, PermState> =>
+  Object.fromEntries(PERM_KEYS.map((k) => [k, 'inherit' as PermState]))
 
 const emptyDraft = (): UserDraft => ({
   id: null, login: '', name: '', password: '', role: 'carrier', carrierId: '',
-  fullName: '', position: '', phone: '', email: '', profileEditOwn: 'inherit',
+  fullName: '', position: '', phone: '', email: '', permOverrides: emptyOverrides(),
 })
 
 const toDraft = (u: AdminUserDTO): UserDraft => ({
   id: u.id, login: u.login, name: u.name, password: '', role: u.role, carrierId: u.carrierId ?? '',
   fullName: u.profile?.fullName ?? '', position: u.profile?.position ?? '',
   phone: u.profile?.phone ?? '', email: u.profile?.email ?? '',
-  profileEditOwn: u.profileEditOwn ?? 'inherit',
+  permOverrides: {
+    ...emptyOverrides(),
+    ...Object.fromEntries(
+      Object.entries(u.permOverrides ?? {}).map(([k, v]) => [k, v as PermState]),
+    ),
+  },
 })
 
-/** Подпись персонального разрешения в таблице */
-const OVERRIDE_LABEL: Record<string, string> = {
-  allow: 'Разрешено',
-  deny: 'Запрещено',
+/** Сколько прав перекрыто лично (для таблицы и заголовка секции) */
+const overrideCount = (o: Record<string, PermState>): number =>
+  Object.values(o).filter((v) => v === 'allow' || v === 'deny').length
+
+const OVERRIDE_LABEL: Record<PermState, string> = {
+  inherit: 'Как у роли',
+  allow: 'Разрешить',
+  deny: 'Запретить',
 }
 
 export default function AdminUsersTab(_props: TabProps) {
@@ -117,16 +135,20 @@ export default function AdminUsersTab(_props: TabProps) {
     try {
       const profile = { fullName: draft.fullName, position: draft.position, phone: draft.phone, email: draft.email }
       const carrierId = draft.role === 'carrier' ? draft.carrierId : null
-      const profileEditOwn = draft.profileEditOwn === 'inherit' ? null : draft.profileEditOwn
+      // персональные права: ключи, перекрытые вручную (inherit не отправляем)
+      const permOverrides: Record<string, 'allow' | 'deny'> = {}
+      for (const [key, value] of Object.entries(draft.permOverrides)) {
+        if (value === 'allow' || value === 'deny') permOverrides[key] = value
+      }
       if (draft.id === null) {
         await api.adminUserCreate({
-          login: draft.login, name: draft.name, password: draft.password, role: draft.role, carrierId, profile, profileEditOwn,
+          login: draft.login, name: draft.name, password: draft.password, role: draft.role, carrierId, profile, permOverrides,
         })
         toast({ title: 'Профиль создан', description: `${draft.name} — теперь может войти на платформу` })
       } else {
         await api.adminUserUpdate({
           id: draft.id, name: draft.name, role: draft.role, carrierId,
-          ...(draft.password ? { password: draft.password } : {}), profile, profileEditOwn,
+          ...(draft.password ? { password: draft.password } : {}), profile, permOverrides,
         })
         toast({ title: 'Профиль сохранён' })
       }
@@ -193,8 +215,8 @@ export default function AdminUsersTab(_props: TabProps) {
                   <TableHead>Компания</TableHead>
                   <TableHead>Профиль</TableHead>
                   <TableHead>
-                    Свой профиль
-                    <span className="mt-0.5 block text-[11px] font-normal text-slate-400">право правки</span>
+                    Персональные права
+                    <span className="mt-0.5 block text-[11px] font-normal text-slate-400">сверх роли</span>
                   </TableHead>
                   <TableHead>Создан</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
@@ -227,7 +249,12 @@ export default function AdminUsersTab(_props: TabProps) {
                         ) : '—'}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-slate-600">
-                        {OVERRIDE_LABEL[u.profileEditOwn ?? ''] ?? 'Как у роли'}
+                        {(() => {
+                          const n = Object.keys(u.permOverrides ?? {}).length
+                          return n > 0 ? (
+                            <StatusDot dot="bg-violet-500">{n} персональных</StatusDot>
+                          ) : 'Как у роли'
+                        })()}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-slate-600">
                         {new Date(u.createdAt).toLocaleDateString('ru-RU')}
@@ -331,33 +358,68 @@ export default function AdminUsersTab(_props: TabProps) {
                 </div>
               </div>
 
-              {/* ——— Доступы: право на редактирование своего профиля (Task 112) ——— */}
+              {/* ——— Права пользователя: персональные права поверх роли (Task 113) ——— */}
               <div className="border-t border-slate-200 pt-3">
                 <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-                  Право на изменение профиля
-                  <InfoTip label="Право на изменение профиля">
-                    По умолчанию менять данные своего профиля может только администрация. Здесь право выдаётся конкретному
-                    пользователю; матрица роли в разделе «Права доступа» действует, пока стоит «Как у роли».
+                  <ShieldCheck className="h-4 w-4 text-violet-600" aria-hidden />
+                  Права пользователя
+                  {overrideCount(draft.permOverrides) > 0 && (
+                    <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                      перекрыто лично: {overrideCount(draft.permOverrides)}
+                    </span>
+                  )}
+                  <InfoTip label="О персональных правах">
+                    «Как у роли» — действует матрица из раздела «Права доступа». Значения «Разрешить» и «Запретить»
+                    перекрывают роль лично: так линейному сотруднику урезают функции (публикация, удаления, сверка,
+                    ЭДО, отчёты), а ведущему специалисту выдают почти весь набор. Функции без права полностью
+                    исчезают из интерфейса пользователя и блокируются на сервере.
                   </InfoTip>
                 </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Роль: {draft.role === 'admin' ? 'администрация' : draft.role === 'logist' ? 'логист' : 'перевозчик'} — базовые права меняются в разделе «Права доступа»
+                </p>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="user-profile-edit">Редактирование своего профиля</Label>
-                  <Select
-                    value={draft.profileEditOwn}
-                    onValueChange={(v) => setDraft((d) => (d ? { ...d, profileEditOwn: v as UserDraft['profileEditOwn'] } : d))}
-                  >
-                    <SelectTrigger id="user-profile-edit" aria-label="Право на редактирование своего профиля">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="inherit">Как у роли</SelectItem>
-                      <SelectItem value="allow">Разрешить</SelectItem>
-                      <SelectItem value="deny">Запретить</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="max-h-72 space-y-3 overflow-y-auto rounded-lg border border-slate-200 p-3 pr-2">
+                {PERM_GROUPS.map((group) => (
+                  <div key={group.title}>
+                    <div className="mb-1.5 text-[11px] font-semibold text-slate-400">{group.title}</div>
+                    <div className="space-y-1.5">
+                      {group.items.map((item) => (
+                        <div key={item.key} className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{item.label}</span>
+                          <Select
+                            value={draft.permOverrides[item.key] ?? 'inherit'}
+                            onValueChange={(v) => setDraft((d) => (d ? {
+                              ...d,
+                              permOverrides: { ...d.permOverrides, [item.key]: v as PermState },
+                            } : d))}
+                          >
+                            <SelectTrigger
+                              aria-label={`Право «${item.label}»`}
+                              className={`h-8 w-[132px] shrink-0 text-xs ${
+                                draft.permOverrides[item.key] === 'allow'
+                                  ? 'border-emerald-300 bg-emerald-50/60 text-emerald-800'
+                                  : draft.permOverrides[item.key] === 'deny'
+                                    ? 'border-red-200 bg-red-50/60 text-red-700'
+                                    : ''
+                              }`}
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="inherit">Как у роли</SelectItem>
+                              <SelectItem value="allow">Разрешить</SelectItem>
+                              <SelectItem value="deny">Запретить</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <p className="pt-1 text-[11px] text-slate-400">
+                  Всего прав в каталоге: {PERM_KEYS.length} · «{OVERRIDE_LABEL.inherit}» — действует право роли
+                </p>
               </div>
 
               {/* ——— Проформа: личные данные пользователя ——— */}

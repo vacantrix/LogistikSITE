@@ -1,10 +1,18 @@
 /**
- * Серверная часть системы прав платформы (Task 111).
+ * Серверная часть системы прав платформы (Task 111–113).
  * Каталог прав и дефолты — src/lib/perm-catalog.ts; здесь — хранение матрицы
- * в БД (модель RolePerm) и проверка прав в API-маршрутах.
+ * в БД (модель RolePerm), персональные права пользователя (User.permOverrides)
+ * и проверка прав в API-маршрутах.
  *
- * Правило видимости: если у роли нет права — функция целиком скрывается из
- * интерфейса (useCan на клиенте) и блокируется на сервере (allowed() в API).
+ * Два уровня прав:
+ *  1. Матрица «роль × право» (RolePerm) — базовые права роли;
+ *  2. Персональные права пользователя (User.permOverrides — JSON { ключ: allow|deny }) —
+ *     выдаются администрацией в «Профилях и доступах» и перекрывают роль:
+ *     так ведущий специалист (logist1) получает почти все права, а линейный
+ *     сотрудник (logist2) — урезанный набор.
+ *
+ * Правило видимости: если права нет — функция целиком скрывается из интерфейса
+ * (useCan на клиенте) и блокируется на сервере (allowedFor() в API).
  */
 import { db } from '@/lib/db'
 import type { Role } from '@/lib/auth'
@@ -46,21 +54,88 @@ export async function permMatrix(): Promise<Matrix> {
   return matrix
 }
 
-/** Есть ли у роли право (серверная проверка — единственный источник истины) */
+/** Есть ли у роли право (матрица без персональных оверрайдов) */
 export async function allowed(role: Role, key: PermKey): Promise<boolean> {
   const matrix = await permMatrix()
   return matrix.get(`${role}:${key}`) ?? false
 }
 
+// ——— персональные права пользователя (Task 113) ———
+
+export type PermOverride = 'allow' | 'deny'
+
+/** Минимальные данные пользователя для проверки прав */
+export interface PermUser {
+  id: string
+  role: Role
+}
+
+const overrideCache = new Map<string, { overrides: Partial<Record<PermKey, PermOverride>>; at: number }>()
+
 /**
- * Эффективное право «Редактирование своего профиля» (Task 112): персональное
- * разрешение администратора (User.profileEditOwn: 'allow' | 'deny' | null) имеет
- * приоритет над матрицей роли; без персонального — право роли из «Права доступа».
+ * Персональные права пользователя из User.permOverrides (JSON).
+ * Для обратной совместимости поле profileEditOwn (Task 112) считается
+ * персональным правом profile:edit, если в JSON переопределения нет.
  */
-export async function allowedOwnProfile(role: Role, override?: string | null): Promise<boolean> {
-  if (override === 'allow') return true
-  if (override === 'deny') return false
-  return allowed(role, 'profile:edit')
+export async function userPermOverrides(userId: string): Promise<Partial<Record<PermKey, PermOverride>>> {
+  const hit = overrideCache.get(userId)
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.overrides
+  const row = await db.user.findUnique({
+    where: { id: userId },
+    select: { permOverrides: true, profileEditOwn: true },
+  })
+  const overrides: Partial<Record<PermKey, PermOverride>> = {}
+  if (row?.permOverrides) {
+    try {
+      const parsed = JSON.parse(row.permOverrides) as Record<string, unknown>
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [key, value] of Object.entries(parsed)) {
+          if (value === 'allow' || value === 'deny') overrides[key as PermKey] = value
+        }
+      }
+    } catch { /* битый JSON — работаем по роли */ }
+  }
+  if ((row?.profileEditOwn === 'allow' || row?.profileEditOwn === 'deny') && !overrides['profile:edit']) {
+    overrides['profile:edit'] = row.profileEditOwn as PermOverride
+  }
+  overrideCache.set(userId, { overrides, at: Date.now() })
+  return overrides
+}
+
+/** Сколько персональных прав выдано пользователю (для интерфейса администрации) */
+export const countOverrides = (overrides: Partial<Record<PermKey, PermOverride>>): number =>
+  Object.values(overrides).filter((v) => v === 'allow' || v === 'deny').length
+
+/** Сброс кэша персональных прав (после правки админом) */
+export function invalidateUserPermCache(userId?: string): void {
+  if (userId) overrideCache.delete(userId)
+  else overrideCache.clear()
+}
+
+/**
+ * Эффективное право пользователя: персональное (allow/deny) приоритетнее роли.
+ * Единственный источник истины для API-маршрутов.
+ */
+export async function allowedFor(user: PermUser, key: PermKey): Promise<boolean> {
+  const overrides = await userPermOverrides(user.id)
+  const own = overrides[key]
+  if (own === 'allow') return true
+  if (own === 'deny') return false
+  return allowed(user.role, key)
+}
+
+/**
+ * Эффективное право «Редактирование своего профиля» (Task 112/113): персональный
+ * оверрайд (permOverrides или legacy-поле profileEditOwn) приоритетнее матрицы роли.
+ */
+export async function allowedOwnProfile(user: PermUser, legacyProfileEditOwn?: string | null): Promise<boolean> {
+  const overrides = await userPermOverrides(user.id)
+  const own = overrides['profile:edit']
+  if (own === 'allow') return true
+  if (own === 'deny') return false
+  if (legacyProfileEditOwn === 'allow') return true
+  if (legacyProfileEditOwn === 'deny') return false
+  return allowed(user.role, 'profile:edit')
 }
 
 /** Сброс кэша после правки матрицы администрацией */
@@ -70,4 +145,4 @@ export function invalidatePermCache(): void {
 
 /** Сообщение об отсутствии права для API-ответа */
 export const permDenied = (key: PermKey): string =>
-  `Функция «${permLabel(key)}» отключена для вашей роли администратором`
+  `Функция «${permLabel(key)}» отключена для вашей учётной записи администратором`

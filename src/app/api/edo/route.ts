@@ -11,7 +11,7 @@ import { DiadocError } from '@/lib/diadoc/client'
 import { diadocEnabled } from '@/lib/diadoc/config'
 import { diadocInfo, etrnDraft, sendEtrnT1, syncDiadoc } from '@/lib/diadoc/etrn'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
-import { allowed, permDenied, type PermKey } from '@/lib/permissions'
+import { allowedFor, permDenied, type PermKey } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -173,7 +173,7 @@ export async function POST(req: NextRequest) {
     sign: 'edo:sign',
   }
   const edoPerm = EDO_ACTION_PERM[action]
-  if (edoPerm && !(await allowed(auth.role, edoPerm))) {
+  if (edoPerm && !(await allowedFor(auth, edoPerm))) {
     return NextResponse.json({ error: permDenied(edoPerm) }, { status: 403 })
   }
 

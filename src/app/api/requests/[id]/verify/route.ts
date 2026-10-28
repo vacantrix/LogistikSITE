@@ -8,7 +8,7 @@ import { inTx, loadRequestFor } from '@/lib/requests'
 import { loadVerifySettings } from '@/lib/settings'
 import { plog, plogError } from '@/lib/platform-log'
 import { verifyDocument, expectedFor, OcrUnavailableError } from '@/lib/verify'
-import { allowed, permDenied } from '@/lib/permissions'
+import { allowedFor, permDenied } from '@/lib/permissions'
 import type { DocType, VerifyVerdict } from '@/lib/verify'
 
 export const dynamic = 'force-dynamic'
@@ -38,7 +38,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Проверку запускает перевозчик, за которым закреплён рейс' }, { status: 403 })
   }
   // права (Task 111): повторная проверка документов сотрудником — правом verify:decide
-  if (isStaff(auth.role) && !(await allowed(auth.role, 'verify:decide'))) {
+  if (isStaff(auth.role) && !(await allowedFor(auth, 'verify:decide'))) {
     return NextResponse.json({ error: permDenied('verify:decide') }, { status: 403 })
   }
 

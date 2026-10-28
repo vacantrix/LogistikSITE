@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { notifyCarrier } from '@/lib/notify-users'
 import { plog } from '@/lib/platform-log'
 import { expiryInfo } from '@/lib/expiry'
-import { allowed, permDenied } from '@/lib/permissions'
+import { allowedFor, permDenied } from '@/lib/permissions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,7 +21,7 @@ export async function POST() {
   const user = await requireUser()
   if (user instanceof NextResponse) return user
   // права (Task 111): рассылка — право notify:agent (по умолчанию только логист)
-  if (!(await allowed(user.role, 'notify:agent'))) {
+  if (!(await allowedFor(user, 'notify:agent'))) {
     return NextResponse.json({ error: permDenied('notify:agent') }, { status: 403 })
   }
 

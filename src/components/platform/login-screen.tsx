@@ -15,15 +15,16 @@ import { activateAccount, listAccounts, saveSessionToken } from '@/lib/api'
 import type { SavedAccount } from '@/lib/accounts'
 import { LogoMark } from '@/components/platform/logo-mark'
 
-/** Демо-доступы (демо-контур): пароль один, логины разные */
+/** Демо-доступы (демо-контур): пароль один, логины разные.
+ *  Task 113 — подписаны персонажами платформы (ФИО, как в проформах). */
 export const DEMO_ACCOUNTS: { login: string; name: string; role: 'admin' | 'logist' | 'carrier' }[] = [
-  { login: 'admin', name: 'Администратор', role: 'admin' },
-  { login: 'logist1', name: 'Логист 1', role: 'logist' },
-  { login: 'logist2', name: 'Логист 2', role: 'logist' },
-  { login: 'carrier-a', name: 'ООО «Перевозчик А»', role: 'carrier' },
-  { login: 'carrier-b', name: 'ООО «Перевозчик Б»', role: 'carrier' },
-  { login: 'carrier-v', name: 'ООО «Перевозчик В»', role: 'carrier' },
-  { login: 'carrier-g', name: 'ООО «Перевозчик Г»', role: 'carrier' },
+  { login: 'admin', name: 'Громова Елена Викторовна · администратор платформы', role: 'admin' },
+  { login: 'logist1', name: 'Соколов Дмитрий Алексеевич · ведущий специалист', role: 'logist' },
+  { login: 'logist2', name: 'Морозова Анна Сергеевна · специалист по логистике', role: 'logist' },
+  { login: 'carrier-a', name: 'Ковалёв Игорь Петрович · ООО «Перевозчик А»', role: 'carrier' },
+  { login: 'carrier-b', name: 'Богданов Сергей Михайлович · ООО «Перевозчик Б»', role: 'carrier' },
+  { login: 'carrier-v', name: 'Литвинов Артём Владимирович · ООО «Перевозчик В»', role: 'carrier' },
+  { login: 'carrier-g', name: 'Ткачёв Николай Андреевич · ООО «Перевозчик Г»', role: 'carrier' },
 ]
 export const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? ''
 

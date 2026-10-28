@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { hashPassword, requireUser } from '@/lib/auth'
 import { plog } from '@/lib/platform-log'
+import { PERM_KEYS, invalidateUserPermCache, permLabel, type PermOverride } from '@/lib/permissions'
 import type { AdminUserDTO, SessionRole } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -14,9 +15,42 @@ const PROFILE_EDIT_OWN: string[] = ['allow', 'deny']
 const overrideOf = (v: unknown): string | null =>
   typeof v === 'string' && PROFILE_EDIT_OWN.includes(v) ? v : null
 
-/** DTO учётной записи с проформой и компанией */
+/**
+ * Персональные права пользователя (Task 113): { ключПрава: allow|deny }.
+ * Разрешены только ключи каталога; неизвестные отбрасываются.
+ * Возвращает JSON-строку для User.permOverrides (null — персональных прав нет).
+ */
+function permOverridesToJson(input: unknown): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const clean: Record<string, PermOverride> = {}
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if ((PERM_KEYS as string[]).includes(key) && (value === 'allow' || value === 'deny')) {
+      clean[key] = value
+    }
+  }
+  return Object.keys(clean).length > 0 ? JSON.stringify(clean) : null
+}
+
+/** JSON-строку User.permOverrides — в объект для DTO */
+function parsePermOverrides(raw: string | null): Record<string, PermOverride> | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const clean: Record<string, PermOverride> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if ((PERM_KEYS as string[]).includes(key) && (value === 'allow' || value === 'deny')) {
+        clean[key] = value
+      }
+    }
+    return Object.keys(clean).length > 0 ? clean : null
+  } catch {
+    return null
+  }
+}
+
+/** DTO учётной записи с проформой, компанией и персональными правами */
 function toAdminUserDTO(u: {
-  id: string; login: string; name: string; role: string; carrierId: string | null; profileEditOwn: string | null; createdAt: Date
+  id: string; login: string; name: string; role: string; carrierId: string | null; profileEditOwn: string | null; permOverrides: string | null; createdAt: Date
   carrier?: { name: string } | null
   profile?: { userId: string; fullName: string; position: string; phone: string; email: string; companyName: string; inn: string; kpp: string; address: string; director: string; contactName: string; note: string; updatedAt: Date } | null
 }): AdminUserDTO {
@@ -25,6 +59,7 @@ function toAdminUserDTO(u: {
     id: u.id, login: u.login, name: u.name, role: (ROLES.includes(u.role as SessionRole) ? u.role : 'carrier') as SessionRole,
     carrierId: u.carrierId, carrierName: u.carrier?.name ?? null,
     profileEditOwn: (u.profileEditOwn === 'allow' || u.profileEditOwn === 'deny') ? u.profileEditOwn : null,
+    permOverrides: parsePermOverrides(u.permOverrides),
     createdAt: u.createdAt.toISOString(),
     profile: p ? {
       userId: p.userId, fullName: p.fullName, position: p.position, phone: p.phone, email: p.email,
@@ -91,6 +126,7 @@ export async function POST(req: NextRequest) {
     data: {
       login, name, role, carrierId, passwordHash: hashPassword(password),
       profileEditOwn: overrideOf(body?.profileEditOwn),
+      permOverrides: permOverridesToJson(body?.permOverrides),
       profile: { create: profileData },
     },
     include: { carrier: { select: { name: true } }, profile: true },
@@ -160,6 +196,22 @@ export async function PUT(req: NextRequest) {
   // персональное разрешение профиля: передано null — сброс к «как у роли»
   if (body?.profileEditOwn !== undefined) patch.profileEditOwn = overrideOf(body.profileEditOwn)
 
+  // персональные права (Task 113): { ключ: allow|deny } — перекрывают матрицу роли;
+  // право profile:edit синхронизируется в legacy-поле profileEditOwn для единообразия
+  let overridesSummary = ''
+  if (body?.permOverrides !== undefined) {
+    const json = permOverridesToJson(body.permOverrides)
+    patch.permOverrides = json
+    const parsed = parsePermOverrides(json)
+    if (parsed && parsed['profile:edit']) patch.profileEditOwn = parsed['profile:edit']
+    const changed = parsed
+      ? Object.entries(parsed).map(([k, v]) => `${permLabel(k as never)} — ${v === 'allow' ? 'разрешено' : 'запрещено'}`)
+      : []
+    overridesSummary = changed.length > 0
+      ? ` — персональные права: ${changed.slice(0, 8).join('; ')}${changed.length > 8 ? '…' : ''}`
+      : ' — персональные права сброшены к роли'
+  }
+
   const profile = (body?.profile ?? null) as Record<string, unknown> | null
   const profileData = profile ? {
     fullName: str(profile.fullName), position: str(profile.position, 120), phone: str(profile.phone, 40),
@@ -178,12 +230,13 @@ export async function PUT(req: NextRequest) {
     },
     include: { carrier: { select: { name: true } }, profile: true },
   })
+  invalidateUserPermCache(id)
 
   await plog({
     type: 'USER_UPDATED', source: 'api/admin/users',
     actor: { login: auth.login, name: auth.name, role: auth.role },
-    message: `Профиль изменён: ${user.name} (логин ${user.login})${
-      patch.profileEditOwn !== undefined
+    message: `Профиль изменён: ${user.name} (логин ${user.login})${overridesSummary}${
+      patch.profileEditOwn !== undefined && !overridesSummary
         ? ` — редактирование своего профиля: ${patch.profileEditOwn === 'allow' ? 'разрешено лично' : patch.profileEditOwn === 'deny' ? 'запрещено лично' : 'как у роли'}`
         : ''}${typeof body?.password === 'string' && body.password ? ' — пароль сброшен' : ''}`,
   })
@@ -219,6 +272,7 @@ export async function DELETE(req: NextRequest) {
   await db.notification.deleteMany({ where: { userId: id } })
   await db.profile.deleteMany({ where: { userId: id } })
   await db.user.delete({ where: { id } })
+  invalidateUserPermCache(id)
 
   await plog({
     type: 'USER_DELETED', source: 'api/admin/users',

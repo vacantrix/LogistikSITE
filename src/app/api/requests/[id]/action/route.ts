@@ -8,7 +8,7 @@ import { canonicalPoint } from '@/lib/points'
 import {
   applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
-import { allowed, permDenied, type PermKey } from '@/lib/permissions'
+import { allowedFor, permDenied, type PermKey } from '@/lib/permissions'
 
 /** Сообщение для «Журнала событий платформы» (Task 76) по выполненному действию */
 function actionLogMessage(action: string, actor: string, number: string, body: Record<string, unknown>, winnerName: string | null): string {
@@ -133,7 +133,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const permKey: PermKey | undefined = action === 'delete'
     ? (visible.status === 'DRAFT' ? 'draft:delete' : 'request:delete')
     : ACTION_PERM[action]
-  if (permKey && !(await allowed(auth.role, permKey))) {
+  if (permKey && !(await allowedFor(auth, permKey))) {
     return NextResponse.json({ error: permDenied(permKey) }, { status: 403 })
   }
 

@@ -5,7 +5,7 @@ import { isStaff, requireUser, type SessionUser } from '@/lib/auth'
 import { toCargoTypeDTO, toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { imageDataUriError } from '@/lib/settings'
-import { allowed, permDenied } from '@/lib/permissions'
+import { allowedFor, permDenied } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
   // права (Task 111): ручное добавление записей — directory:addManual
-  if (!(await allowed(auth.role, 'directory:addManual'))) {
+  if (!(await allowedFor(auth, 'directory:addManual'))) {
     return NextResponse.json({ error: permDenied('directory:addManual') }, { status: 403 })
   }
 
@@ -227,7 +227,7 @@ export async function PUT(req: NextRequest) {
   if (auth instanceof NextResponse) return auth
   // права (Task 111): правка карточек — directory:edit (у администрации по умолчанию
   // выключено — данные правятся через «База данных»)
-  if (!(await allowed(auth.role, 'directory:edit'))) {
+  if (!(await allowedFor(auth, 'directory:edit'))) {
     return NextResponse.json({ error: permDenied('directory:edit') }, { status: 403 })
   }
 

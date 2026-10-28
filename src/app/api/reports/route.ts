@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { buildReport } from '@/lib/reports-data'
 import { parseIsoDay } from '@/lib/report-period'
-import { allowed, permDenied } from '@/lib/permissions'
+import { allowedFor, permDenied } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(request: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
-  if (!(await allowed(auth.role, 'reports:view'))) {
+  if (!(await allowedFor(auth, 'reports:view'))) {
     return NextResponse.json({ error: permDenied('reports:view') }, { status: 403 })
   }
 

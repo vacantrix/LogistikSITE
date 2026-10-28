@@ -5,7 +5,7 @@ import { isoDay, mskDay, parseIsoDay } from '@/lib/report-period'
 import { normalizeSettings, reportDef } from '@/lib/reports/catalog'
 import { buildReportDoc } from '@/lib/reports/build'
 import { renderReportDocx } from '@/lib/reports/docx'
-import { allowed, permDenied } from '@/lib/permissions'
+import { allowedFor, permDenied } from '@/lib/permissions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   const user = await requireUser()
   if (user instanceof NextResponse) return user
   // права (Task 111): выгрузка отчётов — тем же правом reports:view
-  if (!(await allowed(user.role, 'reports:view'))) {
+  if (!(await allowedFor(user, 'reports:view'))) {
     return NextResponse.json({ error: permDenied('reports:view') }, { status: 403 })
   }
 

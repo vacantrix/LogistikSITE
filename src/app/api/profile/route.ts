@@ -64,10 +64,10 @@ export async function PUT(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
 
-  // право «Редактирование своего профиля» (Task 112): по умолчанию только у администрации;
-  // персональное разрешение выдаёт админ в «Профилях и доступах» — без права сервер отклоняет правку
+  // право «Редактирование своего профиля» (Task 112/113): по умолчанию только у администрации;
+  // персональное право выдаёт админ в «Профилях и доступах» — без права сервер отклоняет правку
   const me = await db.user.findUnique({ where: { id: auth.id }, select: { profileEditOwn: true } })
-  if (!(await allowedOwnProfile(auth.role, me?.profileEditOwn))) {
+  if (!(await allowedOwnProfile(auth, me?.profileEditOwn))) {
     return NextResponse.json({ error: permDenied('profile:edit') }, { status: 403 })
   }
 
