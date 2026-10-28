@@ -29,35 +29,37 @@ ONEC_API_KEY=<ключ не короче 24 символов>
 ONEC_CORS_ORIGINS=https://vacantrix.github.io
 ```
 
-`ONEC_CORS_ORIGINS` — адрес сайта, с которого открыт симулятор: только схема и домен, без пути и слеша в конце. Для GitHub Pages пользователя `vacantrix` это `https://vacantrix.github.io` при любом имени репозитория.
+`ONEC_CORS_ORIGINS` — адрес сайта, с которого открыт симулятор: только схема и домен, без пути и слеша в конце. Для GitHub Pages пользователя `vacantrix` это `https://vacantrix.github.io`.
 
 После правки `.env` перезапустите платформу.
 
 Платформа должна открываться по **https**: страница GitHub Pages работает по https, и браузер не даст ей обратиться к http-адресу.
 
-## 2. Репозиторий и GitHub Pages
+## 2. Включить GitHub Pages (один раз)
 
-1. На github.com: **+** → **New repository**. Имя `1c-demo-simulator`, видимость **Public** (Pages для бесплатного аккаунта — только у публичных). Отметьте **Add a README file** и нажмите **Create repository**.
-2. В репозитории: **Add file** → **Upload files** → перетащите `index.html` из этой папки → **Commit changes**.
-3. **Settings** → **Pages** (меню слева). В **Build and deployment**:
+Отдельный репозиторий не нужен: Pages публикует папку `docs` самого LogistikSITE, а симулятор лежит в `docs/1c/simulator/`.
+
+1. github.com → репозиторий **vacantrix/LogistikSITE** → **Settings** → **Pages** (меню слева).
+2. В блоке **Build and deployment**:
    - **Source**: «Deploy from a branch»;
-   - **Branch**: `main`, папка `/ (root)` → **Save**.
-4. Через 1–2 минуты вверху страницы **Pages** появится ссылка:
+   - **Branch**: `main`, папка **`/docs`** → **Save**.
+
+   Пока ветка `claude/1c-request-drafts` не влита в `main`, можно временно выбрать её — с той же папкой `/docs`.
+3. Через 1–2 минуты вверху страницы **Pages** появится адрес сайта `https://vacantrix.github.io/LogistikSITE/`. Ход публикации виден во вкладке **Actions** («pages build and deployment»).
+4. Симулятор открывается по адресу:
 
    ```
-   https://vacantrix.github.io/1c-demo-simulator/
+   https://vacantrix.github.io/LogistikSITE/1c/simulator/
    ```
 
-   Ход публикации виден во вкладке **Actions** («pages build and deployment»).
-
-Ключа в `index.html` нет, поэтому публичный репозиторий безопасен. С ключом читаются справочники с паспортными данными водителей, поэтому ключ вводится только на самой странице.
+Публикуется только папка `docs` (материалы 1С); код платформы и `.env` на сайт не попадают. Ключа в `index.html` нет: с ним читаются справочники с паспортными данными водителей, поэтому ключ вводится только на самой странице. Файл `docs/.nojekyll` нужен, чтобы GitHub отдавал файлы как есть.
 
 ## 3. Демонстрация
 
 1. Откройте ссылку с адресом платформы в параметре:
 
    ```
-   https://vacantrix.github.io/1c-demo-simulator/?api=https://<домен-платформы>
+   https://vacantrix.github.io/LogistikSITE/1c/simulator/?api=https://<домен-платформы>
    ```
 
    Откроется новая «Заявка на перевозку (создание)» с заполненными полями.
