@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { notifyCarrier } from '@/lib/notify-users'
 import { plog } from '@/lib/platform-log'
 import { expiryInfo } from '@/lib/expiry'
+import { allowed, permDenied } from '@/lib/permissions'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -17,8 +18,12 @@ export const dynamic = 'force-dynamic'
  * Уведомления создаются вне транзакции (правило P1008 — здесь транзакции нет вовсе).
  */
 export async function POST() {
-  const user = await requireUser('logist')
+  const user = await requireUser()
   if (user instanceof NextResponse) return user
+  // права (Task 111): рассылка — право notify:agent (по умолчанию только логист)
+  if (!(await allowed(user.role, 'notify:agent'))) {
+    return NextResponse.json({ error: permDenied('notify:agent') }, { status: 403 })
+  }
 
   const [trucks, trailers] = await Promise.all([
     db.truck.findMany({ select: { brand: true, plate: true, techTill: true, carrierId: true } }),

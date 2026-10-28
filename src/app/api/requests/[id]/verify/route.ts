@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, viewerOf } from '@/lib/auth'
+import { isStaff, requireUser, viewerOf } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
@@ -8,6 +8,7 @@ import { inTx, loadRequestFor } from '@/lib/requests'
 import { loadVerifySettings } from '@/lib/settings'
 import { plog, plogError } from '@/lib/platform-log'
 import { verifyDocument, expectedFor, OcrUnavailableError } from '@/lib/verify'
+import { allowed, permDenied } from '@/lib/permissions'
 import type { DocType, VerifyVerdict } from '@/lib/verify'
 
 export const dynamic = 'force-dynamic'
@@ -35,6 +36,10 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
   if (auth.role === 'carrier' && request.winnerId !== auth.carrierId) {
     return NextResponse.json({ error: 'Проверку запускает перевозчик, за которым закреплён рейс' }, { status: 403 })
+  }
+  // права (Task 111): повторная проверка документов сотрудником — правом verify:decide
+  if (isStaff(auth.role) && !(await allowed(auth.role, 'verify:decide'))) {
+    return NextResponse.json({ error: permDenied('verify:decide') }, { status: 403 })
   }
 
   const respond = async () => {

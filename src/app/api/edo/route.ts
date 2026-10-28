@@ -11,6 +11,7 @@ import { DiadocError } from '@/lib/diadoc/client'
 import { diadocEnabled } from '@/lib/diadoc/config'
 import { diadocInfo, etrnDraft, sendEtrnT1, syncDiadoc } from '@/lib/diadoc/etrn'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
+import { allowed, permDenied, type PermKey } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -163,6 +164,18 @@ export async function POST(req: NextRequest) {
   const requestId = typeof body.requestId === 'string' ? body.requestId : ''
   const docId = typeof body.docId === 'string' ? body.docId : ''
   const action = typeof body.action === 'string' ? body.action : ''
+
+  // права (Task 111): синхронизация — edo:sync, отправка ЭТрН — edo:send, подпись — edo:sign
+  const EDO_ACTION_PERM: Partial<Record<string, PermKey>> = {
+    'diadoc-sync': 'edo:sync',
+    'etrn-draft': 'edo:send',
+    'etrn-send': 'edo:send',
+    sign: 'edo:sign',
+  }
+  const edoPerm = EDO_ACTION_PERM[action]
+  if (edoPerm && !(await allowed(auth.role, edoPerm))) {
+    return NextResponse.json({ error: permDenied(edoPerm) }, { status: 403 })
+  }
 
   // ——— Диадок: сверка статусов ЭТрН (обе роли — «Обновить статусы») ———
   if (action === 'diadoc-sync') {

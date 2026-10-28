@@ -25,6 +25,7 @@ import {
   AgentStatusBadge, EmptyState, ErrorBlock, InfoTip, LoadingBlock, NoticeLine, SectionHeader, type TabProps,
 } from '@/components/platform/common'
 import { SearchSelect } from '@/components/platform/search-select'
+import { useCan } from '@/components/platform/perms'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -191,6 +192,10 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   const [approveReq, setApproveReq] = useState<RequestDTO | null>(null)
 
   const isAgent = role === 'carrier'
+  // права платформы (Task 111): назначение и утверждение экипажей — crew:assign (сервер
+  // проверяет то же самое); без права поля показываются только для чтения, кнопки исчезают
+  const can = useCan()
+  const canCrew = can('crew:assign')
 
   const load = useCallback(async () => {
     try {
@@ -634,18 +639,25 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                             Кого оформляем исполнителем по этой заявке: перевозчик — заказ-заявка на перевозку, экспедитор — поручение экспедитору. По умолчанию — роль вашей компании.
                           </InfoTip>
                         </div>
-                        <Select
-                          value={s.executorRole ?? 'CARRIER'}
-                          onValueChange={(v) => setSelFor(r.id, { executorRole: v as ExecutorRole })}
-                        >
-                          <SelectTrigger className="w-full" aria-label={`Исполнитель по заявке ${r.number}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="CARRIER">Перевозчик</SelectItem>
-                            <SelectItem value="FORWARDER">Экспедитор</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        {canCrew ? (
+                          <Select
+                            value={s.executorRole ?? 'CARRIER'}
+                            onValueChange={(v) => setSelFor(r.id, { executorRole: v as ExecutorRole })}
+                          >
+                            <SelectTrigger className="w-full" aria-label={`Исполнитель по заявке ${r.number}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="CARRIER">Перевозчик</SelectItem>
+                              <SelectItem value="FORWARDER">Экспедитор</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          /* без права crew:assign — значение только для чтения (Task 111) */
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            {EXECUTOR_ROLE_LABEL[s.executorRole ?? 'CARRIER']}
+                          </div>
+                        )}
                       </div>
                       <div className="min-w-0 space-y-2">
                         <div className="flex items-center gap-1 text-xs font-semibold text-slate-500">
@@ -654,19 +666,26 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                             Чей транспорт выйдет на рейс. По умолчанию — транспорт в собственности.
                           </InfoTip>
                         </div>
-                        <Select
-                          value={s.transportOwnership ?? 'OWNED'}
-                          onValueChange={(v) => setSelFor(r.id, { transportOwnership: v as TransportOwnership })}
-                        >
-                          <SelectTrigger className="w-full" aria-label={`Транспорт по заявке ${r.number}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(Object.keys(TRANSPORT_OWNERSHIP_META) as TransportOwnership[]).map((k) => (
-                              <SelectItem key={k} value={k}>{TRANSPORT_OWNERSHIP_META[k].label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {canCrew ? (
+                          <Select
+                            value={s.transportOwnership ?? 'OWNED'}
+                            onValueChange={(v) => setSelFor(r.id, { transportOwnership: v as TransportOwnership })}
+                          >
+                            <SelectTrigger className="w-full" aria-label={`Транспорт по заявке ${r.number}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(Object.keys(TRANSPORT_OWNERSHIP_META) as TransportOwnership[]).map((k) => (
+                                <SelectItem key={k} value={k}>{TRANSPORT_OWNERSHIP_META[k].label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          /* без права crew:assign — значение только для чтения (Task 111) */
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            {TRANSPORT_OWNERSHIP_META[s.transportOwnership ?? 'OWNED'].label}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -674,7 +693,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                     <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3">
                       <div className="min-w-0 space-y-2">
                         <div className="text-xs font-semibold text-slate-500">Водитель</div>
-                        <SearchSelect
+                        {canCrew && <SearchSelect
                           value={s.driverId ?? ''}
                           options={freeFirst(drivers, busyCrew.drivers, r.id).map((d) => {
                             const b = busyElsewhere(busyCrew.drivers, d.id, r.id)
@@ -687,12 +706,12 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                           onChange={(v) => pickDriver(r.id, v)}
                           placeholder="Выберите водителя"
                           ariaLabel={`Выбор водителя по заявке ${r.number}`}
-                        />
+                        />}
                         {driver ? <DriverCell d={driver} /> : <span className="text-[11px] text-slate-300">—</span>}
                       </div>
                       <div className="min-w-0 space-y-2">
                         <div className="text-xs font-semibold text-slate-500">Тягач</div>
-                        <SearchSelect
+                        {canCrew && <SearchSelect
                           value={s.truckId ?? ''}
                           options={freeFirst(trucks, busyCrew.trucks, r.id).map((t) => {
                             const b = busyElsewhere(busyCrew.trucks, t.id, r.id)
@@ -705,13 +724,13 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                           onChange={(v) => pickTruck(r.id, v)}
                           placeholder="Выберите тягач"
                           ariaLabel={`Выбор тягача по заявке ${r.number}`}
-                        />
+                        />}
                         {truck ? <TruckCell t={truck} /> : <span className="text-[11px] text-slate-300">—</span>}
                       </div>
                       <div className="min-w-0 space-y-2">
                         <div className="text-xs font-semibold text-slate-500">Прицеп</div>
                         {/* Прицеп обязателен: только реальные прицепы из базы, без варианта «Без прицепа» */}
-                        <SearchSelect
+                        {canCrew && <SearchSelect
                           value={s.trailerId ?? ''}
                           options={freeFirst(trailers, busyCrew.trailers, r.id).map((z) => {
                             const b = busyElsewhere(busyCrew.trailers, z.id, r.id)
@@ -724,7 +743,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                           onChange={(v) => pickTrailer(r.id, v)}
                           placeholder="Выберите прицеп"
                           ariaLabel={`Выбор прицепа по заявке ${r.number}`}
-                        />
+                        />}
                         {trailer ? <TrailerCell z={trailer} /> : <span className="text-[11px] text-slate-300">—</span>}
                       </div>
                     </div>
@@ -741,21 +760,24 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                       </p>
                     )}
 
-                    <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
-                      <Button
-                        disabled={!canAssign}
-                        onClick={() => (assigned ? setApproveReq(r) : void assign(r))}
-                        aria-label={assigned ? `Утвердить экипаж по заявке ${r.number}` : `Передать экипаж по заявке ${r.number} логисту`}
-                      >
-                        {busy === r.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : assigned ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
-                        {assigned ? 'Утвердить' : 'Передать экипаж логисту'}
-                      </Button>
-                      {!assigned && (
-                        <InfoTip label="Как передать экипаж">
-                          Выберите водителя, тягач и прицеп — готовый комплект уйдёт логисту. Занятые в другом рейсе помечены в списках и не выбираются.
-                        </InfoTip>
-                      )}
-                    </div>
+                    {/* передать/утвердить экипаж — по праву crew:assign (Task 111) */}
+                    {canCrew && (
+                      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-3">
+                        <Button
+                          disabled={!canAssign}
+                          onClick={() => (assigned ? setApproveReq(r) : void assign(r))}
+                          aria-label={assigned ? `Утвердить экипаж по заявке ${r.number}` : `Передать экипаж по заявке ${r.number} логисту`}
+                        >
+                          {busy === r.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : assigned ? <CheckCircle2 className="h-4 w-4" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+                          {assigned ? 'Утвердить' : 'Передать экипаж логисту'}
+                        </Button>
+                        {!assigned && (
+                          <InfoTip label="Как передать экипаж">
+                            Выберите водителя, тягач и прицеп — готовый комплект уйдёт логисту. Занятые в другом рейсе помечены в списках и не выбираются.
+                          </InfoTip>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )
@@ -820,43 +842,45 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
             </div>
           </div>
 
-          {/* ——— Правая колонка: массовое назначение из Excel ——— */}
-          <div className="min-w-0 space-y-4">
-            <Card className="border-slate-200 shadow-sm lg:sticky lg:top-4">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <FileSpreadsheet className="h-4 w-4 text-emerald-700" aria-hidden />
-                  Массовое назначение из Excel
-                  <InfoTip label="Массовое назначение">
-                    Скачайте шаблон: в нём ваши выигранные рейсы без экипажа. Впишите водителя, тягач и прицеп из базы и загрузите файл — экипажи встанут на все рейсы сразу.
-                    {needCrew.length === 0 && ' Сейчас рейсов без экипажа нет.'}
-                  </InfoTip>
-                </div>
-                <div className="mt-3 flex flex-col gap-2">
-                  <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={downloadTemplate}>
-                    <Download className="h-3.5 w-3.5" aria-hidden />
-                    Скачать шаблон
-                  </Button>
-                  <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={() => excelInput.current?.click()}>
-                    <Upload className="h-3.5 w-3.5" aria-hidden />
-                    Загрузить Excel
-                  </Button>
-                </div>
-                <input
-                  ref={excelInput}
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  className="hidden"
-                  aria-label="Файл Excel с экипажами"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    e.target.value = ''
-                    if (f) void parseExcel(f)
-                  }}
-                />
-              </CardContent>
-            </Card>
-          </div>
+          {/* ——— Правая колонка: массовое назначение из Excel — тоже crew:assign (Task 111) ——— */}
+          {canCrew && (
+            <div className="min-w-0 space-y-4">
+              <Card className="border-slate-200 shadow-sm lg:sticky lg:top-4">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-700" aria-hidden />
+                    Массовое назначение из Excel
+                    <InfoTip label="Массовое назначение">
+                      Скачайте шаблон: в нём ваши выигранные рейсы без экипажа. Впишите водителя, тягач и прицеп из базы и загрузите файл — экипажи встанут на все рейсы сразу.
+                      {needCrew.length === 0 && ' Сейчас рейсов без экипажа нет.'}
+                    </InfoTip>
+                  </div>
+                  <div className="mt-3 flex flex-col gap-2">
+                    <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={downloadTemplate}>
+                      <Download className="h-3.5 w-3.5" aria-hidden />
+                      Скачать шаблон
+                    </Button>
+                    <Button size="sm" variant="outline" className="justify-start gap-1.5" onClick={() => excelInput.current?.click()}>
+                      <Upload className="h-3.5 w-3.5" aria-hidden />
+                      Загрузить Excel
+                    </Button>
+                  </div>
+                  <input
+                    ref={excelInput}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    aria-label="Файл Excel с экипажами"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      e.target.value = ''
+                      if (f) void parseExcel(f)
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </div>
       )}
 

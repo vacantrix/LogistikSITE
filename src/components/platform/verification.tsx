@@ -33,6 +33,7 @@ import {
   EmptyState, ErrorBlock, InfoTip, LoadingBlock, NoticeLine, SectionHeader, StatusBadge, StatusDot, WithTip, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
+import { useCan } from '@/components/platform/perms'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -240,7 +241,7 @@ function queueState(
   return flagged ? 'pending' : 'new'
 }
 
-export default function VerificationTab({ activeCarrierId: _activeCarrierId, role, onNavigate, liveTick }: TabProps) {
+export default function VerificationTab({ activeCarrierId: _activeCarrierId, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [carriersLoaded, setCarriersLoaded] = useState(false)
@@ -263,8 +264,9 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, rol
   const [returnComment, setReturnComment] = useState('')
   // скрытый input обмена документами (Task 109): загрузка файла для перевозчика
   const exchangeInput = useRef<HTMLInputElement | null>(null)
-  // решения по пакету (утвердить/доработка) и выкладывание документов — только логист (Task 110)
-  const isLogist = role === 'logist'
+  // права платформы (Task 111): решения сверки — verify:decide, документы для перевозчика —
+  // docs:upload; нет права — функция не отображается (сервер проверяет то же самое)
+  const can = useCan()
 
   const load = useCallback(async () => {
     try {
@@ -360,7 +362,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, rol
   const truck = selected ? truckMap.get(selected.truckId ?? '') ?? null : null
   const trailer = selected ? trailerMap.get(selected.trailerId ?? '') ?? null : null
 
-  const isEditable = selected?.status === 'AT_LOGIST' && isLogist
+  const isEditable = selected?.status === 'AT_LOGIST' && can('verify:decide')
 
   const doConfirm = async (r: RequestDTO) => {
     setBusy(r.id)
@@ -842,7 +844,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, rol
                                 <Download className="h-3.5 w-3.5" aria-hidden />
                                 Скачать
                               </a>
-                              {isLogist && (
+                              {can('docs:upload') && (
                                 <button
                                   type="button"
                                   className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-600 disabled:opacity-50"
@@ -873,7 +875,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, rol
                       }}
                     />
                     <div className="mt-3">
-                      {isLogist && (
+                      {can('docs:upload') && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -963,8 +965,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, rol
                           <div className="mt-0.5 text-xs text-slate-500">Пропуск подготовлен, ЭТрН — в разделе «Подписать ЭДО»</div>
                         )}
                       </NoticeLine>
-                    ) : selected.status === 'AT_LOGIST' && !isLogist ? (
-                      /* администрация смотрит пакет на сверке без решений — решает логист (Task 110) */
+                    ) : selected.status === 'AT_LOGIST' && !can('verify:decide') ? (
+                      /* пакет на сверке без права decide — режим просмотра: решение принимает логист (Task 110/111) */
                       <NoticeLine>
                         <div className="font-medium text-slate-900">Пакет на сверке</div>
                         <div className="mt-0.5 text-xs text-slate-600">

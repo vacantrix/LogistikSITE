@@ -402,6 +402,16 @@ export interface AdminUserDTO {
   profile: ProfileDTO | null
 }
 
+// ——— Права доступа (Task 111) ———
+
+/** Строка матрицы прав: роль и список её прав (ключ → включено) */
+export interface PermMatrixRow {
+  role: SessionRole
+  label: string
+  items: { key: string; allowed: boolean }[]
+}
+
+
 // ——— Редактор базы данных (администрация, Task 109) ———
 
 /** Таблица базы данных, доступная администрации */

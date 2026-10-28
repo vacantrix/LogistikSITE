@@ -486,3 +486,19 @@ model Setting {
   minQuality   Float  @default(60)
   rules        String @default("{}")
 }
+
+/**
+ * Права ролей платформы (Task 111): полная матрица «роль × право».
+ * Если строки нет или allowed = false — функция целиком скрывается из интерфейса
+ * этой роли и блокируется на сервере (проверка в API-маршрутах).
+ * Каталог прав и значения по умолчанию — src/lib/permissions.ts; при пустой таблице
+ * она автоматически заполняется дефолтами (ensurePerms).
+ */
+model RolePerm {
+  role    String // 'admin' | 'logist' | 'carrier'
+  key     String // ключ права из каталога (draft:create, request:delete, edo:sign…)
+  allowed Boolean
+  updatedAt DateTime @updatedAt
+
+  @@id([role, key])
+}

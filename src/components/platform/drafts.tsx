@@ -13,6 +13,7 @@ import { CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide
 import {
   EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, NoticeLine, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
+import { useCan } from '@/components/platform/perms'
 import { RoutePointsInline } from '@/components/platform/route-dialog'
 import { DEADLINE_OPTIONS, RequestFormDialog } from '@/components/platform/request-form'
 import {
@@ -61,7 +62,14 @@ export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
   const [busy, setBusy] = useState(false)
   const [publishHours, setPublishHours] = useState('4')
   const [publishRate, setPublishRate] = useState('')
-  // администрация смотрит черновики без решений: публикация/правка/удаление — логист (Task 110)
+  // права платформы (Task 111): каждая функция видна только при включённом праве —
+  // без права кнопка исчезает из интерфейса целиком (сервер проверяет то же самое)
+  const can = useCan()
+  const canCreate = can('draft:create')
+  const canEdit = can('draft:edit')
+  const canDelete = can('draft:delete')
+  const mayPublish = can('request:publish')
+  // администрация смотрит черновики в режиме просмотра (операционные права по умолчанию выключены)
   const isLogist = role === 'logist'
 
   const load = useCallback(async () => {
@@ -131,7 +139,7 @@ export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
         title="Черновики заявок"
         desc="Заявки, которые не на площадке: сохранённые без публикации и торги, по которым за время приёма ставок не было ни одной ставки. Перевозчики черновики не видят."
       >
-        {isLogist && (
+        {canCreate && (
           <Button onClick={() => setCreateOpen(true)} className="gap-1.5">
             <Plus className="h-4 w-4" aria-hidden />
             Новая заявка
@@ -196,19 +204,28 @@ export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
                         Стартовая ставка: <b>{r.startRate > 0 ? rate(r.startRate) : 'не задана'}</b>
                       </span>
                       <div className="ml-auto flex items-center gap-1.5">
-                        {isLogist && (
-                          <>
-                            <Button size="sm" className="gap-1.5" onClick={() => openPublish(r)}>
-                              <Send className="h-4 w-4" aria-hidden />
-                              Опубликовать
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => setEditId(r.id)} aria-label={`Изменить черновик ${r.number}`} title="Изменить">
-                              <Pencil className="h-4 w-4" aria-hidden />
-                            </Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:bg-red-50 hover:text-red-600" onClick={() => setDeleteId(r.id)} aria-label={`Удалить черновик ${r.number}`} title="Удалить">
-                              <Trash2 className="h-4 w-4" aria-hidden />
-                            </Button>
-                          </>
+                        {mayPublish && (
+                          <Button size="sm" className="gap-1.5" onClick={() => openPublish(r)}>
+                            <Send className="h-4 w-4" aria-hidden />
+                            Опубликовать
+                          </Button>
+                        )}
+                        {canEdit && (
+                          <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-500 hover:bg-amber-50 hover:text-amber-700" onClick={() => setEditId(r.id)} aria-label={`Изменить черновик ${r.number}`} title="Изменить">
+                            <Pencil className="h-4 w-4" aria-hidden />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1.5 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => setDeleteId(r.id)}
+                            aria-label={`Удалить черновик ${r.number}`}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                            Удалить
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -220,8 +237,8 @@ export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
         )
       )}
 
-      {/* новая заявка: опубликованная уходит на площадку, черновик — в этот список (только логист) */}
-      {isLogist && createOpen && (
+      {/* новая заявка: опубликованная уходит на площадку, черновик — в этот список */}
+      {canCreate && createOpen && (
         <RequestFormDialog
           open
           onOpenChange={setCreateOpen}
@@ -237,7 +254,7 @@ export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
         />
       )}
 
-      {isLogist && editTarget && (
+      {canEdit && editTarget && (
         <RequestFormDialog
           key={editTarget.id}
           open

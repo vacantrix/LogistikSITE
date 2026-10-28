@@ -69,6 +69,7 @@ import {
 import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
 import { RequestFormDialog } from '@/components/platform/request-form'
 import { AnimatedRate } from '@/components/platform/animated-rate'
+import { useCan } from '@/components/platform/perms'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
@@ -214,14 +215,21 @@ function SortableTh({ k, label, sort, onSort, title }: {
  * обратный отсчёт, метрики, ставки и решения по заявке.
  * Победителя логист не выбирает: по окончании приёма ставок заявка автоматически
  * уходит минимальной ставке (при равных — более ранней). Логист может продлить срок,
- * поднять стартовую ставку или предложить заявку напрямую.
+ * поднять стартовую ставку или предложить заявку напрямую — каждое действие под своим
+ * правом (Task 111); у кого прав нет, стенд остаётся в режиме просмотра.
  */
-function AuctionDesk({ request, now, busy, readOnly = false, onExtend, onOffer, onRaise }: {
+function AuctionDesk({ request, now, busy, canRaise = false, canExtend = false, canOffer = false, adminView = false, onExtend, onOffer, onRaise }: {
   request: RequestDTO
   now: number | null
   busy: boolean
-  /** администрация смотрит стенд без решений: продлить/поднять/предложить — только логист */
-  readOnly?: boolean
+  /** право request:raise (Task 111): кнопка «Поднять стартовую ставку» */
+  canRaise?: boolean
+  /** право request:extend (Task 111): кнопка «Продлить торги на 2 часа» */
+  canExtend?: boolean
+  /** прямое предложение: отдельного права нет (сервер требует роль логиста) — показываем логисту */
+  canOffer?: boolean
+  /** «Режим администрации» — только роли admin: стенд смотрится без решений */
+  adminView?: boolean
   onExtend: () => void
   onOffer: () => void
   onRaise: () => void
@@ -314,7 +322,7 @@ function AuctionDesk({ request, now, busy, readOnly = false, onExtend, onOffer, 
         </div>
       )}
 
-      {/* действия над торгом */}
+      {/* действия над торгом — каждое под своим правом (Task 111): без права кнопки нет */}
       <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
         {minBid ? (
           <WithTip tip="Победитель определится автоматически: минимальная ставка на момент окончания приёма">
@@ -324,26 +332,26 @@ function AuctionDesk({ request, now, busy, readOnly = false, onExtend, onOffer, 
             </span>
           </WithTip>
         ) : (
-          !readOnly && (
+          canRaise && (
             <Button size="sm" disabled={busy} onClick={onRaise}>
               <TrendingUp className="h-4 w-4" aria-hidden />
               Поднять стартовую ставку
             </Button>
           )
         )}
-        {!readOnly && (
-          <>
-            <Button size="sm" variant="outline" disabled={busy} onClick={onExtend}>
-              <ClockPlus className="h-4 w-4" aria-hidden />
-              Продлить торги на 2 часа
-            </Button>
-            <Button size="sm" variant="outline" disabled={busy} onClick={onOffer}>
-              <Send className="h-4 w-4" aria-hidden />
-              Предложить напрямую
-            </Button>
-          </>
+        {canExtend && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={onExtend}>
+            <ClockPlus className="h-4 w-4" aria-hidden />
+            Продлить торги на 2 часа
+          </Button>
         )}
-        {readOnly && (
+        {canOffer && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={onOffer}>
+            <Send className="h-4 w-4" aria-hidden />
+            Предложить напрямую
+          </Button>
+        )}
+        {adminView && (
           <span className="text-xs text-slate-500">Режим администрации — торги смотрятся без решений, действия выполняет логист</span>
         )}
         {busy && <span className="text-xs text-slate-400">Выполняется…</span>}
@@ -444,6 +452,11 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   // персонал (логист и администрация) видит площадку целиком; решения — только логист (Task 110)
   const isLogist = role === 'logist'
   const isStaff = isLogist || role === 'admin'
+  // права платформы (Task 111): нет права — функция полностью исчезает из интерфейса
+  // (сервер проверяет то же самое). Роль-гейты сохранены: ставки — только перевозчик,
+  // решения стенда и удаление заявки — только логист
+  const can = useCan()
+  const canBid = role === 'carrier' && can('bid:submit')
 
   /** клик по заголовку: asc → desc → сброс */
   const toggleSort = useCallback((k: SortKey) => {
@@ -599,9 +612,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     () => buildMapPoints(sorted.filter((r) =>
       r.status === 'PUBLISHED' && r.deadline !== null && new Date(r.deadline).getTime() > Date.now()),
       (r) =>
-        role === 'carrier' && r.status === 'PUBLISHED' && !myBidOf(r)
+        canBid && r.status === 'PUBLISHED' && !myBidOf(r)
         && r.deadline !== null && new Date(r.deadline).getTime() > Date.now()),
-    [sorted, role, myBidOf],
+    [sorted, canBid, myBidOf],
   )
   const deliveryCount = mapPoints.filter((p) => p.kind === 'delivery').length
 
@@ -836,7 +849,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   return (
     <section aria-label="Площадка заявок">
       <SectionHeader title="Площадка заявок">
-        {isLogist && (
+        {/* право draft:create (Task 111): без него кнопки создания нет вовсе */}
+        {isLogist && can('draft:create') && (
           <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать заявку">
             <Plus className="h-4 w-4" aria-hidden />
             Создать заявку
@@ -1019,7 +1033,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                           <td className="border-b border-slate-100 py-3" onClick={(e) => e.stopPropagation()}>
                             {isStaff ? (
                               // персонал: раскрывает торговый стенд прямо в строке или смотрит статус;
-                              // удаление — только логист (Task 65, RBAC: delete_current_orders), админ смотрит
+                              // удаление — право request:delete логиста (Task 65/111), админ смотрит
                               <div className="flex items-center justify-end gap-1.5">
                                 {r.status === 'PUBLISHED' ? (
                                   <Button
@@ -1037,7 +1051,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 ) : (
                                   <StatusBadge status={r.status} />
                                 )}
-                                {isLogist && DELETABLE_STATUSES.includes(r.status) && (
+                                {isLogist && can('request:delete') && DELETABLE_STATUSES.includes(r.status) && (
                                   <Button
                                     size="icon"
                                     variant="ghost"
@@ -1055,7 +1069,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 {r.status === 'PUBLISHED' && biddingClosed(r) && (
                                   <span className="text-xs font-medium text-slate-500">Приём ставок завершён</span>
                                 )}
-                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'AUCTION' && (
+                                {/* право bid:submit (Task 111): выключено — кнопок ставки нет у перевозчика */}
+                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'AUCTION' && canBid && (
                                   <Button
                                     size="sm"
                                     disabled={!activeCarrierId || busyId !== null}
@@ -1066,7 +1081,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                     Сделать ставку
                                   </Button>
                                 )}
-                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'CLOSED' && (
+                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'CLOSED' && canBid && (
                                   <Button
                                     size="sm"
                                     disabled={!activeCarrierId || busyId !== null}
@@ -1089,7 +1104,12 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 request={r}
                                 now={now}
                                 busy={busyId === r.id}
-                                readOnly={!isLogist}
+                                // права (Task 111): поднять/продлить/предложить — только логист с правом;
+                                // пометка «Режим администрации» — только роли admin
+                                canRaise={isLogist && can('request:raise')}
+                                canExtend={isLogist && can('request:extend')}
+                                canOffer={isLogist && can('request:offer')}
+                                adminView={role === 'admin'}
                                 onExtend={() => void runAction(r.id, 'extend', {}, 'Торги продлены', `№${r.number}: срок увеличен на 2 часа`)}
                                 onOffer={() => void openOffer(r)}
                                 onRaise={() => openRaise(r)}
@@ -1139,8 +1159,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         </div>
       )}
 
-      {/* Форма новой заявки (Task 64) — только логист: опубликовать или сохранить в черновики */}
-      {isLogist && createOpen && (
+      {/* Форма новой заявки (Task 64) — только логисту с правом draft:create (Task 111):
+          опубликовать или сохранить в черновики */}
+      {isLogist && can('draft:create') && createOpen && (
         <RequestFormDialog
           open
           onOpenChange={setCreateOpen}
@@ -1549,7 +1570,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
               <DeliveryMap
                 points={mapPoints}
                 focusId={focusPointId}
-                onBid={role === 'carrier' ? (id) => {
+                onBid={canBid ? (id) => {
                   // карта закрывается, поверх открывается обычное окно ставки по заявке
                   setMapOpen(false)
                   setFocusPointId(null)

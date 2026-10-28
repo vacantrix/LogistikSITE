@@ -57,6 +57,7 @@ import {
 import { PIPELINE_STAGES, STAGE_OF_STATUS, StatusPipeline } from '@/components/platform/status-pipeline'
 import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
 import { AnimatedRate } from '@/components/platform/animated-rate'
+import { useCan } from '@/components/platform/perms'
 import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
 import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
@@ -174,6 +175,11 @@ function CrewChips({ r, carrier }: { r: RequestDTO; carrier: CarrierDTO | null }
 
 export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
+  // права платформы (Task 111): нет права — функция полностью исчезает из интерфейса
+  // (сервер проверяет то же самое); проверки владения (winnerId и т.п.) остаются — они про данные
+  const can = useCan()
+  const canBid = can('bid:submit')
+  const canExchange = can('docs:request')
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [carriers, setCarriers] = useState<CarrierDTO[]>([])
   const [loading, setLoading] = useState(true)
@@ -970,8 +976,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       <div className="flex flex-wrap items-center gap-2">
                         {/* статус показан один раз — над линией этапов, итог — в строке статуса ниже */}
                         <h3 className="text-lg font-bold text-slate-900">Заявка {r.number}</h3>
-                        {/* иконка отмены — добровольный выход из идущих торгов (Task 52) */}
-                        {bidding && myBid && (
+                        {/* иконка отмены — добровольный выход из идущих торгов (Task 52);
+                            право bid:submit (Task 111): без него выхода из торгов нет */}
+                        {bidding && myBid && canBid && (
                           <Button
                             size="icon"
                             variant="ghost"
@@ -1075,22 +1082,25 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           )}
                         </div>
                       )}
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="gap-1.5"
-                          disabled={!r.deadline || (now !== null && Date.parse(r.deadline) <= now)}
-                          onClick={() => { setBidReq(r); setBidAmount(''); setBidStep('form') }}
-                          aria-label={`Подать новую ставку по заявке ${r.number}`}
-                        >
-                          <TrendingDown className="h-4 w-4" aria-hidden />
-                          Подать новую ставку
-                        </Button>
-                        <InfoTip label="Что будет дальше">
-                          Когда приём ставок закончится, заявка автоматически уйдёт минимальной ставке — если это ваша, здесь появятся водитель, ТС и документы. До этого можно подать новую, пониженную ставку.
-                        </InfoTip>
-                      </div>
+                      {/* право bid:submit (Task 111): без него ставки не подаются */}
+                      {canBid && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            disabled={!r.deadline || (now !== null && Date.parse(r.deadline) <= now)}
+                            onClick={() => { setBidReq(r); setBidAmount(''); setBidStep('form') }}
+                            aria-label={`Подать новую ставку по заявке ${r.number}`}
+                          >
+                            <TrendingDown className="h-4 w-4" aria-hidden />
+                            Подать новую ставку
+                          </Button>
+                          <InfoTip label="Что будет дальше">
+                            Когда приём ставок закончится, заявка автоматически уйдёт минимальной ставке — если это ваша, здесь появятся водитель, ТС и документы. До этого можно подать новую, пониженную ставку.
+                          </InfoTip>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1132,20 +1142,23 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           )}
                         </div>
                       )}
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          disabled={!r.deadline || (now !== null && Date.parse(r.deadline) <= now)}
-                          onClick={() => { setBidReq(r); setBidAmount(''); setBidStep('form') }}
-                          aria-label={`Сделать ставку по заявке ${r.number}`}
-                        >
-                          <TrendingDown className="h-4 w-4" aria-hidden />
-                          Сделать ставку
-                        </Button>
-                        <InfoTip label="Что будет после ставки">
-                          Заявка останется в вашем кабинете: здесь видно торги, перебитие ставки и победу.
-                        </InfoTip>
-                      </div>
+                      {/* право bid:submit (Task 111): без него ставки не подаются */}
+                      {canBid && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            disabled={!r.deadline || (now !== null && Date.parse(r.deadline) <= now)}
+                            onClick={() => { setBidReq(r); setBidAmount(''); setBidStep('form') }}
+                            aria-label={`Сделать ставку по заявке ${r.number}`}
+                          >
+                            <TrendingDown className="h-4 w-4" aria-hidden />
+                            Сделать ставку
+                          </Button>
+                          <InfoTip label="Что будет после ставки">
+                            Заявка останется в вашем кабинете: здесь видно торги, перебитие ставки и победу.
+                          </InfoTip>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -1228,7 +1241,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                   )}
 
                   {/* ——— Обмен документами с логистом (Task 109): доверенность и заявка — логисту,
-                       документы от АЭМЗ — отсюда; без почты, всё внутри заявки ——— */}
+                       документы от АЭМЗ — отсюда; без почты, всё внутри заявки.
+                       Право docs:request (Task 111): без него обмен — только чтение ——— */}
                   {exchangeOpen && (
                     <div className="space-y-3 rounded-xl border border-slate-200 p-4">
                       <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
@@ -1266,7 +1280,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                                     >
                                       Скачать
                                     </a>
-                                    {file.uploadedBy === 'carrier' && (
+                                    {/* право docs:request (Task 111): удаление своего файла из обмена */}
+                                    {file.uploadedBy === 'carrier' && canExchange && (
                                       <button
                                         type="button"
                                         className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-red-600 disabled:opacity-50"
@@ -1283,7 +1298,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                                   </div>
                                 </div>
                               )}
-                              {exchangeEditable && (
+                              {/* право docs:request (Task 111): загрузка/замена файла обмена */}
+                              {exchangeEditable && canExchange && (
                                 <>
                                   <input
                                     ref={(el) => { exchangeInputs.current[kind] = el }}
@@ -1312,7 +1328,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                                   </Button>
                                 </>
                               )}
-                              {!exchangeEditable && !file && (
+                              {!file && !(exchangeEditable && canExchange) && (
                                 <p className="text-xs text-slate-400">Не передавалась</p>
                               )}
                             </div>

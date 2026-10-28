@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { notifyLive } from '@/lib/notify'
 import { applyCrew, inTx, validateCrew } from '@/lib/requests'
+import { allowed, permDenied } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,10 @@ export interface BulkAssignResult {
 export async function POST(req: NextRequest) {
   const auth = await requireUser('carrier')
   if (auth instanceof NextResponse) return auth
+  // права (Task 111): массовое назначение — то же право crew:assign, что и по одной заявке
+  if (!(await allowed(auth.role, 'crew:assign'))) {
+    return NextResponse.json({ error: permDenied('crew:assign') }, { status: 403 })
+  }
   const carrierId = auth.carrierId!
 
   const body = await req.json().catch(() => null)

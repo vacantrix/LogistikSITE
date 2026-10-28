@@ -7,6 +7,7 @@ import { plog } from '@/lib/platform-log'
 import { loadRequestFor } from '@/lib/requests'
 import { imageDataUriError, isPdfDataUri } from '@/lib/settings'
 import { toRequestDTO } from '@/lib/serialize'
+import { allowed as hasPerm, permDenied, type PermKey } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,6 +37,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const allowed: readonly string[] = isStaff(auth.role) ? [...CARRIER_KINDS, 'FOR_CARRIER'] : CARRIER_KINDS
   if (!allowed.includes(kind)) {
     return NextResponse.json({ error: 'Неизвестный вид файла обмена' }, { status: 400 })
+  }
+
+  // права (Task 111): сотрудник выкладывает документы перевозчику (docs:upload),
+  // перевозчик передаёт доверенность/заявку (docs:request)
+  const needPerm: PermKey = isStaff(auth.role) ? 'docs:upload' : 'docs:request'
+  if (!(await hasPerm(auth.role, needPerm))) {
+    return NextResponse.json({ error: permDenied(needPerm) }, { status: 403 })
   }
 
   let name = typeof body?.fileName === 'string' ? body.fileName.trim().slice(0, 200) : ''
@@ -117,6 +125,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   if (!file || file.requestId !== id) return NextResponse.json({ error: 'Файл не найден' }, { status: 404 })
   if (!isStaff(auth.role) && file.uploadedBy !== 'carrier') {
     return NextResponse.json({ error: 'Удалять можно только свои файлы' }, { status: 403 })
+  }
+  // права (Task 111): тот же набор, что и на загрузку
+  const delPerm: PermKey = isStaff(auth.role) ? 'docs:upload' : 'docs:request'
+  if (!(await hasPerm(auth.role, delPerm))) {
+    return NextResponse.json({ error: permDenied(delPerm) }, { status: 403 })
   }
 
   await db.requestFile.delete({ where: { id: fileId } })

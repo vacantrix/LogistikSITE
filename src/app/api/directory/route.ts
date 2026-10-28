@@ -5,6 +5,7 @@ import { isStaff, requireUser, type SessionUser } from '@/lib/auth'
 import { toCargoTypeDTO, toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { imageDataUriError } from '@/lib/settings'
+import { allowed, permDenied } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,6 +73,10 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
+  // права (Task 111): ручное добавление записей — directory:addManual
+  if (!(await allowed(auth.role, 'directory:addManual'))) {
+    return NextResponse.json({ error: permDenied('directory:addManual') }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => null)
   const { kind, data } = (body ?? {}) as { kind?: string; data?: Record<string, unknown> }
@@ -220,6 +225,11 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
+  // права (Task 111): правка карточек — directory:edit (у администрации по умолчанию
+  // выключено — данные правятся через «База данных»)
+  if (!(await allowed(auth.role, 'directory:edit'))) {
+    return NextResponse.json({ error: permDenied('directory:edit') }, { status: 403 })
+  }
 
   const body = await req.json().catch(() => null)
   const { kind, id, data } = (body ?? {}) as { kind?: string; id?: string; data?: Record<string, unknown> }

@@ -31,6 +31,8 @@ import ProfileTab from '@/components/platform/profile'
 import SupportTab from '@/components/platform/support'
 import AdminUsersTab from '@/components/platform/admin-users'
 import AdminDbTab from '@/components/platform/admin-db'
+import PermissionsTab from '@/components/platform/permissions'
+import { PermProvider, useCan } from '@/components/platform/perms'
 
 /** Роль интерфейса из пользователя сессии */
 function roleOf(user: SessionUserDTO): RoleSelection {
@@ -168,14 +170,45 @@ export default function Page() {
   }
   if (user === null) return <LoginScreen onAuthed={() => void loadSession()} />
 
+  // права платформы (Task 111): контекст вокруг всего интерфейса — разделы и функции
+  // внутри проверяют себя через useCan(); пока права не загружены, разделы показываются
+  // (сервер всё равно проверит), после загрузки лишние скрываются
+  return (
+    <PermProvider>
+      <PlatformView
+        user={user}
+        tab={tab}
+        setTab={setTab}
+        liveTick={liveTick}
+        connLost={connLost}
+        onLogout={() => void logout()}
+        onAddAccount={addAccount}
+      />
+    </PermProvider>
+  )
+}
+
+/** Интерфейс платформы для вошедшего пользователя (внутри PermProvider — здесь доступны права) */
+function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAccount }: {
+  user: SessionUserDTO
+  tab: TabKey
+  setTab: (t: TabKey) => void
+  liveTick: number
+  connLost: boolean
+  onLogout: () => void
+  onAddAccount: () => void
+}) {
+  const can = useCan()
   const role = roleOf(user)
   const activeCarrierId = role.kind === 'carrier' ? role.carrierId ?? null : null
   const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab, liveTick }
-  // защита: раздел недоступен текущей роли — показываем пояснение вместо содержимого
+  // защита: раздел недоступен текущей роли — показываем пояснение вместо содержимого;
+  // «Отчёты» дополнительно закрыты правом reports:view (Task 111)
   const allowed = navFor(role.kind).some((n) => n.key === tab)
+    && (tab !== 'reports' || can('reports:view'))
 
   return (
-    <Shell tab={tab} onNavigate={setTab} role={role} user={user} onLogout={() => void logout()} onAddAccount={addAccount} liveTick={liveTick}>
+    <Shell tab={tab} onNavigate={setTab} role={role} user={user} onLogout={onLogout} onAddAccount={onAddAccount} liveTick={liveTick}>
       {!allowed ? (
         <RoleNotice role={role.kind} />
       ) : (
@@ -196,6 +229,7 @@ export default function Page() {
           {tab === 'support' && <SupportTab {...tabProps} />}
           {tab === 'admin-users' && <AdminUsersTab {...tabProps} />}
           {tab === 'admin-db' && <AdminDbTab {...tabProps} />}
+          {tab === 'perms' && <PermissionsTab />}
         </>
       )}
 

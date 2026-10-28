@@ -34,6 +34,7 @@ import {
   ErrorBlock, ExpiryBadge, InfoTip, LoadingBlock, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
+import { useCan } from '@/components/platform/perms'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -278,6 +279,11 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   const isLogist = role === 'logist'
   // персонал видит весь парк перевозчиков; правка записей — логист и владелец-перевозчик (Task 110)
   const isStaff = isLogist || role === 'admin'
+  // права платформы (Task 111): ручное добавление — directory:addManual, правка строк —
+  // directory:edit, рассылка агенту — notify:agent; нет права — функция не отображается
+  // (сервер проверяет то же самое)
+  const can = useCan()
+  const canEditRows = can('directory:edit')
   // ——— фильтры справочника: текстовый поиск + срок документов + перевозчик (логисту) ———
   const [dirQuery, setDirQuery] = useState('')
   const [dirExpiry, setDirExpiry] = useState<'all' | 'soon' | 'expired'>('all')
@@ -621,8 +627,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
               )}
               <InfoTip label="Цвета сроков">Точка у срока: красная — срок истёк, янтарная — осталось до 30 дней, серая — до 90 дней.</InfoTip>
             </div>
-            {/* рассылка «Уведомить агента» — операционное действие логиста (Task 108) */}
-            {isLogist && expiryItems.length > 0 && (
+            {/* рассылка «Уведомить агента» — по праву notify:agent (Task 108/111) */}
+            {can('notify:agent') && expiryItems.length > 0 && (
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="outline" onClick={notifyAgents} disabled={notifying}>
                   {notifying
@@ -702,8 +708,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
         })}
       </div>
 
-      {/* Компании-исполнители (логист): роль определяет договорной документ рейса */}
-      {isLogist && (carriers ?? []).length > 0 && (
+      {/* Компании-исполнители (логист): смена роли компании — правом directory:edit (права, Task 111) */}
+      {isLogist && can('directory:edit') && (carriers ?? []).length > 0 && (
         <Card className="mt-4 shadow-sm">
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -767,8 +773,9 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                       <ArrowRight className="h-3.5 w-3.5" aria-hidden />
                     </Button>
                   )}
-                  {/* «Добавить вручную» — только логист; перевозчик пополняет базу через «Подать документы» (Task 110) */}
-                  {isLogist && (
+                  {/* «Добавить вручную» — по праву directory:addManual; перевозчик пополняет
+                      базу через «Подать документы» (Task 110/111) */}
+                  {can('directory:addManual') && (
                     <Button size="sm" className="h-9 gap-1.5" onClick={() => openAdd(section.kind)}>
                       <Plus className="h-4 w-4" aria-hidden />
                       Добавить вручную
@@ -827,12 +834,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
-                            {role === 'carrier' && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                            {canEditRows && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {driversFlat.map(({ d, carrierName }) => (
-                            <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isStaff} onEdit={() => openEdit('driver', d.id, {
+                            <DriverRow key={d.id} d={d} carrierName={carrierName} showCarrier={isStaff} showEdit={canEditRows} onEdit={() => openEdit('driver', d.id, {
                               fullName: d.fullName, birthDate: d.birthDate, passport: d.passport,
                               ownershipType: d.ownershipType,
                               ownerName: d.ownerName === '—' ? '' : d.ownerName,
@@ -858,12 +865,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
-                            {role === 'carrier' && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                            {canEditRows && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {trucksFlat.map(({ t, carrierName }) => (
-                            <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isStaff} onEdit={() => openEdit('truck', t.id, {
+                            <TruckRow key={t.id} t={t} carrierName={carrierName} showCarrier={isStaff} showEdit={canEditRows} onEdit={() => openEdit('truck', t.id, {
                               brand: t.brand, plate: t.plate, vin: t.vin, sts: t.sts,
                               techTill: t.techTill === '—' ? '' : t.techTill, owner: t.owner,
                               ownershipType: t.ownershipType,
@@ -889,12 +896,12 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                             <TableHead>Принадлежность</TableHead>
                             <TableHead>Добавлен</TableHead>
                             <TableHead className="w-10"><span className="sr-only">Фото документов</span></TableHead>
-                            {role === 'carrier' && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
+                            {canEditRows && <TableHead className="w-10"><span className="sr-only">Изменить</span></TableHead>}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {trailersFlat.map(({ z, carrierName }) => (
-                            <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isStaff} onEdit={() => openEdit('trailer', z.id, {
+                            <TrailerRow key={z.id} z={z} carrierName={carrierName} showCarrier={isStaff} showEdit={canEditRows} onEdit={() => openEdit('trailer', z.id, {
                               plate: z.plate, type: z.type, sts: z.sts, techTill: z.techTill === '—' ? '' : z.techTill,
                               owner: z.owner === '—' ? '' : z.owner,
                               ownershipType: z.ownershipType,
@@ -1123,7 +1130,7 @@ function PhotosButton({ title, onOpen }: { title: string; onOpen: () => void }) 
   )
 }
 
-function DriverRow({ d, carrierName, showCarrier, onEdit, onPhotos }: { d: DriverDTO; carrierName: string; showCarrier: boolean; onEdit: () => void; onPhotos: () => void }) {
+function DriverRow({ d, carrierName, showCarrier, showEdit, onEdit, onPhotos }: { d: DriverDTO; carrierName: string; showCarrier: boolean; showEdit: boolean; onEdit: () => void; onPhotos: () => void }) {
   return (
     <TableRow>
       <TableCell className="font-medium text-slate-800">{d.fullName}</TableCell>
@@ -1135,7 +1142,8 @@ function DriverRow({ d, carrierName, showCarrier, onEdit, onPhotos }: { d: Drive
       <TableCell>
         <PhotosButton title={d.fullName} onOpen={onPhotos} />
       </TableCell>
-      {!showCarrier && (
+      {/* правка строки — по праву directory:edit (Task 111) */}
+      {showEdit && (
         <TableCell>
           <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${d.fullName}`} onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -1146,7 +1154,7 @@ function DriverRow({ d, carrierName, showCarrier, onEdit, onPhotos }: { d: Drive
   )
 }
 
-function TruckRow({ t, carrierName, showCarrier, onEdit, onPhotos }: { t: TruckDTO; carrierName: string; showCarrier: boolean; onEdit: () => void; onPhotos: () => void }) {
+function TruckRow({ t, carrierName, showCarrier, showEdit, onEdit, onPhotos }: { t: TruckDTO; carrierName: string; showCarrier: boolean; showEdit: boolean; onEdit: () => void; onPhotos: () => void }) {
   const tech = expiryInfo(t.techTill)
   return (
     <TableRow className={rowTint([tech.state])}>
@@ -1161,7 +1169,8 @@ function TruckRow({ t, carrierName, showCarrier, onEdit, onPhotos }: { t: TruckD
       <TableCell>
         <PhotosButton title={`${t.brand} · ${t.plate}`} onOpen={onPhotos} />
       </TableCell>
-      {!showCarrier && (
+      {/* правка строки — по праву directory:edit (Task 111) */}
+      {showEdit && (
         <TableCell>
           <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${t.plate}`} onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" aria-hidden />
@@ -1172,7 +1181,7 @@ function TruckRow({ t, carrierName, showCarrier, onEdit, onPhotos }: { t: TruckD
   )
 }
 
-function TrailerRow({ z, carrierName, showCarrier, onEdit, onPhotos }: { z: TrailerDTO; carrierName: string; showCarrier: boolean; onEdit: () => void; onPhotos: () => void }) {
+function TrailerRow({ z, carrierName, showCarrier, showEdit, onEdit, onPhotos }: { z: TrailerDTO; carrierName: string; showCarrier: boolean; showEdit: boolean; onEdit: () => void; onPhotos: () => void }) {
   const tech = expiryInfo(z.techTill)
   return (
     <TableRow className={rowTint([tech.state])}>
@@ -1187,7 +1196,8 @@ function TrailerRow({ z, carrierName, showCarrier, onEdit, onPhotos }: { z: Trai
       <TableCell>
         <PhotosButton title={`${z.type} · ${z.plate}`} onOpen={onPhotos} />
       </TableCell>
-      {!showCarrier && (
+      {/* правка строки — по праву directory:edit (Task 111) */}
+      {showEdit && (
         <TableCell>
           <Button size="icon" variant="ghost" className="h-8 w-8" aria-label={`Изменить ${z.plate}`} onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5" aria-hidden />

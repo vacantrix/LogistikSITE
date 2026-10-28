@@ -42,6 +42,7 @@ import { api, secureFileUrl } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
 import { formatKm, routeDistanceKm } from '@/lib/geo'
 import { RouteButton } from '@/components/platform/route-dialog'
+import { useCan } from '@/components/platform/perms'
 import { PORT_COL_WIDTHS, buildPortRows, type PortExportEntry } from '@/lib/port-excel'
 import {
   REGISTRY_STEPS, fmtDateTime, num, rate, registryStepIndex,
@@ -217,6 +218,9 @@ function DocBadges({ r, stacked }: { r: RequestDTO; stacked?: boolean }) {
 
 export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
+  // права платформы (Task 111): закрытие рейсов — trip:close; нет права — кнопки
+  // «Закрыть рейс» не отображаются (сервер проверяет то же самое)
+  const can = useCan()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [drivers, setDrivers] = useState<Map<string, DriverDTO>>(new Map())
   const [trucks, setTrucks] = useState<Map<string, TruckDTO>>(new Map())
@@ -507,7 +511,8 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                                 >
                                   <Eye className="h-4 w-4" aria-hidden />
                                 </Button>
-                                {r.status === 'CONFIRMED' && (
+                                {/* закрытие рейса — по праву trip:close (Task 111) */}
+                                {r.status === 'CONFIRMED' && can('trip:close') && (
                                   <Button
                                     size="icon"
                                     variant="ghost"
@@ -673,7 +678,8 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                   </div>
                 </div>
 
-                {detail.status === 'CONFIRMED' && (
+                {/* закрытие рейса — по праву trip:close (Task 111) */}
+                {detail.status === 'CONFIRMED' && can('trip:close') && (
                   <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3">
                     <Button
                       size="sm"

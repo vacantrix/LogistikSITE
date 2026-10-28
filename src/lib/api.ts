@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
+  AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PermMatrixRow, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
 import type { ReportId, ReportPreview, ReportSettings } from '@/lib/reports/catalog'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
@@ -225,6 +225,12 @@ export const api = {
     fetch('/api/profile', withAuth({ cache: 'no-store' })).then(json<{ profile: ProfileDTO; role: string; carrierRole: 'CARRIER' | 'FORWARDER' | null }>),
   saveProfile: (data: Partial<ProfileDTO>) =>
     fetch('/api/profile', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ profile: ProfileDTO }>),
+
+  /** Права доступа (Task 111): матрица «роль × право» и её правка администрацией */
+  permissions: () =>
+    fetch('/api/permissions', withAuth({ cache: 'no-store' })).then(json<{ perms: PermMatrixRow[]; mine: string[] }>),
+  permissionsUpdate: (updates: { role: string; key: string; allowed: boolean }[]) =>
+    fetch('/api/permissions', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }) })).then(json<{ ok: boolean; perms: PermMatrixRow[] }>),
 
   /** Профили и доступы (администрация, Task 109) */
   adminUsers: () =>

@@ -20,7 +20,7 @@
  *  «Добавить аккаунт» (вход под новой учёткой без выбрасывания текущих сессий)
  *  и выход — затрагивающий только аккаунт этой вкладки.
  */
-import { useState, type ComponentType } from 'react'
+import { useState, useEffect, type ComponentType } from 'react'
 import {
   BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
   History, LayoutGrid, ListChecks, LogOut, MessagesSquare, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
@@ -33,9 +33,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { NotificationBell } from '@/components/platform/notification-bell'
 import { LogoMark } from '@/components/platform/logo-mark'
+import { useCan } from '@/components/platform/perms'
 import type { RoleKind, TabKey } from '@/components/platform/common'
-import type { SessionUserDTO } from '@/lib/types'
-import { activateAccount, listAccounts } from '@/lib/api'
+import type { ProfileDTO, SessionUserDTO } from '@/lib/types'
+import { activateAccount, api, listAccounts } from '@/lib/api'
 
 /** Полный список разделов с пометкой ролей: A — администрация, L — логист, C — перевозчик.
  *  Система прав (Task 109): три роли — администрация (профили, база данных), логист (внутренний
@@ -56,6 +57,7 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'] },
   { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'] },
   { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'] },
+  { key: 'perms', label: 'Права доступа', roles: ['admin'] },
   { key: 'admin-db', label: 'База данных', roles: ['admin'] },
   { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'] },
   { key: 'profile', label: 'Профиль', roles: ['logist', 'carrier', 'admin'] },
@@ -76,6 +78,7 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   reports: { Icon: BarChart3, short: 'Отчёты' },
   journal: { Icon: History, short: 'Журнал' },
   'admin-users': { Icon: UserCog, short: 'Профили' },
+  'perms': { Icon: ShieldCheck, short: 'Права' },
   'admin-db': { Icon: Database, short: 'База' },
   support: { Icon: MessagesSquare, short: 'Обращения' },
   profile: { Icon: CircleUserRound, short: 'Профиль' },
@@ -220,19 +223,35 @@ function RoleIcon({ role, className }: { role: RoleKind; className?: string }) {
 const roleLabelOf = (role: RoleKind): string =>
   role === 'admin' ? 'администрация' : role === 'logist' ? 'логист АЭМЗ' : 'перевозчик'
 
+/** Данные проформы для плашки аккаунта: ФИО крупнее, ниже — должность и организация.
+ *  Без проформы — имя учётки и роль. */
+function pillLines(profile: ProfileDTO | null, user: SessionUserDTO): { title: string; sub: string } {
+  const title = profile?.fullName?.trim() || user.name
+  const position = profile?.position?.trim() || ''
+  const company = profile?.companyName?.trim() || ''
+  // должность слева, затем организация; пустые — замещаем ролью учётной записи
+  const sub = [position, company].filter(Boolean).join(' · ')
+  return { title, sub: sub || roleLabelOf(user.role) }
+}
+
 /**
  * Меню аккаунта (Task 74): текущий пользователь, переключение на сохранённые
  * в браузере аккаунты, «Добавить аккаунт» и выход. Переключение активирует токен
  * другого аккаунта для этой вкладки и перезагружает страницу.
+ * Task 111: в плашке — ФИО крупнее, ниже должность и организация (переносятся
+ * внутри пузыря, за края не выходят); данные — из проформы профиля.
  */
-function AccountMenu({ user, compact, onLogout, onAddAccount }: {
+function AccountMenu({ user, profile, compact, onLogout, onAddAccount }: {
   user: SessionUserDTO
+  /** проформа текущего пользователя (ФИО, должность, организация) */
+  profile: ProfileDTO | null
   /** компактный вид для мобильной шапки (48px) */
   compact?: boolean
   onLogout: () => void
   onAddAccount: () => void
 }) {
   const others = listAccounts().filter((a) => a.userId !== user.id)
+  const { title: pillName, sub: pillSub } = pillLines(profile, user)
 
   const switchTo = (userId: string) => {
     if (activateAccount(userId)) window.location.reload()
@@ -256,18 +275,24 @@ function AccountMenu({ user, compact, onLogout, onAddAccount }: {
           <button
             type="button"
             aria-label="Меню аккаунта"
-            title={`${user.name} — меню аккаунта`}
-            className="flex h-9 max-w-full items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 text-sm font-medium text-blue-100 transition-colors hover:bg-white/20 hover:text-white"
+            title={`${pillName} — меню аккаунта`}
+            className="flex max-w-full items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-1.5 text-left transition-colors hover:bg-white/20 hover:text-white"
           >
-            <CircleUserRound className="h-[18px] w-[18px] shrink-0" aria-hidden />
-            <span className="max-w-[180px] truncate sm:max-w-[240px]">{user.name}</span>
+            <CircleUserRound className="h-[22px] w-[22px] shrink-0" aria-hidden />
+            <span className="flex min-w-0 max-w-[150px] flex-col leading-tight sm:max-w-[240px]">
+              <span className="truncate text-[15px] font-semibold text-white">{pillName}</span>
+              <span className="line-clamp-2 break-words text-left text-[11px] font-normal leading-snug text-blue-100/85">
+                {pillSub}
+              </span>
+            </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
           </button>
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel>
-          <span className="block truncate font-semibold text-slate-900">{user.name}</span>
+          <span className="block truncate font-semibold text-slate-900">{pillName}</span>
+          <span className="block break-words text-xs font-normal text-slate-500">{pillSub}</span>
           <span className="block truncate text-xs font-normal text-slate-500">
             {user.login} · {roleLabelOf(user.role)}
           </span>
@@ -318,8 +343,18 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
 }) {
   const isLogist = role.kind === 'logist'
   const isAdmin = role.kind === 'admin'
-  const nav = navFor(role.kind)
+  const can = useCan()
+  // разделы роли; «Отчёты» дополнительно закрыты правом reports:view (Task 111) —
+  // без права пункт меню исчезает целиком
+  const nav = navFor(role.kind).filter((n) => n.key !== 'reports' || can('reports:view'))
   const userName = user.name
+  // проформа для плашки аккаунта: ФИО, должность, организация (Task 111)
+  const [profile, setProfile] = useState<ProfileDTO | null>(null)
+  useEffect(() => {
+    let alive = true
+    api.getProfile().then((d) => { if (alive) setProfile(d.profile) }).catch(() => { /* плашка покажет имя учётки */ })
+    return () => { alive = false }
+  }, [user.id])
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
@@ -332,7 +367,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
             {/* меню аккаунта: смена/добавление/выход (Task 74) */}
-            <AccountMenu user={user} compact onLogout={onLogout} onAddAccount={onAddAccount} />
+            <AccountMenu user={user} profile={profile} compact onLogout={onLogout} onAddAccount={onAddAccount} />
           </div>
         </div>
 
@@ -351,7 +386,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             {/* колокольчик персональных уведомлений (Task 69) */}
             <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
             {/* меню аккаунта: смена/добавление/выход (Task 74); роль задаётся учётной записью */}
-            <AccountMenu user={user} onLogout={onLogout} onAddAccount={onAddAccount} />
+            <AccountMenu user={user} profile={profile} onLogout={onLogout} onAddAccount={onAddAccount} />
           </div>
         </div>
         <nav aria-label="Разделы платформы" className="hidden border-t border-white/10 md:block">

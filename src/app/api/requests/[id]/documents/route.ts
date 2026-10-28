@@ -5,6 +5,7 @@ import { DOC_SELECT, toDocumentDTO, toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { inTx, loadRequestFor } from '@/lib/requests'
 import { imageDataUriError, isPdfDataUri } from '@/lib/settings'
+import { allowed, permDenied } from '@/lib/permissions'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +33,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const request = await db.request.findUnique({ where: { id }, select: { id: true, number: true, status: true, winnerId: true } })
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
+  // права (Task 111): загрузка документа сотрудником — docs:upload (перевозчик загружает
+  // документы своего рейса — базовый поток кабинета, без отдельного права)
+  if (isStaff(auth.role) && !(await allowed(auth.role, 'docs:upload'))) {
+    return NextResponse.json({ error: permDenied('docs:upload') }, { status: 403 })
+  }
   const logistAttachment = isStaff(auth.role) && (request.status === 'PUBLISHED' || request.status === 'DRAFT')
   if (auth.role === 'carrier' && request.winnerId !== auth.carrierId) {
     return NextResponse.json({ error: 'Документы загружает только перевозчик, за которым закреплён рейс' }, { status: 403 })

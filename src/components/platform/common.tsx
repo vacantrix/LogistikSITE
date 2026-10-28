@@ -18,7 +18,7 @@ import { AGENT_STATUS_LABEL, DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } f
 import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
-export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo' | 'profile' | 'support' | 'admin-users' | 'admin-db'
+export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo' | 'profile' | 'support' | 'admin-users' | 'admin-db' | 'perms'
 
 /** Роль пользователя: администрация, сотрудник АЭМЗ (логист) или перевозчик/экспедитор */
 export type RoleKind = 'admin' | 'logist' | 'carrier'

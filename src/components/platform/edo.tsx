@@ -23,6 +23,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { EtrnSendDialog, EtrnStatus } from '@/components/platform/etrn-dialog'
+import { useCan } from '@/components/platform/perms'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { fmtDateTime } from '@/lib/status'
@@ -100,6 +101,9 @@ export default function EdoTab({ role, liveTick }: TabProps) {
   const isLogist = role === 'logist'
   // администрация видит комплекты ЭДО в режиме просмотра: подписи/отправки в Диадок — за сторонами (Task 110)
   const isAdmin = role === 'admin'
+  // права платформы (Task 111): сверка статусов Диадока — edo:sync (сервер проверяет то же самое);
+  // без права кнопка «Обновить статусы» не отображается — остаётся пояснение «сверяет логист»
+  const can = useCan()
 
   const load = useCallback(async () => {
     try {
@@ -177,7 +181,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
               <span className="text-sm text-slate-500">{diadoc.stand.charAt(0).toUpperCase() + diadoc.stand.slice(1)}</span>
               {/* время последней сверки — по наведению на кнопку */}
               <WithTip tip={diadoc.lastSyncAt ? `Статусы ЭТрН сверены с Диадоком ${fmtDateTime(diadoc.lastSyncAt)}` : 'Сверить статусы ЭТрН с Диадоком'}>
-                {isLogist ? (
+                {can('edo:sync') ? (
                   <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
                     <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden />
                     Обновить статусы
@@ -340,6 +344,9 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
   onEtrnSend?: (doc: EdoDocDTO) => void
 }) {
   const isLogist = role === 'logist'
+  // права платформы (Task 111): подписание — edo:sign, отправка ЭТрН в Диадок — edo:send;
+  // нет права — кнопка не отображается (сервер проверяет то же самое)
+  const can = useCan()
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-100 px-4 py-3">
@@ -358,8 +365,8 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
             // через Диадок идёт накладная рейса в работе или уже отправленная; у закрытых
             // до подключения Диадока рейсов накладная подписана в платформе — показываем её подписи
             const viaDiadoc = diadocEnabled && doc.kind === 'ETRN' && (Boolean(doc.diadoc) || pack.request.status === 'CONFIRMED')
-            // администрация не подписывает — только просмотр статусов (Task 110)
-            const canSign = !viaDiadoc && !mySideDone && !(doc.aemzSigned && doc.partySigned) && role !== 'admin'
+            // подписание — по праву edo:sign; администрация не подписывает — только просмотр статусов (Task 110/111)
+            const canSign = !viaDiadoc && !mySideDone && !(doc.aemzSigned && doc.partySigned) && role !== 'admin' && can('edo:sign')
             return (
               <div key={doc.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -389,7 +396,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                   </div>
                 )}
                 {viaDiadoc && <EtrnStatus doc={doc} />}
-                {viaDiadoc && !doc.diadoc && isLogist && pack.request.status === 'CONFIRMED' && onEtrnSend && (
+                {viaDiadoc && !doc.diadoc && can('edo:send') && pack.request.status === 'CONFIRMED' && onEtrnSend && (
                   <div className="mt-2">
                     <Button size="sm" variant="outline" onClick={() => onEtrnSend(doc)} className="h-8">
                       <Send className="mr-1.5 h-3.5 w-3.5" aria-hidden />

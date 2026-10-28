@@ -8,6 +8,7 @@ import { canonicalPoint } from '@/lib/points'
 import {
   applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
+import { allowed, permDenied, type PermKey } from '@/lib/permissions'
 
 /** Сообщение для «Журнала событий платформы» (Task 76) по выполненному действию */
 function actionLogMessage(action: string, actor: string, number: string, body: Record<string, unknown>, winnerName: string | null): string {
@@ -47,6 +48,23 @@ const ACTION_LOG_TYPE: Record<string, string> = {
 }
 
 export const dynamic = 'force-dynamic'
+
+/** Право (Task 111), закрывающее каждое действие: без него действие скрыто из интерфейса
+ *  и отклоняется сервером. Удаление черновика и удаление заявки — разные права. */
+const ACTION_PERM: Partial<Record<string, PermKey>> = {
+  bid: 'bid:submit',
+  withdraw: 'bid:submit',
+  publish: 'request:publish',
+  edit: 'draft:edit',
+  extend: 'request:extend',
+  'raise-rate': 'request:raise',
+  'direct-offer': 'request:offer',
+  assign: 'crew:assign',
+  'approve-crew': 'crew:assign',
+  confirm: 'verify:decide',
+  return: 'verify:decide',
+  close: 'trip:close',
+}
 
 /** Кто может выполнять действие. Перевозчик действует только от своего имени — carrierId берётся из сессии.
  *  RBAC (Task 65): действие delete — это разрешение delete_current_orders роли «Логист»:
@@ -110,6 +128,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   await finalizeExpired()
   const visible = await loadRequestFor(id, viewer)
   if (!visible) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
+
+  // права (Task 111): действие выполняется только при включённом праве роли
+  const permKey: PermKey | undefined = action === 'delete'
+    ? (visible.status === 'DRAFT' ? 'draft:delete' : 'request:delete')
+    : ACTION_PERM[action]
+  if (permKey && !(await allowed(auth.role, permKey))) {
+    return NextResponse.json({ error: permDenied(permKey) }, { status: 403 })
+  }
 
   const me = auth.carrierId
   let liveType = action
