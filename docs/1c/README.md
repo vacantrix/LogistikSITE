@@ -9,6 +9,16 @@
 
 Авторизация — заголовок `X-API-Key` со значением `ONEC_API_KEY` из `.env` сервера (не короче 24 символов). Без переменной все маршруты `/api/integration/1c/*` отвечают `503`.
 
+Показать обмен без 1С можно в браузере: HTML-симулятор формы 1С [`simulator/index.html`](simulator/index.html) публикуется на GitHub Pages (инструкция — [`simulator/instructions.md`](simulator/instructions.md)).
+
+## Переменные окружения
+
+| Переменная | Обязательна | Значение |
+|---|---|---|
+| `ONEC_API_KEY` | да | Ключ интеграции, не короче 24 символов: `openssl rand -hex 24`. Тот же ключ — в модуле 1С и в симуляторе. |
+| `ONEC_CORS_ORIGINS` | для симулятора | Сайты, которым браузер разрешит обращаться к `/ping` и `/requests`, через запятую: `https://vacantrix.github.io`. `*` — любой сайт, только для временной проверки. Пусто — CORS выключен; 1С это не мешает, она ходит с сервера. |
+| `DATABASE_URL` | да | Как и раньше. После обновления — `bun run db:push`. |
+
 ## POST /api/integration/1c/requests
 
 ```json
@@ -51,6 +61,35 @@
 
 Номер заявки (`Z-<n>`) выдаёт платформа по своему правилу. Номер 1С хранится отдельно, в поле `Request.onecRef`.
 
+### Примеры curl
+
+Успешное создание (`201`) и повтор того же документа (`200`, `duplicate: true`):
+
+```bash
+curl -i -X POST https://<домен>/api/integration/1c/requests \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <ONEC_API_KEY>" \
+  -d '{"oneC_number":"ЗП-00001 от 28.10.2026","fromPoint":"Москва, ул. Заводская, 1","toPoint":"Санкт-Петербург, пр. Ленина, 100","cargo":"Перевозка готовой продукции - арматура","tonnage":20,"truckType":"Тент","loadDate":"2026-11-02","loadWindow":"09:00–18:00","startRate":8400,"comment":"Срочная"}'
+```
+
+Ошибка в данных (`400`, `{"ok":false,"error":"Укажите fromPoint и toPoint — адреса погрузки и выгрузки"}`):
+
+```bash
+curl -i -X POST https://<домен>/api/integration/1c/requests \
+  -H "Content-Type: application/json" -H "X-API-Key: <ONEC_API_KEY>" \
+  -d '{"oneC_number":"ЗП-00002 от 28.10.2026","cargo":"Перевозка металлолома","loadDate":"2026-11-02"}'
+```
+
+Статус документа и предварительный запрос браузера (CORS):
+
+```bash
+curl -s -G https://<домен>/api/integration/1c/requests -H "X-API-Key: <ONEC_API_KEY>" --data-urlencode "onecRef=ЗП-00001 от 28.10.2026"
+```
+
+```bash
+curl -i -X OPTIONS https://<домен>/api/integration/1c/requests -H "Origin: https://vacantrix.github.io" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,x-api-key"
+```
+
 ## GET /api/integration/1c/requests?onecRef=…
 
 Статус одного документа 1С: `data[0].status` / `statusRu`, `winner` (перевозчик и ИНН), `rates.best`, `crew` (водитель, ТС, прицеп), `etrn`. Поле `onecRef` есть у каждой строки реестра, так что 1С может сопоставлять и при выгрузке через `?since=`.
@@ -63,11 +102,14 @@
    bun run db:push
    ```
 
-2. Задать ключ в `.env` (пример генерации: `openssl rand -hex 24`):
+2. Задать переменные в `.env` (ключ можно сгенерировать командой `openssl rand -hex 24`):
 
    ```
    ONEC_API_KEY=<ключ не короче 24 символов>
+   ONEC_CORS_ORIGINS=https://vacantrix.github.io
    ```
+
+   `ONEC_CORS_ORIGINS` нужна только для симулятора.
 
 3. Пересобрать и перезапустить платформу (`bun run build`, затем перезапуск сервиса).
 4. Проверить обмен **без 1С** (ключ — тот же, что на сервере):
