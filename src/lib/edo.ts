@@ -12,8 +12,10 @@
  * рейса, через Диадок, если он подключён) и акт оказанных услуг (после закрытия).
  * Все документы добираются автоматически — логист только подписывает.
  *
- * Подписание: aemz* — КЭП АЭМЗ, party* — КЭП исполнителя (перевозчика или
- * экспедитора) через оператора ЭДО. Реквизиты для рендера скана — в payload (JSON).
+ * Подписание: aemz* — сторона АЭМЗ, party* — исполнитель (перевозчик или
+ * экспедитор). До подключения Диадока это отметки в платформе (не КЭП):
+ * реквизиты подписи пишутся честно — «Отметка платформы»; с подключённым
+ * Диадоком титулы подписываются КЭП в Диадоке. Реквизиты для рендера скана — в payload (JSON).
  */
 import { db } from '@/lib/db'
 
@@ -156,7 +158,7 @@ export function buildEdoPayload(
           `Водитель: ${party.driverName}`,
           `ТС: ${party.truckLabel}`,
           ...common,
-          'ЭТП: ГИС ЭПД · оператор ЭДО · подписи КЭП сторон',
+          'ЭТП: ГИС ЭПД · оператор ЭДО · подписи сторон',
         ],
         driverName: party.driverName,
         carrierName: party.carrierName,
@@ -286,7 +288,12 @@ async function ensureEdoDocumentsNow(trips: TripWithRels[]): Promise<void> {
           aemzSigned: m.bothSigned ?? false,
           partySigned: m.bothSigned ?? false,
           ...(m.bothSigned
-            ? { aemzSignedAt: now, partySignedAt: now, aemzSigner: 'КЭП АЭМЗ', partySigner: party === 'EXPEDITOR' ? 'КЭП экспедитора' : 'КЭП перевозчика' }
+            ? {
+                aemzSignedAt: now, partySignedAt: now,
+                // рейс закрыт до подключения Диадока — честная отметка платформы, не КЭП
+                aemzSigner: 'Отметка платформы (Диадок не подключён)',
+                partySigner: 'Отметка платформы (Диадок не подключён)',
+              }
             : {}),
         },
       })

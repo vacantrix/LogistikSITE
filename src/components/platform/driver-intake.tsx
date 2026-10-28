@@ -21,7 +21,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  BadgeCheck, CarFront, CircleAlert, IdCard, ScanLine, Sparkles, Truck, Trash2, X,
+  BadgeCheck, CarFront, CircleAlert, CircleCheck, IdCard, ScanLine, Sparkles, Truck, Trash2, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +34,7 @@ import {
 import ScanOverlay from '@/components/platform/scan-overlay'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
+import { isPositiveIssue } from '@/lib/doc-issues'
 import { DOC_TYPE_LABEL } from '@/lib/status'
 import { PhotoSteps, useStepUploads, type StepFile, type StepLoading } from '@/components/platform/photo-steps'
 import { validatePortField, type PortFieldKind } from '@/lib/port-fields'
@@ -607,12 +608,18 @@ export default function DriverLine({
                     Качество изображения {Math.round(v.quality)}%
                   </div>
                 )}
-                {v.issues.map((issue) => (
-                  <div key={issue} className="flex items-start gap-1 text-[10px] leading-snug text-red-700">
-                    <CircleAlert className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
-                    {issue}
-                  </div>
-                ))}
+                {v.issues.map((issue) => {
+                  // принято по подтверждениям — положительный итог: зелёным, а не красным
+                  const positive = isPositiveIssue(issue)
+                  return (
+                    <div key={issue} className={`flex items-start gap-1 text-[10px] leading-snug ${positive ? 'text-emerald-700' : 'text-red-700'}`}>
+                      {positive
+                        ? <CircleCheck className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />
+                        : <CircleAlert className="mt-px h-2.5 w-2.5 shrink-0" aria-hidden />}
+                      {issue}
+                    </div>
+                  )
+                })}
               </div>
             )
           }}

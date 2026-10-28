@@ -261,6 +261,8 @@ async function main() {
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 8400, bestRate: 7900,
       status: 'PUBLISHED', loadDate: dateInDays(2), loadWindow: '08:00–12:00', createdBy: FIO.logist1,
       deadline: inHours(2.25),
+      // дата создания — по времени публикации (не у всех заявок одна и та же)
+      createdAt: hoursAgo(26),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 8 400 ₽/т, торги до срока', createdAt: hoursAgo(26) } },
     },
   })
@@ -283,6 +285,7 @@ async function main() {
       tonnage: 18, truckType: 'Тент', mode: 'AUCTION', startRate: 6800, bestRate: null,
       status: 'PUBLISHED', loadDate: dateInDays(3), loadWindow: '09:00–13:00', createdBy: FIO.logist2,
       deadline: inHours(26),
+      createdAt: hoursAgo(20),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 6 800 ₽/т', createdAt: hoursAgo(20) } },
     },
   })
@@ -293,6 +296,7 @@ async function main() {
       tonnage: 20, truckType: 'Борт', mode: 'CLOSED', startRate: 11500, bestRate: null,
       status: 'PUBLISHED', loadDate: dateInDays(4), loadWindow: '08:00–11:00', createdBy: FIO.logist1,
       deadline: inHours(28),
+      createdAt: hoursAgo(14),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: закрытые ставки, участники не видят цены друг друга', createdAt: hoursAgo(14) } },
     },
   })
@@ -303,6 +307,7 @@ async function main() {
       tonnage: 20, truckType: 'Тент', mode: 'AUCTION', startRate: 9200, bestRate: null,
       status: 'PUBLISHED', loadDate: dateInDays(4), loadWindow: '13:00–17:00', createdBy: FIO.logist2,
       deadline: inHours(5.5),
+      createdAt: hoursAgo(6),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 9 200 ₽/т', createdAt: hoursAgo(6) } },
     },
   })
@@ -313,6 +318,7 @@ async function main() {
       tonnage: 10, truckType: 'Тент', mode: 'AUCTION', startRate: 3200, bestRate: null,
       status: 'PUBLISHED', loadDate: dateInDays(5), loadWindow: '10:00–14:00', createdBy: FIO.logist1,
       deadline: inHours(20),
+      createdAt: hoursAgo(3),
       events: { create: { type: 'REQUEST_PUBLISHED', message: 'Заявка опубликована: стартовая ставка 3 200 ₽/т', createdAt: hoursAgo(3) } },
     },
   })
@@ -381,7 +387,8 @@ async function main() {
       dataUri: docSvg('ПАСПОРТ РФ · стр. с фото', ['ГУ МВД РОССИИ', 'ПО КРАСНОДАРСКОМУ КРАЮ', 'ИВАНОВ ИВАН ИВАНОВИЧ', '15.05.1990', '99 12 345678'], '#0f3b66'),
       status: 'PASSED', quality: 96, engine: 'PaddleOCR-демо',
       fields: JSON.stringify(passFields), confidence: JSON.stringify(passConf),
-      issues: JSON.stringify(['Все оценки от 0,95 — поля приняты по уверенности; ФИО и дата совпали с заявкой']),
+      // все оценки ≥ 0,95 — движок флагов не оставляет (как в живой автопроверке)
+      issues: JSON.stringify([]),
       createdAt: hoursAgo(30), updatedAt: hoursAgo(29.5),
     },
   })
@@ -403,18 +410,23 @@ async function main() {
       status: 'PASSED', quality: 97, engine: 'PaddleOCR-демо',
       fields: JSON.stringify({ 'Госномер': 'А123ВС777', 'VIN': 'X9622277XKG123456', 'Номер СТС': '99 00 123456', 'Владелец': 'ООО ПЕРЕВОЗЧИК А' }),
       confidence: JSON.stringify({ 'Госномер': 0.99, 'VIN': 0.998, 'Номер СТС': 0.995, 'Владелец': 0.97 }),
-      issues: JSON.stringify(['Госномер и VIN совпали с заявкой; собственник может отличаться от водителя — не ошибка']),
+      issues: JSON.stringify([]),
       createdAt: hoursAgo(28), updatedAt: hoursAgo(27.7),
     },
   })
+  // дата на скане заявки перевозчика — согласована с созданием Z-1039 (два дня назад),
+  // маршрут на скане — тот же, что в заявке платформы (Абинск → Санкт-Петербург)
+  const z1039DocDate = dateInDays(-2)
   await db.document.create({
     data: {
       requestId: z1039.id, type: 'REQUEST_DOC', fileName: 'zayavka_scan.jpg',
-      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', '18.10.2026', 'ГРУЗ: КАТАНКА, 20 Т', 'МАРШРУТ: ЗАВОД → ПОРТ', 'СТАВКА: 9 800 РУБ/Т'], '#9a3412'),
+      dataUri: docSvg('ЗАЯВКА НА ПЕРЕВОЗКУ', ['№ Z-1039', z1039DocDate, 'ГРУЗ: КАТАНКА, 20 Т', 'МАРШРУТ: АБИНСК → САНКТ-ПЕТЕРБУРГ', 'СТАВКА: 9 800 РУБ/Т'], '#9a3412'),
       status: 'PASSED', quality: 95, engine: 'PaddleOCR-демо',
-      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': '18.10.2026', 'Груз': 'КАТАНКА, 20 Т', 'Ставка': '9 800 РУБ/Т' }),
-      confidence: JSON.stringify({ 'Номер заявки': 0.997, 'Дата заявки': 0.99, 'Груз': 0.98, 'Ставка': 0.96 }),
-      issues: JSON.stringify(['Номер заявки на скане совпал с рейсом Z-1039 — документ принят автоматически']),
+      fields: JSON.stringify({ 'Номер заявки': 'Z-1039', 'Дата заявки': z1039DocDate, 'Груз': 'КАТАНКА, 20 Т', 'Ставка': '9 800 РУБ/Т' }),
+      // уверенность номера ниже автопорога 0,95, но есть подтверждения (формат + совпадение)
+      // — ровно тот случай, когда движок пишет положительный флаг «принято по подтверждениям»
+      confidence: JSON.stringify({ 'Номер заявки': 0.9, 'Дата заявки': 0.99, 'Груз': 0.98, 'Ставка': 0.96 }),
+      issues: JSON.stringify(['Поле «Номер заявки»: уверенность 0.90 — принято по подтверждениям (строгий формат, совпадает с заявкой)']),
       createdAt: hoursAgo(27.6), updatedAt: hoursAgo(27.3),
     },
   })
@@ -425,7 +437,7 @@ async function main() {
       status: 'PASSED', quality: 93, engine: 'PaddleOCR-демо',
       fields: JSON.stringify({ 'Номер доверенности': '47', 'Дата выдачи': '18.10.2026', 'Действительна до': '31.12.2026', 'Кем выдана (перевозчик)': 'ООО «ПЕРЕВОЗЧИК А»', 'Представитель (ФИО)': 'ИВАНОВ ИВАН ИВАНОВИЧ' }),
       confidence: JSON.stringify({ 'Номер доверенности': 0.98, 'Дата выдачи': 0.99, 'Действительна до': 0.995, 'Кем выдана (перевозчик)': 0.97, 'Представитель (ФИО)': 0.98 }),
-      issues: JSON.stringify(['Срок доверенности действителен; представитель совпал с водителем заявки']),
+      issues: JSON.stringify([]),
       createdAt: hoursAgo(27.2), updatedAt: hoursAgo(27),
     },
   })
@@ -483,6 +495,7 @@ async function main() {
       tonnage: 22, truckType: 'Борт', mode: 'AUCTION', startRate: 9100, bestRate: null,
       status: 'PUBLISHED', loadDate: dateInDays(3), loadWindow: '08:00–12:00', createdBy: FIO.logist2,
       deadline: inHours(30),
+      createdAt: hoursAgo(2),
       events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована: стартовая ставка 9 100 ₽/т (${FIO.logist2})`, createdAt: hoursAgo(2) } },
     },
   })
@@ -492,6 +505,7 @@ async function main() {
       tonnage: 12, truckType: 'Тент', mode: 'CLOSED', startRate: 9900, bestRate: null,
       status: 'PUBLISHED', loadDate: dateInDays(4), loadWindow: '09:00–13:00', createdBy: FIO.logist1,
       deadline: inHours(44),
+      createdAt: hoursAgo(1),
       events: { create: { type: 'REQUEST_PUBLISHED', message: `Заявка опубликована: закрытые ставки (${FIO.logist1})`, createdAt: hoursAgo(1) } },
     },
   })

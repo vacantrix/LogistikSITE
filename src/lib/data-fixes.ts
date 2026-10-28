@@ -8,6 +8,8 @@
  *  — старые тексты событий и уведомлений про передачу данных в 1С — к единым
  *    формулировкам «рейс выполняется» / Диадок (интеграция с 1С пока не используется);
  *  — «АО «АЭМЗ»» в реквизитах документов ЭДО → «ООО «АЭМЗ»»; поручение экспедитору — номер ПОР-…;
+ *  — фейковые подписи «КЭП АЭМЗ»/«КЭП перевозчика» в старых документах (автодобор
+ *    закрытых рейсов до Диадока) — честная «Отметка платформы»; подписи из Диадока не трогаем;
  *  — дубли документов ЭДО одного вида по рейсу (одновременный добор) — лишние
  *    копии удаляются, остаётся самая ранняя (отправленные в Диадок не трогаем).
  */
@@ -63,7 +65,12 @@ export async function normalizeLegacyData(): Promise<void> {
     + await db.$executeRaw`UPDATE "Profile" SET "companyName" = 'ООО «АЭМЗ»' WHERE "companyName" = 'АО «АЭМЗ»'`
   // поручение экспедитору нумеруется ПОР-…, а не ЗАК-… (как заказ-заявка перевозчику)
   const orderNo = await db.$executeRaw`UPDATE "EdoDocument" SET number = 'ПОР-' || SUBSTR(number, 5) WHERE kind = 'ORDER' AND party = 'EXPEDITOR' AND number LIKE 'ЗАК-%'`
-  const texts = events.count + etrn.count + notes.count + org + orderNo
+  // старые автоподписи закрытых рейсов называли отметку платформы КЭП — пишем честно;
+  // подписанные в Диадоке («КЭП АЭМЗ · подписано в Диадоке») не трогаем
+  const kepAemz = await db.$executeRaw`UPDATE "EdoDocument" SET "aemzSigner" = 'Отметка платформы (Диадок не подключён)' WHERE "aemzSigner" = 'КЭП АЭМЗ' AND "diadocMessageId" IS NULL`
+  const kepParty = await db.$executeRaw`UPDATE "EdoDocument" SET "partySigner" = 'Отметка платформы (Диадок не подключён)' WHERE "partySigner" IN ('КЭП перевозчика', 'КЭП экспедитора') AND "diadocMessageId" IS NULL`
+  const kepLine = await db.$executeRaw`UPDATE "EdoDocument" SET payload = REPLACE(payload, 'подписи КЭП сторон', 'подписи сторон') WHERE payload LIKE '%подписи КЭП сторон%'`
+  const texts = events.count + etrn.count + notes.count + org + orderNo + kepAemz + kepParty + kepLine
 
   const edoDocs = await db.edoDocument.findMany({
     select: { id: true, requestId: true, kind: true, aemzSigned: true, partySigned: true, diadocMessageId: true },

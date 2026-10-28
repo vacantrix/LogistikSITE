@@ -61,6 +61,7 @@ import { useCan } from '@/components/platform/perms'
 import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
 import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
+import { isPositiveIssue } from '@/lib/doc-issues'
 import { DOC_TYPE_LABEL, fmtDateTime, rate, timeLeft } from '@/lib/status'
 import { pointInfo } from '@/lib/points'
 import { REQUEST_FILE_META } from '@/lib/types'
@@ -773,7 +774,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       )}
                       {doc?.message && <p className="text-[11px] leading-snug text-slate-600">{doc.message}</p>}
                       {doc && doc.issues.map((is, i) => (
-                        <p key={i} className={`text-[11px] leading-snug ${issueClass(doc.status)}`}>• {is}</p>
+                        // принято по подтверждениям — положительный итог: зелёным, не цветом статуса
+                        <p key={i} className={`text-[11px] leading-snug ${isPositiveIssue(is) ? 'text-emerald-700' : issueClass(doc.status)}`}>• {is}</p>
                       ))}
                     </div>
 

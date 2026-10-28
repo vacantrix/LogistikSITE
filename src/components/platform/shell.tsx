@@ -583,10 +583,22 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
+  // высота шапки — для sticky-шапок таблиц (реестры): меню разделов может переноситься
+  // на вторую строку (12 разделов у администратора), тогда офсет растёт вместе с шапкой
+  const headerRef = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+    const update = () => document.documentElement.style.setProperty('--header-h', `${el.offsetHeight}px`)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
-      <header className="sticky top-0 z-40 bg-[#0E1B2C] text-white shadow-lg shadow-slate-900/10">
+      <header ref={headerRef} className="sticky top-0 z-40 bg-[#0E1B2C] text-white shadow-lg shadow-slate-900/10">
         {/* Мобильная шапка (ТЗ Task 67): один ряд, минимальная высота, только критичные
             элементы — логотип, название, профиль и выход. Меню ушло в нижний Tab Bar. */}
         <div className="flex h-12 items-center gap-2 px-3 md:hidden">
@@ -631,7 +643,9 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
           </div>
         </div>
         <nav aria-label="Разделы платформы" className="hidden border-t border-white/10 md:block">
-          <div className="flex w-full gap-1 overflow-x-auto px-2 py-1.5 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {/* много разделов (12 у администратора) не влезают в одну строку на 1280–1440px:
+              переносим на вторую строку — все разделы видны, скрытой прокрутки нет */}
+          <div className="flex w-full flex-wrap gap-1 px-2 py-1.5 sm:px-6">
             {nav.map((item) => (
               <button
                 key={item.key}

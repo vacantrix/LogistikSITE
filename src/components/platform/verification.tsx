@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Ban,
   CheckCheck,
+  CircleCheck,
   ClipboardCheck,
   Download,
   FileText,
@@ -33,6 +34,7 @@ import {
   EmptyState, ErrorBlock, InfoTip, LoadingBlock, NoticeLine, SectionHeader, StatusBadge, StatusDot, WithTip, type TabProps,
 } from '@/components/platform/common'
 import { DocumentPreviewModal, ZoomableThumb } from '@/components/platform/document-preview'
+import { isPositiveIssue } from '@/lib/doc-issues'
 import { useCan } from '@/components/platform/perms'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -798,7 +800,10 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                             <ul className="mt-2 space-y-1.5">
                               {activeDoc.issues.map((issue, i) => (
                                 <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
-                                  <IssueIcon docStatus={activeDoc.status} />
+                                  {/* принято по подтверждениям — положительный итог, не предупреждение */}
+                                  {isPositiveIssue(issue)
+                                    ? <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden />
+                                    : <IssueIcon docStatus={activeDoc.status} />}
                                   <span>{issue}</span>
                                 </li>
                               ))}

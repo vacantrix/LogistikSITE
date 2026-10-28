@@ -257,7 +257,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
     const list = (requests ?? []).filter((r) => {
       if (group !== 'ALL' && requestGroupOf(r.status) !== group) return false
       if (!needle) return true
-      // поиск по ID заявки или названию груза (+ маршрут для удобства)
+      // поиск по номеру заявки или названию груза (+ маршрут для удобства)
       return [r.number, r.cargo, r.fromPoint, r.toPoint]
         .some((v) => v.toLowerCase().includes(needle))
     })
@@ -334,9 +334,9 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                 <Input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Поиск по ID заявки или названию груза…"
+                  placeholder="Поиск по номеру заявки или названию груза…"
                   className="pl-9"
-                  aria-label="Поиск по ID заявки или названию груза"
+                  aria-label="Поиск по номеру заявки или названию груза"
                 />
               </div>
               <Select value={order} onValueChange={(v) => setOrder(v as SortOrder)}>
@@ -368,9 +368,9 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                     перехват скролла контейнером отключён через .registry-sticky-table (globals.css) */}
                 <div className="registry-sticky-table">
                   <Table>
-                    <TableHeader className="z-10 bg-slate-50 shadow-[0_2px_6px_-2px_rgba(15,23,42,0.12)] md:sticky md:top-[105px]">
+                    <TableHeader className="z-10 bg-slate-50 shadow-[0_2px_6px_-2px_rgba(15,23,42,0.12)] md:sticky md:top-[var(--header-h,105px)]">
                       <TableRow className="bg-slate-50">
-                        <TableHead className="whitespace-nowrap">ID заявки</TableHead>
+                        <TableHead className="whitespace-nowrap">№ заявки</TableHead>
                         <TableHead className="whitespace-nowrap">Дата создания</TableHead>
                         <TableHead className="whitespace-nowrap">Статус</TableHead>
                         <TableHead className="whitespace-nowrap">Маршрут</TableHead>
@@ -382,6 +382,8 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                     <TableBody>
                       {filtered.map((r) => {
                         const g = REQUEST_GROUP_META[requestGroupOf(r.status)]
+                        // точный статус под группой: если слово совпадает («Черновик») — не дублируем
+                        const sub = REQUEST_STATUS_META[r.status as RequestDTO['status']]?.label ?? r.status
                         // права (Task 111): кнопки скрыты, если действия нет у учётной записи —
                         // те же права, что сервер проверяет в action 'delete' и 'edit'
                         const deletable = DELETABLE_STATUSES.includes(r.status)
@@ -396,19 +398,25 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                                   Task 73: яркий насыщенный пузырь группы + читаемая подпись под ним */}
                               <div className="flex flex-col items-start gap-0.5">
                                 <StatusDot dot={g.dot} tone={g === REQUEST_GROUP_META.deleted ? 'danger' : undefined}>{g.label}</StatusDot>
-                                <span className="text-xs leading-tight text-slate-500">
-                                  {REQUEST_STATUS_META[r.status as RequestDTO['status']]?.label ?? r.status}
+                                {sub !== g.label && (
+                                  <span className="text-xs leading-tight text-slate-500">{sub}</span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-slate-700">
+                              {/* ограничение ширины — на внутреннем блоке (max-width на td не сдерживает текст) */}
+                              <div className="max-w-[260px]">
+                                {/* whitespace-normal: у TableCell базово nowrap — без сброса длинный маршрут не переносится */}
+                                <span className="block whitespace-normal break-words">
+                                  {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
                                 </span>
                               </div>
                             </TableCell>
-                            <TableCell className="max-w-[260px] text-slate-700">
-                              <span className="block break-words">
-                                {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
-                              </span>
-                            </TableCell>
                             <TableCell className="whitespace-nowrap text-slate-600">{r.createdBy || '—'}</TableCell>
-                            <TableCell className="max-w-[200px] text-slate-600">
-                              <span className="line-clamp-2" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
+                            <TableCell className="text-slate-600">
+                              <div className="max-w-[200px]">
+                                <span className="line-clamp-2 whitespace-normal" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
+                              </div>
                             </TableCell>
                             <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-1">
@@ -468,13 +476,18 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   Заявка <span className="font-bold text-slate-900">№{detail.number}</span>
-                  {/* статус-пузырь один — группа; точный статус — рядом словом (Task 67) */}
-                  <StatusDot dot={REQUEST_GROUP_META[requestGroupOf(detail.status)].dot} className="font-normal">
-                    {REQUEST_GROUP_META[requestGroupOf(detail.status)].label}
-                  </StatusDot>
-                  <span className="text-sm font-normal text-slate-500">
-                    · {REQUEST_STATUS_META[detail.status]?.label ?? detail.status}
-                  </span>
+                  {/* статус-пузырь один — группа; точный статус — рядом словом (Task 67),
+                      совпадающие названия не дублируются («Черновик · Черновик») */}
+                  {(() => {
+                    const g = REQUEST_GROUP_META[requestGroupOf(detail.status)]
+                    const sub = REQUEST_STATUS_META[detail.status]?.label ?? detail.status
+                    return (
+                      <>
+                        <StatusDot dot={g.dot} className="font-normal">{g.label}</StatusDot>
+                        {sub !== g.label && <span className="text-sm font-normal text-slate-500">· {sub}</span>}
+                      </>
+                    )
+                  })()}
                 </DialogTitle>
                 <DialogDescription>
                   Создана {fmtDateTime(detail.createdAt)} · {detail.createdBy}

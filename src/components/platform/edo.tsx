@@ -8,7 +8,8 @@
  *  — экспедитор: поручение экспедитору по договору транспортной экспедиции;
  *  — у обоих: транспортная накладная (ЭТрН — через Диадок, если он подключён)
  *    и акт оказанных услуг после закрытия рейса.
- * Все документы появляются сами — логист и исполнитель только подписывают своей КЭП.
+ * Все документы появляются сами — логист и исполнитель подтверждают их в платформе;
+ * подпись КЭП — в Диадоке, до подключения это честные отметки, а не КЭП.
  * Статусы подписания, предосмотр сканов с факсимиле — в карточке каждого рейса.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -64,7 +65,7 @@ function edoScanSvg(p: EdoDocPayloadDTO, doc: EdoDocDTO): string {
     : ''
   const stampY = height - 66
   const stampAemz = doc.aemzSigned
-    ? `<g transform="rotate(-7 170 ${stampY + 21})"><rect x="60" y="${stampY}" width="230" height="42" rx="8" fill="none" stroke="#059669" stroke-width="3"/><text x="175" y="${stampY + 27}" text-anchor="middle" font-family="Arial" font-size="16" font-weight="bold" fill="#059669">ПОДПИСАНО · КЭП АЭМЗ</text></g>`
+    ? `<g transform="rotate(-7 170 ${stampY + 21})"><rect x="60" y="${stampY}" width="230" height="42" rx="8" fill="none" stroke="#059669" stroke-width="3"/><text x="175" y="${stampY + 27}" text-anchor="middle" font-family="Arial" font-size="16" font-weight="bold" fill="#059669">ПОДПИСАНО · АЭМЗ</text></g>`
     : ''
   const stampParty = doc.partySigned
     ? `<g transform="rotate(5 465 ${stampY + 21})"><rect x="350" y="${stampY}" width="230" height="42" rx="8" fill="none" stroke="#059669" stroke-width="3"/><text x="465" y="${stampY + 18}" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#059669">ПОДПИСАНО · ${escapeXml(doc.partyRole.toUpperCase())}</text><text x="465" y="${stampY + 33}" text-anchor="middle" font-family="Arial" font-size="9" fill="#059669">оператор ЭДО</text></g>`
@@ -239,8 +240,15 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                       <span className="text-sm text-slate-500">· погрузка {r.loadDate}</span>
                       <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
                         <span className="inline-flex items-center gap-1"><Building2 className="h-3.5 w-3.5 text-slate-400" aria-hidden />{r.winnerName ?? '—'}</span>
-                        <span className="inline-flex items-center gap-1"><UserRound className="h-3.5 w-3.5 text-slate-400" aria-hidden />{r.driverName ?? '—'}</span>
-                        <span className="font-mono">{r.truckLabel ?? '—'}</span>
+                        {/* экипаж: что есть — то показываем; без экипажа — честная подпись вместо прочерков */}
+                        {r.driverName || r.truckLabel ? (
+                          <>
+                            {r.driverName && <span className="inline-flex items-center gap-1"><UserRound className="h-3.5 w-3.5 text-slate-400" aria-hidden />{r.driverName}</span>}
+                            {r.truckLabel && <span className="font-mono">{r.truckLabel}</span>}
+                          </>
+                        ) : (
+                          <span className="text-slate-400">экипаж не указан</span>
+                        )}
                       </span>
                     </div>
 
@@ -314,7 +322,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
                   className="w-full rounded-xl border border-slate-200"
                 />
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                  <SignBadge signed={previewDoc.doc.aemzSigned} label="КЭП АЭМЗ" />
+                  <SignBadge signed={previewDoc.doc.aemzSigned} label="АЭМЗ" />
                   <SignBadge signed={previewDoc.doc.partySigned} label={previewDoc.doc.partyRole} />
                   {previewDoc.doc.aemzSigner && <span>АЭМЗ: {previewDoc.doc.aemzSigner}{previewDoc.doc.aemzSignedAt ? ` · ${fmtDateTime(previewDoc.doc.aemzSignedAt)}` : ''}</span>}
                   {previewDoc.doc.partySigner && <span>{previewDoc.doc.partyRole}: {previewDoc.doc.partySigner}{previewDoc.doc.partySignedAt ? ` · ${fmtDateTime(previewDoc.doc.partySignedAt)}` : ''}</span>}
@@ -384,7 +392,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                   {/* у ЭТрН через Диадок подписи показывает полоса титулов Т1–Т4 — без дублей */}
                   {!viaDiadoc && (
                     <span className="ml-auto flex flex-wrap items-center gap-1.5">
-                      <SignBadge signed={doc.aemzSigned} label="КЭП АЭМЗ" />
+                      <SignBadge signed={doc.aemzSigned} label="АЭМЗ" />
                       <SignBadge signed={doc.partySigned} label={doc.partyRole} />
                     </span>
                   )}
@@ -417,12 +425,12 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                     {isAemz ? (
                       <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8">
                         <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                        Подписать (КЭП АЭМЗ)
+                        Подписать за АЭМЗ
                       </Button>
                     ) : (
                       <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8">
                         <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                        {doc.party === 'EXPEDITOR' ? 'Подписать (КЭП экспедитора)' : 'Подписать (КЭП перевозчика)'}
+                        {doc.party === 'EXPEDITOR' ? 'Подписать за экспедитора' : 'Подписать за перевозчика'}
                       </Button>
                     )}
                   </div>

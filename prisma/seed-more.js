@@ -173,7 +173,7 @@ async function main() {
         events.push([dt(createdDay + 3, 9), 'CREW_APPROVED', 'Экипаж утверждён логистом'])
         if (passPackage) events.push([dt(createdDay + 3, 14), 'PASS_SENT', 'Пропуск на площадку оформлен'])
       }
-      if (etrnStatus !== 'NONE') events.push([dt(createdDay + 4, 10), 'ETRN_SENT', 'Заявка отправлена в ЭТРАН'])
+      if (etrnStatus !== 'NONE') events.push([dt(createdDay + 4, 10), 'ETRN_SENT', 'Транспортная накладная подготовлена — отправка в Диадок в разделе «Подписать ЭДО»'])
       if (etrnStatus === 'SIGNED') events.push([dt(createdDay + 5, 12), 'CONFIRMED_1C', 'Документы сверены и подтверждены — рейс выполняется'])
     }
     if (status === 'CLOSED') events.push([dt(createdDay + 6, 16), 'REQUEST_CLOSED', 'Заявка закрыта: рейс выполнен'])
@@ -189,7 +189,7 @@ async function main() {
     if (['DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED'].includes(status) && drv && trk) {
       const p = drv.fullName.split(' ')
       if (status === 'DOCS_REVIEW' && number === 'Z-1057') {
-        await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 96, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.99, 'Имя': 0.996, 'Отчество': 0.984, 'Дата рождения': 0.999, 'Серия и номер': 0.998 }, ['Все оценки от 0,95 — поля приняты по уверенности; ФИО и дата совпали с заявкой'], null)
+        await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 96, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.99, 'Имя': 0.996, 'Отчество': 0.984, 'Дата рождения': 0.999, 'Серия и номер': 0.998 }, [], null)
         await put('PASSPORT_REG', 'passport_reg.jpg', 'REUPLOAD', 52, { 'Дата регистрации': '10.06.2019', 'Код подразделения': '770-002', 'Адрес регистрации': 'г. МОСКВА, ул. ОБРАЗЦОВАЯ д. 14' }, { 'Дата регистрации': 0.93, 'Код подразделения': 0.91, 'Адрес регистрации': 0.45 }, ['Штамп регистрации смазан — адрес прочитан с ошибкой (0,45), требуется повторная загрузка'], null)
         await put('STS', 'sts.jpg', 'PENDING', null, null, null, null, 'Ожидает нейропроверки')
       } else if (status === 'DOCS_REVIEW' && number === 'Z-1058') {
@@ -197,7 +197,7 @@ async function main() {
         await put('STS', 'sts.jpg', 'PASSED', 97, { 'Госномер': trk.plate, 'VIN': trk.vin, 'Номер СТС': trk.sts }, { 'Госномер': 0.999, 'VIN': 0.998, 'Номер СТС': 0.996 }, [], null)
         await put('POA', 'poa.jpg', 'MANUAL', 84, { 'Номер доверенности': 'Д-44/26', 'Дата выдачи': d(1, 10), 'Действительна до': d(31, 12), 'Кем выдана (перевозчик)': C[crewKey].name, 'Представитель (ФИО)': drv.fullName }, { 'Номер доверенности': 0.97, 'Дата выдачи': 0.98, 'Действительна до': 0.98, 'Кем выдана (перевозчик)': 0.6, 'Представитель (ФИО)': 0.99 }, ['Наименование перевозчика прочитано частично (0,6) — смотрит оператор'], null)
       } else if (status === 'AT_LOGIST' && number === 'Z-1059') {
-        await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 97, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.995, 'Имя': 0.997, 'Отчество': 0.99, 'Дата рождения': 0.999, 'Серия и номер': 0.999 }, ['Все поля распознаны с оценкой от 0,95 — автодопуск'], null)
+        await put('PASSPORT_PHOTO', 'passport_photo.jpg', 'PASSED', 97, { 'Фамилия': p[0].toUpperCase(), 'Имя': p[1].toUpperCase(), 'Отчество': p[2].toUpperCase(), 'Дата рождения': drv.birthDate, 'Серия и номер': drv.passport }, { 'Фамилия': 0.995, 'Имя': 0.997, 'Отчество': 0.99, 'Дата рождения': 0.999, 'Серия и номер': 0.999 }, [], null)
         await put('PASSPORT_REG', 'passport_reg.jpg', 'PASSED', 93, { 'Дата регистрации': '17.05.2021', 'Код подразделения': '612-044', 'Адрес регистрации': 'г. БАТАЙСК, ул. ЛЕНИНА д. 88' }, { 'Дата регистрации': 0.96, 'Код подразделения': 0.96, 'Адрес регистрации': 0.95 }, [], null)
         await put('STS', 'sts.jpg', 'PASSED', 98, { 'Госномер': trk.plate, 'VIN': trk.vin, 'Номер СТС': trk.sts }, { 'Госномер': 0.999, 'VIN': 0.998, 'Номер СТС': 0.997 }, [], null)
         await put('REQUEST_DOC', 'request_doc.pdf', 'PASSED', 96, { 'Номер заявки': number, 'Дата заявки': d(createdDay), 'Груз': 'Перевозка металлолома', 'Ставка': `${fmt(bestRate)} ₽/т` }, { 'Номер заявки': 0.99, 'Дата заявки': 0.98, 'Груз': 0.97, 'Ставка': 0.98 }, [], null)

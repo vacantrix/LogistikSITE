@@ -427,7 +427,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     .registry-sticky-table (globals.css) */}
                 <div className="registry-sticky-table">
                   <Table>
-                    <TableHeader className="z-10 bg-slate-50 shadow-[0_2px_6px_-2px_rgba(15,23,42,0.12)] md:sticky md:top-[105px]">
+                    <TableHeader className="z-10 bg-slate-50 shadow-[0_2px_6px_-2px_rgba(15,23,42,0.12)] md:sticky md:top-[var(--header-h,105px)]">
                       <TableRow className="bg-slate-50">
                         <TableHead className="whitespace-nowrap">№</TableHead>
                         <TableHead className="whitespace-nowrap">Статус</TableHead>
@@ -465,26 +465,39 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                                 </span>
                               </div>
                             </TableCell>
-                            <TableCell className="max-w-[150px] text-slate-700">
-                              <span className="block break-words">
-                                {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
-                              </span>
-                            </TableCell>
-                            <TableCell className="max-w-[150px] text-slate-800">
-                              <span className="block whitespace-nowrap font-medium" title={r.winnerName ?? ''}>{r.winnerName ?? '—'}</span>
-                            </TableCell>
-                            <TableCell className="max-w-[140px] text-slate-600">
-                              <span className="line-clamp-2" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
-                            </TableCell>
-                            <TableCell className="text-slate-600">
-                              {/* водитель + ТС одной компактной ячейкой */}
-                              <div className="flex max-w-[200px] flex-col items-start leading-tight">
-                                <span className="max-w-full break-words">{driver?.fullName ?? '—'}</span>
-                                <span className="max-w-full truncate text-[11px] text-slate-500" title={truck ? `${truck.brand} · ${truck.plate}${trailer ? ` + ${trailer.plate}` : ''}` : ''}>
-                                  {truck ? `${truck.brand} · ${truck.plate}` : '—'}
-                                  {trailer && ` + ${trailer.plate}`}
+                            <TableCell className="text-slate-700">
+                              {/* ограничение ширины — на внутреннем блоке (max-width на td в auto-таблице не сдерживает текст,
+                                  маршрут наезжал на соседнюю колонку) */}
+                              <div className="max-w-[150px]" title={`${r.fromPoint} → ${r.toPoint}`}>
+                                {/* whitespace-normal: у TableCell базово nowrap — без сброса маршрут не переносится и наезжает на соседний столбец */}
+                                <span className="block whitespace-normal break-words">
+                                  {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
                                 </span>
                               </div>
+                            </TableCell>
+                            <TableCell className="text-slate-800">
+                              <div className="max-w-[150px]">
+                                <span className="block truncate font-medium" title={r.winnerName ?? ''}>{r.winnerName ?? '—'}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-slate-600">
+                              <div className="max-w-[140px]">
+                                <span className="line-clamp-2 whitespace-normal" title={`${r.cargo}, ${num(r.tonnage)} т`}>{r.cargo}, {num(r.tonnage)} т</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-slate-600">
+                              {/* водитель + ТС одной компактной ячейкой; без экипажа — честная подпись, а не два прочерка */}
+                              {driver || truck ? (
+                                <div className="flex max-w-[200px] flex-col items-start leading-tight">
+                                  <span className="max-w-full break-words">{driver?.fullName ?? '—'}</span>
+                                  <span className="max-w-full truncate text-[11px] text-slate-500" title={truck ? `${truck.brand} · ${truck.plate}${trailer ? ` + ${trailer.plate}` : ''}` : ''}>
+                                    {truck ? `${truck.brand} · ${truck.plate}` : '—'}
+                                    {trailer && ` + ${trailer.plate}`}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-400">экипаж не указан</span>
+                              )}
                             </TableCell>
                             <TableCell className="whitespace-nowrap">
                               {/* итоговая ставка + старт под ней (Task 75: компактная ячейка) */}
