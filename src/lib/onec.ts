@@ -5,6 +5,7 @@
  *   • GET  /api/integration/1c/ping         — проверка связи и ключа
  *   • GET  /api/integration/1c/dictionaries — справочники (перевозчики, водители, ТС, прицепы)
  *   • GET  /api/integration/1c/requests     — заявки/рейсы со статусами
+ *   • POST /api/integration/1c/requests     — черновик заявки из 1С (логист публикует его на площадке)
  *   • GET  /api/integration/1c/etrn         — данные ЭТрН для 1С:ERP
  *   • POST /api/integration/1c/etrn        — подтверждения ЭТрН из 1С (SENT/SIGNED)
  *
@@ -16,7 +17,7 @@ import { createHash, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import type { RequestStatus } from '@/lib/types'
 
-export const ONEC_VERSION = '1.0.0'
+export const ONEC_VERSION = '1.1.0'
 
 /** Ключ интеграции или null, если интеграция не настроена */
 export function onecApiKey(): string | null {

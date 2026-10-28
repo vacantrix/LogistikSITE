@@ -227,6 +227,11 @@ model Request {
    * логист, создавший заявку (Task 66 — колонка «Логист / Создатель» в реестре заявок)
    */
   createdBy          String         @default("—")
+  /**
+   * документ-основание в 1С («ЗП-0012 от 28.10.2026»), если черновик пришёл через
+   * POST /api/integration/1c/requests — ключ идемпотентности: повтор не создаёт дубль
+   */
+  onecRef            String?        @unique
   tonnage            Float
   truckType          String
   mode               String // AUCTION | CLOSED
