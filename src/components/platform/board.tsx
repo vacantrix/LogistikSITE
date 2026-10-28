@@ -52,7 +52,6 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
-  AgentStatusBadge,
   EmptyState,
   ErrorBlock,
   LoadingBlock,
@@ -60,7 +59,6 @@ import {
   InfoTip,
   SectionHeader,
   NoticeLine,
-  StatusBadge,
   StatusDot,
   WithTip,
   DocStatusBadge,
@@ -75,7 +73,7 @@ import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
 import { formatKm, haversineKm, pointCoords, routeDistanceKm } from '@/lib/geo'
 import type { MapPoint } from '@/components/platform/delivery-map'
-import { DOC_TYPE_LABEL, fmtDateTime, MODE_META, num, rate, REQUEST_STATUS_META, DELETABLE_STATUSES, timeLeft } from '@/lib/status'
+import { DOC_TYPE_LABEL, fmtDateTime, MODE_META, num, rate, DELETABLE_STATUSES, timeLeft } from '@/lib/status'
 import type { BidDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
@@ -562,9 +560,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     const list = requests ?? []
     const needle = q.trim().toLowerCase()
     return list.filter((r) => {
-      // черновики живут в отдельном разделе «Черновики заявок» — на площадку не выходят
-      if (r.status === 'DRAFT') return false
-      // Персонал (логист и администрация) видит всю площадку целиком — полный контроль и просмотр
+      // Площадка — ТОЛЬКО активные заявки (Task 115): опубликованные и открытые для ставок.
+      // Черновики живут в «Черновиках заявок», выбранные/сверка/рейсы/закрытые — в «Реестре
+      // заявок»: ни те ни другие на площадку не выходят — ни у персонала, ни у перевозчика
+      if (r.status !== 'PUBLISHED') return false
       if (isStaff) {
         if (mode !== 'ALL' && r.mode !== mode) return false
       } else if (mode === 'MY_BIDS') {
@@ -574,7 +573,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       } else {
         // «Площадка заявок» у агента: только новые, доступные всем заявки —
         // открытые и без его отклика; заявки с откликами живут в «Моих откликах»
-        if (r.status !== 'PUBLISHED' || myBidOf(r)) return false
+        if (myBidOf(r)) return false
         if (mode !== 'ALL' && r.mode !== mode) return false
       }
       if (!needle) return true
@@ -736,7 +735,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
 
   /** клик по строке: у персонала раскрытие торгов, иначе — детали заявки */
   const onRowClick = (r: RequestDTO) => {
-    if (isStaff && r.status === 'PUBLISHED') {
+    if (isStaff) {
       setExpandedId((cur) => (cur === r.id ? null : r.id))
     } else {
       setDetailId(r.id)
@@ -941,10 +940,12 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
             <CardContent className="p-4 sm:p-6">
               {filtered.length === 0 ? (
                 <EmptyState
-                  title={mode === 'MY_BIDS' ? 'Откликов пока нет' : 'Заявок не найдено'}
+                  title={mode === 'MY_BIDS' ? 'Откликов пока нет' : 'Активных заявок нет'}
                   hint={mode === 'MY_BIDS'
                     ? 'Здесь собраны только заявки, куда вы подали отклик; новые доступны на «Площадке заявок»'
-                    : 'Здесь только новые заявки, открытые для всех; заявки с вашим откликом — в фильтре «Мои отклики»'}
+                    : isStaff
+                      ? 'На площадке только активные заявки — опубликованы и открыты для ставок; выбранные, сверка и рейсы — в «Реестре заявок»'
+                      : 'Здесь только новые заявки, открытые для всех; заявки с вашим откликом — в фильтре «Мои отклики»'}
                 />
               ) : (
                 <div className="-mx-2 overflow-x-auto px-2">
@@ -981,7 +982,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                       {sorted.map((r) => {
                         const my = myBidOf(r)
                         const km = routeDistanceKm(r.fromPoint, r.toPoint)
-                        const expanded = isStaff && expandedId === r.id && r.status === 'PUBLISHED'
+                        const expanded = isStaff && expandedId === r.id
                         return (
                           <Fragment key={r.id}>
                           <tr
@@ -1032,25 +1033,21 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                           <td className="border-b border-slate-100 py-3 pr-3"><DeadlineCell request={r} now={now} /></td>
                           <td className="border-b border-slate-100 py-3" onClick={(e) => e.stopPropagation()}>
                             {isStaff ? (
-                              // персонал: раскрывает торговый стенд прямо в строке или смотрит статус;
+                              // персонал: раскрывает торговый стенд прямо в строке;
                               // удаление — право request:delete логиста (Task 65/111), админ смотрит
                               <div className="flex items-center justify-end gap-1.5">
-                                {r.status === 'PUBLISHED' ? (
-                                  <Button
-                                    size="sm"
-                                    variant={expandedId === r.id ? 'secondary' : 'outline'}
-                                    className="gap-1.5"
-                                    onClick={(e) => { e.stopPropagation(); onRowClick(r) }}
-                                    aria-expanded={expandedId === r.id}
-                                    aria-label={`Ставки и действия по заявке ${r.number}`}
-                                  >
-                                    {r.mode === 'AUCTION' ? <Gavel className="h-4 w-4" aria-hidden /> : <Lock className="h-4 w-4" aria-hidden />}
-                                    {r.mode === 'AUCTION' ? 'Торги' : 'Ставки'}
-                                    {expandedId === r.id ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
-                                  </Button>
-                                ) : (
-                                  <StatusBadge status={r.status} />
-                                )}
+                                <Button
+                                  size="sm"
+                                  variant={expandedId === r.id ? 'secondary' : 'outline'}
+                                  className="gap-1.5"
+                                  onClick={(e) => { e.stopPropagation(); onRowClick(r) }}
+                                  aria-expanded={expandedId === r.id}
+                                  aria-label={`Ставки и действия по заявке ${r.number}`}
+                                >
+                                  {r.mode === 'AUCTION' ? <Gavel className="h-4 w-4" aria-hidden /> : <Lock className="h-4 w-4" aria-hidden />}
+                                  {r.mode === 'AUCTION' ? 'Торги' : 'Ставки'}
+                                  {expandedId === r.id ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
+                                </Button>
                                 {isLogist && can('request:delete') && DELETABLE_STATUSES.includes(r.status) && (
                                   <Button
                                     size="icon"
@@ -1066,11 +1063,11 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                               </div>
                             ) : (
                               <>
-                                {r.status === 'PUBLISHED' && biddingClosed(r) && (
+                                {biddingClosed(r) && (
                                   <span className="text-xs font-medium text-slate-500">Приём ставок завершён</span>
                                 )}
                                 {/* право bid:submit (Task 111): выключено — кнопок ставки нет у перевозчика */}
-                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'AUCTION' && canBid && (
+                                {!biddingClosed(r) && r.mode === 'AUCTION' && canBid && (
                                   <Button
                                     size="sm"
                                     disabled={!activeCarrierId || busyId !== null}
@@ -1081,7 +1078,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                     Сделать ставку
                                   </Button>
                                 )}
-                                {r.status === 'PUBLISHED' && !biddingClosed(r) && r.mode === 'CLOSED' && canBid && (
+                                {!biddingClosed(r) && r.mode === 'CLOSED' && canBid && (
                                   <Button
                                     size="sm"
                                     disabled={!activeCarrierId || busyId !== null}
@@ -1092,7 +1089,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                     Подать закрытую ставку
                                   </Button>
                                 )}
-                                {r.status !== 'PUBLISHED' && (isLogist ? <StatusBadge status={r.status} /> : <AgentStatusBadge status={r.status} />)}
                               </>
                             )}
                           </td>
@@ -1323,10 +1319,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
               <DialogHeader>
                 <DialogTitle className="flex flex-wrap items-center gap-2">
                   Заявка <span className="text-slate-900">{detailReq.number}</span>
-                  {/* пузырь «На площадке» в деталях не нужен (Task 34): режим и так виден рядом */}
-                  {detailReq.status !== 'PUBLISHED' && (isLogist
-                    ? <StatusBadge status={detailReq.status} />
-                    : <AgentStatusBadge status={detailReq.status} />)}
+                  {/* пузырь «На площадке» в деталях не нужен (Task 34): режим и так виден рядом;
+                      на площадку выходят только активные заявки — бейджей прочих статусов нет (Task 115) */}
                   <ModeBadge mode={detailReq.mode} />
                 </DialogTitle>
                 <DialogDescription asChild>
