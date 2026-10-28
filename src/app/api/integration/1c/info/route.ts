@@ -25,7 +25,8 @@ export async function GET(req: NextRequest) {
     endpoints: [
       { method: 'GET', path: '/ping', summary: 'Проверка связи и API-ключа' },
       { method: 'GET', path: '/dictionaries?since=ISO', summary: 'Справочники: перевозчики, водители, тягачи, прицепы (since — новые и изменённые)' },
-      { method: 'GET', path: '/requests?status=&since=&limit=', summary: 'Заявки/рейсы со статусами, экипажами и ставками' },
+      { method: 'GET', path: '/requests?status=&since=&limit=&onecRef=', summary: 'Заявки/рейсы со статусами, экипажами и ставками (onecRef — по документу 1С)' },
+      { method: 'POST', path: '/requests', summary: 'Черновик заявки из 1С: { oneC_number, fromPoint, toPoint, cargo, loadDate, tonnage, truckType, startRate ₽/т } — повтор по oneC_number не создаёт дубль' },
       { method: 'GET', path: '/etrn?number=&since=', summary: 'Данные ЭТрН по рейсам с экипажем' },
       { method: 'POST', path: '/etrn', summary: 'Подтверждение ЭТрН из 1С: { number, etrnStatus: SENT | SIGNED }' },
     ],
