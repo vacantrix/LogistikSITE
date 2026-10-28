@@ -181,25 +181,57 @@ export const POINT_DIRECTORY: { value: string; info: PointInfo }[] = [
   ...SPOTS.map((info) => ({ value: info.short, info })),
 ]
 
-/** Разворачивает точку маршрута из заявки в полное название и адрес */
+const norm = (s: string) => (s ?? '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ')
+
+/** Старые значения заявок (до справочника точек) — только целиком, не по подстроке */
+const LEGACY_POINTS: Record<string, PointInfo> = {
+  'завод': FACTORY,
+  'завод аэмз': FACTORY,
+  'аэмз': FACTORY,
+  'порт': TERMINAL_ST_PETER,
+  'терминал': TERMINAL_ST_PETER,
+  'склад': WAREHOUSE_SPB,
+}
+
+/** «Краснодарский край», «Ростовская обл.» — регион, а не город точки */
+const REGION_WORDS = new Set(['край', 'область', 'обл', 'район', 'р', 'округ', 'республика', 'респ'])
+/** «ул. Московская», «Ростовское ш.» — улица, а не город точки */
+const STREET_WORDS = new Set(['ул', 'улица', 'пр', 'пр-т', 'проспект', 'пер', 'переулок', 'ш', 'шоссе', 'наб', 'набережная', 'б-р', 'бульвар', 'проезд', 'пл', 'площадь', 'тупик'])
+
+/**
+ * Разворачивает точку маршрута из заявки в полное название и адрес.
+ * Точное значение справочника → его точка; иначе город ищется по словам адреса
+ * слева направо (адрес пишется от региона к улице): «Краснодар, ул. Московская» —
+ * Краснодар, «Петрозаводск» — не завод, «ул. Портовая» — не порт. Не нашли —
+ * точка «по данным заявки»: адрес показывается как есть, карта ищет его текстом.
+ */
 export function pointInfo(raw: string): PointInfo {
-  const v = (raw ?? '').trim().toLowerCase()
-  const exact = POINT_DIRECTORY.find((p) => p.value.toLowerCase() === v)
+  const v = norm(raw)
+  const exact = POINT_DIRECTORY.find((p) => norm(p.value) === v)
   if (exact) return exact.info
-  // старые значения заявок («Завод», «Порт», «Новороссийск (порт)») — по ключевым словам
-  if (v.includes('завод') || v.includes('аэмз') || v.includes('абинск')) return FACTORY
-  // Сначала конкретные города (иначе «Новороссийск (порт)» ложно матчится
-  // как петербургский порт по слову «порт»)
-  for (const { keys, idx } of SPOT_KEYS) {
-    if (keys.some((k) => v.includes(k))) return SPOTS[idx]
-  }
-  if (
-    v.includes('порт') || v.includes('терминал') || v.includes('свят') ||
-    v.includes('петр') || v.includes('спб') || v.includes('санкт') ||
-    v.includes('канонер')
-  ) return TERMINAL_ST_PETER
-  if (v.includes('склад')) return WAREHOUSE_SPB
+  const legacy = LEGACY_POINTS[v]
+  if (legacy) return legacy
   const label = (raw ?? '').trim()
+  // город нашёлся по адресу: карта и подпись — по городу, адрес — тот, что в заявке
+  const byAddress = (info: PointInfo): PointInfo => ({ ...info, name: label, address: label, mapQuery: label })
+  // части адреса между запятыми: «улица»/«регион» определяется по соседним словам внутри части
+  const parts = v.split(/[,;]/).map((p) =>
+    p.split(/[^a-zа-я0-9-]+/).flatMap((w) => (STREET_WORDS.has(w) ? [w] : w.split('-'))).filter(Boolean))
+  const all = parts.flat()
+  const spb = all.includes('спб') || all.includes('петербург') || all.includes('канонерский')
+  for (const words of parts) {
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i]
+      if (REGION_WORDS.has(words[i + 1] ?? '')) continue
+      if (STREET_WORDS.has(words[i - 1] ?? '') || STREET_WORDS.has(words[i + 1] ?? '')) continue
+      if (w === 'аэмз' || w.startsWith('абинск')) return byAddress(FACTORY)
+      const spot = SPOT_KEYS.find(({ keys }) => keys.some((k) => w.startsWith(k)))
+      if (spot) return byAddress(SPOTS[spot.idx])
+      if (spb && (w === 'спб' || w === 'петербург' || w === 'канонерский')) {
+        return byAddress(all.includes('склад') || all.includes('южный') ? WAREHOUSE_SPB : TERMINAL_ST_PETER)
+      }
+    }
+  }
   return {
     short: label,
     name: label,
@@ -224,12 +256,16 @@ export function routeMapUrl(from: string, to: string): string {
 
 /**
  * Значение точки для записи в заявку: город из справочника (POINT_DIRECTORY)
- * или null, если точки в справочнике нет. Старые «Завод»/«Порт» приводятся к городу.
+ * или null, если это не точка справочника. Приводятся только значения, которые
+ * и есть точка: «сочи», «г. Сочи», «Новороссийск (порт)», старые «Завод»/«Порт».
+ * Полный адрес («Краснодар, ул. Красная, 5» — например, из 1С) точкой не считается
+ * и не переписывается: иначе улица и дом молча терялись бы.
  */
 export function canonicalPoint(raw: string): string | null {
-  const info = pointInfo(raw)
-  if (!info.known) return null
-  return POINT_DIRECTORY.find((p) => p.info === info)?.value ?? null
+  const v = norm(raw)
+  const pick = (x: string) => POINT_DIRECTORY.find((p) => norm(p.value) === x)?.value
+    ?? (LEGACY_POINTS[x] ? POINT_DIRECTORY.find((p) => p.info === LEGACY_POINTS[x])?.value : undefined)
+  return pick(v) ?? pick(v.replace(/^г\.\s*/, '').replace(/\s*\([^)]*\)$/, '')) ?? null
 }
 
 /**

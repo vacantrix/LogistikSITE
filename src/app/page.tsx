@@ -137,8 +137,9 @@ export default function Page() {
     socket.on('disconnect', onLost)
     socket.on('connect_error', onLost)
     socket.on('platform:update', (ev?: { type?: string }) => {
+      // смена прав: пересчитать свои права и обновить данные (списки учёток, кнопки разделов)
       if (ev?.type === 'PERMS_CHANGED') setPermTick((t) => t + 1)
-      else setLiveTick((t) => t + 1)
+      setLiveTick((t) => t + 1)
     })
     return () => {
       socket.disconnect()

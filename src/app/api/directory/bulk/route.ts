@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
+import { notifyLive } from '@/lib/notify'
 
 export const dynamic = 'force-dynamic'
 
@@ -104,6 +105,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // справочники и экипажи у всех открытых вкладок (логист видит базу перевозчика) — без перезагрузки
+    notifyLive({ type: 'DIRECTORY_CHANGED' })
     return NextResponse.json({
       ok: true,
       drivers: { created: driversCreated, updated: driversUpdated },

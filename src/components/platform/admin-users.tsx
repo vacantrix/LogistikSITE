@@ -66,7 +66,7 @@ const toDraft = (u: AdminUserDTO): UserDraft => ({
 
 type Filter = 'all' | RoleKind
 
-export default function AdminUsersTab(_props: TabProps) {
+export default function AdminUsersTab({ liveTick }: TabProps) {
   const { toast } = useToast()
   const [users, setUsers] = useState<AdminUserDTO[] | null>(null)
   const [access, setAccess] = useState<AccessDataDTO | null>(null)
@@ -97,6 +97,14 @@ export default function AdminUsersTab(_props: TabProps) {
   }, [])
 
   useEffect(() => { void load() }, [load])
+  // другой администратор поменял учётки или должности — список обновляется сам;
+  // открытые окна держат свой черновик и не сбрасываются
+  useEffect(() => {
+    if (!liveTick) return
+    void Promise.all([api.adminUsers(), api.accessData()])
+      .then(([u, a]) => { setUsers(u.users); setAccess(a) })
+      .catch(() => { /* фоновое обновление: ошибка не мешает работе, повторится при следующем событии */ })
+  }, [liveTick])
 
   const reload = async () => {
     try {

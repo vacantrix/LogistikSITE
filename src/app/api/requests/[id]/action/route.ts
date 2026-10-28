@@ -6,7 +6,7 @@ import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-u
 import { plog, plogError } from '@/lib/platform-log'
 import { canonicalPoint } from '@/lib/points'
 import {
-  applyCrew, finalizeExpired, inTx, loadRequestFor, minActiveBid, money, parseRuDate, validateCrew,
+  applyCrew, finalizeExpired, inTx, loadRequestFor, losingBidders, lostNotice, minActiveBid, money, parseRuDate, validateCrew,
 } from '@/lib/requests'
 import { allowedFor, permDenied, type PermKey } from '@/lib/permissions'
 
@@ -229,13 +229,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const carrier = carrierId ? await tx.carrier.findUnique({ where: { id: carrierId } }) : null
           if (!carrier) fail('Перевозчик не найден', 404)
           if (!carrier!.access) fail('У перевозчика закрыт доступ к площадке')
-          const rate = (await minActiveBid(tx, id)) ?? r.startRate
+          // ставка рейса — та, на которую согласился сам перевозчик: его лучшая активная ставка,
+          // а если он не торговался — стартовая. Чужая (меньшая) ставка ему не навязывается.
+          const own = await tx.bid.findFirst({
+            where: { requestId: id, carrierId, withdrawn: false },
+            orderBy: [{ amount: 'asc' }, { createdAt: 'asc' }],
+          })
+          const rate = own?.amount ?? r.startRate
           const moved = await tx.request.updateMany({
             where: { id, status: 'PUBLISHED' },
             data: { status: 'AWARDED', winnerId: carrierId, bestRate: rate },
           })
           if (moved.count === 0) fail('Заявка уже передана перевозчику')
           await tx.bid.updateMany({ where: { requestId: id }, data: { isWinner: false } })
+          if (own) await tx.bid.update({ where: { id: own.id }, data: { isWinner: true } })
+          for (const l of await losingBidders(tx, id, carrierId)) {
+            notes.push({ carrierId: l.carrierId, payload: lostNotice(r.number, l.amount, rate, id) })
+          }
           await event('DIRECT_OFFER', `Заявка предложена напрямую: ${carrier!.name} — ${money(rate)}`, carrierId)
           await event('AUCTION_FINISHED', 'Приём ставок завершён — заявка передана перевозчику напрямую')
           notes.push({
@@ -465,6 +475,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           for (const key of ['fromPoint', 'toPoint'] as const) {
             const raw = body[key]
             if (typeof raw !== 'string' || !raw.trim()) continue
+            if (raw.trim() === r[key]) continue // точка не менялась (например, адрес из 1С) — оставляем как есть
             const point = canonicalPoint(raw)
             if (!point) fail('Выберите точку из справочника точек')
             patch[key] = point

@@ -108,7 +108,8 @@ export async function finalizeExpired(now = new Date()): Promise<void> {
         await tx.event.create({
           data: { requestId: id, type: 'AUCTION_FINISHED', message: 'Приём ставок завершён, победитель определён по минимальной ставке' },
         })
-        return { carrierId: best.carrierId, carrierName: best.carrier.name, amount: best.amount }
+        const losers = await losingBidders(tx, id, best.carrierId)
+        return { carrierId: best.carrierId, carrierName: best.carrier.name, amount: best.amount, losers }
       })
       if (awarded) {
         notifyLive({ type: 'WINNER_AWARDED', requestId: id })
@@ -127,6 +128,10 @@ export async function finalizeExpired(now = new Date()): Promise<void> {
             body: `Приём ставок завершён — победитель: ${awarded.carrierName}, ${money(awarded.amount)}`,
             requestId: id,
           }).catch((e) => console.error('notification error AUCTION_FINISHED', e))
+          for (const l of awarded.losers) {
+            await notifyCarrier(l.carrierId, lostNotice(req.number, l.amount, awarded.amount, id))
+              .catch((e) => console.error('notification error AUCTION_FINISHED (участник)', e))
+          }
         }
       }
     } catch (e) {
@@ -137,6 +142,40 @@ export async function finalizeExpired(now = new Date()): Promise<void> {
         message: 'Сбой автоподведения итогов торгов — победитель не определён, повтор на следующем запросе',
       })
     }
+  }
+}
+
+/** Участники торгов, кроме победителя, с их лучшей активной ставкой — им уходит «Итоги торгов» */
+export async function losingBidders(tx: Tx, requestId: string, winnerId: string): Promise<{ carrierId: string; amount: number }[]> {
+  const rows = await tx.bid.groupBy({
+    by: ['carrierId'],
+    where: { requestId, withdrawn: false, carrierId: { not: winnerId } },
+    _min: { amount: true },
+  })
+  return rows.map((r) => ({ carrierId: r.carrierId, amount: r._min.amount ?? 0 }))
+}
+
+/** Уведомление участнику, чья ставка не выиграла: без имени победителя (коммерческая тайна торгов) */
+export function lostNotice(number: string, own: number, winning: number, requestId: string) {
+  return {
+    type: 'AUCTION_FINISHED' as const,
+    title: `Торги завершены · №${number}`,
+    body: own > winning
+      ? `Заявка ушла другому перевозчику по ставке ${money(winning)}; ваша ставка — ${money(own)}`
+      : `Заявка передана другому перевозчику; ваша ставка — ${money(own)}`,
+    requestId,
+  }
+}
+
+/** Фоновое подведение итогов: победитель узнаёт о выигрыше, даже если в этот момент никто не открыл платформу */
+let sweeping = false
+export async function sweepAuctions(): Promise<void> {
+  if (sweeping) return
+  sweeping = true
+  try {
+    await finalizeExpired()
+  } finally {
+    sweeping = false
   }
 }
 

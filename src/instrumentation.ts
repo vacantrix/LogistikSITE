@@ -8,9 +8,12 @@
  * сбой журналирования не влияет на ответ сервера.
  */
 /**
- * Старт сервера: фоновая сверка ЭТрН с Диадоком (если интеграция настроена).
- * Подписи перевозчика (Т2/Т4), УИД ГИС ЭПД и ошибки приходят без участия логиста;
- * период — DIADOC_SYNC_INTERVAL_SEC (по умолчанию 180 с, 0 — только по кнопке).
+ * Старт сервера:
+ *  — фоновое подведение итогов торгов: срок вышел — победитель получает уведомление сразу,
+ *    а не когда кто-то откроет платформу; период — AUCTION_SWEEP_SEC (по умолчанию 30 с, 0 — выкл.);
+ *  — фоновая сверка ЭТрН с Диадоком (если интеграция настроена).
+ *    Подписи перевозчика (Т2/Т4), УИД ГИС ЭПД и ошибки приходят без участия логиста;
+ *    период — DIADOC_SYNC_INTERVAL_SEC (по умолчанию 180 с, 0 — только по кнопке).
  */
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
@@ -18,11 +21,23 @@ export async function register(): Promise<void> {
   await import('@/lib/data-fixes')
     .then(({ normalizeLegacyData }) => normalizeLegacyData())
     .catch((e) => console.error('[data-fixes] не удалось привести данные', e))
+  // при горячей перезагрузке в dev register вызывается повторно — таймеры по одному
+  const g = globalThis as unknown as {
+    __diadocSyncTimer?: ReturnType<typeof setInterval>
+    __auctionSweepTimer?: ReturnType<typeof setInterval>
+  }
+  const sweepSec = Number(process.env.AUCTION_SWEEP_SEC ?? 30)
+  if (g.__auctionSweepTimer) clearInterval(g.__auctionSweepTimer)
+  if (Number.isFinite(sweepSec) && sweepSec > 0) {
+    g.__auctionSweepTimer = setInterval(() => {
+      void import('@/lib/requests')
+        .then(({ sweepAuctions }) => sweepAuctions())
+        .catch((e) => console.error('[auction-sweep] сбой подведения итогов', e))
+    }, sweepSec * 1000)
+  }
   const { diadocConfig, diadocEnabled } = await import('@/lib/diadoc/config')
   const interval = diadocConfig().syncIntervalSec
   if (!diadocEnabled() || interval <= 0) return
-  // при горячей перезагрузке в dev register вызывается повторно — таймер один
-  const g = globalThis as unknown as { __diadocSyncTimer?: ReturnType<typeof setInterval> }
   if (g.__diadocSyncTimer) clearInterval(g.__diadocSyncTimer)
   g.__diadocSyncTimer = setInterval(() => {
     void import('@/lib/diadoc/etrn')

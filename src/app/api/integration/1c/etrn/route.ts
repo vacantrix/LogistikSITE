@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { ONEC_ETRN_RU, ONEC_STATUS_RU, onecAuthorized, onecBadRequest, onecMeta, onecUnauthorized } from '@/lib/onec'
 import { plog } from '@/lib/platform-log'
+import { notifyLive } from '@/lib/notify'
 import type { RequestStatus } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -116,6 +117,7 @@ export async function POST(req: NextRequest) {
     type: 'ETRN_1C', source: '1c/etrn', requestId: request.id, requestNumber: request.number, carrierName,
     message: `Статус ЭТрН обновлён из 1С:ERP — «${ONEC_ETRN_RU[etrnStatus] ?? etrnStatus}» (№${request.number})`,
   })
+  notifyLive({ type: 'ETRN_1C', requestId: request.id })
 
   return NextResponse.json({
     ok: true,

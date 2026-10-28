@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { plog } from '@/lib/platform-log'
+import { notifyLive } from '@/lib/notify'
 import { allowedFor, invalidateAccessCache, permDenied } from '@/lib/permissions'
 import type { AdminDbTableData, AdminDbTableDTO } from '@/lib/types'
 
@@ -13,6 +14,11 @@ export const dynamic = 'force-dynamic'
  * Администрация может создавать, изменять и удалять записи любой таблицы «как угодно» —
  * это служебный контур платформы: каждый доступ выписан явно, действия пишутся в журнал.
  */
+
+/** Правка базы видна сразу у всех открытых вкладок; правка учёток — ещё и пересчёт прав */
+function liveAfter(table: string): void {
+  notifyLive({ type: table === 'user' ? 'PERMS_CHANGED' : 'DB_CHANGED' })
+}
 
 /** Таблицы, доступные администрации: ключ Prisma-делегата → человекочитаемое название */
 const TABLES: Record<string, { model: Prisma.ModelName; label: string }> = {
@@ -223,6 +229,7 @@ export async function POST(req: NextRequest) {
         actor: { login: auth.login, name: auth.name, role: auth.role },
         message: `База данных: удалена запись ${body!.table} (${id})`,
       })
+      liveAfter(body!.table!)
       return NextResponse.json({ ok: true })
     }
 
@@ -245,6 +252,7 @@ export async function POST(req: NextRequest) {
         actor: { login: auth.login, name: auth.name, role: auth.role },
         message: `База данных: создана запись ${body!.table} (${String(row.id)})`,
       })
+      liveAfter(body!.table!)
       return NextResponse.json({ ok: true, id: String(row.id) }, { status: 201 })
     }
 
@@ -257,6 +265,7 @@ export async function POST(req: NextRequest) {
       actor: { login: auth.login, name: auth.name, role: auth.role },
       message: `База данных: изменена запись ${body!.table} (${id}) — поля: ${Object.keys(data).join(', ')}`,
     })
+    liveAfter(body!.table!)
     return NextResponse.json({ ok: true })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Не удалось выполнить операцию'
