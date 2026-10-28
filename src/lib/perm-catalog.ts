@@ -125,9 +125,10 @@ export const PERM_DEFAULTS: Record<PermRole, Record<PermKey, boolean>> = {
   carrier: has([
     'bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'edo:send', 'directory:edit',
   ]),
-  // Администрация — просмотр всех разделов, управление правами и свой профиль;
-  // операционные функции выключены (при необходимости админ включит их себе сам)
-  admin: has(['reports:view', 'profile:edit']),
+  // Администрация — максимальные права платформы: все операционные функции логиста
+  // (заявки, торги, сверка, ЭДО, справочники, рейсы, отчёты) и правка своего профиля.
+  // Индивидуально право можно отключить персональным deny в «Профилях и доступах»
+  admin: has(PERM_KEYS),
 }
 
 export const ROLE_LABELS: Record<PermRole, string> = {

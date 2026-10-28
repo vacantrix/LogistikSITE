@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/auth'
+import { isStaff, requireUser } from '@/lib/auth'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { plog, plogError } from '@/lib/platform-log'
@@ -21,7 +21,7 @@ const VISIBLE_KINDS = ['ORDER', 'ETRN', 'ACT']
 
 /**
  * GET /api/edo — пакеты документов ЭДО по рейсам (Task 76).
- * Логист видит все рейсы в работе и закрытые; перевозчик — только свои.
+ * Внутренний контур (логист и администрация) видит все рейсы в работе и закрытые; перевозчик — только свои.
  * Документы добираются автоматически: заказ-заявка или поручение экспедитору
  * (по роли исполнителя), ЭТрН и акт.
  */
@@ -152,9 +152,9 @@ function safePayload(raw: string): Record<string, unknown> {
 
 /**
  * POST /api/edo — действия ЭДО.
- *  sign (обе роли): подписать документ своей КЭП — логист за АЭМЗ,
+ *  sign (обе стороны): подписать документ своей КЭП — сотрудник АЭМЗ за грузоотправителя,
  *    исполнитель рейса — за перевозчика или экспедитора.
- *  etrn-draft / etrn-send (логист): ЭТрН через Диадок; diadoc-sync — сверка статусов.
+ *  etrn-draft / etrn-send (сотрудник АЭМЗ): ЭТрН через Диадок; diadoc-sync — сверка статусов.
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
@@ -200,7 +200,7 @@ export async function POST(req: NextRequest) {
   // ——— Диадок: черновик и отправка ЭТрН (титул Т1 за АЭМЗ) ———
   if (action === 'etrn-draft' || action === 'etrn-send') {
     if (!diadocEnabled()) return NextResponse.json({ error: 'Интеграция с Диадоком не настроена' }, { status: 400 })
-    if (auth.role !== 'logist') return NextResponse.json({ error: 'ЭТрН отправляет логист АЭМЗ — грузоотправитель' }, { status: 403 })
+    if (!isStaff(auth.role)) return NextResponse.json({ error: 'ЭТрН отправляет сотрудник АЭМЗ — грузоотправитель' }, { status: 403 })
     const doc = await db.edoDocument.findFirst({ where: { id: docId, requestId, kind: 'ETRN' }, select: { id: true } })
     if (!doc) return NextResponse.json({ error: 'Транспортная накладная не найдена' }, { status: 404 })
     try {
@@ -221,7 +221,7 @@ export async function POST(req: NextRequest) {
     // при подключённом Диадоке ЭТрН подписывается у оператора ЭДО, а не отметкой в платформе
     if (doc.kind === 'ETRN' && diadocEnabled()) {
       return NextResponse.json({
-        error: auth.role === 'logist'
+        error: isStaff(auth.role)
           ? 'ЭТрН подписывается через Диадок: нажмите «Отправить ЭТрН в Диадок»'
           : 'Подпишите титул перевозчика Т2 в своём Диадоке — платформа увидит подпись автоматически',
       }, { status: 400 })
@@ -231,7 +231,7 @@ export async function POST(req: NextRequest) {
     const now = new Date()
     const kindMeta = { ...EDO_KIND_META[doc.kind], title: edoTitle(doc.kind, doc.party) }
     const party = doc.party === 'EXPEDITOR' ? 'EXPEDITOR' : 'CARRIER'
-    if (auth.role === 'logist') {
+    if (isStaff(auth.role)) {
       if (doc.aemzSigned) return NextResponse.json({ error: 'Со стороны АЭМЗ документ уже подписан' }, { status: 400 })
       await db.edoDocument.update({
         where: { id: doc.id },

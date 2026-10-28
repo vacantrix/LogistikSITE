@@ -61,9 +61,9 @@ async function nextNumber(): Promise<number> {
   return (Number.isFinite(max) ? Math.max(max, 1000) : 1000) + 1
 }
 
-/** POST /api/requests — логист публикует заявку или сохраняет её в «Черновики заявок» (draft: true) */
+/** POST /api/requests — сотрудник внутреннего контура публикует заявку или сохраняет её в «Черновики заявок» (draft: true) */
 export async function POST(req: NextRequest) {
-  const auth = await requireUser('logist')
+  const auth = await requireUser('logist', 'admin')
   if (auth instanceof NextResponse) return auth
   const viewer = viewerOf(auth)
 

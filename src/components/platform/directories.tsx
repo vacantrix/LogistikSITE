@@ -448,7 +448,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   const expiredCount = expiryItems.filter((i) => i.info.state === 'expired').length
 
   const openAdd = (kind: Kind) => {
-    setForm({ carrierId: isLogist ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? ''), ownershipType: 'OWNED' })
+    setForm({ carrierId: isStaff ? (carriers?.[0]?.id ?? '') : (activeCarrierId ?? ''), ownershipType: 'OWNED' })
     setEditing(null)
     setAddKind(kind)
   }
@@ -575,7 +575,7 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
                 {isLogist
                   ? 'Водители и техника, добавленные перевозчиками — агентами АЭМЗ.'
                   : role === 'admin'
-                    ? 'Кадры и техника всех перевозчиков — просмотр. Правка данных — через «База данных».'
+                    ? 'Кадры и техника всех перевозчиков — доступны просмотр и правка.'
                     : 'Добавляется через «Подать документы» после допуска карточек.'}
               </InfoTip>
             </div>
@@ -708,8 +708,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
         })}
       </div>
 
-      {/* Компании-исполнители (логист): смена роли компании — правом directory:edit (права, Task 111) */}
-      {isLogist && can('directory:edit') && (carriers ?? []).length > 0 && (
+      {/* Компании-исполнители (внутренний контур): смена роли компании — правом directory:edit (права, Task 111) */}
+      {isStaff && can('directory:edit') && (carriers ?? []).length > 0 && (
         <Card className="mt-4 shadow-sm">
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -933,8 +933,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
           </DialogHeader>
 
           <div className="space-y-3">
-            {/* перевозчик записи: логист выбирает, перевозчику запись принадлежит его аккаунту */}
-            {isLogist && dialogKind && (
+            {/* перевозчик записи: внутренний контур выбирает, перевозчику запись принадлежит его аккаунту */}
+            {isStaff && dialogKind && (
               <div className="space-y-1.5">
                 <Label>Перевозчик</Label>
                 <Select value={form.carrierId ?? ''} onValueChange={(v) => setForm((f) => ({ ...f, carrierId: v }))} disabled={!!editing}>

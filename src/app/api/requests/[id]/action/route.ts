@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireUser, viewerOf, type Role } from '@/lib/auth'
+import { isStaff, requireUser, viewerOf, type Role } from '@/lib/auth'
 import { toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
@@ -67,6 +67,7 @@ const ACTION_PERM: Partial<Record<string, PermKey>> = {
 }
 
 /** Кто может выполнять действие. Перевозчик действует только от своего имени — carrierId берётся из сессии.
+ *  Сотрудники внутреннего контура (логист и администрация) выполняют операционные действия.
  *  RBAC (Task 65): действие delete — это разрешение delete_current_orders роли «Логист»:
  *  удалять можно только текущие заявки (не завершённые рейсы — они в реестре и бухгалтерии). */
 const ACTION_ROLE: Record<string, Role> = {
@@ -84,6 +85,10 @@ const ACTION_ROLE: Record<string, Role> = {
   edit: 'logist',
   publish: 'logist',
 }
+
+/** Проверка роли действия: перевозчик — только роль carrier, операционные действия — внутренний контур */
+const roleAllows = (actionRole: Role, userRole: Role): boolean =>
+  actionRole === 'carrier' ? userRole === 'carrier' : isStaff(userRole)
 
 class ActionError extends Error {
   constructor(message: string, readonly status = 400) { super(message) }
@@ -103,7 +108,7 @@ const EDIT_FIELD_LABEL: Record<string, string> = {
 /**
  * POST /api/requests/[id]/action — действия рабочего процесса.
  * Перевозчик: bid | withdraw | assign | approve-crew.
- * Логист: extend | direct-offer | raise-rate | confirm | return | close | delete | edit | publish.
+ * Сотрудник АЭМЗ (логист и администрация): extend | direct-offer | raise-rate | confirm | return | close | delete | edit | publish.
  * Победителя торгов никто не выбирает вручную: по окончании срока заявка
  * автоматически уходит минимальной ставке (src/lib/requests.ts → finalizeExpired).
  */
@@ -122,7 +127,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
   const role = ACTION_ROLE[action]
   if (!role) return NextResponse.json({ error: `Неизвестное действие: ${action || '—'}` }, { status: 400 })
-  if (auth.role !== role) return NextResponse.json({ error: 'Недостаточно прав для этого действия' }, { status: 403 })
+  if (!roleAllows(role, auth.role)) return NextResponse.json({ error: 'Недостаточно прав для этого действия' }, { status: 403 })
 
   // итоги торгов по сроку подводятся до любого действия — ставка после срока не пройдёт
   await finalizeExpired()

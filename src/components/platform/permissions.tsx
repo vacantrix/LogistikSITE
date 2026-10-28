@@ -139,8 +139,9 @@ export default function RolePermMatrix({ rows, onRowsChange }: {
           <div className="flex items-start gap-2.5">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
             <div className="text-sm text-slate-700">
-              Стандартные наборы: логисту — все функции, перевозчику — торги, документы и ЭДО,
-              администрации — просмотр всех разделов. Сброс возвращает эти значения.
+              Стандартные наборы: логисту — все операционные функции, перевозчику — торги, документы
+              и ЭДО, администрации — максимум прав: всё, что у логиста, плюс управление платформой.
+              Сброс возвращает эти значения.
             </div>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">

@@ -216,7 +216,7 @@ function SortableTh({ k, label, sort, onSort, title }: {
  * поднять стартовую ставку или предложить заявку напрямую — каждое действие под своим
  * правом (Task 111); у кого прав нет, стенд остаётся в режиме просмотра.
  */
-function AuctionDesk({ request, now, busy, canRaise = false, canExtend = false, canOffer = false, adminView = false, onExtend, onOffer, onRaise }: {
+function AuctionDesk({ request, now, busy, canRaise = false, canExtend = false, canOffer = false, onExtend, onOffer, onRaise }: {
   request: RequestDTO
   now: number | null
   busy: boolean
@@ -224,10 +224,8 @@ function AuctionDesk({ request, now, busy, canRaise = false, canExtend = false, 
   canRaise?: boolean
   /** право request:extend (Task 111): кнопка «Продлить торги на 2 часа» */
   canExtend?: boolean
-  /** прямое предложение: отдельного права нет (сервер требует роль логиста) — показываем логисту */
+  /** прямое предложение: право request:offer (Task 111) */
   canOffer?: boolean
-  /** «Режим администрации» — только роли admin: стенд смотрится без решений */
-  adminView?: boolean
   onExtend: () => void
   onOffer: () => void
   onRaise: () => void
@@ -349,9 +347,6 @@ function AuctionDesk({ request, now, busy, canRaise = false, canExtend = false, 
             Предложить напрямую
           </Button>
         )}
-        {adminView && (
-          <span className="text-xs text-slate-500">Режим администрации — торги смотрятся без решений, действия выполняет логист</span>
-        )}
         {busy && <span className="text-xs text-slate-400">Выполняется…</span>}
       </div>
     </div>
@@ -447,9 +442,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   const [now, setNow] = useState<number | null>(null)
   // сортировка таблицы (Task 49): null — как пришло с сервера (новые сверху)
   const [sort, setSort] = useState<SortState>(null)
-  // персонал (логист и администрация) видит площадку целиком; решения — только логист (Task 110)
-  const isLogist = role === 'logist'
-  const isStaff = isLogist || role === 'admin'
+  // персонал внутреннего контура (логист и администрация) видит площадку целиком и выполняет решения — по правам (Task 110/111)
+  const isStaff = role === 'logist' || role === 'admin'
   // права платформы (Task 111): нет права — функция полностью исчезает из интерфейса
   // (сервер проверяет то же самое). Роль-гейты сохранены: ставки — только перевозчик,
   // решения стенда и удаление заявки — только логист
@@ -619,7 +613,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
 
   /** Выгрузка текущей выборки в Excel: то, что видно в таблице с учётом фильтров и поиска */
   const exportExcel = () => {
-    const withMine = !isLogist
+    const withMine = !isStaff
     const header = [
       'Заявка', 'Маршрут', 'КМ', 'Груз', 'Тоннаж, т', 'Тип ТС', 'Вид тендера',
       'Ставка, ₽/т', 'Стартовая, ₽/т', 'Погрузка', 'Окно', 'Приём ставок до',
@@ -849,7 +843,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     <section aria-label="Площадка заявок">
       <SectionHeader title="Площадка заявок">
         {/* право draft:create (Task 111): без него кнопки создания нет вовсе */}
-        {isLogist && can('draft:create') && (
+        {isStaff && can('draft:create') && (
           <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать заявку">
             <Plus className="h-4 w-4" aria-hidden />
             Создать заявку
@@ -1048,7 +1042,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                   {r.mode === 'AUCTION' ? 'Торги' : 'Ставки'}
                                   {expandedId === r.id ? <ChevronUp className="h-4 w-4" aria-hidden /> : <ChevronDown className="h-4 w-4" aria-hidden />}
                                 </Button>
-                                {isLogist && can('request:delete') && DELETABLE_STATUSES.includes(r.status) && (
+                                {isStaff && can('request:delete') && DELETABLE_STATUSES.includes(r.status) && (
                                   <Button
                                     size="icon"
                                     variant="ghost"
@@ -1100,12 +1094,11 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                                 request={r}
                                 now={now}
                                 busy={busyId === r.id}
-                                // права (Task 111): поднять/продлить/предложить — только логист с правом;
-                                // пометка «Режим администрации» — только роли admin
-                                canRaise={isLogist && can('request:raise')}
-                                canExtend={isLogist && can('request:extend')}
-                                canOffer={isLogist && can('request:offer')}
-                                adminView={role === 'admin'}
+                                // права (Task 111): поднять/продлить/предложить — по правам,
+                                // у внутреннего контура (логист и администрация)
+                                canRaise={isStaff && can('request:raise')}
+                                canExtend={isStaff && can('request:extend')}
+                                canOffer={isStaff && can('request:offer')}
                                 onExtend={() => void runAction(r.id, 'extend', {}, 'Торги продлены', `№${r.number}: срок увеличен на 2 часа`)}
                                 onOffer={() => void openOffer(r)}
                                 onRaise={() => openRaise(r)}
@@ -1155,9 +1148,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
         </div>
       )}
 
-      {/* Форма новой заявки (Task 64) — только логисту с правом draft:create (Task 111):
+      {/* Форма новой заявки (Task 64) — внутреннему контуру с правом draft:create (Task 111):
           опубликовать или сохранить в черновики */}
-      {isLogist && can('draft:create') && createOpen && (
+      {isStaff && can('draft:create') && createOpen && (
         <RequestFormDialog
           open
           onOpenChange={setCreateOpen}
@@ -1169,7 +1162,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       )}
 
       {/* Экран успеха (Task 64): лаконичное окно с переходом в реестр или созданием следующей */}
-      {isLogist && (
+      {isStaff && (
         <Dialog open={created !== null} onOpenChange={(o) => { if (!o) setCreated(null) }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader className="items-center text-center">
@@ -1353,8 +1346,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                 ))}
               </div>
 
-              {/* логист: видит состояние комплекта документов прямо в деталях заявки */}
-              {isLogist && (
+              {/* внутренний контур: состояние комплекта документов прямо в деталях заявки */}
+              {isStaff && (
                 <div>
                   <h4 className="mb-2 text-sm font-semibold text-slate-900">Комплект документов ({detailReq.documents.length})</h4>
                   {detailReq.documents.length === 0 ? (

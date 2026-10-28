@@ -51,7 +51,7 @@ function loadDatePassed(loadDate: string): boolean {
   return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) < today
 }
 
-export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
+export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -69,8 +69,6 @@ export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
   const canEdit = can('draft:edit')
   const canDelete = can('draft:delete')
   const mayPublish = can('request:publish')
-  // администрация смотрит черновики в режиме просмотра (операционные права по умолчанию выключены)
-  const isLogist = role === 'logist'
 
   const load = useCallback(async () => {
     try {
@@ -146,12 +144,6 @@ export default function DraftsTab({ role, onNavigate, liveTick }: TabProps) {
           </Button>
         )}
       </SectionHeader>
-
-      {!isLogist && (
-        <NoticeLine className="mb-4">
-          Раздел логиста — администрация видит черновики в режиме просмотра. Правка данных — через «База данных».
-        </NoticeLine>
-      )}
 
       {requests === null && !error && <LoadingBlock label="Загружаем черновики…" />}
       {error && <ErrorBlock message={error} onRetry={() => void load()} />}

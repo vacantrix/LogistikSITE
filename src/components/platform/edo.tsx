@@ -98,8 +98,8 @@ export default function EdoTab({ role, liveTick }: TabProps) {
   const [etrnFor, setEtrnFor] = useState<{ requestId: string; requestNumber: string; doc: EdoDocDTO } | null>(null)
   const [syncing, setSyncing] = useState(false)
 
+  // роль — только для подписи контура в шапке раздела; подписи и отправки — по гранулярным правам (Task 111)
   const isLogist = role === 'logist'
-  // администрация видит комплекты ЭДО в режиме просмотра: подписи/отправки в Диадок — за сторонами (Task 110)
   const isAdmin = role === 'admin'
   // права платформы (Task 111): сверка статусов Диадока — edo:sync (сервер проверяет то же самое);
   // без права кнопка «Обновить статусы» не отображается — остаётся пояснение «сверяет логист»
@@ -343,7 +343,8 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
   diadocEnabled?: boolean
   onEtrnSend?: (doc: EdoDocDTO) => void
 }) {
-  const isLogist = role === 'logist'
+  // сотрудник АЭМЗ (логист или администрация) подписывает за грузоотправителя; исполнитель — за свою компанию
+  const isAemz = role !== 'carrier'
   // права платформы (Task 111): подписание — edo:sign, отправка ЭТрН в Диадок — edo:send;
   // нет права — кнопка не отображается (сервер проверяет то же самое)
   const can = useCan()
@@ -361,12 +362,12 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
           <div className="py-2 text-sm text-slate-400">Документов пока нет</div>
         ) : (
           docs.map((doc) => {
-            const mySideDone = isLogist ? doc.aemzSigned : doc.partySigned
+            const mySideDone = isAemz ? doc.aemzSigned : doc.partySigned
             // через Диадок идёт накладная рейса в работе или уже отправленная; у закрытых
             // до подключения Диадока рейсов накладная подписана в платформе — показываем её подписи
             const viaDiadoc = diadocEnabled && doc.kind === 'ETRN' && (Boolean(doc.diadoc) || pack.request.status === 'CONFIRMED')
-            // подписание — по праву edo:sign; администрация не подписывает — только просмотр статусов (Task 110/111)
-            const canSign = !viaDiadoc && !mySideDone && !(doc.aemzSigned && doc.partySigned) && role !== 'admin' && can('edo:sign')
+            // подписание — по праву edo:sign (внутренний контур и исполнитель рейса)
+            const canSign = !viaDiadoc && !mySideDone && !(doc.aemzSigned && doc.partySigned) && can('edo:sign')
             return (
               <div key={doc.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -413,7 +414,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
                 )}
                 {canSign && (
                   <div className="mt-2">
-                    {isLogist ? (
+                    {isAemz ? (
                       <Button size="sm" variant="outline" disabled={busy === doc.id} onClick={() => void onSign(pack, doc)} className="h-8">
                         <PenLine className="mr-1.5 h-3.5 w-3.5" aria-hidden />
                         Подписать (КЭП АЭМЗ)

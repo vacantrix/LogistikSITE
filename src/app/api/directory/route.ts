@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null)
   const { kind, data } = (body ?? {}) as { kind?: string; data?: Record<string, unknown> }
   if (!kind || !data || typeof data !== 'object') return NextResponse.json({ error: 'Нужны kind и data' }, { status: 400 })
-  if ((kind === 'cargo' || kind === 'carrier') && auth.role !== 'logist') return forbidden()
+  if ((kind === 'cargo' || kind === 'carrier') && !isStaff(auth.role)) return forbidden()
 
   /** фото/документы записи справочника (Task 54): только изображения, не больше 8 штук */
   const rawPhotos = Array.isArray(body?.photos) ? (body.photos as unknown[]).slice(0, 8) : []
@@ -225,8 +225,8 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
-  // права (Task 111): правка карточек — directory:edit (у администрации по умолчанию
-  // выключено — данные правятся через «База данных»)
+  // права (Task 111): правка карточек — directory:edit (у администрации и логиста включено;
+  // персональный deny в «Профилях и доступах» закрывает правку)
   if (!(await allowedFor(auth, 'directory:edit'))) {
     return NextResponse.json({ error: permDenied('directory:edit') }, { status: 403 })
   }
@@ -236,7 +236,7 @@ export async function PUT(req: NextRequest) {
   if (!kind || typeof id !== 'string' || !id || !data || typeof data !== 'object') {
     return NextResponse.json({ error: 'Нужны kind, id и data' }, { status: 400 })
   }
-  if ((kind === 'cargo' || kind === 'carrier') && auth.role !== 'logist') return forbidden()
+  if ((kind === 'cargo' || kind === 'carrier') && !isStaff(auth.role)) return forbidden()
   if (kind === 'driver' || kind === 'truck' || kind === 'trailer') {
     const own = await ownsRecord(auth, kind, id)
     if (own === null) return NextResponse.json({ error: 'Запись не найдена' }, { status: 404 })

@@ -11,16 +11,16 @@ const num = (v: unknown): number | null => {
   return v == null || v === '' || !Number.isFinite(n) ? null : n
 }
 
-/** GET /api/settings — пороги уверенности и правила проверки (только логист) */
+/** GET /api/settings — пороги уверенности и правила проверки (внутренний контур) */
 export async function GET() {
-  const auth = await requireUser('logist')
+  const auth = await requireUser('logist', 'admin')
   if (auth instanceof NextResponse) return auth
   return NextResponse.json(toSettingsDTO(await db.setting.findUnique({ where: { id: 'main' } })))
 }
 
-/** PUT /api/settings — обновить пороги и правила (только логист) */
+/** PUT /api/settings — обновить пороги и правила (внутренний контур) */
 export async function PUT(req: NextRequest) {
-  const auth = await requireUser('logist')
+  const auth = await requireUser('logist', 'admin')
   if (auth instanceof NextResponse) return auth
 
   const body = await req.json().catch(() => null)
