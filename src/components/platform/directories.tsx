@@ -25,6 +25,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Send,
   Truck,
   User,
   Wrench,
@@ -272,6 +273,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   const [editing, setEditing] = useState<{ kind: Kind; id: string } | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  // рассылка «Уведомить агента» по срокам документов техники (Task 108)
+  const [notifying, setNotifying] = useState(false)
   const isLogist = role === 'logist'
   // ——— фильтры справочника: текстовый поиск + срок документов + перевозчик (логисту) ———
   const [dirQuery, setDirQuery] = useState('')
@@ -442,6 +445,28 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
     setAddKind(kind)
   }
 
+  /** «Уведомить агента»: разослать перевозчикам уведомление об истекающих документах техники */
+  const notifyAgents = async () => {
+    setNotifying(true)
+    try {
+      const res = await api.notifyDocExpiry()
+      if (res.notified.length > 0) {
+        toast({
+          title: 'Уведомление отправлено',
+          description: `Получатели: ${res.notified.join(', ')}${res.skipped.length > 0 ? `. Уже уведомлены сегодня: ${res.skipped.join(', ')}` : ''}`,
+        })
+      } else if (res.skipped.length > 0) {
+        toast({ title: 'Уже уведомлены сегодня', description: `Рассылка сегодня уже уходила: ${res.skipped.join(', ')}` })
+      } else {
+        toast({ title: 'Некому отправлять', description: 'По истекающим документам получатели не найдены' })
+      }
+    } catch (e) {
+      toast({ title: 'Не удалось отправить уведомление', description: e instanceof Error ? e.message : 'Повторите попытку' })
+    } finally {
+      setNotifying(false)
+    }
+  }
+
   const openEdit = (kind: Kind, id: string, record: Record<string, string>) => {
     setForm({ ...record })
     setAddKind(null)
@@ -592,6 +617,20 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
               )}
               <InfoTip label="Цвета сроков">Точка у срока: красная — срок истёк, янтарная — осталось до 30 дней, серая — до 90 дней.</InfoTip>
             </div>
+            {isLogist && expiryItems.length > 0 && (
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="outline" onClick={notifyAgents} disabled={notifying}>
+                  {notifying
+                    ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    : <Send className="h-4 w-4" aria-hidden />}
+                  Уведомить агента
+                </Button>
+                <InfoTip label="Про рассылку">
+                  Разошлёт перевозчикам, у чьей техники истёк техосмотр или истекает в ближайшие 30 дней,
+                  уведомления в личный кабинет. Повторно за день не дублируется.
+                </InfoTip>
+              </div>
+            )}
           </div>
 
           {expiryItems.length === 0 ? (

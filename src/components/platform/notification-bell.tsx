@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Bell, CheckCheck, FileCheck2, FilePen, FileSignature, Gavel, Trash2, TrendingDown, Trophy, Truck, Undo2, Users, type LucideIcon,
+  Bell, CalendarClock, CheckCheck, FileCheck2, FilePen, FileSignature, Gavel, Trash2, TrendingDown, Trophy, Truck, Undo2, Users, type LucideIcon,
 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -39,6 +39,7 @@ const NOTIF_META: Record<string, { Icon: LucideIcon; cls: string }> = {
   MOVED_TO_DRAFT: { Icon: FilePen, cls: 'bg-slate-200 text-slate-700' },
   EDO_READY: { Icon: FileSignature, cls: 'bg-teal-100 text-teal-700' },
   EDO_SIGNED: { Icon: FileSignature, cls: 'bg-emerald-100 text-emerald-700' },
+  DOC_EXPIRY: { Icon: CalendarClock, cls: 'bg-amber-100 text-amber-700' },
 }
 
 /** Куда вести по клику: раздел зависит от роли получателя */
@@ -56,6 +57,7 @@ const NAV_TARGET: Record<string, Partial<Record<RoleKind, TabKey>>> = {
   MOVED_TO_DRAFT: { logist: 'drafts' },
   EDO_READY: { logist: 'edo', carrier: 'edo' },
   EDO_SIGNED: { logist: 'edo', carrier: 'edo' },
+  DOC_EXPIRY: { carrier: 'directory' },
 }
 
 /** «Только что / 7 мин назад / 3 ч назад / вчера / 12.03» */

@@ -17,7 +17,8 @@
  *      TRIP_CLOSED     — рейс закрыт, заявка завершена;
  *      REQUEST_DELETED — логист удалил заявку (с площадки снята);
  *      EDO_READY       — сформирован комплект ЭДО, доступен к подписанию (Task 76);
- *      EDO_SIGNED      — АЭМЗ подписало документ, ждёт подписи перевозчика (Task 76).
+ *      EDO_SIGNED      — АЭМЗ подписало документ, ждёт подписи перевозчика (Task 76);
+ *      DOC_EXPIRY      — у техники истёк или истекает техосмотр (рассылка «Уведомить агента»).
  *
  * Уведомления создаются после успешной транзакции действия; вместе с ними
  * уходит live-событие в шину ws-service — колокольчик в шапке обновляется
@@ -30,7 +31,7 @@ export type NotifyType =
   | 'BID_PLACED' | 'BID_OUTBID' | 'AUCTION_FINISHED' | 'WINNER_AWARDED'
   | 'CREW_ASSIGNED' | 'DOCS_READY' | 'DOCS_RETURNED' | 'DOCS_CONFIRMED'
   | 'TRIP_CLOSED' | 'REQUEST_DELETED' | 'MOVED_TO_DRAFT'
-  | 'EDO_READY' | 'EDO_SIGNED'
+  | 'EDO_READY' | 'EDO_SIGNED' | 'DOC_EXPIRY'
 
 export interface NotifyPayload {
   type: NotifyType

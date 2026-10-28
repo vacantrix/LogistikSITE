@@ -216,6 +216,9 @@ export const api = {
   /** Отметить прочитанными: конкретные id или все сразу ({ all: true }) */
   markNotifications: (body: { ids?: string[]; all?: boolean }) =>
     fetch('/api/notifications', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ok: boolean; unread: number }>),
+  /** Рассылка перевозчикам о сроках документов техники (кнопка «Уведомить агента») */
+  notifyDocExpiry: () =>
+    fetch('/api/notifications/doc-expiry', withAuth({ method: 'POST' })).then(json<{ notified: string[]; skipped: string[] }>),
   settings: () => fetch('/api/settings', withAuth({ cache: 'no-store' })).then(json<SettingsDTO>),
   saveSettings: (data: Partial<SettingsDTO>) =>
     fetch('/api/settings', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<SettingsDTO>),
