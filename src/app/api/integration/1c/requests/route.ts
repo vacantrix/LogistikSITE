@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { ONEC_ETRN_RU, ONEC_STATUS_RU, onecAuthorized, onecBadRequest, onecMeta, onecUnauthorized } from '@/lib/onec'
+import { ONEC_ETRN_RU, ONEC_STATUS_RU, onecAuthorized, onecBadRequest, onecMeta, onecPreflight, onecUnauthorized, withOnecCors } from '@/lib/onec'
 import { notifyLive } from '@/lib/notify'
 import { plog, plogError } from '@/lib/platform-log'
 import { finalizeExpired, inTx, money, parseRuDate } from '@/lib/requests'
@@ -16,8 +16,21 @@ const STATUSES = Object.keys(ONEC_STATUS_RU) as RequestStatus[]
  *      Реестр рейсов для 1С:ERP: маршрут, груз, ставки, перевозчик-победитель, экипаж, ЭТрН;
  *      onecRef — судьба одного документа 1С (черновик → торги → победитель → рейс).
  * POST /api/integration/1c/requests — черновик заявки из 1С (логист публикует его на площадке).
+ * Оба метода доступны и браузеру (HTML-симулятор 1С) — CORS по ONEC_CORS_ORIGINS.
  */
 export async function GET(req: NextRequest) {
+  return withOnecCors(req, await listRequests(req))
+}
+
+export async function POST(req: NextRequest) {
+  return withOnecCors(req, await createDraft(req))
+}
+
+export function OPTIONS(req: NextRequest) {
+  return onecPreflight(req, 'GET, POST')
+}
+
+async function listRequests(req: NextRequest): Promise<NextResponse> {
   if (!onecAuthorized(req)) return onecUnauthorized()
   await finalizeExpired() // статусы торгов, у которых истёк срок, — уже с победителем
 
@@ -177,7 +190,7 @@ function draftResponse(r: DraftRow, extra: { duplicate: boolean; cargoCreated: b
  * Идемпотентность по oneC_number: повторная отправка того же документа отдаёт
  * уже созданный черновик (200, duplicate: true), новый создаётся с кодом 201.
  */
-export async function POST(req: NextRequest) {
+async function createDraft(req: NextRequest): Promise<NextResponse> {
   if (!onecAuthorized(req)) return onecUnauthorized()
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null

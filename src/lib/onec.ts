@@ -12,6 +12,10 @@
  * Авторизация: только заголовок X-API-Key (ключ в адресе попадал бы в логи прокси).
  * Ключ задаётся переменной окружения ONEC_API_KEY (не короче 24 символов).
  * Ключа по умолчанию нет: без переменной интеграция выключена и отвечает 503.
+ *
+ * CORS (ping и requests): для браузерных клиентов — HTML-симулятора 1С на GitHub Pages.
+ * Сайты-источники перечисляются в ONEC_CORS_ORIGINS через запятую; без переменной CORS
+ * выключен — 1С обращается к платформе со своего сервера, и браузерные правила её не касаются.
  */
 import { createHash, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
@@ -53,6 +57,41 @@ export function onecUnauthorized(): NextResponse {
 
 export function onecBadRequest(error: string): NextResponse {
   return NextResponse.json({ ok: false, error }, { status: 400 })
+}
+
+/** Источник запроса, если он есть в ONEC_CORS_ORIGINS («*» — любой сайт) */
+function onecCorsOrigin(req: NextRequest): string | null {
+  const origin = req.headers.get('origin')
+  if (!origin) return null
+  const allowed = (process.env.ONEC_CORS_ORIGINS ?? '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean)
+  return allowed.includes('*') || allowed.includes(origin) ? origin : null
+}
+
+/** Разрешить браузеру прочитать ответ (в том числе ошибку — симулятор покажет её текст) */
+export function withOnecCors(req: NextRequest, res: NextResponse): NextResponse {
+  const origin = onecCorsOrigin(req)
+  if (origin) {
+    res.headers.set('Access-Control-Allow-Origin', origin)
+    res.headers.append('Vary', 'Origin')
+  }
+  return res
+}
+
+/** Ответ на предварительный запрос браузера: X-API-Key — нестандартный заголовок, без OPTIONS браузер его не отправит */
+export function onecPreflight(req: NextRequest, methods: string): NextResponse {
+  const res = new NextResponse(null, { status: 204 })
+  const origin = onecCorsOrigin(req)
+  if (origin) {
+    res.headers.set('Access-Control-Allow-Origin', origin)
+    res.headers.set('Access-Control-Allow-Methods', `${methods}, OPTIONS`)
+    res.headers.set('Access-Control-Allow-Headers', 'Content-Type, X-API-Key')
+    res.headers.set('Access-Control-Max-Age', '86400')
+    res.headers.set('Vary', 'Origin')
+  }
+  return res
 }
 
 export function onecMeta(count: number, extra: Record<string, unknown> = {}) {
