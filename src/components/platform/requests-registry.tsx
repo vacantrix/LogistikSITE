@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
+import { useCan } from '@/components/platform/perms'
 import { api, secureFileUrl } from '@/lib/api'
 import { formatKm, routeDistanceKm } from '@/lib/geo'
 import { pointInfo } from '@/lib/points'
@@ -217,6 +218,7 @@ function RequestFilesList({ files }: { files: RequestDTO['files'] }) {
 
 export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
+  const can = useCan()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -380,8 +382,11 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                     <TableBody>
                       {filtered.map((r) => {
                         const g = REQUEST_GROUP_META[requestGroupOf(r.status)]
+                        // права (Task 111): кнопки скрыты, если действия нет у учётной записи —
+                        // те же права, что сервер проверяет в action 'delete' и 'edit'
                         const deletable = DELETABLE_STATUSES.includes(r.status)
-                        const editable = r.status === 'PUBLISHED' || r.status === 'DRAFT'
+                          && can(r.status === 'DRAFT' ? 'draft:delete' : 'request:delete')
+                        const editable = (r.status === 'PUBLISHED' || r.status === 'DRAFT') && can('draft:edit')
                         return (
                           <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setDetailId(r.id)}>
                             <TableCell className="whitespace-nowrap font-bold text-slate-900">№{r.number}</TableCell>
