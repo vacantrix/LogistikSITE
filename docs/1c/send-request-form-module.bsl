@@ -2,7 +2,7 @@
 // АЭМЗ Логистика и получение статуса торгов обратно.
 //
 // Платформа: POST /api/integration/1c/requests (черновик), GET /api/integration/1c/requests?onecRef= (статус).
-// Подробности и проверка без 1С — docs/1c/README.md и scripts/onec-check.mjs.
+// Подробности и проверка без 1С — docs/1c/README.md и docs/1c/onec-check.mjs.
 //
 // Как подключить:
 //  1. Добавьте в форму документа две команды: «ОтправитьНаПлатформу» и «СтатусНаПлатформе»

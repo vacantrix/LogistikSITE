@@ -1,6 +1,6 @@
 /**
  * Проверка обмена с 1С без 1С: скрипт делает те же запросы, что модуль формы 1С
- * (docs/1c/send-request-form-module.bsl), и печатает ответы платформы.
+ * (send-request-form-module.bsl в этой папке), и печатает ответы платформы.
  *
  *   1) GET  /ping      — связь и API-ключ;
  *   2) POST /requests  — черновик заявки (как кнопка «Отправить на веб-платформу»);
@@ -8,9 +8,9 @@
  *   4) GET  /requests?status=DRAFT — черновик виден в реестре для 1С с полем onecRef.
  *
  * Запуск (ключ — тот же, что ONEC_API_KEY на сервере):
- *   node --env-file-if-exists=.env.local scripts/onec-check.mjs
- *   ONEC_URL=https://logistika.example.ru ONEC_API_KEY=… node scripts/onec-check.mjs
- *   node scripts/onec-check.mjs --ref "ЗП-0012 от 28.10.2026"   — свой номер документа 1С
+ *   node --env-file-if-exists=.env.local docs/1c/onec-check.mjs
+ *   ONEC_URL=https://logistika.example.ru ONEC_API_KEY=… node docs/1c/onec-check.mjs
+ *   node docs/1c/onec-check.mjs --ref "ЗП-0012 от 28.10.2026"   — свой номер документа 1С
  * Без --ref номер уникальный (ПРОВЕРКА-<время>), поэтому каждый запуск создаёт новый черновик —
  * лишние черновики логист удаляет в «Черновиках заявок».
  */
@@ -39,7 +39,7 @@ const draft = {
   loadDate,
   loadWindow: '09:00–18:00',
   startRate: 0, // ₽/т; 0 — ставку задаст логист при публикации
-  comment: 'Проверка обмена с 1С (scripts/onec-check.mjs)',
+  comment: 'Проверка обмена с 1С (docs/1c/onec-check.mjs)',
 }
 
 async function call(method, path, body) {
