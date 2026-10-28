@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   CheckCheck,
+  Download,
   FileText,
   Loader2,
   MessageSquare,
@@ -42,7 +43,7 @@ import { api, secureFileUrl } from '@/lib/api'
 import { fmtDateTime } from '@/lib/status'
 import {
   TICKET_CATEGORY_META, TICKET_STATUS_META,
-  type TicketCategory, type TicketDTO, type TicketMessageDTO, type TicketStatus, type TicketThreadDTO,
+  type TicketAttachmentDTO, type TicketCategory, type TicketDTO, type TicketMessageDTO, type TicketStatus, type TicketThreadDTO,
 } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300'
@@ -71,6 +72,15 @@ function relTime(iso: string): string {
 function fmtSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} КБ`
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`
+}
+
+/** «1 вложение / 2 вложения / 5 вложений» */
+function pluralFiles(n: number): string {
+  const mod10 = n % 10
+  const mod100 = n % 100
+  if (mod10 === 1 && mod100 !== 11) return 'вложение'
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'вложения'
+  return 'вложений'
 }
 
 /** Остаток лимита в мегабайтах для подсказки */
@@ -154,9 +164,10 @@ async function pickFiles(
 }
 
 /**
- * Блок вложений — общий для ветки обращения и нового обращения: чипы выбранных
- * файлов с удалением, кнопка выбора, подсказка об остатке лимита и красная строка
- * при превышении. `available` — сколько байт вложений всего доступно обращению.
+ * Блок вложений — общий для ветки обращения и нового обращения: выбранные картинки
+ * показываются миниатюрами с весом и кнопкой удаления, документы — чипами с именем
+ * и весом; под кнопкой — счётчик: приложено и остаток лимита. `available` — сколько
+ * байт вложений всего доступно обращению.
  */
 function AttachArea({
   files, available, error, disabled, onPick, onRemove,
@@ -172,12 +183,39 @@ function AttachArea({
   const used = files.reduce((s, f) => s + f.size, 0)
   const left = Math.max(0, available - used)
   const over = used > available
+  // картинки — миниатюрами (обычные медиа-вложения), документы — чипами
+  const images = files.map((f, i) => ({ f, i })).filter(({ f }) => f.dataUri.startsWith('data:image/'))
+  const docs = files.map((f, i) => ({ f, i })).filter(({ f }) => !f.dataUri.startsWith('data:image/'))
 
   return (
     <div>
-      {files.length > 0 && (
+      {images.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2">
-          {files.map((f, i) => (
+          {images.map(({ f, i }) => (
+            <span key={`${f.fileName}-${i}`} className="relative">
+              <img
+                src={f.dataUri}
+                alt={f.fileName}
+                className="h-16 w-16 rounded-lg border border-slate-200 object-cover"
+              />
+              <span className="absolute bottom-0.5 right-0.5 rounded bg-black/55 px-1 py-0.5 text-[9px] font-medium leading-none text-white">
+                {fmtSize(f.size)}
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemove(i)}
+                aria-label={`Убрать файл ${f.fileName}`}
+                className="absolute -right-1.5 -top-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:text-slate-800"
+              >
+                <X className="h-3 w-3" aria-hidden />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {docs.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {docs.map(({ f, i }) => (
             <span
               key={`${f.fileName}-${i}`}
               className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700"
@@ -213,7 +251,9 @@ function AttachArea({
           <Paperclip className="h-4 w-4" aria-hidden />
           Приложить файл
         </Button>
-        <span className="text-xs text-slate-500">Можно приложить ещё {mb(left)} из 10 МБ</span>
+        <span className="text-xs text-slate-500">
+          {used > 0 ? `Приложено ${fmtSize(used)} · ` : ''}можно ещё {mb(left)} из 10 МБ
+        </span>
       </div>
       {error && <p className="mt-1.5 text-sm text-red-600" role="alert">{error}</p>}
       {!error && over && <p className="mt-1.5 text-sm text-red-600" role="alert">Приложено больше лимита — уберите лишний файл</p>}
@@ -222,11 +262,60 @@ function AttachArea({
 }
 
 /**
+ * Просмотр медиа-вложения: полная картинка с именем и весом, скачивание.
+ * Открывается по щелчку на миниатюре в пузыре сообщения.
+ */
+function MediaLightbox({ att, onClose }: { att: TicketAttachmentDTO | null; onClose: () => void }) {
+  return (
+    <Dialog open={!!att} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-3xl">
+        {att && (
+          <div className="space-y-3">
+            <DialogHeader className="space-y-0.5 text-left">
+              <DialogTitle className="break-words text-sm font-semibold text-slate-900">{att.fileName}</DialogTitle>
+              <DialogDescription className="text-xs">{fmtSize(att.sizeBytes)} · картинка откроется в новой вкладке по щелчку</DialogDescription>
+            </DialogHeader>
+            <a
+              href={secureFileUrl(att.url)}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Открыть ${att.fileName} в новой вкладке`}
+              className="block cursor-zoom-in"
+            >
+              <img
+                src={secureFileUrl(att.url)}
+                alt={att.fileName}
+                className="max-h-[65vh] w-full rounded-lg border border-slate-200 object-contain"
+              />
+            </a>
+            <div className="flex justify-end">
+              <Button variant="outline" asChild>
+                <a href={downloadHref(att.url)} download={att.fileName}>
+                  <Download className="h-4 w-4" aria-hidden />
+                  Скачать — {fmtSize(att.sizeBytes)}
+                </a>
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
  * Сообщение ветки — пузырь как в мессенджере (Task 112): свои сообщения справа
  * (тон плашки — как в «Проверке документов»), чужие слева; автор, роль, время,
- * текст и вложения внутри пузыря.
+ * текст и вложения внутри пузыря. Медиа-вложения (Task 114): картинки — крупные
+ * превью с весом в углу, по щелчку — лайтбокс со скачиванием; под вложениями —
+ * их суммарный вес.
  */
 function MessageBubble({ m, own }: { m: TicketMessageDTO; own: boolean }) {
+  const [view, setView] = useState<TicketAttachmentDTO | null>(null)
+  const images = m.attachments.filter((a) => a.isImage)
+  const docs = m.attachments.filter((a) => !a.isImage)
+  const weight = m.attachments.reduce((s, a) => s + a.sizeBytes, 0)
+
   return (
     <div className={`flex ${own ? 'justify-end' : 'justify-start'}`}>
       <article
@@ -242,42 +331,59 @@ function MessageBubble({ m, own }: { m: TicketMessageDTO; own: boolean }) {
           <span className="ml-auto shrink-0 text-xs text-slate-400">{relTime(m.createdAt)}</span>
         </div>
         {m.body && <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-800">{m.body}</p>}
-        {m.attachments.length > 0 && (
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            {m.attachments.map((a) => (
-              a.isImage ? (
-                <a
-                  key={a.id}
-                  href={secureFileUrl(a.url)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={a.fileName}
-                  aria-label={`Открыть изображение ${a.fileName} в новой вкладке`}
-                  className="block cursor-zoom-in"
-                >
-                  <img
-                    src={secureFileUrl(a.url)}
-                    alt={a.fileName}
-                    loading="lazy"
-                    className="h-24 w-36 rounded-lg border border-slate-200 object-cover"
-                  />
-                </a>
-              ) : (
-                <a
-                  key={a.id}
-                  href={downloadHref(a.url)}
-                  download={a.fileName}
-                  className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs transition-colors hover:border-blue-200"
-                >
-                  <FileText className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-                  <span className="max-w-[220px] truncate text-blue-700 underline">{a.fileName}</span>
-                  <span className="shrink-0 text-slate-400">{fmtSize(a.sizeBytes)}</span>
-                </a>
-              )
+        {images.length > 0 && (
+          <div className={images.length > 1 ? 'mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3' : 'mt-2.5'}>
+            {images.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => setView(a)}
+                title={`${a.fileName} · ${fmtSize(a.sizeBytes)}`}
+                aria-label={`Открыть изображение ${a.fileName}, вес ${fmtSize(a.sizeBytes)}`}
+                className="group relative block w-full overflow-hidden rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-400"
+              >
+                <img
+                  src={secureFileUrl(a.url)}
+                  alt={a.fileName}
+                  loading="lazy"
+                  className={
+                    images.length > 1
+                      ? 'h-28 w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]'
+                      : 'h-56 w-72 max-w-full object-cover'
+                  }
+                />
+                <span className="absolute bottom-1 right-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  {fmtSize(a.sizeBytes)}
+                </span>
+              </button>
             ))}
           </div>
         )}
+        {docs.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-2">
+            {docs.map((a) => (
+              <a
+                key={a.id}
+                href={downloadHref(a.url)}
+                download={a.fileName}
+                title={`${a.fileName} · ${fmtSize(a.sizeBytes)}`}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs transition-colors hover:border-blue-200"
+              >
+                <FileText className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                <span className="max-w-[220px] truncate text-blue-700 underline">{a.fileName}</span>
+                <span className="shrink-0 text-slate-400">{fmtSize(a.sizeBytes)}</span>
+              </a>
+            ))}
+          </div>
+        )}
+        {m.attachments.length > 0 && (
+          <div className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-400">
+            <Paperclip className="h-3 w-3 shrink-0" aria-hidden />
+            {m.attachments.length} {pluralFiles(m.attachments.length)} · {fmtSize(weight)}
+          </div>
+        )}
       </article>
+      <MediaLightbox att={view} onClose={() => setView(null)} />
     </div>
   )
 }
@@ -480,6 +586,8 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
   const tMeta = t ? TICKET_STATUS_META[t.status] : null
   // сторона сообщения: свои — справа (пузырь), чужие — слева (Task 112)
   const ownOf = (m: TicketMessageDTO): boolean => (role === 'carrier' ? !m.staff : m.staff)
+  // вес вложений ветки: число и суммарный размер — показываются в шапке (Task 114)
+  const attachCount = thread?.messages.reduce((s, m) => s + m.attachments.length, 0) ?? 0
 
   return (
     <div>
@@ -588,9 +696,17 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
                     {tk.lastMessage && (
                       <span className="mt-1 block truncate text-sm text-slate-500">{tk.lastMessage.body}</span>
                     )}
-                    <span className="mt-1.5 flex items-center gap-1 text-xs text-slate-400">
-                      <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      {tk.messagesCount}
+                    <span className="mt-1.5 flex items-center gap-3 text-xs text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <MessageSquare className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        {tk.messagesCount}
+                      </span>
+                      {tk.sizeTotal > 0 && (
+                        <span className="flex items-center gap-1" title={`Вес вложений обращения — ${fmtSize(tk.sizeTotal)}`}>
+                          <Paperclip className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          {fmtSize(tk.sizeTotal)}
+                        </span>
+                      )}
                     </span>
                   </button>
                 )
@@ -641,6 +757,15 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
                         <span aria-hidden>·</span>
                         <span>создано {fmtDateTime(t.createdAt)}</span>
                       </div>
+                      {attachCount > 0 && (
+                        <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-slate-100 pt-2.5 text-xs text-slate-600">
+                          <Paperclip className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                          <span className="font-medium text-slate-700">
+                            Вложения: {attachCount} {pluralFiles(attachCount)} · {fmtSize(t.sizeTotal)} из 10 МБ
+                          </span>
+                          <span className="text-slate-400">— можно приложить ещё {mb(thread?.sizeLeft ?? 0)}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       {t.status !== 'CLOSED' ? (

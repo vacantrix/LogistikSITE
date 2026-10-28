@@ -27,7 +27,6 @@ import DirectoryTab from '@/components/platform/directories'
 import ReportsTab from '@/components/platform/reports'
 import JournalTab from '@/components/platform/journal'
 import EdoTab from '@/components/platform/edo'
-import ProfileTab from '@/components/platform/profile'
 import SupportTab from '@/components/platform/support'
 import AdminUsersTab from '@/components/platform/admin-users'
 import AdminDbTab from '@/components/platform/admin-db'
@@ -225,7 +224,6 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
           {tab === 'directory' && <DirectoryTab {...tabProps} />}
           {tab === 'reports' && <ReportsTab {...tabProps} />}
           {tab === 'journal' && <JournalTab {...tabProps} />}
-          {tab === 'profile' && <ProfileTab {...tabProps} />}
           {tab === 'support' && <SupportTab {...tabProps} />}
           {tab === 'admin-users' && <AdminUsersTab {...tabProps} />}
           {tab === 'admin-db' && <AdminDbTab {...tabProps} />}
