@@ -9,7 +9,7 @@ import { db } from '@/lib/db'
 import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { plogError } from '@/lib/platform-log'
-import type { Viewer } from '@/lib/auth'
+import { isStaff, type Viewer } from '@/lib/auth'
 import { BUSY_STATUSES, busyReason } from '@/lib/busy'
 import { REQUEST_INCLUDE, type RequestFull } from '@/lib/serialize'
 import type { RequestDTO } from '@/lib/types'
@@ -24,7 +24,7 @@ type Tx = Prisma.TransactionClient
  * Черновики (в том числе торги, закончившиеся без ставок) перевозчику не видны.
  */
 export function requestWhereFor(viewer: Viewer): Prisma.RequestWhereInput {
-  if (viewer.role === 'logist') return {}
+  if (isStaff(viewer.role)) return {}
   const me = viewer.carrierId ?? '__none__'
   return {
     status: { not: 'DRAFT' },

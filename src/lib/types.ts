@@ -75,8 +75,21 @@ export interface DirectoryPhotoDTO {
   status: 'LOADED' | 'NEEDS_REVIEW'
 }
 
+/** Роль пользователя на платформе (система прав, Task 109): администрация / логист АЭМЗ / перевозчик-экспедитор */
+export type SessionRole = 'admin' | 'logist' | 'carrier'
+
 /** Роль исполнителя рейса: перевозчик (заказ-заявка) или экспедитор (поручение экспедитору) */
 export type ExecutorRole = 'CARRIER' | 'FORWARDER'
+
+/** Принадлежность транспорта по заявке (Task 109): в собственности / наёмный / аренда-лизинг */
+export type TransportOwnership = 'OWNED' | 'HIRED' | 'LEASE'
+
+/** Метки и подсказки принадлежности транспорта по заявке */
+export const TRANSPORT_OWNERSHIP_META: Record<TransportOwnership, { label: string }> = {
+  OWNED: { label: 'Транспорт в собственности' },
+  HIRED: { label: 'Наёмный транспорт' },
+  LEASE: { label: 'Аренда / лизинг' },
+}
 
 export interface CarrierDTO {
   id: string
@@ -133,6 +146,32 @@ export interface DocumentDTO {
   createdAt: string
 }
 
+/** Вид документа в обмене между перевозчиком и логистом по заявке (без почты, Task 109) */
+export type RequestFileKind = 'POA' | 'REQUEST_DOC' | 'FOR_CARRIER'
+
+/** Метки видов файлов обмена */
+export const REQUEST_FILE_META: Record<RequestFileKind, { label: string; hint: string }> = {
+  POA: { label: 'Доверенность', hint: 'Перевозчик передаёт логисту доверенность по заявке' },
+  REQUEST_DOC: { label: 'Заявка', hint: 'Перевозчик передаёт логисту заявку (подтверждение исполнения)' },
+  FOR_CARRIER: { label: 'Документ от логиста', hint: 'Документ, выложенный логистом для перевозчика (скачивается из кабинета)' },
+}
+
+/** Файл обмена по заявке: кто загрузил и что это — скачивается по защищённой ссылке */
+export interface RequestFileDTO {
+  id: string
+  kind: RequestFileKind
+  fileName: string
+  /** защищённая ссылка (/api/files/request-file/<id>) */
+  url: string
+  isPdf: boolean
+  isImage: boolean
+  sizeBytes: number
+  /** carrier | logist — кто загрузил файл */
+  uploadedBy: 'carrier' | 'logist'
+  uploadedByName: string
+  createdAt: string
+}
+
 export interface EventDTO {
   id: string
   type: string
@@ -172,6 +211,12 @@ export interface RequestDTO {
   driverId: string | null
   truckId: string | null
   trailerId: string | null
+  /** исполнитель по данной заявке: перевозчик или экспедитор (выбор перевозчика, Task 109); null — по роли компании */
+  executorRole: ExecutorRole | null
+  /** транспорт по заявке: в собственности (по умолчанию) / наёмный / аренда-лизинг */
+  transportOwnership: TransportOwnership
+  /** файлы обмена перевозчик ↔ логист по заявке (доверенность, заявка, документы от АЭМЗ) */
+  files: RequestFileDTO[]
   passPackage: boolean
   etrnStatus: string
   /** комментарий логиста к сверки/отклонению (Task 62) */
@@ -322,8 +367,135 @@ export interface SessionUserDTO {
   id: string
   login: string
   name: string
-  role: 'logist' | 'carrier'
+  role: SessionRole
   carrierId: string | null
+}
+
+// ——— Профиль / проформа учётной записи (Task 109) ———
+
+/** Проформа пользователя: персональные данные + реквизиты кабинета перевозчика */
+export interface ProfileDTO {
+  userId: string
+  fullName: string
+  position: string
+  phone: string
+  email: string
+  companyName: string
+  inn: string
+  kpp: string
+  address: string
+  director: string
+  contactName: string
+  note: string
+  updatedAt: string
+}
+
+/** Учётная запись для раздела «Профили и доступы» (администрация) */
+export interface AdminUserDTO {
+  id: string
+  login: string
+  name: string
+  role: SessionRole
+  carrierId: string | null
+  carrierName: string | null
+  createdAt: string
+  profile: ProfileDTO | null
+}
+
+// ——— Редактор базы данных (администрация, Task 109) ———
+
+/** Таблица базы данных, доступная администрации */
+export interface AdminDbTableDTO {
+  key: string
+  label: string
+  count: number
+}
+
+/** Строка таблицы: значения — примитивы/строки (даты — ISO, большие поля обрезаются) */
+export interface AdminDbRow {
+  id: string
+  values: Record<string, string | number | boolean | null>
+}
+
+/** Ответ GET /api/admin/db?table=… — строки таблицы + список её полей */
+export interface AdminDbTableData {
+  table: AdminDbTableDTO
+  columns: { key: string; kind: 'string' | 'number' | 'boolean' | 'datetime' }[]
+  rows: AdminDbRow[]
+  truncated: boolean
+}
+
+// ——— Обращения в поддержку (чат, Task 109) ———
+
+/** Категория обращения */
+export type TicketCategory = 'docs' | 'auction' | 'payment' | 'edo' | 'tech' | 'other'
+
+/** Метки категорий обращений */
+export const TICKET_CATEGORY_META: Record<TicketCategory, string> = {
+  docs: 'Документы по заявке',
+  auction: 'Торги и заявки',
+  payment: 'Оплата и закрывающие документы',
+  edo: 'ЭДО и подписи',
+  tech: 'Проблемы с платформой',
+  other: 'Другое',
+}
+
+export type TicketStatus = 'OPEN' | 'ANSWERED' | 'CLOSED'
+
+/** Метки статусов обращения («точка и слово») */
+export const TICKET_STATUS_META: Record<TicketStatus, { label: string; dot: string; tone?: 'warning' | 'danger' }> = {
+  OPEN: { label: 'Открыто', dot: 'bg-amber-500', tone: 'warning' },
+  ANSWERED: { label: 'Есть ответ', dot: 'bg-blue-500' },
+  CLOSED: { label: 'Закрыто', dot: 'bg-slate-400' },
+}
+
+/** Вложение сообщения обращения */
+export interface TicketAttachmentDTO {
+  id: string
+  fileName: string
+  mime: string
+  isImage: boolean
+  sizeBytes: number
+  url: string
+}
+
+/** Сообщение обращения */
+export interface TicketMessageDTO {
+  id: string
+  authorName: string
+  authorRole: SessionRole
+  staff: boolean
+  body: string
+  createdAt: string
+  attachments: TicketAttachmentDTO[]
+}
+
+/** Обращение в списке */
+export interface TicketDTO {
+  id: string
+  number: number
+  subject: string
+  category: TicketCategory
+  status: TicketStatus
+  authorName: string
+  carrierName: string | null
+  sizeTotal: number
+  /** число сообщений в ветке */
+  messagesCount: number
+  /** последнее сообщение (превью) — null, если сообщений ещё нет */
+  lastMessage: { authorName: string; staff: boolean; body: string; createdAt: string } | null
+  lastMessageAt: string
+  createdAt: string
+}
+
+/** Ветка обращения: обращение + сообщения с вложениями */
+export interface TicketThreadDTO {
+  ticket: TicketDTO
+  messages: TicketMessageDTO[]
+  /** сколько ещё вложений можно приложить к обращению, байт (лимит 10 МБ на обращение) */
+  sizeLeft: number
+  /** может ли текущий пользователь писать в ветку */
+  canReply: boolean
 }
 
 // ——— Журнал событий платформы (Task 76) ———

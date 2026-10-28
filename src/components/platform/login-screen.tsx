@@ -10,13 +10,14 @@
  * новый вход добавляется в реестр и не выбрасывает другие аккаунты.
  */
 import { useState } from 'react'
-import { Building2, ChevronRight, CircleAlert, Eye, EyeOff, KeyRound, Loader2, LogIn, UserCog } from 'lucide-react'
+import { Building2, ChevronRight, CircleAlert, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
 import { activateAccount, listAccounts, saveSessionToken } from '@/lib/api'
 import type { SavedAccount } from '@/lib/accounts'
 import { LogoMark } from '@/components/platform/logo-mark'
 
 /** Демо-доступы (демо-контур): пароль один, логины разные */
-export const DEMO_ACCOUNTS: { login: string; name: string; role: 'logist' | 'carrier' }[] = [
+export const DEMO_ACCOUNTS: { login: string; name: string; role: 'admin' | 'logist' | 'carrier' }[] = [
+  { login: 'admin', name: 'Администратор', role: 'admin' },
   { login: 'logist1', name: 'Логист 1', role: 'logist' },
   { login: 'logist2', name: 'Логист 2', role: 'logist' },
   { login: 'carrier-a', name: 'ООО «Перевозчик А»', role: 'carrier' },
@@ -25,6 +26,20 @@ export const DEMO_ACCOUNTS: { login: string; name: string; role: 'logist' | 'car
   { login: 'carrier-g', name: 'ООО «Перевозчик Г»', role: 'carrier' },
 ]
 export const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD ?? ''
+
+/** Иконка роли на экране входа и в демо-доступах */
+function RoleMark({ role, className = 'h-5 w-5 shrink-0' }: { role: 'admin' | 'logist' | 'carrier'; className?: string }) {
+  if (role === 'admin') return <ShieldCheck className={`${className} text-violet-600`} aria-hidden />
+  return role === 'logist'
+    ? <UserCog className={`${className} text-blue-600`} aria-hidden />
+    : <Building2 className={`${className} text-emerald-600`} aria-hidden />
+}
+
+const ROLE_LABEL: Record<'admin' | 'logist' | 'carrier', string> = {
+  admin: 'администрация',
+  logist: 'логист АЭМЗ',
+  carrier: 'перевозчик',
+}
 
 export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [login, setLogin] = useState('')
@@ -95,13 +110,11 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                     aria-label={`Продолжить как ${a.name}`}
                     className="flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60 disabled:opacity-60"
                   >
-                    {a.role === 'logist'
-                      ? <UserCog className="h-5 w-5 shrink-0 text-blue-600" aria-hidden />
-                      : <Building2 className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />}
+                    <RoleMark role={a.role} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-semibold text-slate-900">{a.name}</span>
                       <span className="block truncate text-xs text-slate-500">
-                        {a.login} · {a.role === 'logist' ? 'логист АЭМЗ' : 'перевозчик'}
+                        {a.login} · {ROLE_LABEL[a.role]}
                       </span>
                     </span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
@@ -209,9 +222,7 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                         className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-white"
                         aria-label={`Подставить доступ ${a.name}`}
                       >
-                        {a.role === 'logist'
-                          ? <UserCog className="h-3.5 w-3.5 shrink-0 text-blue-600" aria-hidden />
-                          : <Building2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />}
+                        <RoleMark role={a.role} className="h-3.5 w-3.5 shrink-0" />
                         <span className="font-mono font-semibold text-slate-800">{a.login}</span>
                         <span className="truncate text-slate-500">{a.name}</span>
                       </button>

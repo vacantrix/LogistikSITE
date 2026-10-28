@@ -9,13 +9,16 @@
  *  — журнал: свои события и общие (публикация, продление, повышение ставки).
  * Сами файлы документов в списки не попадают — только ссылка /api/files/... с проверкой прав.
  */
+import type { Carrier, CargoType, Driver, Event, Prisma, Trailer, Truck } from '@prisma/client'
+import { isStaff, type Viewer } from '@/lib/auth'
 import type {
-  Carrier, CargoType, Driver, Event, Prisma, Trailer, Truck,
-} from '@prisma/client'
-import type { Viewer } from '@/lib/auth'
-import type {
-  CargoTypeDTO, CarrierDTO, DocumentDTO, DriverDTO, RequestDTO, TrailerDTO, TruckDTO,
+  CargoTypeDTO, CarrierDTO, DocumentDTO, DriverDTO, ExecutorRole, RequestDTO, RequestFileDTO, RequestFileKind, TrailerDTO, TransportOwnership, TruckDTO,
 } from '@/lib/types'
+
+/** Поля файла обмена без самого файла (dataUri тяжёлый — читается только в /api/files) */
+const REQUEST_FILE_SELECT = {
+  id: true, requestId: true, kind: true, fileName: true, sizeBytes: true, uploadedBy: true, uploadedByName: true, createdAt: true,
+} satisfies Prisma.RequestFileSelect
 
 /** Поля документа без самого файла (dataUri тяжёлый — читается только в /api/files) */
 export const DOC_SELECT = {
@@ -27,8 +30,9 @@ export const DOC_SELECT = {
 export const REQUEST_INCLUDE = {
   bids: { include: { carrier: { select: { id: true, name: true } } } },
   documents: { select: DOC_SELECT },
+  files: { select: REQUEST_FILE_SELECT, orderBy: { createdAt: 'asc' as const } },
   events: true,
-  winner: { select: { id: true, name: true } },
+  winner: { select: { id: true, name: true, role: true } },
   cargoType: true,
 } satisfies Prisma.RequestInclude
 
@@ -40,13 +44,13 @@ const PUBLIC_EVENT_TYPES = new Set(['REQUEST_PUBLISHED', 'DEADLINE_EXTENDED', 'R
 /** События торгов: перевозчику — только собственные */
 const BID_EVENT_TYPES = new Set(['BID_PLACED', 'BID_WITHDRAWN'])
 
-/** Видит ли перевозчик событие (логист видит все) */
+/** Видит ли перевозчик событие (администрация и логист видят все) */
 export function eventVisibleTo(
   e: Pick<Event, 'type' | 'carrierId'>,
   viewer: Viewer,
   winnerId: string | null,
 ): boolean {
-  if (viewer.role === 'logist') return true
+  if (isStaff(viewer.role)) return true
   const me = viewer.carrierId
   if (!me) return false
   if (e.carrierId) return e.carrierId === me
@@ -63,7 +67,7 @@ export function toCargoTypeDTO(c: CargoType & { _count?: { requests: number } })
 }
 
 export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
-  const isLogist = viewer.role === 'logist'
+  const isLogist = isStaff(viewer.role)
   const me = viewer.carrierId
   const isWinner = !!me && r.winnerId === me
   // закрытые ставки: до итогов перевозчик не видит ни лучшую цену, ни число участников
@@ -72,6 +76,8 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
   const bestRate = sealed ? null : r.bestRate
   const savings = bestRate != null && bestRate < r.startRate ? r.startRate - bestRate : null
   const seesTrip = isLogist || isWinner
+  // исполнитель по заявке: явный выбор перевозчика; если не выбран — роль компании-победителя
+  const executorRole: ExecutorRole = (r.executorRole ?? r.winner?.role) === 'FORWARDER' ? 'FORWARDER' : 'CARRIER'
 
   return {
     id: r.id,
@@ -98,6 +104,13 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
     driverId: seesTrip ? r.driverId : null,
     truckId: seesTrip ? r.truckId : null,
     trailerId: seesTrip ? r.trailerId : null,
+    executorRole: seesTrip ? executorRole : null,
+    transportOwnership: ownership(r.transportOwnership),
+    files: seesTrip
+      ? r.files
+        .filter((f) => isLogist || f.uploadedBy === 'logist' || isWinner)
+        .map(toRequestFileDTO)
+      : [],
     passPackage: r.passPackage,
     etrnStatus: r.etrnStatus,
     verifyComment: r.verifyComment,
@@ -146,7 +159,23 @@ export function toDocumentDTO(d: DocumentLite): DocumentDTO {
 
 const OWNERSHIP = new Set(['OWNED', 'HIRED', 'LEASE'])
 /** принадлежность записи: незнакомое значение трактуем как собственный парк */
-const ownership = (v: string) => (OWNERSHIP.has(v) ? (v as 'OWNED' | 'HIRED' | 'LEASE') : 'OWNED')
+const ownership = (v: string): TransportOwnership => (OWNERSHIP.has(v) ? (v as TransportOwnership) : 'OWNED')
+
+/** DTO файла обмена по заявке (превью: mime не нужен — isPdf/isImage по имени файла) */
+export function toRequestFileDTO(f: Prisma.RequestFileGetPayload<{ select: typeof REQUEST_FILE_SELECT }>): RequestFileDTO {
+  return {
+    id: f.id,
+    kind: f.kind as RequestFileKind,
+    fileName: f.fileName,
+    url: `/api/files/request-file/${f.id}`,
+    isPdf: /\.pdf$/i.test(f.fileName),
+    isImage: /\.(png|jpe?g|gif|webp|svg|bmp|heic|heif)$/i.test(f.fileName),
+    sizeBytes: f.sizeBytes,
+    uploadedBy: f.uploadedBy === 'carrier' ? 'carrier' : 'logist',
+    uploadedByName: f.uploadedByName,
+    createdAt: f.createdAt.toISOString(),
+  }
+}
 
 export function toDriverDTO(d: Driver): DriverDTO {
   return {

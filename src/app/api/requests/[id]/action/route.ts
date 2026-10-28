@@ -249,12 +249,33 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           if (r.status !== 'AWARDED' && r.status !== 'DOCS_REVIEW') {
             fail('Экипаж можно менять, пока заявка у перевозчика — после передачи логисту состав зафиксирован')
           }
+          // исполнитель по заявке (Task 109): перевозчик или экспедитор — выбор перевозчика;
+          // не передан — сохраняем прежнее значение (null = работает роль компании)
+          const executorRole = body.executorRole === undefined || body.executorRole === null || body.executorRole === ''
+            ? r.executorRole
+            : body.executorRole === 'FORWARDER'
+              ? 'FORWARDER'
+              : body.executorRole === 'CARRIER' ? 'CARRIER' : null
+          if (body.executorRole !== undefined && body.executorRole !== null && body.executorRole !== '' && executorRole === null) {
+            fail('Исполнитель по заявке — «перевозчик» или «экспедитор»')
+          }
+          // транспорт по заявке (Task 109): по умолчанию — транспорт в собственности
+          const transportOwnership = body.transportOwnership === 'HIRED' || body.transportOwnership === 'LEASE'
+            ? body.transportOwnership
+            : 'OWNED'
           const crew = await validateCrew(tx, r, { driverId: body.driverId, truckId: body.truckId, trailerId: body.trailerId })
           if (typeof crew === 'string') return fail(crew)
           await applyCrew(tx, r, crew)
+          await tx.request.update({ where: { id }, data: { executorRole, transportOwnership } })
           const who = `${crew.driver.fullName}, ${crew.truck.brand} (${crew.truck.plate}) + ${crew.trailer.plate}`
           if (action === 'assign') await event('DRIVER_ASSIGNED', `Указаны водитель и ТС: ${who}`, me)
           else await event('CREW_APPROVED', `Экипаж утверждён агентом: ${who} — состав передан логисту`, me)
+          if (executorRole && executorRole !== (r.executorRole ?? null)) {
+            await event('EXECUTOR_SET', `Исполнитель по заявке: ${executorRole === 'FORWARDER' ? 'экспедитор' : 'перевозчик'}`, me)
+          }
+          if (transportOwnership !== r.transportOwnership) {
+            await event('OWNERSHIP_SET', `Транспорт по заявке: ${transportOwnership === 'OWNED' ? 'в собственности' : transportOwnership === 'HIRED' ? 'наёмный' : 'аренда/лизинг'}`, me)
+          }
           notes.push({
             payload: {
               type: 'CREW_ASSIGNED',

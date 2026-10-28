@@ -81,7 +81,8 @@ export async function GET() {
         loadDate: t.loadDate,
         status: t.status,
         winnerName: t.winner?.name ?? null,
-        executorRole: t.winner?.role === 'FORWARDER' ? 'FORWARDER' : 'CARRIER',
+        // исполнитель по заявке: явный выбор перевозчика; иначе роль компании (Task 109)
+        executorRole: (t.executorRole ?? t.winner?.role) === 'FORWARDER' ? 'FORWARDER' : 'CARRIER',
         driverName: driver?.fullName ?? null,
         truckLabel: truck ? `${truck.brand} · ${truck.plate}${trailer ? ` + ${trailer.plate}` : ''}` : null,
       },

@@ -23,7 +23,7 @@ const LEGACY_TOKEN_KEY = 'aemz_session_token'
 const REGISTRY_KEY = 'aemz_accounts'
 const LAST_KEY = 'aemz_last_account'
 
-export type AccountRole = 'logist' | 'carrier'
+export type AccountRole = 'admin' | 'logist' | 'carrier'
 
 export interface SavedAccount {
   userId: string
@@ -47,7 +47,7 @@ export function decodeToken(token: string): { user: SessionUserDTO; exp: number 
     const [body] = token.split('.')
     if (!body) return null
     const data = JSON.parse(b64urlDecode(body)) as Partial<SessionUserDTO> & { exp?: number }
-    if (!data || typeof data.exp !== 'number' || !data.id || (data.role !== 'logist' && data.role !== 'carrier')) return null
+    if (!data || typeof data.exp !== 'number' || !data.id || (data.role !== 'admin' && data.role !== 'logist' && data.role !== 'carrier')) return null
     return {
       exp: data.exp,
       user: { id: data.id, login: data.login ?? '', name: data.name ?? '', role: data.role, carrierId: data.carrierId ?? null },

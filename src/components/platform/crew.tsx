@@ -46,7 +46,8 @@ import { busyElsewhere, busyMaps, busyReason } from '@/lib/busy'
 import { expiryInfo, type ExpiryInfo } from '@/lib/expiry'
 import { pointInfo } from '@/lib/points'
 import { AGENT_STATUS_LABEL, MODE_META, rate, REQUEST_STATUS_META } from '@/lib/status'
-import type { CarrierDTO, DriverDTO, RequestDTO, TrailerDTO, TruckDTO } from '@/lib/types'
+import { TRANSPORT_OWNERSHIP_META } from '@/lib/types'
+import type { CarrierDTO, DriverDTO, ExecutorRole, RequestDTO, TrailerDTO, TransportOwnership, TruckDTO } from '@/lib/types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
@@ -54,6 +55,20 @@ interface SelState {
   driverId?: string
   truckId?: string
   trailerId?: string
+  /** исполнитель по заявке: перевозчик или экспедитор (Task 109) */
+  executorRole?: ExecutorRole
+  /** чей транспорт выйдет на рейс (Task 109) */
+  transportOwnership?: TransportOwnership
+}
+
+/** Подписи роли исполнителя по заявке (Task 109) */
+const EXECUTOR_ROLE_LABEL: Record<ExecutorRole, string> = { CARRIER: 'Перевозчик', FORWARDER: 'Экспедитор' }
+
+/** Короткие подписи принадлежности транспорта — для компактной строки в таблице (Task 109) */
+const OWNERSHIP_SHORT: Record<TransportOwnership, string> = {
+  OWNED: 'в собственности',
+  HIRED: 'наёмный',
+  LEASE: 'аренда / лизинг',
 }
 
 // ——— helpers массовой загрузки Excel (переехали из «Подать документы») ———
@@ -209,6 +224,9 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   const trucks = carrier?.trucks ?? []
   const trailers = carrier?.trailers ?? []
 
+  /** Роль компании-перевозчика: исполнитель по заявке по умолчанию (Task 109) */
+  const companyRole: ExecutorRole = carrier?.role ?? 'CARRIER'
+
   // ——— Правило занятости (Task 50): кто уже «в рейсе» (комплект у логиста или рейс выполняется) ———
   const busyCrew = useMemo(
     () => busyMaps(requests ?? []),
@@ -299,6 +317,10 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
       truckId: base?.truckId ?? free(busyCrew.trucks, r.truckId),
       trailerId: base?.trailerId ?? free(busyCrew.trailers, r.trailerId)
         ?? trailers.find((z) => !busyElsewhere(busyCrew.trailers, z.id, r.id))?.id,
+      // исполнитель и транспорт по заявке (Task 109): сохранённый выбор агента, иначе —
+      // значения заявки; по умолчанию — роль компании и «Транспорт в собственности»
+      executorRole: base?.executorRole ?? r.executorRole ?? companyRole,
+      transportOwnership: base?.transportOwnership ?? r.transportOwnership ?? 'OWNED',
     }
   }
 
@@ -319,6 +341,8 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
         driverId: s.driverId,
         truckId: s.truckId,
         trailerId: s.trailerId,
+        executorRole: s.executorRole,
+        transportOwnership: s.transportOwnership,
       })
       applyRequest(request)
       toast({
@@ -342,6 +366,8 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
         driverId: s.driverId,
         truckId: s.truckId,
         trailerId: s.trailerId,
+        executorRole: s.executorRole,
+        transportOwnership: s.transportOwnership,
       })
       applyRequest(request)
       toast({
@@ -598,6 +624,51 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                       </table>
                     </div>
 
+                    {/* ——— исполнитель и транспорт по заявке (Task 109): кого оформляем и чей транспорт выходит на рейс ——— */}
+                    <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-2">
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex items-center gap-1 text-xs font-semibold text-slate-500">
+                          Исполнитель по заявке
+                          <InfoTip label="Исполнитель по заявке">
+                            Кого оформляем исполнителем по этой заявке: перевозчик — заказ-заявка на перевозку, экспедитор — поручение экспедитору. По умолчанию — роль вашей компании.
+                          </InfoTip>
+                        </div>
+                        <Select
+                          value={s.executorRole ?? 'CARRIER'}
+                          onValueChange={(v) => setSelFor(r.id, { executorRole: v as ExecutorRole })}
+                        >
+                          <SelectTrigger className="w-full" aria-label={`Исполнитель по заявке ${r.number}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="CARRIER">Перевозчик</SelectItem>
+                            <SelectItem value="FORWARDER">Экспедитор</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="min-w-0 space-y-2">
+                        <div className="flex items-center gap-1 text-xs font-semibold text-slate-500">
+                          Транспорт по заявке
+                          <InfoTip label="Транспорт по заявке">
+                            Чей транспорт выйдет на рейс. По умолчанию — транспорт в собственности.
+                          </InfoTip>
+                        </div>
+                        <Select
+                          value={s.transportOwnership ?? 'OWNED'}
+                          onValueChange={(v) => setSelFor(r.id, { transportOwnership: v as TransportOwnership })}
+                        >
+                          <SelectTrigger className="w-full" aria-label={`Транспорт по заявке ${r.number}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(Object.keys(TRANSPORT_OWNERSHIP_META) as TransportOwnership[]).map((k) => (
+                              <SelectItem key={k} value={k}>{TRANSPORT_OWNERSHIP_META[k].label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
                     {/* ——— состав экипажа: три колонки (на телефоне — друг под другом), состав из базы ——— */}
                     <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-3">
                       <div className="min-w-0 space-y-2">
@@ -722,7 +793,14 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
                               <TableCell className="whitespace-nowrap text-slate-600">
                                 {pointInfo(r.fromPoint).short} → {pointInfo(r.toPoint).short}
                               </TableCell>
-                              <TableCell className="font-medium text-slate-800">{d?.fullName ?? '—'}</TableCell>
+                              <TableCell className="font-medium text-slate-800">
+                                {d?.fullName ?? '—'}
+                                {/* исполнитель и транспорт по заявке (Task 109) */}
+                                <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                                  Исполнитель: {r.executorRole ? EXECUTOR_ROLE_LABEL[r.executorRole] : 'по роли компании'}
+                                  {' · '}Транспорт: {OWNERSHIP_SHORT[r.transportOwnership]}
+                                </span>
+                              </TableCell>
                               <TableCell className="whitespace-nowrap text-slate-700">{t ? `${t.brand} · ${t.plate}` : '—'}</TableCell>
                               <TableCell className="whitespace-nowrap text-slate-600">{z ? `${z.plate} · ${z.type}` : '—'}</TableCell>
                               <TableCell><AgentStatusBadge status={r.status} /></TableCell>

@@ -18,10 +18,10 @@ import { AGENT_STATUS_LABEL, DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } f
 import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
-export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo'
+export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo' | 'profile' | 'support' | 'admin-users' | 'admin-db'
 
-/** Роль пользователя: сотрудник АЭМЗ (логист) или перевозчик */
-export type RoleKind = 'logist' | 'carrier'
+/** Роль пользователя: администрация, сотрудник АЭМЗ (логист) или перевозчик/экспедитор */
+export type RoleKind = 'admin' | 'logist' | 'carrier'
 
 export interface TabProps {
   /** какой перевозчик выбран в шапке (действия агента); для логиста — null */
@@ -39,7 +39,7 @@ export interface TabProps {
 export function RoleNotice({ role }: { role: RoleKind }) {
   return (
     <EmptyState
-      title={role === 'logist' ? 'Раздел доступен только перевозчикам' : 'Раздел внутреннего контура АЭМЗ'}
+      title={role === 'admin' ? 'Раздел для логистов и перевозчиков' : role === 'logist' ? 'Раздел доступен только перевозчикам' : 'Раздел внутреннего контура АЭМЗ'}
       hint={role === 'logist'
         ? 'Переключите роль в шапке на перевозчика, чтобы работать с площадкой от его имени'
         : 'Этот раздел доступен сотрудникам отдела логистики. Переключите роль в шапке, чтобы вернуться в кабинет перевозчика.'}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { requireUser, type SessionUser } from '@/lib/auth'
+import { isStaff, requireUser, type SessionUser } from '@/lib/auth'
 import { toCargoTypeDTO, toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { imageDataUriError } from '@/lib/settings'
@@ -35,7 +35,7 @@ async function ownsRecord(user: SessionUser, kind: string, id: string): Promise<
       ? await db.truck.findUnique({ where: { id }, select: { carrierId: true } })
       : await db.trailer.findUnique({ where: { id }, select: { carrierId: true } })
   if (!rec) return null
-  return user.role === 'logist' || rec.carrierId === user.carrierId
+  return isStaff(user.role) || rec.carrierId === user.carrierId
 }
 
 /**
@@ -47,7 +47,7 @@ export async function GET() {
   if (auth instanceof NextResponse) return auth
 
   const carriers = await db.carrier.findMany({
-    where: auth.role === 'logist' ? {} : { id: auth.carrierId! },
+    where: isStaff(auth.role) ? {} : { id: auth.carrierId! },
     include: {
       drivers: { orderBy: { fullName: 'asc' } },
       trucks: { orderBy: { plate: 'asc' } },

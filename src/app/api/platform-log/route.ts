@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  * Возвращает ленту (новые сверху) и статистику за 24 часа для плиток.
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireUser('logist')
+  const auth = await requireUser('admin', 'logist')
   if (auth instanceof NextResponse) return auth
 
   const sp = req.nextUrl.searchParams

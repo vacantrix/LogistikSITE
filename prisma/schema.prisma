@@ -36,19 +36,49 @@ model Carrier {
 
 /**
  * Пользователи для входа на платформу (экран входа + /api/auth/*).
- * Роль повторяет переключатель демо-контура: 'logist' | 'carrier'.
+ * Роль задаёт права на платформе (система прав, Task 109):
+ * 'admin'  — администрация: профили и доступы, прямое редактирование базы данных;
+ * 'logist' — логист АЭМЗ: площадка, торги, сверка, реестры;
+ * 'carrier'— перевозчик/экспедитор: кабинет компании.
  * У перевозчика carrierId связывает учётку с его кабинетом.
  */
 model User {
-  id            String         @id @default(cuid())
-  login         String         @unique
-  name          String
-  passwordHash  String // scrypt: "salt:hash"
-  role          String // 'logist' | 'carrier'
-  carrierId     String?
-  carrier       Carrier?       @relation("carrierUser", fields: [carrierId], references: [id])
-  createdAt     DateTime       @default(now())
-  notifications Notification[]
+  id             String          @id @default(cuid())
+  login          String          @unique
+  name           String
+  passwordHash   String // scrypt: "salt:hash"
+  role           String // 'admin' | 'logist' | 'carrier'
+  carrierId      String?
+  carrier        Carrier?        @relation("carrierUser", fields: [carrierId], references: [id])
+  createdAt      DateTime        @default(now())
+  notifications  Notification[]
+  profile        Profile?
+  tickets        Ticket[]
+  ticketMessages TicketMessage[]
+}
+
+/**
+ * Проформа учётной записи (Task 109): персональные данные пользователя —
+ * заполняются самим пользователем в разделе «Профиль», редактируются администрацией.
+ * У перевозчика companyName/inn/kpp/phone синхронизируются с карточкой компании (Carrier).
+ */
+model Profile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id])
+  fullName    String   @default("") // ФИО (как в документах)
+  position    String   @default("") // должность
+  phone       String   @default("") // рабочий телефон
+  email       String   @default("") // рабочая почта
+  // — проформа перевозчика/экспедитора (реквизиты кабинета компании) —
+  companyName String   @default("") // наименование организации
+  inn         String   @default("") // ИНН
+  kpp         String   @default("") // КПП
+  address     String   @default("") // юридический адрес
+  director    String   @default("") // руководитель (подписант документов)
+  contactName String   @default("") // контактное лицо по заявкам и обращениям
+  note        String   @default("") // примечание (реквизиты договора, банковские детали и пр.)
+  updatedAt   DateTime @updatedAt
 }
 
 /**
@@ -174,48 +204,140 @@ model CargoType {
 // ============ Requests (auctions) / trips ============
 
 model Request {
-  id            String         @id @default(cuid())
-  number        String         @unique
-  fromPoint     String
-  toPoint       String
-  cargo         String // денормализованное имя груза из справочника (CargoType.name)
-  cargoTypeId   String?
-  cargoType     CargoType?     @relation(fields: [cargoTypeId], references: [id])
+  id                 String         @id @default(cuid())
+  number             String         @unique
+  fromPoint          String
+  toPoint            String
+  cargo              String // денормализованное имя груза из справочника (CargoType.name)
+  cargoTypeId        String?
+  cargoType          CargoType?     @relation(fields: [cargoTypeId], references: [id])
   /**
    * комментарий для исполнителя (Task 64)
    */
-  comment       String         @default("")
+  comment            String         @default("")
   /**
    * логист, создавший заявку (Task 66 — колонка «Логист / Создатель» в реестре заявок)
    */
-  createdBy     String         @default("—")
-  tonnage       Float
-  truckType     String
-  mode          String // AUCTION | CLOSED
-  startRate     Float
-  bestRate      Float?
-  status        String         @default("PUBLISHED") // DRAFT | PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED | DELETED
-  loadDate      String
-  loadWindow    String
-  deadline      DateTime?
-  winnerId      String?
-  winner        Carrier?       @relation("winner", fields: [winnerId], references: [id])
-  driverId      String?
-  truckId       String?
-  trailerId     String?
-  passPackage   Boolean        @default(false)
-  etrnStatus    String         @default("NONE") // NONE | SENT | SIGNED
+  createdBy          String         @default("—")
+  tonnage            Float
+  truckType          String
+  mode               String // AUCTION | CLOSED
+  startRate          Float
+  bestRate           Float?
+  status             String         @default("PUBLISHED") // DRAFT | PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED | DELETED
+  loadDate           String
+  loadWindow         String
+  deadline           DateTime?
+  winnerId           String?
+  winner             Carrier?       @relation("winner", fields: [winnerId], references: [id])
+  driverId           String?
+  truckId            String?
+  trailerId          String?
+  /**
+   * Исполнитель по данной заявке (Task 109): CARRIER — перевозчик (заказ-заявка),
+   * FORWARDER — экспедитор (поручение). Выбирает перевозчик при назначении экипажа;
+   * null — работает роль компании-победителя (Carrier.role).
+   */
+  executorRole       String?
+  /**
+   * Транспорт по заявке (Task 109): OWNED — транспорт в собственности (по умолчанию),
+   * HIRED — наёмный, LEASE — аренда/лизинг. Указывает перевозчик при назначении экипажа.
+   */
+  transportOwnership String         @default("OWNED")
+  passPackage        Boolean        @default(false)
+  etrnStatus         String         @default("NONE") // NONE | SENT | SIGNED
   /**
    * комментарий логиста к сверки/отклонению (Task 62)
    */
-  verifyComment String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  bids          Bid[]
-  documents     Document[]
-  edoDocuments  EdoDocument[]
-  events        Event[]
-  notifications Notification[]
+  verifyComment      String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  bids               Bid[]
+  documents          Document[]
+  files              RequestFile[]
+  edoDocuments       EdoDocument[]
+  events             Event[]
+  notifications      Notification[]
+}
+
+/**
+ * Обмен документами по заявке без почты (Task 109):
+ * — перевозчик/экспедитор загружает логисту «Доверенность» (POA) и «Заявку» (REQUEST_DOC);
+ * — логист выкладывает документы для перевозчика (FOR_CARRIER) — например, комплект
+ * для экспедитора, которому нужны документы от АЭМЗ.
+ * Файлы отдаются защищённой ссылкой /api/files/request-file/<id> с проверкой прав.
+ */
+model RequestFile {
+  id             String   @id @default(cuid())
+  requestId      String
+  request        Request  @relation(fields: [requestId], references: [id])
+  kind           String // POA | REQUEST_DOC | FOR_CARRIER
+  fileName       String
+  dataUri        String
+  sizeBytes      Int      @default(0)
+  uploadedBy     String // carrier | logist
+  uploadedByName String
+  createdAt      DateTime @default(now())
+
+  @@index([requestId])
+}
+
+/**
+ * Обращение в поддержку платформы (Task 109): перевозчик/экспедитор описывает
+ * проблему, логист и администрация отвечают в ветке сообщений.
+ * Вложения (документы и медиа) — на сообщения обращения, суммарный лимит 10 МБ на обращение.
+ */
+model Ticket {
+  id            String          @id @default(cuid())
+  // сквозной номер обращения (назначается при создании: max+1 — SQLite не умеет autoincrement вне @id)
+  number        Int             @unique
+  subject       String
+  category      String          @default("other") // docs | auction | payment | edo | tech | other
+  status        String          @default("OPEN") // OPEN | ANSWERED | CLOSED
+  authorId      String
+  author        User            @relation(fields: [authorId], references: [id])
+  authorName    String // денормализованно — для списка без join
+  carrierId     String? // кабинет перевозчика, если автор из компании
+  carrierName   String?
+  sizeTotal     Int             @default(0) // суммарный размер вложений обращения, байт (лимит 10 МБ)
+  lastMessageAt DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  messages      TicketMessage[]
+}
+
+/**
+ * Сообщение в обращении: вопрос автора или ответ платформы (логист/администрация)
+ */
+model TicketMessage {
+  id          String             @id @default(cuid())
+  ticketId    String
+  ticket      Ticket             @relation(fields: [ticketId], references: [id])
+  authorId    String
+  author      User               @relation(fields: [authorId], references: [id])
+  authorName  String
+  authorRole  String // carrier | logist | admin
+  staff       Boolean            @default(false) // ответ платформы
+  body        String
+  createdAt   DateTime           @default(now())
+  attachments TicketAttachment[]
+}
+
+/**
+ * Вложение сообщения обращения: документ или медиа (данные в dataUri, отдаётся ссылкой)
+ */
+model TicketAttachment {
+  id        String        @id @default(cuid())
+  messageId String
+  message   TicketMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  fileName  String
+  mime      String        @default("")
+  isImage   Boolean       @default(false)
+  sizeBytes Int           @default(0)
+  dataUri   String
+  createdAt DateTime      @default(now())
+
+  @@index([messageId])
 }
 
 model Bid {
@@ -254,40 +376,40 @@ model Document {
 /**
  * Документ ЭДО рейса (Task 76, раздел «Подписать ЭДО»).
  * Наш случай — цепочка АЭМЗ (грузоотправитель) → экспедитор → перевозчик:
- *  — kind POA («Доверенность экспедитору») и ORDER («Поручение экспедитору»)
- *    создаёт АЭМЗ — это его обязанность перед экспедитором;
- *  — kind ETRN («Транспортная накладная / ЭТрН») появляется при подтверждении
- *    рейса, kind ACT («Акт оказанных услуг») — после закрытия рейса.
+ * — kind POA («Доверенность экспедитору») и ORDER («Поручение экспедитору»)
+ * создаёт АЭМЗ — это его обязанность перед экспедитором;
+ * — kind ETRN («Транспортная накладная / ЭТрН») появляется при подтверждении
+ * рейса, kind ACT («Акт оказанных услуг») — после закрытия рейса.
  * Каждая сторона подписывает своей КЭП: aemz* — КЭП логиста АЭМЗ,
  * party* — подпись контрагента (экспедитор или перевозчик) через ЭДО-оператора.
  */
 model EdoDocument {
-  id                   String   @id @default(cuid())
-  requestId            String
-  request              Request  @relation(fields: [requestId], references: [id])
-  kind                 String // POA | ORDER | ETRN | ACT
-  party                String // EXPEDITOR | CARRIER
-  number               String // номер документа (ДОВ-1042, ПОР-1042, ЭТрН 1042, АКТ-1042)
-  payload              String // JSON: реквизиты для рендера скана и подписантов
-  aemzSigned           Boolean  @default(false)
-  aemzSignedAt         DateTime?
-  aemzSigner           String?
-  partySigned          Boolean  @default(false)
-  partySignedAt        DateTime?
-  partySigner          String?
+  id              String    @id @default(cuid())
+  requestId       String
+  request         Request   @relation(fields: [requestId], references: [id])
+  kind            String // POA | ORDER | ETRN | ACT
+  party           String // EXPEDITOR | CARRIER
+  number          String // номер документа (ДОВ-1042, ПОР-1042, ЭТрН 1042, АКТ-1042)
+  payload         String // JSON: реквизиты для рендера скана и подписантов
+  aemzSigned      Boolean   @default(false)
+  aemzSignedAt    DateTime?
+  aemzSigner      String?
+  partySigned     Boolean   @default(false)
+  partySignedAt   DateTime?
+  partySigner     String?
   // ——— Диадок: ЭТрН через API оператора ЭДО (src/lib/diadoc) ———
-  diadocBoxId          String? // ящик АЭМЗ, из которого отправлен титул Т1
-  diadocMessageId      String? // MessageId сообщения с титулами Т1/Т2 (он же kl-id перевозки)
-  diadocEntityId       String? // EntityId титула Т1
-  diadocStage          String? // kl-status — этап перевозки по данным Диадока (r-wait-carrier-sign, on-the-way, completed…)
-  etrnUid              String? // УИД ТрН (mt-id) — присваивает ГИС ЭПД после регистрации Т1
-  gisStatus            String? // последний статус обработки в ГИС ЭПД
-  gisError             String? // текст ошибки Диадока или ГИС ЭПД, если она была
-  etrnInput            String? // JSON: данные ЭТрН, которые логист подтвердил при отправке Т1
-  diadocSentAt         DateTime?
-  diadocSyncedAt       DateTime?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  diadocBoxId     String? // ящик АЭМЗ, из которого отправлен титул Т1
+  diadocMessageId String? // MessageId сообщения с титулами Т1/Т2 (он же kl-id перевозки)
+  diadocEntityId  String? // EntityId титула Т1
+  diadocStage     String? // kl-status — этап перевозки по данным Диадока (r-wait-carrier-sign, on-the-way, completed…)
+  etrnUid         String? // УИД ТрН (mt-id) — присваивает ГИС ЭПД после регистрации Т1
+  gisStatus       String? // последний статус обработки в ГИС ЭПД
+  gisError        String? // текст ошибки Диадока или ГИС ЭПД, если она была
+  etrnInput       String? // JSON: данные ЭТрН, которые логист подтвердил при отправке Т1
+  diadocSentAt    DateTime?
+  diadocSyncedAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([requestId])
 }

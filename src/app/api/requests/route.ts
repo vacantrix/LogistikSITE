@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { requireUser, viewerOf } from '@/lib/auth'
+import { isStaff, requireUser, viewerOf } from '@/lib/auth'
 import { REQUEST_INCLUDE, toRequestDTO } from '@/lib/serialize'
 import { finalizeExpired, money, parseRuDate, requestWhereFor } from '@/lib/requests'
 import { notifyLive } from '@/lib/notify'
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const status = sp.get('status')
   const mode = sp.get('mode')
   const q = sp.get('q')?.trim().slice(0, 100)
-  const includeDeleted = sp.get('includeDeleted') === '1' && viewer.role === 'logist'
+  const includeDeleted = sp.get('includeDeleted') === '1' && isStaff(viewer.role)
   if (!includeDeleted) where.push({ status: { not: 'DELETED' } })
   if (status && STATUSES.includes(status)) where.push({ status })
   if (mode && MODES.includes(mode)) where.push({ mode })

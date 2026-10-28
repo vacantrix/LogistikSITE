@@ -12,6 +12,7 @@ import {
   FileSignature,
   FileText,
   FileX,
+  Files,
   History,
   IdCard,
   Loader2,
@@ -61,6 +62,7 @@ import { api, secureFileUrl } from '@/lib/api'
 import { fileToCompressedDataUri, sampleSvg } from '@/lib/demo-media'
 import { DOC_TYPE_LABEL, fmtDateTime, rate, timeLeft } from '@/lib/status'
 import { pointInfo } from '@/lib/points'
+import { REQUEST_FILE_META } from '@/lib/types'
 import type { BidDTO, CarrierDTO, DocStatus, DocType, RequestDTO } from '@/lib/types'
 
 const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
@@ -93,6 +95,12 @@ const STATUS_ORDER: Record<RequestDTO['status'], number> = {
   CLOSED: 4,
   DELETED: 5, // удалённые заявки в кабинет агента не попадают (фильтр выше), но тип требует полноты
 }
+
+/** Статусы, в которых карточка показывает обмен документами с логистом (Task 109) */
+const EXCHANGE_STATUSES: RequestDTO['status'][] = ['AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED']
+
+/** Размер файла по-человечески: до 1 МБ — в килобайтах, дальше — в мегабайтах */
+const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} КБ` : `${(n / 1024 / 1024).toFixed(1)} МБ`)
 
 /** Этап плашки для заявки из «Моих заявок»: ставка уже подана — «Согласование ставки» */
 const stageOf = (r: RequestDTO): number => (r.status === 'PUBLISHED' ? 1 : STAGE_OF_STATUS[r.status])
@@ -183,6 +191,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
   // свёрнутый загрузчик документов на этапе «Подтверждено» (Task 50)
   const [docsOpenId, setDocsOpenId] = useState<string | null>(null)
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
+  // скрытые input'ы обмена документами с логистом (Task 109): ключ — вид файла (POA / REQUEST_DOC)
+  const exchangeInputs = useRef<Record<string, HTMLInputElement | null>>({})
   // ——— окно ставки: форма → подтверждение → успех (как на площадке) ———
   const [bidReq, setBidReq] = useState<RequestDTO | null>(null)
   const [bidAmount, setBidAmount] = useState('')
@@ -396,6 +406,38 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
   }
 
   // ——— отправить PENDING-документы на проверку ———
+
+  // ——— обмен документами с логистом (Task 109): доверенность и заявка уходят логисту ———
+  const uploadExchangeFile = async (r: RequestDTO, kind: 'POA' | 'REQUEST_DOC', file: File) => {
+    setBusy(`${r.id}:xf:${kind}`)
+    try {
+      const dataUri = await fileToCompressedDataUri(file)
+      const { request } = await api.uploadRequestFile(r.id, { kind, fileName: file.name, dataUri })
+      applyRequest(request)
+      toast({
+        title: `${REQUEST_FILE_META[kind].label} передана логисту`,
+        description: `Заявка ${r.number} — файл доступен логисту в «Проверке документов»`,
+      })
+    } catch (e) {
+      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** Убрать свой файл из обмена: файлы заменяемы, поэтому без окна подтверждения */
+  const removeExchangeFile = async (r: RequestDTO, fileId: string) => {
+    setBusy(`${r.id}:xfd:${fileId}`)
+    try {
+      await api.deleteRequestFile(r.id, fileId)
+      setRequests((prev) => (prev ?? []).map((x) => (x.id === r.id ? { ...x, files: x.files.filter((f) => f.id !== fileId) } : x)))
+      toast({ title: 'Файл убран из обмена', description: `Заявка ${r.number} — документ удалён` })
+    } catch (e) {
+      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const carrier = carriers.find((c) => c.id === activeCarrierId) ?? null
   const carrierName = carrier?.name ?? 'перевозчик'
@@ -641,6 +683,14 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
         /** большая карточка без цветных заливок и рамок: серый фон — только у выхода и
             проигрыша (Task 52), состояние говорит строка статуса */
         const cardCls = grey ? 'border-slate-200 bg-slate-50 shadow-sm' : 'border-slate-200 shadow-sm'
+
+        /** Обмен документами с логистом (Task 109): после победы — с загрузкой,
+            дальше (AT_LOGIST/CONFIRMED/CLOSED) — только скачивание; чужие победы скрыты */
+        const exchangeOpen = r.winnerId === activeCarrierId && EXCHANGE_STATUSES.includes(r.status)
+        const exchangeEditable = r.status === 'AWARDED' || r.status === 'DOCS_REVIEW'
+        const poaFile = r.files.find((f) => f.kind === 'POA')
+        const requestDocFile = r.files.find((f) => f.kind === 'REQUEST_DOC')
+        const forCarrierFiles = r.files.filter((f) => f.kind === 'FOR_CARRIER')
 
         /** Секция документов: единый вид для «Подтверждено» (свёрнуто) и «Документы» (раскрыто) */
         const docsSection = (
@@ -937,6 +987,11 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       </div>
                       <RoutePointsInline from={r.fromPoint} to={r.toPoint} className="mt-1 max-w-xl" />
                       <p className="mt-1 text-sm text-slate-600">{r.cargo}, {r.tonnage} т</p>
+                      {r.executorRole && (
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          Исполнитель: {r.executorRole === 'FORWARDER' ? 'Экспедитор' : 'Перевозчик'}
+                        </p>
+                      )}
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <div className="text-right">
@@ -1167,6 +1222,131 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                             {docsSection}
                             {demoButtons}
                           </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ——— Обмен документами с логистом (Task 109): доверенность и заявка — логисту,
+                       документы от АЭМЗ — отсюда; без почты, всё внутри заявки ——— */}
+                  {exchangeOpen && (
+                    <div className="space-y-3 rounded-xl border border-slate-200 p-4">
+                      <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <Files className="h-4 w-4 text-slate-400" aria-hidden />
+                        Документы по заявке · обмен с логистом
+                        <InfoTip label="Обмен документами">
+                          Доверенность и заявку вы передаёте логисту прямо здесь — почта не нужна. Документы, выложенные логистом для вашей компании, скачивайте в этом же блоке.
+                        </InfoTip>
+                      </h4>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {([
+                          ['POA', poaFile],
+                          ['REQUEST_DOC', requestDocFile],
+                        ] as const).map(([kind, file]) => {
+                          const label = REQUEST_FILE_META[kind].label
+                          return (
+                            <div key={kind} className="flex flex-col rounded-xl border border-dashed border-slate-300 bg-white p-3">
+                              <div className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-800">
+                                {label}
+                                <InfoTip label={label}>{REQUEST_FILE_META[kind].hint}</InfoTip>
+                              </div>
+                              {file && (
+                                <div className="mb-2 min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                                  <div className="truncate text-xs font-medium text-slate-900">{file.fileName}</div>
+                                  <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                                    {kb(file.sizeBytes)} · передал(а) {file.uploadedByName} · {fmtDateTime(file.createdAt)}
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    <a
+                                      href={secureFileUrl(file.url)}
+                                      download={file.fileName}
+                                      className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                                      aria-label={`Скачать ${label} — ${file.fileName}`}
+                                    >
+                                      Скачать
+                                    </a>
+                                    {file.uploadedBy === 'carrier' && (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 transition-colors hover:text-red-600 disabled:opacity-50"
+                                        aria-label={`Убрать ${label} — ${file.fileName}`}
+                                        disabled={busy !== null}
+                                        onClick={() => void removeExchangeFile(r, file.id)}
+                                      >
+                                        {busy === `${r.id}:xfd:${file.id}`
+                                          ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                                          : <Trash2 className="h-3 w-3" aria-hidden />}
+                                        Убрать
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              {exchangeEditable && (
+                                <>
+                                  <input
+                                    ref={(el) => { exchangeInputs.current[kind] = el }}
+                                    type="file"
+                                    accept="image/*,.pdf"
+                                    className="hidden"
+                                    aria-label={`Загрузить ${label} по заявке ${r.number}`}
+                                    onChange={(e) => {
+                                      const f = e.target.files?.[0]
+                                      e.target.value = ''
+                                      if (f) void uploadExchangeFile(r, kind, f)
+                                    }}
+                                  />
+                                  <Button
+                                    size="sm"
+                                    variant={file ? 'outline' : 'default'}
+                                    className="w-full gap-1.5 border-dashed"
+                                    disabled={busy !== null}
+                                    onClick={() => exchangeInputs.current[kind]?.click()}
+                                    aria-label={file ? `Заменить ${label} по заявке ${r.number}` : `Загрузить ${label} по заявке ${r.number}`}
+                                  >
+                                    {busy === `${r.id}:xf:${kind}`
+                                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                      : <Upload className="h-4 w-4" aria-hidden />}
+                                    {file ? 'Заменить' : 'Загрузить файл'}
+                                  </Button>
+                                </>
+                              )}
+                              {!exchangeEditable && !file && (
+                                <p className="text-xs text-slate-400">Не передавалась</p>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-white p-3">
+                        <h5 className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                          Документы от логиста
+                          <InfoTip label="Документы от логиста">
+                            Документы, выложенные логистом для вашей компании — скачивайте отсюда.
+                          </InfoTip>
+                        </h5>
+                        {forCarrierFiles.length === 0 ? (
+                          <p className="mt-2 text-sm text-slate-500">Пока нет — документы от АЭМЗ появятся здесь</p>
+                        ) : (
+                          <ul className="mt-2 space-y-1.5">
+                            {forCarrierFiles.map((f) => (
+                              <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 px-2.5 py-2">
+                                <FileText className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                                <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900">{f.fileName}</span>
+                                <span className="shrink-0 text-[11px] text-slate-500">{kb(f.sizeBytes)} · {fmtDateTime(f.createdAt)}</span>
+                                <a
+                                  href={secureFileUrl(f.url)}
+                                  download={f.fileName}
+                                  className="text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                                  aria-label={`Скачать ${f.fileName}`}
+                                >
+                                  Скачать
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
                         )}
                       </div>
                     </div>

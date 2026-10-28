@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, viewerOf } from '@/lib/auth'
+import { isStaff, requireUser, viewerOf } from '@/lib/auth'
 import { DOC_SELECT, toDocumentDTO, toRequestDTO } from '@/lib/serialize'
 import { notifyLive } from '@/lib/notify'
 import { inTx, loadRequestFor } from '@/lib/requests'
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const request = await db.request.findUnique({ where: { id }, select: { id: true, number: true, status: true, winnerId: true } })
   if (!request) return NextResponse.json({ error: 'Заявка не найдена' }, { status: 404 })
-  const logistAttachment = auth.role === 'logist' && (request.status === 'PUBLISHED' || request.status === 'DRAFT')
+  const logistAttachment = isStaff(auth.role) && (request.status === 'PUBLISHED' || request.status === 'DRAFT')
   if (auth.role === 'carrier' && request.winnerId !== auth.carrierId) {
     return NextResponse.json({ error: 'Документы загружает только перевозчик, за которым закреплён рейс' }, { status: 403 })
   }

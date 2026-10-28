@@ -14,7 +14,8 @@ const hashPassword = (password: string): string => {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
 }
 
-const ACCOUNTS: { login: string; name: string; role: 'logist' | 'carrier'; carrierName?: string }[] = [
+const ACCOUNTS: { login: string; name: string; role: 'admin' | 'logist' | 'carrier'; carrierName?: string }[] = [
+  { login: 'admin', name: 'Администратор', role: 'admin' },
   { login: 'logist1', name: 'Логист 1', role: 'logist' },
   { login: 'logist2', name: 'Логист 2', role: 'logist' },
   { login: 'carrier-a', name: 'ООО «Перевозчик А»', role: 'carrier', carrierName: 'ООО «Перевозчик А»' },

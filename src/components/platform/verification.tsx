@@ -5,19 +5,26 @@
  *  кнопки «Увеличить»/«Скачать» убраны (клик по скану / окно предосмотра), яркая плашка решения):
  *  очередь с вычисляемыми состояниями (новые / ожидают проверки / расхождения / проверено /
  *  отклонено), фильтры и поиск, данные рейса из системы, сканы с зумом, сверка полей OCR. */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   ArrowRight,
   Ban,
   CheckCheck,
   ClipboardCheck,
+  Download,
+  FileText,
+  Files,
+  Image as ImageIcon,
   ListChecks,
+  Loader2,
   MapPin,
   Package,
   Search,
+  Trash2,
   Truck as TruckIcon,
   Undo2,
+  Upload,
   UserCog,
   UserRound,
   X,
@@ -44,7 +51,9 @@ import { ToastAction } from '@/components/ui/toast'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
-import { DOC_STATUS_META, DOC_TYPE_LABEL, rate } from '@/lib/status'
+import { fileToCompressedDataUri } from '@/lib/demo-media'
+import { DOC_STATUS_META, DOC_TYPE_LABEL, fmtDateTime, rate } from '@/lib/status'
+import { REQUEST_FILE_META } from '@/lib/types'
 import type {
   DocStatus, DocType, DocumentDTO, DriverDTO, RequestDTO, RequestStatus, TrailerDTO, TruckDTO,
 } from '@/lib/types'
@@ -55,6 +64,9 @@ const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_
 
 /** причины возврата агенту — выбор из списка, не свободный текст */
 const RETURN_REASONS = ['Нет печати', 'Расхождение по весу', 'Нечитаемый скан', 'Не тот документ', 'Другое'] as const
+
+/** Размер файла по-человечески: до 1 МБ — в килобайтах, дальше — в мегабайтах */
+const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} КБ` : `${(n / 1024 / 1024).toFixed(1)} МБ`)
 
 /** госномер: латиница/кириллица — взаимно однозначное приведение */
 const PLATE_MAP: Record<string, string> = {
@@ -249,6 +261,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   const [returnOpen, setReturnOpen] = useState(false)
   const [returnReason, setReturnReason] = useState('')
   const [returnComment, setReturnComment] = useState('')
+  // скрытый input обмена документами (Task 109): загрузка файла для перевозчика
+  const exchangeInput = useRef<HTMLInputElement | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -390,6 +404,46 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
     } catch (e) {
       toast({
         title: 'Не удалось вернуть заявку',
+        description: e instanceof Error ? e.message : 'Попробуйте ещё раз',
+        variant: 'destructive',
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ——— обмен документами (Task 109): логист выкладывает документы для перевозчика ———
+  const uploadForCarrier = async (r: RequestDTO, file: File) => {
+    setBusy(`${r.id}:xf`)
+    try {
+      const dataUri = await fileToCompressedDataUri(file)
+      const { request } = await api.uploadRequestFile(r.id, { kind: 'FOR_CARRIER', fileName: file.name, dataUri })
+      setRequests((prev) => (prev ?? []).map((x) => (x.id === request.id ? request : x)))
+      toast({
+        title: 'Документ выложен — перевозчик получит уведомление',
+        description: `Заявка №${r.number} · ${file.name} — перевозчик скачает его в «Моих заявках»`,
+      })
+    } catch (e) {
+      toast({
+        title: 'Не удалось загрузить документ',
+        description: e instanceof Error ? e.message : 'Попробуйте ещё раз',
+        variant: 'destructive',
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /** Персонал может удалить любой файл обмена — в том числе загруженный перевозчиком */
+  const removeRequestFile = async (r: RequestDTO, fileId: string) => {
+    setBusy(`${r.id}:xfd:${fileId}`)
+    try {
+      await api.deleteRequestFile(r.id, fileId)
+      setRequests((prev) => (prev ?? []).map((x) => (x.id === r.id ? { ...x, files: x.files.filter((f) => f.id !== fileId) } : x)))
+      toast({ title: 'Файл удалён из обмена', description: `Заявка №${r.number}` })
+    } catch (e) {
+      toast({
+        title: 'Не удалось удалить файл',
         description: e instanceof Error ? e.message : 'Попробуйте ещё раз',
         variant: 'destructive',
       })
@@ -749,6 +803,86 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                         )}
                       </div>
                     )}
+                  </div>
+
+                  {/* ——— обмен документами (Task 109): перевозчик передаёт доверенность и заявку здесь,
+                       документы для перевозчика выкладывает логист — почта не нужна ——— */}
+                  <div className="border-b border-slate-100 p-4 sm:p-5">
+                    <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
+                      <Files className="h-4 w-4 text-slate-400" aria-hidden />
+                      Обмен документами
+                      <InfoTip label="Обмен документами">
+                        Перевозчик передаёт доверенность и заявку здесь; ваши документы он скачает из своего кабинета. Почта не нужна.
+                      </InfoTip>
+                    </div>
+                    {selected.files.length === 0 ? (
+                      <p className="text-sm text-slate-500">Перевозчик ещё не передал документы</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {selected.files.map((f) => {
+                          const Icon = f.isImage ? ImageIcon : FileText
+                          return (
+                            <li key={f.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                              <Icon className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-slate-900">{f.fileName}</span>
+                                <span className="block text-[11px] text-slate-500">
+                                  {REQUEST_FILE_META[f.kind].label} · {f.uploadedByName} · {fmtDateTime(f.createdAt)}
+                                </span>
+                              </span>
+                              <span className="shrink-0 text-[11px] tabular-nums text-slate-400">{kb(f.sizeBytes)}</span>
+                              <a
+                                href={secureFileUrl(f.url)}
+                                download={f.fileName}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+                                aria-label={`Скачать ${f.fileName}`}
+                              >
+                                <Download className="h-3.5 w-3.5" aria-hidden />
+                                Скачать
+                              </a>
+                              <button
+                                type="button"
+                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-600 disabled:opacity-50"
+                                aria-label={`Удалить файл ${f.fileName}`}
+                                disabled={busy !== null}
+                                onClick={() => void removeRequestFile(selected, f.id)}
+                              >
+                                {busy === `${selected.id}:xfd:${f.id}`
+                                  ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                                  : <Trash2 className="h-4 w-4" aria-hidden />}
+                              </button>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                    <input
+                      ref={exchangeInput}
+                      type="file"
+                      accept="image/*,.pdf"
+                      className="hidden"
+                      aria-label="Документ для перевозчика"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        e.target.value = ''
+                        if (file && selected) void uploadForCarrier(selected, file)
+                      }}
+                    />
+                    <div className="mt-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        disabled={busy !== null}
+                        onClick={() => exchangeInput.current?.click()}
+                        aria-label={`Загрузить документ для перевозчика по заявке №${selected.number}`}
+                      >
+                        {busy === `${selected.id}:xf`
+                          ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                          : <Upload className="h-4 w-4" aria-hidden />}
+                        Загрузить документ для перевозчика
+                      </Button>
+                    </div>
                   </div>
 
                   {/* решение по пакету (Task 72): карточка-действие, итог — строкой с иконкой */}

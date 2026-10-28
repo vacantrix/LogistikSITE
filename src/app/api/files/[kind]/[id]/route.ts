@@ -4,9 +4,9 @@ import { requireUserViaRequest } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-/** data:<mime>[;base64],<payload> → байты и тип; null — не изображение и не PDF */
+/** data:<mime>[;base64],<payload> → байты и тип; null — не файл (любой допустимый mime) */
 function decodeDataUri(uri: string): { mime: string; bytes: Buffer } | null {
-  const m = uri.match(/^data:(image\/[a-z0-9.+-]+|application\/pdf)(;[^,]*)?,([\s\S]*)$/i)
+  const m = uri.match(/^data:([a-z0-9.+-]+\/[a-z0-9.+-]+)(;[^,]*)?,([\s\S]*)$/i)
   if (!m) return null
   const mime = m[1].toLowerCase()
   const isBase64 = (m[2] ?? '').toLowerCase().includes('base64')
@@ -55,14 +55,38 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ kind
     }
     fileName = photo.fileName
     dataUri = photo.dataUri
+  } else if (kind === 'request-file') {
+    // файлы обмена по заявке (Task 109): логист/администрация — все, перевозчик — только по своим рейсам
+    const file = await db.requestFile.findUnique({
+      where: { id },
+      select: { fileName: true, dataUri: true, request: { select: { winnerId: true } } },
+    })
+    if (!file) return notFound()
+    if (auth.role === 'carrier' && file.request.winnerId !== auth.carrierId) return notFound()
+    fileName = file.fileName
+    dataUri = file.dataUri
+  } else if (kind === 'ticket-attachment') {
+    // вложение обращения (Task 109): участник обращения (автор/его компания) или платформа
+    const att = await db.ticketAttachment.findUnique({
+      where: { id },
+      select: { fileName: true, dataUri: true, message: { select: { ticket: { select: { authorId: true, carrierId: true } } } } },
+    })
+    if (!att) return notFound()
+    const t = att.message.ticket
+    const allowed = auth.role !== 'carrier' || t.authorId === auth.id || (!!auth.carrierId && t.carrierId === auth.carrierId)
+    if (!allowed) return notFound()
+    fileName = att.fileName
+    dataUri = att.dataUri
   } else {
     return notFound()
   }
 
   const file = dataUri ? decodeDataUri(dataUri) : null
   if (!file) return notFound()
-  const download = req.nextUrl.searchParams.get('download') === '1'
   const pdf = file.mime === 'application/pdf'
+  const inlineType = pdf || file.mime.startsWith('image/')
+  // не-медиа файлы (docx, xlsx…) всегда отдаются скачиванием — безопаснее и удобнее
+  const download = req.nextUrl.searchParams.get('download') === '1' || !inlineType
   return new NextResponse(new Uint8Array(file.bytes), {
     headers: {
       'Content-Type': file.mime,

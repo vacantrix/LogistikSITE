@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Bell, CalendarClock, CheckCheck, FileCheck2, FilePen, FileSignature, Gavel, Trash2, TrendingDown, Trophy, Truck, Undo2, Users, type LucideIcon,
+  Bell, CalendarClock, CheckCheck, FileCheck2, FilePen, FileSignature, Gavel, MessagesSquare, MessageSquarePlus, Trash2, TrendingDown, Trophy, Truck, Undo2, Users, type LucideIcon,
 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
@@ -40,6 +40,10 @@ const NOTIF_META: Record<string, { Icon: LucideIcon; cls: string }> = {
   EDO_READY: { Icon: FileSignature, cls: 'bg-teal-100 text-teal-700' },
   EDO_SIGNED: { Icon: FileSignature, cls: 'bg-emerald-100 text-emerald-700' },
   DOC_EXPIRY: { Icon: CalendarClock, cls: 'bg-amber-100 text-amber-700' },
+  DOCS_EXCHANGED: { Icon: FileCheck2, cls: 'bg-cyan-100 text-cyan-700' },
+  TICKET_NEW: { Icon: MessageSquarePlus, cls: 'bg-violet-100 text-violet-700' },
+  TICKET_REPLY: { Icon: MessagesSquare, cls: 'bg-blue-100 text-blue-700' },
+  TICKET_CLOSED: { Icon: CheckCheck, cls: 'bg-slate-200 text-slate-700' },
 }
 
 /** Куда вести по клику: раздел зависит от роли получателя */
@@ -58,6 +62,10 @@ const NAV_TARGET: Record<string, Partial<Record<RoleKind, TabKey>>> = {
   EDO_READY: { logist: 'edo', carrier: 'edo' },
   EDO_SIGNED: { logist: 'edo', carrier: 'edo' },
   DOC_EXPIRY: { carrier: 'directory' },
+  DOCS_EXCHANGED: { logist: 'verify', carrier: 'my' },
+  TICKET_NEW: { admin: 'support', logist: 'support' },
+  TICKET_REPLY: { admin: 'support', logist: 'support', carrier: 'support' },
+  TICKET_CLOSED: { carrier: 'support' },
 }
 
 /** «Только что / 7 мин назад / 3 ч назад / вчера / 12.03» */
@@ -125,7 +133,7 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
       setUnread((u) => Math.max(0, u - 1))
       void api.markNotifications({ ids: [n.id] }).catch(() => {})
     }
-    const target = NAV_TARGET[n.type]?.[role] ?? (role === 'logist' ? 'requests' : 'my')
+    const target = NAV_TARGET[n.type]?.[role] ?? (role === 'carrier' ? 'my' : 'requests')
     setOpen(false)
     onNavigate(target)
   }
@@ -181,9 +189,9 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
                 {loadedOnce ? 'Уведомлений нет' : 'Загрузка…'}
               </div>
               <div className="text-xs text-slate-400">
-                {role === 'logist'
-                  ? 'Ставки перевозчиков и события по заявкам появятся здесь'
-                  : 'События по вашим заявкам и рейсам появятся здесь'}
+                {role === 'carrier'
+                  ? 'События по вашим заявкам и рейсам появятся здесь'
+                  : 'Ставки перевозчиков и события по заявкам появятся здесь'}
               </div>
             </div>
           ) : (

@@ -152,6 +152,7 @@ async function main() {
     return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`
   }
   const userAccounts = [
+    { login: 'admin', name: 'Администратор', role: 'admin', carrierId: null as string | null },
     { login: 'logist1', name: 'Логист 1', role: 'logist', carrierId: null as string | null },
     { login: 'logist2', name: 'Логист 2', role: 'logist', carrierId: null as string | null },
     { login: 'carrier-a', name: 'ООО «Перевозчик А»', role: 'carrier', carrierId: carrierA.id },

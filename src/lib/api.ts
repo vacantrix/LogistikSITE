@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
+  AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
 import type { ReportId, ReportPreview, ReportSettings } from '@/lib/reports/catalog'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
@@ -219,6 +219,55 @@ export const api = {
   /** Рассылка перевозчикам о сроках документов техники (кнопка «Уведомить агента») */
   notifyDocExpiry: () =>
     fetch('/api/notifications/doc-expiry', withAuth({ method: 'POST' })).then(json<{ notified: string[]; skipped: string[] }>),
+
+  /** Проформа учётной записи (Task 109): прочитать / сохранить свои данные */
+  getProfile: () =>
+    fetch('/api/profile', withAuth({ cache: 'no-store' })).then(json<{ profile: ProfileDTO; role: string; carrierRole: 'CARRIER' | 'FORWARDER' | null }>),
+  saveProfile: (data: Partial<ProfileDTO>) =>
+    fetch('/api/profile', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ profile: ProfileDTO }>),
+
+  /** Профили и доступы (администрация, Task 109) */
+  adminUsers: () =>
+    fetch('/api/admin/users', withAuth({ cache: 'no-store' })).then(json<{ users: AdminUserDTO[] }>),
+  adminUserCreate: (data: { login: string; name: string; password: string; role: string; carrierId?: string | null; profile?: Partial<ProfileDTO> }) =>
+    fetch('/api/admin/users', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
+  adminUserUpdate: (data: { id: string; name?: string; role?: string; carrierId?: string | null; password?: string; profile?: Partial<ProfileDTO> }) =>
+    fetch('/api/admin/users', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
+  adminUserDelete: (id: string) =>
+    fetch(`/api/admin/users?id=${encodeURIComponent(id)}`, withAuth({ method: 'DELETE' })).then(json<{ ok: boolean }>),
+
+  /** Редактор базы данных (администрация, Task 109) */
+  adminDbTables: () =>
+    fetch('/api/admin/db', withAuth({ cache: 'no-store' })).then(json<{ tables: AdminDbTableDTO[] }>),
+  adminDbTable: (table: string, params?: { q?: string; limit?: number; id?: string }) => {
+    const sp = new URLSearchParams({ table })
+    if (params?.q) sp.set('q', params.q)
+    if (params?.limit) sp.set('limit', String(params.limit))
+    if (params?.id) sp.set('id', params.id)
+    return fetch(`/api/admin/db?${sp}`, withAuth({ cache: 'no-store' })).then(json<{ data?: AdminDbTableData; row?: AdminDbTableData['rows'][number] }>)
+  },
+  adminDbMutate: (body: { table: string; op: 'create' | 'update' | 'delete'; id?: string; data?: Record<string, string | number | boolean | null> }) =>
+    fetch('/api/admin/db', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ok: boolean; id?: string }>),
+
+  /** Обмен документами по заявке (Task 109): доверенность/заявка от перевозчика, документы от логиста */
+  uploadRequestFile: (id: string, body: { kind: string; fileName: string; dataUri: string }) =>
+    fetch(`/api/requests/${id}/files`, withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ request: RequestDTO }>),
+  deleteRequestFile: (id: string, fileId: string) =>
+    fetch(`/api/requests/${id}/files?fileId=${encodeURIComponent(fileId)}`, withAuth({ method: 'DELETE' })).then(json<{ ok: boolean }>),
+
+  /** Обращения в поддержку (Task 109) */
+  tickets: (params?: { status?: string; q?: string }) => {
+    const sp = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][])
+    return fetch(`/api/support/tickets${sp.toString() ? `?${sp}` : ''}`, withAuth({ cache: 'no-store' })).then(json<{ tickets: TicketDTO[] }>)
+  },
+  createTicket: (body: { subject: string; category: string; body: string; attachments?: { fileName: string; dataUri: string }[] }) =>
+    fetch('/api/support/tickets', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ticket: TicketDTO }>),
+  ticketThread: (id: string) =>
+    fetch(`/api/support/tickets/${id}`, withAuth({ cache: 'no-store' })).then(json<TicketThreadDTO>),
+  ticketMessage: (id: string, body: { body: string; attachments?: { fileName: string; dataUri: string }[] }) =>
+    fetch(`/api/support/tickets/${id}`, withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ok?: boolean }>),
+  ticketStatus: (id: string, action: 'close' | 'reopen') =>
+    fetch(`/api/support/tickets/${id}`, withAuth({ method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) })).then(json<{ ok: boolean; status: string }>),
   settings: () => fetch('/api/settings', withAuth({ cache: 'no-store' })).then(json<SettingsDTO>),
   saveSettings: (data: Partial<SettingsDTO>) =>
     fetch('/api/settings', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<SettingsDTO>),

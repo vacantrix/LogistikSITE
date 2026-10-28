@@ -22,8 +22,8 @@
  */
 import { useState, type ComponentType } from 'react'
 import {
-  BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, FilePen, FileSignature, FileUp, FolderOpen,
-  History, LayoutGrid, ListChecks, LogOut, MoreHorizontal, ScanSearch, Truck, UserCog, UserPlus, Users,
+  BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
+  History, LayoutGrid, ListChecks, LogOut, MessagesSquare, MoreHorizontal, ScanSearch, ShieldCheck, Truck, UserCog, UserPlus, Users,
 } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
@@ -37,24 +37,26 @@ import type { RoleKind, TabKey } from '@/components/platform/common'
 import type { SessionUserDTO } from '@/lib/types'
 import { activateAccount, listAccounts } from '@/lib/api'
 
-/** Полный список разделов с пометкой ролей: L — логист, C — перевозчик.
- *  Сводка удалена (полоса «Требует внимания» на площадке), торги влиты в площадку,
- *  настройки — будущий административный контур (экран settings.tsx остаётся в коде).
- *  Порядок вкладок перевозчика фиксирован (замечание пользователя): всё происходит
- *  по очереди — площадка → мои заявки → документы → экипаж → справочники. */
+/** Полный список разделов с пометкой ролей: A — администрация, L — логист, C — перевозчик.
+ *  Система прав (Task 109): три роли — администрация (профили, база данных), логист (внутренний
+ *  контур), перевозчик/экспедитор (кабинет). Профиль и обращения — у всех ролей. */
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
-  { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier'] },
+  { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier', 'admin'] },
   { key: 'drafts', label: 'Черновики заявок', roles: ['logist'] },
   { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
   { key: 'apply', label: 'Подать документы', roles: ['carrier'] },
   { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'] },
   { key: 'verify', label: 'Проверка документов', roles: ['logist'] },
-  { key: 'requests', label: 'Реестр заявок', roles: ['logist'] },
-  { key: 'registry', label: 'Реестр рейсов', roles: ['logist'] },
+  { key: 'requests', label: 'Реестр заявок', roles: ['logist', 'admin'] },
+  { key: 'registry', label: 'Реестр рейсов', roles: ['logist', 'admin'] },
   { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier'] },
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier'] },
   { key: 'reports', label: 'Отчёты', roles: ['logist'] },
-  { key: 'journal', label: 'Журнал событий', roles: ['logist'] },
+  { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'] },
+  { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'] },
+  { key: 'admin-db', label: 'База данных', roles: ['admin'] },
+  { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'] },
+  { key: 'profile', label: 'Профиль', roles: ['logist', 'carrier', 'admin'] },
 ]
 
 /** Иконка и короткая подпись раздела для нижнего Tab Bar (мобильные) */
@@ -71,6 +73,10 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   directory: { Icon: FolderOpen, short: 'Справочники' },
   reports: { Icon: BarChart3, short: 'Отчёты' },
   journal: { Icon: History, short: 'Журнал' },
+  'admin-users': { Icon: UserCog, short: 'Профили' },
+  'admin-db': { Icon: Database, short: 'База' },
+  support: { Icon: MessagesSquare, short: 'Обращения' },
+  profile: { Icon: CircleUserRound, short: 'Профиль' },
 }
 
 /** Разделы, доступные выбранной роли */
@@ -202,13 +208,15 @@ function BottomTabBar({ tab, onNavigate, nav }: {
 }
 
 /** Иконка и бейдж роли в меню аккаунта */
-function RoleIcon({ role, className }: { role: 'logist' | 'carrier'; className?: string }) {
+function RoleIcon({ role, className }: { role: RoleKind; className?: string }) {
+  if (role === 'admin') return <ShieldCheck className={`${className ?? 'h-4 w-4'} text-violet-600`} aria-hidden />
   return role === 'logist'
     ? <UserCog className={`${className ?? 'h-4 w-4'} text-blue-600`} aria-hidden />
     : <Building2 className={`${className ?? 'h-4 w-4'} text-emerald-600`} aria-hidden />
 }
 
-const roleLabelOf = (role: 'logist' | 'carrier'): string => (role === 'logist' ? 'логист АЭМЗ' : 'перевозчик')
+const roleLabelOf = (role: RoleKind): string =>
+  role === 'admin' ? 'администрация' : role === 'logist' ? 'логист АЭМЗ' : 'перевозчик'
 
 /**
  * Меню аккаунта (Task 74): текущий пользователь, переключение на сохранённые
@@ -307,6 +315,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   children: React.ReactNode
 }) {
   const isLogist = role.kind === 'logist'
+  const isAdmin = role.kind === 'admin'
   const nav = navFor(role.kind)
   const userName = user.name
 
@@ -331,7 +340,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             <LogoMark variant="inverse" className="h-9 w-9" />
             <div>
               <div className="text-sm font-bold leading-tight sm:text-base">АЭМЗ Логистика</div>
-              <div className="text-[11px] text-slate-300">{isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}</div>
+              <div className="text-[11px] text-slate-300">{isAdmin ? 'Администрация платформы' : isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}</div>
             </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -368,7 +377,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
       <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs">
           <div>
-            АЭМЗ · {isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}
+            АЭМЗ · {isAdmin ? 'Администрация платформы' : isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}
             <span className="ml-2 rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
               V 1.01
             </span>

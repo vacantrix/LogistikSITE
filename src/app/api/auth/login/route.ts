@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const session = { id: user.id, login: user.login, name: user.name, role: user.role as 'logist' | 'carrier', carrierId: user.carrierId }
+  const session = { id: user.id, login: user.login, name: user.name, role: user.role as 'admin' | 'logist' | 'carrier', carrierId: user.carrierId }
   // Токен отдаётся и в ответе: во встроенном окне предпросмотра браузер может не
   // принимать куки — клиент хранит его и шлёт заголовком Authorization: Bearer.
   const token = createSessionToken(session)
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   // журнал платформы (Task 76): вход в систему
   await plog({
     type: 'LOGIN', source: 'auth/login', actor: { login: user.login, name: user.name, role: user.role },
-    message: `Вход в систему: ${user.name} (${user.role === 'logist' ? 'логист АЭМЗ' : 'перевозчик'})`,
+    message: `Вход в систему: ${user.name} (${user.role === 'admin' ? 'администрация' : user.role === 'logist' ? 'логист АЭМЗ' : 'перевозчик'})`,
   })
   return res
 }

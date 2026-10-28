@@ -18,7 +18,12 @@
  *      REQUEST_DELETED — логист удалил заявку (с площадки снята);
  *      EDO_READY       — сформирован комплект ЭДО, доступен к подписанию (Task 76);
  *      EDO_SIGNED      — АЭМЗ подписало документ, ждёт подписи перевозчика (Task 76);
- *      DOC_EXPIRY      — у техники истёк или истекает техосмотр (рассылка «Уведомить агента»).
+ *      DOC_EXPIRY      — у техники истёк или истекает техосмотр (рассылка «Уведомить агента»);
+ *      DOCS_EXCHANGED  — обмен документами по заявке (Task 109): перевозчик передал
+ *                      доверенность/заявку логисту или логист выложил документ для перевозчика.
+ *  — Администрация и логисты:
+ *      TICKET_NEW      — перевозчик создал обращение в поддержку (Task 109);
+ *      TICKET_REPLY    — новый ответ в обращении.
  *
  * Уведомления создаются после успешной транзакции действия; вместе с ними
  * уходит live-событие в шину ws-service — колокольчик в шапке обновляется
@@ -32,6 +37,8 @@ export type NotifyType =
   | 'CREW_ASSIGNED' | 'DOCS_READY' | 'DOCS_RETURNED' | 'DOCS_CONFIRMED'
   | 'TRIP_CLOSED' | 'REQUEST_DELETED' | 'MOVED_TO_DRAFT'
   | 'EDO_READY' | 'EDO_SIGNED' | 'DOC_EXPIRY'
+  | 'DOCS_EXCHANGED'
+  | 'TICKET_NEW' | 'TICKET_REPLY' | 'TICKET_CLOSED'
 
 export interface NotifyPayload {
   type: NotifyType
@@ -57,6 +64,26 @@ export async function notifyCarrier(carrierId: string | null | undefined, n: Not
   if (users.length === 0) return
   await db.notification.createMany({
     data: users.map((u) => ({ userId: u.id, type: n.type, title: n.title, body: n.body, requestId: n.requestId ?? null })),
+  })
+  notifyLive({ type: `NOTIFY:${n.type}`, requestId: n.requestId })
+}
+
+/** Уведомление администрации: все пользователи с ролью admin */
+export async function notifyAdmins(n: NotifyPayload): Promise<void> {
+  const users = await db.user.findMany({ where: { role: 'admin' }, select: { id: true } })
+  if (users.length === 0) return
+  await db.notification.createMany({
+    data: users.map((u) => ({ userId: u.id, type: n.type, title: n.title, body: n.body, requestId: n.requestId ?? null })),
+  })
+  notifyLive({ type: `NOTIFY:${n.type}`, requestId: n.requestId })
+}
+
+/** Персональное уведомление одному пользователю (автору обращения и т. п.) */
+export async function notifyUser(userId: string, n: NotifyPayload): Promise<void> {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { id: true } })
+  if (!user) return
+  await db.notification.create({
+    data: { userId: user.id, type: n.type, title: n.title, body: n.body, requestId: n.requestId ?? null },
   })
   notifyLive({ type: `NOTIFY:${n.type}`, requestId: n.requestId })
 }

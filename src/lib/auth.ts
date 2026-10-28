@@ -19,7 +19,7 @@ import { db } from '@/lib/db'
 export const SESSION_COOKIE = 'aemz_session'
 const SESSION_TTL_MS = 7 * 24 * 3600_000
 
-export type Role = 'logist' | 'carrier'
+export type Role = 'admin' | 'logist' | 'carrier'
 
 export interface SessionUser {
   id: string
@@ -86,7 +86,7 @@ export function readSessionToken(token: string | undefined | null): SessionUser 
   try {
     const data = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionUser & { exp: number }
     if (!data.exp || data.exp < Date.now()) return null
-    if (data.role !== 'logist' && data.role !== 'carrier') return null
+    if (data.role !== 'admin' && data.role !== 'logist' && data.role !== 'carrier') return null
     return { id: data.id, login: data.login, name: data.name, role: data.role, carrierId: data.carrierId ?? null }
   } catch {
     return null
@@ -112,7 +112,14 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   return readSessionToken(store.get(SESSION_COOKIE)?.value)
 }
 
-/** Проверка роли и (для перевозчика) доступа к площадке — общая для requireUser* */
+/** Роли с доступом к внутреннему контуру (всё, кроме кабинета перевозчика) */
+export const STAFF_ROLES: Role[] = ['admin', 'logist']
+
+export const isStaff = (role: Role): boolean => role === 'admin' || role === 'logist'
+
+/**
+ * Проверка роли и (для перевозчика) доступа к площадке — общая для requireUser*
+ */
 async function accessChecked(user: SessionUser, roles: Role[]): Promise<SessionUser | NextResponse> {
   if (roles.length > 0 && !roles.includes(user.role)) {
     return NextResponse.json({ error: 'Недостаточно прав для этого действия' }, { status: 403 })

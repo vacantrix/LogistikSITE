@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { requireUser, viewerOf } from '@/lib/auth'
+import { isStaff, requireUser, viewerOf } from '@/lib/auth'
 import { eventVisibleTo } from '@/lib/serialize'
 
 export const dynamic = 'force-dynamic'
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const events = await db.event.findMany({
     orderBy: { createdAt: 'desc' },
     // перевозчику берём с запасом: часть событий отфильтруется по правам
-    take: viewer.role === 'logist' ? limit : limit * 5,
+    take: isStaff(viewer.role) ? limit : limit * 5,
     include: { request: { select: { number: true, winnerId: true } } },
   })
   const visible = events.filter((e) => eventVisibleTo(e, viewer, e.request?.winnerId ?? null)).slice(0, limit)

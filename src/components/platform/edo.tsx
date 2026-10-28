@@ -27,6 +27,7 @@ import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { fmtDateTime } from '@/lib/status'
 import type { DiadocInfoDTO, EdoDocDTO, EdoDocPayloadDTO, EdoKind, EdoPackageDTO } from '@/lib/types'
+import type { RoleKind } from '@/components/platform/common'
 
 /** Перенос длинной строки реквизитов на несколько строк скана */
 function wrapLine(l: string, max = 56): string[] {
@@ -320,7 +321,7 @@ function DocKit({ title, hint, docs, pack, role, busy, onSign, onPreview, footer
   hint: string
   docs: EdoDocDTO[]
   pack: EdoPackageDTO
-  role: 'logist' | 'carrier'
+  role: RoleKind
   busy: string | null
   onSign: (pack: EdoPackageDTO, doc: EdoDocDTO) => Promise<void>
   onPreview: (v: { doc: EdoDocDTO; pack: EdoPackageDTO }) => void
