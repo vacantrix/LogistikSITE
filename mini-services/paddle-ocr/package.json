@@ -2,6 +2,6 @@
   "name": "aemz-paddle-ocr",
   "private": true,
   "scripts": {
-    "dev": "PADDLE_PDX_CACHE_HOME=.models OCR_ACCURATE_RETRY=0 OCR_UPSCALE_BELOW=1100 .venv/bin/python server.py"
+    "dev": "PADDLE_PDX_CACHE_HOME=.models OCR_UPSCALE_BELOW=1100 .venv/bin/python server.py"
   }
 }

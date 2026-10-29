@@ -167,8 +167,8 @@ class Handler(BaseHTTPRequestHandler):
         path = decode_image(data_uri)
         if not path:
             return self.send_json({"ok": False, "error": "нужно изображение JPG, PNG, WebP или PDF"}, 400)
-        # Task 83 — две нейросети по кнопкам платформы: "fast" (лёгкая, «Автозаполнение»),
-        # "accurate" (точная, «Проверить»); без mode — прежний автопободор режима
+        # Task 85 — одна сильная цепочка: точная модель — основной проход, лёгкая добирает
+        # недочитанное; mode от кнопок платформы сохранён для совместимости контракта
         mode = body.get("mode")
         if mode not in ("fast", "accurate"):
             mode = None
@@ -198,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
             "confidences": res["confidences"],
             "detectedType": res["docType"],
             "confirmations": res["confirmations"],
-            "engineMode": res.get("engineMode") or mode or "fast",
+            "engineMode": res.get("engineMode") or mode or "accurate",
             **({"side": res["side"]} if res.get("side") else {}),
         }
         if platform:

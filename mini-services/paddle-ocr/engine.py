@@ -14,9 +14,10 @@ PaddleOCR (три нейросети: поиск строк, ориентаци�
 страница регистрации, водительское удостоверение, СТС (лицевая сторона и оборот),
 доверенность по форме М-2.
 
-Скорость: сначала быстрая модель поиска текста (mobile), и только если документ не узнан
-или не хватает ключевых полей — второй проход точной (server). На ноутбуке без видеокарты
-это 6–17 с на документ вместо 30–90 с.
+Точность (Task 85): все операции платформы читает одна сильная цепочка — сначала точная
+модель поиска строк (PP-OCRv5 server), а что она не дочитала на изношенных сканах, добирает
+лёгкая (mobile): у каждой модели строки находит свои (боевой тест: точная нашла фамилию,
+лёгкая — отчество), слияние проходов читает больше, чем любая модель по отдельности.
 """
 import os
 import gc
@@ -45,7 +46,8 @@ PLATFORM_TYPE = {"passport": "PASSPORT_PHOTO", "passport_registration": "PASSPOR
                  "poa": "POA", "unknown": "UNKNOWN"}
 SUPPORTED = {"PASSPORT_PHOTO", "PASSPORT_REG", "LICENSE", "STS", "POA"}
 
-# модели: быстрая для первого прохода, точная — для повторного (переопределяются переменными окружения)
+# модели (Task 85): точная — основной проход всех операций, лёгкая — автоматический
+# добор полей, которые точная не дочитала (переопределяются переменными окружения)
 FAST_DET = os.environ.get("OCR_DET_FAST", "PP-OCRv5_mobile_det")
 ACCURATE_DET = os.environ.get("OCR_DET_ACCURATE", "PP-OCRv5_server_det")
 REC_MODEL = os.environ.get("OCR_REC_MODEL", "eslav_PP-OCRv5_mobile_rec")
@@ -143,7 +145,7 @@ def add_years(d, n):
 # ---------------- чтение текста ----------------
 
 _ocr = {}
-_mode = "fast"
+_mode = "accurate"
 _det_limit = None   # лимит кадра поиска строк лёгкой моделью на этот проход (None — FAST_DET_LIMIT)
 
 # признаки известных документов: если на фото нет ни одного, точный повторный проход не нужен —
@@ -339,7 +341,7 @@ def lex_fix(text, line, kind):
 
 
 def get_ocr(mode=None):
-    """mode: fast — быстрая модель поиска текста, accurate — точная (медленнее в 3–5 раз).
+    """mode: accurate — точная модель (основной проход), fast — лёгкая (добор полей).
 
     Экономия памяти на стенде 4 ГБ (Task 83): в памяти держим ТОЛЬКО одну нейросеть —
     при загрузке другой другая выгружается (server_det + mobile_det вместе ~3.2 ГБ → OOM-killer;
@@ -1543,12 +1545,10 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
     """Фото → {quality, sharpness, docType, side, fields, confidences, confirmations, engineMode}.
     Поля называются так же, как в DOC_FIELDS (src/lib/verify.ts).
 
-    mode (Task 83 — две нейросети по кнопкам платформы):
-      "fast"     — только лёгкая модель (PP-OCRv5_mobile_det), без точного повтора —
-                   кнопка «Автозаполнение» (быстро заполнить карточку);
-      "accurate" — только точная модель (PP-OCRv5_server_det) — кнопка «Проверить»
-                   (реальная проверка перед попаданием в базу);
-      None       — прежнее поведение: быстрый проход + точный повтор, если поля не дочитаны."""
+    Task 85 — одна сильная цепочка для всех операций платформы («Автозаполнение» и «Проверить»
+    читают одинаково): сначала точная модель (PP-OCRv5_server_det), что не дочитает — добирает
+    лёгкая (PP-OCRv5_mobile_det). Параметр mode сохранён в сигнатуре ради совместимости вызовов,
+    различие кнопок ушло: и «Автозаполнение», и «Проверить» идут по полной цепочке."""
     global _mode, _det_limit
     from pathlib import Path
     path = Path(path)
@@ -1556,29 +1556,15 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
     quality = int(round(min(100.0, 60.0 * sharp / SHARPNESS_MIN)))
     work, cropped = prepare(path)
     try:
-        if mode == "accurate":
-            # сразу точная модель, быстрый проход не нужен: две модели вместе
-            # + пул инференса — OOM на стенде 4 ГБ (Task 83, живые тесты)
-            _mode = "accurate"
-            lines, work, turns = read_upright(work, path)
-            out = _analyze_lines(work, lines, quality, sharp)
-            # памяти хватает на обе модели: что точная не дочитала, добираем лёгкой
-            # (на реальном паспорте лёгкая находит дату выдачи и код подразделения, точная — нет)
-            if not LOW_MEMORY and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
-                _mode = "fast"
-                out = _fill_gaps(out, _analyze_lines(work, read_lines(work), quality, sharp))
-        else:
+        _mode = "accurate"
+        lines, work, turns = read_upright(work, path)
+        out = _analyze_lines(work, lines, quality, sharp)
+        # добор лёгкой моделью в том же процессе — только при запасе памяти (две модели
+        # вместе — OOM на стенде 4 ГБ); при экономии памяти добор делает отдельный
+        # процесс (analyze_subprocess): у каждой модели строки находит свои
+        if accurate_retry and not LOW_MEMORY and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
             _mode = "fast"
-            lines, work, turns = read_upright(work, path)
-            out = _analyze_lines(work, lines, quality, sharp)
-            hinted = any(h in flat_text(lines) for h in DOC_HINTS)
-            if mode == "fast":
-                pass                       # лёгкая модель: один проход, без точного повтора
-            elif accurate_retry and _needs_retry(out) and (out["docType"] != "UNKNOWN" or hinted):
-                _mode = "accurate"
-                second = _analyze_lines(work, read_lines(work), quality, sharp)
-                if _score(second) > _score(out):
-                    out = second
+            out = _fill_gaps(out, _analyze_lines(work, read_lines(work), quality, sharp))
         # документ вырезан с листа, но не узнан или главные поля не дочитаны: читаем и исходный кадр
         # и добираем пустое — результат по вырезке чувствителен к масштабу (×2,39 и ×2,392 — разное)
         if cropped and _incomplete(out):
@@ -1592,7 +1578,7 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                         pass
                 whole = rotated
             try:
-                _mode = "fast" if mode == "fast" or LOW_MEMORY else "accurate"
+                _mode = "fast" if LOW_MEMORY else "accurate"
                 out = _fill_gaps(out, _analyze_lines(whole, read_lines(whole), quality, sharp), margin=0.1)
             finally:
                 if whole != path:
@@ -1607,7 +1593,7 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
             big = scaled(work, 1.5, "_x15")
             if big:
                 try:
-                    _mode = "fast" if LOW_MEMORY and mode == "fast" else "accurate"
+                    _mode = "fast" if LOW_MEMORY else "accurate"
                     _det_limit = FAST_DET_RETRY_LIMIT
                     out = _fill_gaps(out, _analyze_lines(big, read_lines(big), quality, sharp), margin=0.1)
                 finally:
@@ -1623,7 +1609,7 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                 flipped = work.with_name(work.stem + "_r180.png")
                 cv2.imencode(".png", cv2.rotate(img, cv2.ROTATE_180))[1].tofile(str(flipped))
                 try:
-                    _mode = "fast" if LOW_MEMORY or mode == "fast" else "accurate"
+                    _mode = "fast" if LOW_MEMORY else "accurate"
                     second = _analyze_lines(flipped, read_lines(flipped), quality, sharp)
                     if second["docType"] != "UNKNOWN":
                         out = second
@@ -1633,12 +1619,15 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                     except OSError:
                         pass
     finally:
-        _mode = "fast"
+        _mode = "accurate"
         if work != path:
             try:
                 os.unlink(work)
             except OSError:
                 pass
+    # основной проход всегда точная модель — помечаем результат ею,
+    # даже если отдельные поля добраны лёгкой (последние проходы переключали _mode)
+    out["engineMode"] = "accurate"
     return out
 
 
@@ -1662,23 +1651,6 @@ def _fill_gaps(main, extra, margin=None):
 
 def _filled(out):
     return sum(1 for v in out["fields"].values() if v)
-
-
-def _needs_retry(out):
-    if out["docType"] == "UNKNOWN":
-        return True
-    f = out["fields"]
-    if out["docType"] == "LICENSE":
-        # ФИО целиком (фамилия + имя), категории и обе даты — без них ВУ не проверить
-        words = [w for w in (f.get("ФИО") or "").split() if len(w) >= 2]
-        return len(words) < 2 or not f.get("Категории") or not f.get("Дата выдачи") or not f.get("Действует до")
-    if out["docType"] == "PASSPORT_PHOTO":
-        return sum(1 for k in ("Фамилия", "Имя", "Дата рождения", "Серия и номер") if not f.get(k)) >= 2
-    return False
-
-
-def _score(out):
-    return (out["docType"] != "UNKNOWN", _filled(out), sum(out["confidences"].values()))
 
 
 def _analyze_lines(path, lines, quality, sharp):
@@ -1825,11 +1797,13 @@ def drop_models():
 
 
 def analyze_subprocess(path, mode=None):
-    """Распознавание в отдельном процессе (мало памяти). Для «Проверить» (accurate): если точная
-    модель не узнала документ или не дочитала поля, ещё один процесс с лёгкой моделью добирает
-    пустое — на стенде 4 ГБ точная иногда теряла всё ФИО, а лёгкая читала его."""
+    """Распознавание в отдельном процессе (мало памяти). Если точная модель (server) не узнала
+    документ или не дочитала поля — ещё один процесс с лёгкой добирает пустое: у каждой модели
+    строки находит свои, слияние проходов читает больше (Task 85, боевой тест: точная нашла
+    фамилию «АЛЕКСЕЕВ», лёгкая — отчество «ВЛАДИМИРОВИЧ», ни одна по отдельности — не обе).
+    Параметр mode сохранён ради совместимости вызовов — цепочка одна для всех операций."""
     out = _run_isolated(path, mode)
-    if mode == "accurate" and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
+    if out["docType"] == "UNKNOWN" or not all(out["fields"].values()):
         try:
             out = _fill_gaps(out, _run_isolated(path, "fast"))
         except RuntimeError:
@@ -1893,6 +1867,14 @@ if __name__ == "__main__":
     # CLI для analyze_subprocess: python3 engine.py <image> [fast|accurate|auto]
     import json as _json
     import sys as _sys
+    # ребёнок расходуемый (OOM → родитель повторит с меньшим кадром): при нехватке памяти
+    # система должна убить ЕГО, а не платформу. oom_score_adj выше — жертва первее
+    # (у next-server анонимной памяти больше, без этого он погибал первым — боевой тест)
+    try:
+        with open("/proc/self/oom_score_adj", "w") as _fh:
+            _fh.write("800")
+    except OSError:
+        pass
     _argv_mode = _sys.argv[2] if len(_sys.argv) > 2 else None
     _mode_arg = _argv_mode if _argv_mode in ("fast", "accurate") else None
     _res = analyze(_sys.argv[1], mode=_mode_arg)

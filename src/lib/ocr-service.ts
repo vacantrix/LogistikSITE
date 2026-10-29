@@ -92,8 +92,8 @@ function enqueue<T>(job: () => Promise<T>): Promise<T> {
 
 /**
  * Распознавание через локальный сервис (изображение или PDF — сервис читает первую страницу).
- * mode (Task 83) — какая нейросеть читает: "fast" (лёгкая, кнопка «Автозаполнение»),
- * "accurate" (точная, кнопка «Проверить»); без mode — сервис сам подбирает режим.
+ * mode (Task 83) — устаревший параметр совместимости: с Task 85 движок всегда читает
+ * полной цепочкой (точная модель + добор лёгкой), различие кнопок платформы ушло.
  */
 export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean, mode?: 'fast' | 'accurate'): Promise<OcrServiceResult> {
   if (!ocrServiceEnabled()) return Promise.resolve({ kind: 'unavailable' })
