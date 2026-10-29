@@ -19,6 +19,7 @@
 | `onec-check.mjs` | Проверка обмена с сервера или своего компьютера, без 1С и браузера. |
 | `simulator/index.html` | Симулятор формы «Заказы грузоотправителей» с кнопкой «в Веб-Логистик» — для демонстрации в браузере. |
 | `simulator/instructions.md` | Публикация симулятора на GitHub Pages и сценарий показа. |
+| `../../public/1c-simulator/` | Установленная копия симулятора: платформа раздаёт её сама по адресу `/1c-simulator/` (тот же origin, CORS не нужен). После правки `docs/1c/simulator/index.html` скопируйте файл сюда ещё раз. |
 
 Код платформы лежит там, где его ищет Next.js:
 
@@ -28,7 +29,7 @@
 
 Авторизация — заголовок `X-API-Key` со значением `ONEC_API_KEY` из `.env` сервера (не короче 24 символов). Без переменной все маршруты `/api/integration/1c/*` отвечают `503`.
 
-Показать обмен без 1С можно в браузере: HTML-симулятор формы 1С [`simulator/index.html`](simulator/index.html) публикуется на GitHub Pages (инструкция — [`simulator/instructions.md`](simulator/instructions.md)).
+Показать обмен без 1С можно в браузере: HTML-симулятор формы 1С [`simulator/index.html`](simulator/index.html) публикуется на GitHub Pages (инструкция — [`simulator/instructions.md`](simulator/instructions.md)). На демо-стенде симулятор уже установлен в самой платформе: откройте `/1c-simulator/start.html` — адрес обмена подставится сам (тот же origin, CORS не нужен), останется ввести API-ключ.
 
 ## Переменные окружения
 

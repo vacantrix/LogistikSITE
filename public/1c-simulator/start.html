@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Запуск симулятора 1С «Веб-Логистик»</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f4f5f7; color: #1f2937;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .card { background: #fff; border-radius: 14px; padding: 32px 36px; max-width: 520px;
+          box-shadow: 0 10px 40px rgba(15, 23, 42, .12); }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  p { color: #64748b; font-size: 14px; line-height: 1.55; margin: 8px 0; }
+  a.btn { display: inline-block; margin-top: 14px; padding: 11px 22px; border-radius: 9px;
+          background: #166534; color: #fff; text-decoration: none; font-size: 15px; font-weight: 600; }
+  code { background: #f1f5f9; padding: 2px 6px; border-radius: 5px; font-size: 13px; }
+</style>
+<script>
+  // Адрес платформы = адрес этой страницы (симулятор обслуживается самой платформой),
+  // дальше — встроенный механизм ?api= симулятора.
+  window.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('go').href =
+      'index.html?api=' + encodeURIComponent(location.origin);
+  });
+</script>
+</head>
+<body>
+  <main class="card">
+    <h1>Симулятор 1С «Заказы грузоотправителей»</h1>
+    <p>Заглушка 1С обслуживается самой платформой, поэтому адрес обмена уже известен —
+       он совпадает с адресом этой страницы.</p>
+    <p>Останется один раз ввести API-ключ (<code>ONEC_API_KEY</code> с сервера платформы)
+       и нажать «Проверить связь».</p>
+    <a class="btn" id="go" href="index.html">Открыть симулятор 1С</a>
+  </main>
+</body>
+</html>
