@@ -26,6 +26,8 @@
 const PORT = Number(process.env.OCR_PORT ?? 3020)
 const PADDLE_URL = process.env.PADDLE_OCR_URL ?? 'http://127.0.0.1:3031/ocr'
 const TOKEN = process.env.OCR_SERVICE_TOKEN ?? ''
+// Токен наружу (к удалённому движку) может отличаться от входного токена шлюза
+const UPSTREAM_TOKEN = process.env.PADDLE_OCR_TOKEN ?? TOKEN
 const VERSION = '1.2.0'
 // один документ — до ~40 с (с повторным точным проходом — до ~90 с); Bun допускает idleTimeout до 255 с
 const PADDLE_TIMEOUT_MS = 170_000
@@ -90,7 +92,11 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<PaddleResult> 
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(TOKEN ? { 'X-OCR-Token': TOKEN } : {}) },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(UPSTREAM_TOKEN ? { 'X-OCR-Token': UPSTREAM_TOKEN } : {}),
+        ...(url.includes('ngrok') ? { 'ngrok-skip-browser-warning': '1' } : {}),
+      },
       body: JSON.stringify({ image: dataUri, docType: type, fields: DOC_FIELDS[type] }),
       signal: AbortSignal.timeout(PADDLE_TIMEOUT_MS),
     })
