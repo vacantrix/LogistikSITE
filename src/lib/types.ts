@@ -221,6 +221,8 @@ export interface RequestDTO {
   etrnStatus: string
   /** комментарий логиста к сверки/отклонению (Task 62) */
   verifyComment: string | null
+  /** ссылка на документ 1С (onecRef): заявка пришла из 1С через интеграцию; null — создана на платформе. Только персоналу */
+  onecRef: string | null
   createdAt: string
   updatedAt: string
   savings: number | null

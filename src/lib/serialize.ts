@@ -115,6 +115,8 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
     passPackage: seesTrip ? r.passPackage : false,
     etrnStatus: seesTrip ? r.etrnStatus : 'NONE',
     verifyComment: seesTrip ? r.verifyComment : null,
+    // документ 1С — только персоналу (пометка «из 1С» на черновиках)
+    onecRef: isLogist ? r.onecRef ?? null : null,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     savings,

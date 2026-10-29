@@ -9,7 +9,7 @@
  * сроком и ставкой или удаляют.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide-react'
+import { Cable, CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide-react'
 import {
   EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, NoticeLine, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
@@ -165,6 +165,16 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
                   <CardContent className="space-y-3 p-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-slate-900">{r.number}</span>
+                      {/* заявка пришла из 1С через интеграцию (Task: onec-stub-install) */}
+                      {r.onecRef && (
+                        <span
+                          className="inline-flex max-w-[240px] items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600"
+                          title={`Заявка из 1С, документ: ${r.onecRef}`}
+                        >
+                          <Cable className="h-3 w-3 shrink-0" aria-hidden />
+                          <span className="truncate">из 1С</span>
+                        </span>
+                      )}
                       {origin.unanswered ? (
                         <StatusDot dot="bg-amber-500" tone="warning">Торги без ставок</StatusDot>
                       ) : (

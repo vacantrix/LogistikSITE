@@ -270,7 +270,7 @@
 
     <div class="table-wrap bottom-table">
       <table>
-        <thead><tr><th class="cb"></th><th>п/п</th><th title="Путевой лист сформирован">Н</th><th>Дата погрузки</th><th>Дата выгрузки</th><th>Веб-Логистик</th><th>Транспортная компания</th><th>Номер ТС</th><th>Прицеп</th><th>Водитель</th><th>Контрагент</th><th>Заказчик</th><th>Спецификация</th><th>Пункт разгрузки</th><th>Продукция</th><th>Кол-во</th></tr></thead>
+        <thead><tr><th class="cb"></th><th>п/п</th><th title="Путевой лист сформирован">Н</th><th>Дата погрузки</th><th>Дата выгрузки</th><th>Веб-Логистик</th><th title="Ставка за тонну для торгов — уходит на платформу">Ставка, ₽/т</th><th>Транспортная компания</th><th>Номер ТС</th><th>Прицеп</th><th>Водитель</th><th>Контрагент</th><th>Заказчик</th><th>Спецификация</th><th>Пункт разгрузки</th><th>Продукция</th><th>Кол-во</th></tr></thead>
         <tbody id="botBody"></tbody>
       </table>
     </div>
@@ -367,6 +367,7 @@ const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const ruDate = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 const isoDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const fmtQty = (v) => v ? v.toLocaleString('ru-RU', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : '';
+const fmtRate = (v) => v ? v.toLocaleString('ru-RU', { maximumFractionDigits: 0 }) : '';
 const parseNum = (s) => { const v = Number(String(s).replace(/[\s ]/g, '').replace(',', '.')); return Number.isFinite(v) ? v : NaN; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
@@ -416,38 +417,39 @@ function demoOrders() {
   ];
 }
 
-// рейс = одна машина; строки — продукция рейса
+// рейс = одна машина; строки — продукция рейса; rate — ставка за тонну из заказа (шлётся на платформу как startRate)
 function demoTrips() {
-  const own = (n, d1, d2, plate, trailer, driver, lines) => ({ n, d1: D(d1), d2: D(d2), tk: 'АЭМЗ ООО', plate, trailer, driver, lines, done: false });
-  const ext = (n, d1, d2, tk, plate, trailer, driver, lines) => ({ n, d1: D(d1), d2: D(d2), tk, plate, trailer, driver, lines, done: false });
-  const free = (n, d1, d2, lines) => ({ n, d1: D(d1), d2: D(d2), tk: '', plate: '', trailer: '', driver: '', lines, done: false });
+  const own = (n, d1, d2, plate, trailer, driver, lines, rate = 0) => ({ n, d1: D(d1), d2: D(d2), tk: 'АЭМЗ ООО', plate, trailer, driver, lines, rate, done: false });
+  const ext = (n, d1, d2, tk, plate, trailer, driver, lines, rate = 0) => ({ n, d1: D(d1), d2: D(d2), tk, plate, trailer, driver, lines, rate, done: false });
+  const free = (n, d1, d2, lines, rate = 0) => ({ n, d1: D(d1), d2: D(d2), tk: '', plate: '', trailer: '', driver: '', lines, rate, done: false });
   return [
     ext(1, 0, 2, 'ООО «Магистраль-Т»', 'Н 134 УК 32', 'АН 5097 32', 'Савельев Алексей Петрович', [
       { contragent: 'АО «Метиз-Брянск»', customer: '', spec: 'Спецификация (к договору) 6М от 09.10.2026', point: '302030, г. Орёл, ул. Кромская, 5', product: 'Проволока 3,4-С-I-Б/бухты', qty: 20.5 },
-    ]),
+    ], 8400),
     own(2, 0, 1, 'Н 288 СВ 123', 'МВ 7387 23', 'Тарасов Дмитрий Сергеевич', [
       { contragent: 'ООО «СтальМетиз»', customer: 'ООО «ПромТехОпт»', spec: 'Спецификация (к договору) ПМТК-002358 от 22.09.2026', point: 'Волгодонск г, 7-я Заводская ул., 12', product: 'Проволока 2,5-Св-08А', qty: 10 },
       { contragent: 'ООО «СтальМетиз»', customer: 'ООО «ПромТехОпт»', spec: 'Спецификация (к договору) ПМТК-002358 от 22.09.2026', point: 'Волгодонск г, 7-я Заводская ул., 12', product: 'Проволока 3,0-Св-08А', qty: 10.4 },
-    ]),
+    ], 6200),
     own(3, 0, 2, 'М 576 ХВ 67', 'АН 2646 67', 'Мартынов Евгений Сергеевич', [
       { contragent: 'ООО «СтальМетиз»', customer: 'ООО «СнабМеталл-М»', spec: 'Спецификация (к договору) ПМТК-002443 от 29.09.2026', point: 'Московская обл., п. Михнево, ул. Строительная, 3', product: 'Проволока 1,2-Св-08Г2С', qty: 11 },
       { contragent: 'ООО «СтальМетиз»', customer: 'ООО «СнабМеталл-М»', spec: 'Спецификация (к договору) ПМТК-002443 от 29.09.2026', point: 'Московская обл., п. Михнево, ул. Строительная, 3', product: 'Проволока 1,6-Св-08Г2С', qty: 9.6 },
-    ]),
+    ], 9100),
     free(4, 1, 2, [
       { contragent: 'ООО «Велес-Строй»', customer: 'ООО «Велес-Строй»', spec: 'Спец. ТК-7845 от 27.10.2026', point: 'Геленджик г., Портовая ул. 1', product: 'Пруток МД1-10х11700-А240С', qty: 12 },
       { contragent: 'ООО «Велес-Строй»', customer: 'ООО «Велес-Строй»', spec: 'Спец. ТК-7845 от 27.10.2026', point: 'Геленджик г., Портовая ул. 1', product: 'Пруток 2ф-МД1-8х11700-ОМ1-ОВ2-А500СН', qty: 2.1 },
-    ]),
+    ], 6800),
     free(5, 1, 3, [
       { contragent: 'АО «ДонЭнергоСтрой»', customer: 'АО «ДонЭнергоСтрой»', spec: 'Спец. ТК-7389 от 14.10.2026', point: 'Краснодарский край, Динской район, ст. Новотитаровская, ул. Ленина, 2', product: 'Пруток 2ф-МД1-25х11700-ОМ1-ОВ2-А500СЕ', qty: 21 },
-    ]),
+    ], 5400),
     free(6, 2, 3, [
       { contragent: 'ООО «КраснодарМонтаж»', customer: 'ООО «КраснодарМонтаж»', spec: 'Спец. ТК-7820 от 26.10.2026', point: 'Краснодар, п. Плодородный, д. 12/1', product: 'Пруток 2ф-МД1-32х11700-ОМ1-ОВ2-А500СЕ', qty: 8 },
-    ]),
+    ], 4900),
   ];
 }
 
 // ——— состояние: рейсы и статусы обмена хранятся в браузере ———
-const STATE_KEY = 'wl-sim:state:' + isoDate(TODAY);
+// ключ v2: добавилась ставка рейса (rate) — старое сохранённое состояние без ставки не подхватываем
+const STATE_KEY = 'wl-sim:state2:' + isoDate(TODAY);
 let orders = demoOrders();
 let trips;
 let web = {}; // ключ рейса → { id, number, status, statusRu, carrier?, crew? }
@@ -602,12 +604,13 @@ function renderBottom() {
         <td class="n">${t.n}</td><td class="c">${t.done ? '✓' : ''}</td>
         <td>${esc(t.d1)}</td><td>${esc(t.d2)}</td>
         <td>${first ? webCell(t) : ''}</td>
+        <td class="n" title="Ставка за тонну, уходит на платформу">${first ? fmtRate(t.rate) : ''}</td>
         <td title="${esc(t.tk)}">${esc(t.tk)}</td><td>${esc(t.plate)}</td><td>${esc(t.trailer)}</td><td title="${esc(t.driver)}">${esc(t.driver)}</td>
         <td title="${esc(l.contragent)}">${esc(l.contragent)}</td><td title="${esc(l.customer)}">${esc(l.customer)}</td><td title="${esc(l.spec)}">${esc(l.spec)}</td><td title="${esc(l.point)}">${esc(l.point)}</td><td title="${esc(l.product)}">${esc(l.product)}</td><td class="n">${fmtQty(l.qty)}</td>
       </tr>`);
     });
   }
-  $('botBody').innerHTML = rows.join('') || '<tr><td colspan="16" style="padding:14px;color:#8c8c8c">Рейсов нет</td></tr>';
+  $('botBody').innerHTML = rows.join('') || '<tr><td colspan="17" style="padding:14px;color:#8c8c8c">Рейсов нет</td></tr>';
   $('sumMachines').value = String(trips.length);
   $('sumQty').value = fmtQty(trips.reduce((s, t) => s + t.lines.reduce((a, l) => a + l.qty, 0), 0));
   $('fMachines').value = String(trips.filter((t) => !t.tk).length);
@@ -746,7 +749,7 @@ function payloadOf(t) {
     tonnage: qtyOf(t),
     loadDate: ruToIso(t.d1),
     loadWindow: LOAD_WINDOW,
-    startRate: 0, // ставку за тонну задаст логист при публикации
+    startRate: t.rate || 0, // ставка за тонну из заказа 1С; 0 — платформа предложит задать ставку при публикации
     comment: [
       t.lines.map((l) => `${l.product} — ${fmtQty(l.qty)} т`).join('; '),
       `грузополучатель ${first.customer || first.contragent}`,
@@ -763,7 +766,7 @@ $('toWeb').addEventListener('click', () => {
   $('sendText').textContent = `Будет отправлено рейсов: ${sel.length}.`;
   $('sendList').innerHTML = sel.map((t) => {
     const w = web[tripKey(t)];
-    return `<li><b>№${t.n}</b> · ${esc(t.d1)} · ${esc(t.lines[0].point)} · ${fmtQty(qtyOf(t))} т<br><small>${esc(t.lines.map((l) => l.product).join(', '))}${t.tk ? ` · транспорт уже указан: ${esc(t.tk)}` : ''}${w ? ` · уже на платформе: ${esc(w.number)}` : ''}</small></li>`;
+    return `<li><b>№${t.n}</b> · ${esc(t.d1)} · ${esc(t.lines[0].point)} · ${fmtQty(qtyOf(t))} т${t.rate ? ` · ставка ${fmtRate(t.rate)} ₽/т` : ''}<br><small>${esc(t.lines.map((l) => l.product).join(', '))}${t.tk ? ` · транспорт уже указан: ${esc(t.tk)}` : ''}${w ? ` · уже на платформе: ${esc(w.number)}` : ''}</small></li>`;
   }).join('');
   openDlg('sendDlg');
 });
