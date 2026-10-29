@@ -22,7 +22,7 @@
  */
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
-  ArrowLeft, BarChart3, Building2, Cable, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
+  ArrowLeft, BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
   History, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Phone, Save, ScanSearch, ShieldCheck, Truck,
   UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
@@ -41,7 +41,7 @@ import { NotificationBell } from '@/components/platform/notification-bell'
 import { LogoMark } from '@/components/platform/logo-mark'
 import { useCan } from '@/components/platform/perms'
 import type { PermKey } from '@/lib/perm-catalog'
-import type { RoleKind, TabKey } from '@/components/platform/common'
+import { OneCMark, type RoleKind, type TabKey } from '@/components/platform/common'
 import type { ProfileDTO, SessionUserDTO } from '@/lib/types'
 import { activateAccount, api, listAccounts } from '@/lib/api'
 
@@ -519,7 +519,7 @@ function AccountMenu({ user, profile, compact, canEditProfile, onLogout, onAddAc
                 }}
                 className="gap-2.5"
               >
-                <Cable className="h-4 w-4" aria-hidden />
+                <OneCMark className="h-4 w-4 text-[9px]" />
                 Симулятор 1С «Заказы»
               </DropdownMenuItem>
             )}

@@ -320,3 +320,17 @@ export function ErrorBlock({ message, onRetry }: { message: string; onRetry?: ()
     </div>
   )
 }
+
+/** Фирменный знак «1С»: оранжево-красная плашка с белой надписью — помечает
+ *  артефакты интеграции 1С (пункт меню симулятора, бейдж «из 1С» на черновиках).
+ *  Размер задаётся классом, надпись масштабируется через em от размера контейнера. */
+export function OneCMark({ className = 'h-4 w-4 text-[9px]' }: { className?: string }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-[4px] bg-gradient-to-br from-[#F7941D] to-[#EE3124] font-bold leading-none tracking-tight text-white shadow-sm ${className}`}
+      aria-hidden
+    >
+      1С
+    </span>
+  )
+}

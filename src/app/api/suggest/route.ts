@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isStaff, requireUser } from '@/lib/auth'
+import { dadataAddress, dadataApiKey } from '@/lib/dadata'
+import { onecAuthorized } from '@/lib/onec'
 import {
   formatAddress, formatPlace, issuerTemplates, placeAt, placeRank, regionFromText,
   type PhotonFeature, type SuggestKind, type Suggestion,
@@ -54,14 +56,19 @@ async function cached(key: string, load: () => Promise<Suggestion[]>): Promise<S
 const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 
 /**
- * POST /api/suggest — подсказки для полей проформы водителя.
+ * POST /api/suggest — подсказки для полей проформы водителя и точек заявки.
  * { kind: 'address' | 'place', q } — поиск по карте; { kind: 'reverse', lat, lon, level? } — адрес точки на карте;
  * { kind: 'issuer', q, region?, county?, address? } — «Кем выдан»: формулировки по региону адреса
  * и уже введённые в базе значения. Текст запроса — в теле, а не в адресной строке.
+ *
+ * Доступ: сессия платформы — для страниц платформы; заголовок X-API-Key (ONEC_API_KEY) —
+ * для HTML-симулятора 1С, он тоже набирает адрес погрузки с подсказками.
+ * Источник подсказок адреса: DaData (ФИАС/ГАР, точнее на российских адресах) если задан
+ * DADATA_API_KEY; без ключа — геокодер OSM Photon. Формат ответа одинаковый.
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
-  if (auth instanceof NextResponse) return auth
+  if (auth instanceof NextResponse && !onecAuthorized(req)) return auth
 
   const body = await req.json().catch(() => null)
   const kind = body?.kind as SuggestKind
@@ -72,6 +79,12 @@ export async function POST(req: NextRequest) {
       if (q.length < 3) return NextResponse.json({ items: [] })
       const items = await cached(`${kind}:${q.toLowerCase()}`, async () => {
         if (kind === 'address') {
+          // DaData — основной источник (точные российские адреса с домом и индексом)
+          if (dadataApiKey()) {
+            const dadata = await dadataAddress(q, 8)
+            if (dadata && dadata.items.length > 0) return dadata.items
+            // DaData недоступна/ошибка ключа — тихо уходим в OSM, поле остаётся рабочим
+          }
           const features = await photon('/api/', { q, limit: '15', lang: 'default', bbox: RU_BBOX, ...BIAS })
           return uniq(features.filter((f) => f.properties.countrycode === 'RU').map(formatAddress), 8)
         }
@@ -80,7 +93,7 @@ export async function POST(req: NextRequest) {
         const ranked = features.map((f, i) => ({ f, i })).sort((a, b) => placeRank(a.f.properties) - placeRank(b.f.properties) || a.i - b.i)
         return uniq(ranked.map(({ f }) => formatPlace(f)), 8)
       })
-      return NextResponse.json({ items })
+      return NextResponse.json({ items, dadata: dadataApiKey() ? true : false })
     }
 
     if (kind === 'reverse') {
@@ -108,7 +121,9 @@ export async function POST(req: NextRequest) {
       const fromText = regionFromText(str(body?.address, 400))
       const region = str(body?.region) || fromText.region
       const county = str(body?.county) || fromText.county
-      // значения, уже введённые в базе: внутренний контур видит всех, перевозчик — только своих водителей
+      // значения, уже введённые в базе: внутренний контур видит всех, перевозчик — только своих водителей.
+      // Сюда попадают только пользователи с сессией — X-API-Key-запросы без сессии не доходят до справочников
+      if (auth instanceof NextResponse) return NextResponse.json({ items: [] })
       const rows = await db.driver.findMany({
         where: isStaff(auth.role) ? {} : { carrierId: auth.carrierId ?? '' },
         select: { passportIssuedBy: true },

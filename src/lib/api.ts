@@ -155,6 +155,10 @@ export const api = {
   suggest: (body: { kind: SuggestKind; q?: string; region?: string; county?: string; address?: string; lat?: number; lon?: number; level?: 'place' }) =>
     fetch('/api/suggest', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ items: Suggestion[]; unavailable?: boolean }>),
 
+  /** Подсказки адресов России для точек заявки: DaData (ФИАС), без ключа — карта OSM */
+  suggestAddress: (q: string) =>
+    fetch('/api/suggest', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'address' as const, q }) })).then(json<{ items: Suggestion[]; unavailable?: boolean }>).then((d) => ({ items: d.items ?? [] })),
+
   /** Мгновенная нейропроверка одного документа при загрузке (соответствие вида + качество + поля) */
   checkDocument: (body: { type: string; fileName: string; dataUri: string }) =>
     fetch('/api/documents/check', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ verdict: IntakeDocVerdict }>),

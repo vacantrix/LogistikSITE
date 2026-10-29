@@ -15,6 +15,8 @@ export interface Suggestion {
   county?: string
   lat?: number
   lon?: number
+  /** источник подсказки: DaData (ФИАС) или карта OSM — для пометки в выпадающем списке */
+  source?: 'dadata' | 'osm'
 }
 
 /** Свойства объекта из ответа Photon (GeoJSON properties) */

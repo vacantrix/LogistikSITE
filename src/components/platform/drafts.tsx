@@ -9,9 +9,9 @@
  * сроком и ставкой или удаляют.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Cable, CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide-react'
+import { CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, NoticeLine, SectionHeader, StatusDot, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, NoticeLine, OneCMark, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import { useCan } from '@/components/platform/perms'
 import { RoutePointsInline } from '@/components/platform/route-dialog'
@@ -171,7 +171,7 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
                           className="inline-flex max-w-[240px] items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600"
                           title={`Заявка из 1С, документ: ${r.onecRef}`}
                         >
-                          <Cable className="h-3 w-3 shrink-0" aria-hidden />
+                          <OneCMark className="h-3 w-3 text-[7px]" />
                           <span className="truncate">из 1С</span>
                         </span>
                       )}
