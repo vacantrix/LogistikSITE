@@ -14,14 +14,14 @@
  *
  * При старте ничего не горит красным, кнопка «Проверить» чёрная и всегда активна;
  * если что-то не заполнено — после нажатия подсвечиваются все пропущенные поля
- * и слоты фото. Когда всё заполнено, кнопка карточки водителя запускает нейросеть:
- * она читает фото, заполняет ТОЛЬКО пустые поля, сверяет данные между документами
+ * и слоты фото. Кнопка карточки запускает нейросеть: она читает фото, заполняет
+ * пустые поля, уточняет заполненные нейросетью, сверяет данные между документами
  * и сама допускает карточку в базу аккаунта (идемпотентно, по паспорту)
- * или отклоняет. Одиночные карточки допускаются сразу после валидации полей и фото.
+ * или отклоняет. Одиночные карточки допускаются сразу после проверки полей и фото.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  BadgeCheck, CarFront, CircleAlert, CircleCheck, IdCard, ScanLine, Sparkles, Truck, Trash2, X,
+  BadgeCheck, CarFront, CircleAlert, CircleCheck, IdCard, ScanLine, Truck, Trash2, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -62,8 +62,8 @@ export const TRAILER_LABELS: Record<string, string> = {
 export type TruckDraft = { brand: string; plate: string; vin: string; sts: string; color: string; owner: string }
 export type TrailerDraft = { type: string; plate: string; sts: string; color: string; owner: string }
 
-/** Чем карточка занята: нейросеть заполняет (fast), проверяет (accurate) или тихо — из «Проверить все» (Task 83) */
-type CardBusy = 'fill' | 'check' | 'check-quiet' | null
+/** Чем карточка занята: нейросеть проверяет, или тихо — из «Проверить все» (Task 83) */
+type CardBusy = 'check' | 'check-quiet' | null
 
 type Upload = StepFile
 /** Фото документов водителя: паспорт и регистрация (водительское удостоверение не запрашивается) */
@@ -185,7 +185,7 @@ function TrailerFields({
 /**
  * Поля, заполненные нейросетью, и шаг-фото, с которого они прочитаны. Когда в шаг загружают
  * другое фото, такие поля — если их не правили вручную — очищаются: иначе карточка осталась бы
- * с данными старого снимка, а «Автозаполнение» заполняет только пустые поля.
+ * с данными старого снимка.
  */
 function useAiFields<F extends string, S extends string>() {
   const ref = useRef<Partial<Record<F, { value: string; source: S }>>>({})
@@ -204,9 +204,9 @@ function useAiFields<F extends string, S extends string>() {
     return stale
   }, [])
 
-  /** Слить новое чтение с карточкой: пустые поля заполняются; при refine (проверка,
-   * «Проверить») заменяются и поля, которые заполнила нейросеть и человек не правил —
-   * иначе ошибки автозаполнения доживали бы до базы. refined — заменённые поля. */
+  /** Слить новое чтение с карточкой: пустые поля заполняются; поля, которые заполнила нейросеть
+   * и человек не правил, заменяются новым чтением — иначе ошибки распознавания доживали бы
+   * до базы. refined — заменённые поля. */
   const merge = useCallback(<T extends Record<F, string>>(cur: T, next: Partial<Record<F, string>>, refine: boolean, sourceOf: (f: F) => S) => {
     const out = { ...cur }
     const refined: F[] = []
@@ -278,7 +278,7 @@ export default function DriverLine({
   const [verdicts, setVerdicts] = useState<Partial<Record<DocType, IntakeResult['documents'][number]>>>(EMPTY_VERDICTS)
   const [crossChecks, setCrossChecks] = useState<IntakeResult['crossChecks']>([])
   const [conf, setConf] = useState<Record<string, number>>({})
-  /** чем занята карточка: fill — «Автозаполнение», check — «Проверить» (обе идут по одной сильной цепочке, Task 85) */
+  /** чем занята карточка: check — нейросеть проверяет (Task 86, одна кнопка) */
   const [busy, setBusy] = useState<CardBusy>(null)
   /** подсветка незаполненного включается только после первого нажатия «Проверить» (Task 44) */
   const [showErrors, setShowErrors] = useState(false)
@@ -306,12 +306,11 @@ export default function DriverLine({
   /** обязательное поле подсвечено, если проверка уже запускалась и поле пустое */
   const miss = (v: string) => showErrors && v.trim() === ''
 
-  /** Нейросеть читает фото и возвращает обновлённые поля (заполняются ТОЛЬКО пустые).
-   * mode сохранён ради совместимости (Task 85): обе кнопки идут по одной сильной цепочке */
-  const runOcr = useCallback(async (mode: 'fast' | 'accurate') => {
+  /** Нейросеть читает фото и возвращает обновлённые поля: пустые заполняются, заполненные
+   * нейросетью перечитываются заново (одна сильная модель, Task 86) */
+  const runOcr = useCallback(async () => {
     const res = await api.intakeDriver(
       Object.fromEntries(Object.entries(uploads).filter(([, v]) => v)) as Partial<Record<string, Upload>>,
-      mode,
     )
     setVerdicts(Object.fromEntries(res.documents.map((doc) => [doc.type, doc])))
     setCrossChecks(res.crossChecks)
@@ -326,7 +325,7 @@ export default function DriverLine({
     }
     const movedNote = moved.length > 0 ? 'Страницы паспорта были перепутаны местами — фото переложены в свои слоты.' : ''
     // заполняем пустые поля; вручную введённое не затирается, а заполненное нейросетью
-    // «Проверить» перечитывает полной цепочкой
+    // перечитывается новой сильной моделью
     const { merged: eff, refined } = ai.merge(d, {
       fullName: res.driver.fullName,
       birthDate: res.driver.birthDate,
@@ -336,7 +335,7 @@ export default function DriverLine({
       passportIssuedBy: res.driver.passportIssuedBy,
       birthPlace: res.driver.birthPlace,
       address: res.driver.address,
-    }, mode === 'accurate', DRIVER_FIELD_SOURCE)
+    }, true, DRIVER_FIELD_SOURCE)
     setD(eff)
     setConf(res.driver.confidence ?? {})
     const refinedNote = refined.length > 0 ? `Нейросеть уточнила: ${refined.map((k) => DRIVER_LABELS[k]).join(', ')}.` : ''
@@ -347,38 +346,25 @@ export default function DriverLine({
     if (admitted) return true
     if (busy) return false
 
-    // ——— валидация «все поля обязательны»: подсветка появляется только здесь (Task 44) ———
+    // ——— фото обязательны: без них нейросети нечего читать (Task 44) ———
     setShowErrors(true)
-    const dKeys = Object.keys(DRIVER_LABELS) as (keyof typeof d)[]
-    const missingLabels = dKeys.filter((k) => d[k].trim() === '').map((k) => DRIVER_LABELS[k])
     const missingPhotos = DRIVER_DOC_TYPES.filter((tp) => !uploads[tp])
-
-    if (missingLabels.length > 0 || missingPhotos.length > 0) {
+    if (missingPhotos.length > 0) {
       if (!quiet) {
-        const cap = (arr: string[]) => (arr.length > 6 ? `${arr.slice(0, 6).join(', ')} + ещё ${arr.length - 6}` : arr.join(', '))
-        if (missingLabels.length === 0) {
-          // заполнено всё, кроме фотографий — тот самый случай из «проформы перевозчика» (Task 83)
-          toast({
-            title: 'Требуется загрузить фото',
-            description: `Добавьте: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')}`,
-            variant: 'destructive',
-          })
-        } else {
-          const parts = [
-            `Поля: ${cap(missingLabels)}`,
-            missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')}` : null,
-          ].filter(Boolean)
-          toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
-        }
+        toast({
+          title: 'Требуется загрузить фото',
+          description: `Добавьте: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')} — нейросеть прочитает карточку по ним`,
+          variant: 'destructive',
+        })
       }
       return false
     }
 
     setBusy(quiet ? 'check-quiet' : 'check')
     try {
-      // ——— «Проверить» — реальная нейропроверка: полная цепочка (server + добор) читает фото
-      // перед попаданием карточки в базу (Task 85) ———
-      const { effD, latest, files, movedNote } = await runOcr('accurate')
+      // ——— реальная нейропроверка: одна сильная модель читает фото, заполняет пустые поля
+      // и уточняет заполненные нейросетью перед попаданием карточки в базу (Task 86) ———
+      const { effD, latest, files, movedNote } = await runOcr()
 
       const bad = latest.filter((x) => x.status === 'REUPLOAD' || x.status === 'REJECTED')
       if (bad.length > 0) {
@@ -391,6 +377,7 @@ export default function DriverLine({
       }
 
       // ——— после нейросети проверяем ещё раз: не заполненными остались только то, что ИИ не смог прочитать ———
+      const dKeys = Object.keys(DRIVER_LABELS) as (keyof typeof d)[]
       const stillMiss = dKeys.filter((k) => effD[k].trim() === '').map((k) => DRIVER_LABELS[k])
       if (stillMiss.length > 0) {
         toast({
@@ -437,48 +424,7 @@ export default function DriverLine({
     } finally {
       setBusy(null)
     }
-  }, [admitted, busy, uploads, d, carrierId, runOcr, onAdmitted, toast])
-
-
-  /** «Автозаполнение»: сильная нейроцепочка (точная модель + добор, Task 85) читает фото и
-   * заполняет пустые поля; в базу ничего не пишется — допуск только через «Проверить». Без фото —
-   * красные слоты и тост «Требуется загрузить фото». */
-  const autofill = useCallback(async (): Promise<boolean> => {
-    if (admitted || busy) return false
-    setShowErrors(true)
-    const missingPhotos = DRIVER_DOC_TYPES.filter((tp) => !uploads[tp])
-    if (missingPhotos.length > 0) {
-      toast({
-        title: 'Требуется загрузить фото',
-        description: `Добавьте: ${missingPhotos.map((tp) => DOC_TYPE_LABEL[tp]).join(', ')} — нейросеть заполнит карточку по ним`,
-        variant: 'destructive',
-      })
-      return false
-    }
-    setBusy('fill')
-    try {
-      const { effD, movedNote } = await runOcr('fast')
-      const dKeys = Object.keys(DRIVER_LABELS) as (keyof typeof d)[]
-      const stillEmpty = dKeys.filter((k) => effD[k].trim() === '').map((k) => DRIVER_LABELS[k])
-      const what = stillEmpty.length === 0
-        ? 'Нейросеть прочитала фото — сверьте поля и нажмите «Проверить» для допуска в базу'
-        : `Не прочитано: ${stillEmpty.join(', ')} — заполните вручную и нажмите «Проверить»`
-      toast({
-        title: stillEmpty.length === 0 ? 'Карточка заполнена нейросетью' : 'Карточка заполнена частично',
-        description: movedNote ? `${movedNote} ${what}` : what,
-      })
-      return true
-    } catch (e) {
-      toast({
-        title: 'Автозаполнение не удалось',
-        description: e instanceof Error ? e.message : 'Неизвестная ошибка',
-        variant: 'destructive',
-      })
-      return false
-    } finally {
-      setBusy(null)
-    }
-  }, [admitted, busy, uploads, runOcr, toast])
+  }, [admitted, busy, uploads, carrierId, runOcr, onAdmitted, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -510,18 +456,6 @@ export default function DriverLine({
           <StatusDot dot="bg-emerald-500" className="text-xs">допущен в базу</StatusDot>
         )}
         <span className="flex-1" />
-        {!admitted && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void autofill()}
-            disabled={busy !== null || uploading !== null}
-            className="gap-1.5"
-          >
-            <Sparkles className="h-4 w-4" aria-hidden />
-            {busy === 'fill' ? 'Заполняем…' : 'Автозаполнение'}
-          </Button>
-        )}
         {!admitted && (
           <Button
             size="sm"
@@ -643,11 +577,8 @@ export default function DriverLine({
 
       {/* ——— «замыливание» экрана с лупой, пока нейросеть работает над карточкой (Task 83) ——— */}
       <ScanOverlay
-        open={busy === 'fill' || busy === 'check'}
-        title={busy === 'fill' ? 'Автозаполнение' : 'Проверка карточки'}
-        steps={busy === 'fill'
-          ? ['Читаем фото документов…', 'Распознаём поля…', 'Заполняем карточку…']
-          : undefined}
+        open={busy === 'check'}
+        title="Проверка карточки"
       />
     </section>
   )
@@ -656,7 +587,7 @@ export default function DriverLine({
 // ——————————————————————————————————————————————————————————————————————————————
 // Одиночные карточки «Добавить ТС» / «Добавить прицеп» (Task 48): пополнение базы
 // только техникой — без водителя и фотографий. 5 обязательных полей, подсветка
-// незаполненного только после «Проверить», допуск сразу после валидации
+// незаполненного только после «Проверить», допуск сразу после проверки
 // (идемпотентно по госномеру). Участвуют в «Проверить все» через registerCheck.
 // ——————————————————————————————————————————————————————————————————————————————
 
@@ -671,9 +602,9 @@ export interface SoloLineProps {
   onRemove: (id: string) => void
 }
 
-/** Шапка одиночной карточки: иконка, заголовок, метка, кнопки «Автозаполнение»/«Проверить» и удаления */
+/** Шапка одиночной карточки: иконка, заголовок, метка, кнопка «Проверить» и удаления */
 function SoloHeader({
-  icon, title, index, kind, tag, busy, admitted, onAutofill, uploading = false, onCheck, onRemove,
+  icon, title, index, kind, tag, busy, admitted, uploading = false, onCheck, onRemove,
 }: {
   icon: ReactNode
   title: string
@@ -683,9 +614,7 @@ function SoloHeader({
   tag?: string
   busy: CardBusy
   admitted: boolean
-  /** если задана — в шапке появляется кнопка «Автозаполнение» (Task 83) */
-  onAutofill?: () => void
-  /** фото ещё загружается — кнопки нейросети ждут */
+  /** фото ещё загружается — кнопка нейросети ждёт */
   uploading?: boolean
   onCheck: () => void
   onRemove: () => void
@@ -703,18 +632,6 @@ function SoloHeader({
         <StatusDot dot="bg-emerald-500" className="text-xs">допущено в базу</StatusDot>
       )}
       <span className="flex-1" />
-      {!admitted && onAutofill && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onAutofill}
-          disabled={busy !== null || uploading}
-          className="gap-1.5"
-        >
-          <Sparkles className="h-4 w-4" aria-hidden />
-          {busy === 'fill' ? 'Заполняем…' : 'Автозаполнение'}
-        </Button>
-      )}
       {!admitted && (
         <Button
           size="sm"
@@ -883,7 +800,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   })
   const [showErrors, setShowErrors] = useState(false)
   const [admitted, setAdmitted] = useState<string | null>(null)
-  /** чем занята карточка: fill — «Автозаполнение», check — «Проверить» (обе идут по одной сильной цепочке, Task 85) */
+  /** чем занята карточка: check — нейросеть проверяет (Task 86, одна кнопка) */
   const [busy, setBusy] = useState<CardBusy>(null)
   /** уверенность нейросети по полям (Task 83) */
   const [conf, setConf] = useState<Record<string, number>>({})
@@ -921,8 +838,8 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
   /** Правила «Авто в порт» по полям карточки тягача (Task 80/83) */
   const fieldKinds: Record<keyof TruckDraft, PortFieldKind> = { brand: 'text', plate: 'plate', vin: 'vin', sts: 'sts', color: 'color', owner: 'text' }
 
-  /** Слить результат нейросети с ручным вводом: заполняются пустые поля, а при refine («Проверить»)
-   * и заполненные нейросетью, если человек их не правил; вернуть слитые значения
+  /** Слить результат нейросети с ручным вводом: заполняются пустые поля, заполненные нейросетью
+   * перечитываются заново, если человек их не правил; вернуть слитые значения
    * и подсветить поля, нарушающие формат (Task 83) */
   const mergeVehicle = useCallback((res: VehicleIntakeResult, refine = false) => {
     const { merged, refined } = ai.merge(t, res.fields, refine, VEHICLE_FIELD_SOURCE)
@@ -940,83 +857,29 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     return { merged, bad, refined }
   }, [t, ai, swapSts])
 
-  /** «Автозаполнение»: сильная нейроцепочка (точная модель + добор, Task 85) читает обе стороны СТС
-   * и заполняет пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
-  const autofill = useCallback(async (): Promise<boolean> => {
-    if (admitted || busy) return false
-    setShowErrors(true)
-    if (!photos.sts && !photos.stsBack) {
-      toast({
-        title: 'Требуется загрузить фото',
-        description: 'Добавьте фото СТС тягача (лицевая и оборот) — нейросеть заполнит карточку по ним',
-        variant: 'destructive',
-      })
-      return false
-    }
-    setBusy('fill')
-    try {
-      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, stsBack: photos.stsBack, mode: 'fast' })
-      if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
-        if (res.swapped) swapSts()
-        toast({ title: res.crossCheck?.ok === false ? 'Стороны от разных СТС' : 'СТС не распознано', description: [res.message, res.swapped ? STS_SWAP_NOTE : null].filter(Boolean).join(' · '), variant: 'destructive' })
-        return false
-      }
-      const { merged, bad } = mergeVehicle(res)
-      const filled = (['brand', 'plate', 'vin', 'sts', 'color', 'owner'] as const).filter((k) => !t[k].trim() && merged[k].trim())
-      const badList = Object.values(bad)
-      toast({
-        title: filled.length === 0
-          ? 'Нового прочитать не удалось'
-          : badList.length > 0 ? 'Заполнено, но есть нарушения формата' : 'Карточка заполнена нейросетью',
-        description: [
-          filled.length > 0 ? `Заполнено: ${filled.map((k) => (k === 'vin' ? 'VIN' : TRUCK_LABELS[k])).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — нейросеть ничего не добавила',
-          badList.length > 0 ? badList.join(' · ') : null,
-          res.swapped ? STS_SWAP_NOTE : null,
-        ].filter(Boolean).join(' · '),
-        ...(badList.length > 0 ? { variant: 'destructive' as const } : {}),
-      })
-      return true
-    } catch (e) {
-      toast({ title: 'Автозаполнение не удалось', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
-      return false
-    } finally {
-      setBusy(null)
-    }
-  }, [admitted, busy, photos.sts, photos.stsBack, mergeVehicle, swapSts, t, toast])
-
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
     if (busy) return false
 
-    // ——— валидация «все поля и фото обязательны»: подсветка появляется только здесь ———
+    // ——— фото обязательны (сохраняются вместе с записью, Task 54): подсветка появляется только здесь ———
     setShowErrors(true)
-    const missing = (Object.keys(TRUCK_LABELS) as (keyof TruckDraft)[]).filter((k) => t[k].trim() === '')
     const missingPhotos = SOLO_PHOTO_KEYS.filter((k) => !photos[k])
-    if (missing.length > 0 || missingPhotos.length > 0) {
+    if (missingPhotos.length > 0) {
       if (!quiet) {
-        if (missing.length === 0 && missingPhotos.length > 0) {
-          // заполнено всё, кроме фото — тот самый случай из «проформы перевозчика» (Task 83)
-          toast({
-            title: 'Требуется загрузить фото',
-            description: `Добавьте: ${missingPhotos.map((k) => TRUCK_PHOTO_LABELS[k]).join(', ')}`,
-            variant: 'destructive',
-          })
-        } else {
-          const parts = [
-            missing.length > 0 ? `Поля: ${missing.map((k) => TRUCK_LABELS[k]).join(', ')}` : null,
-            missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRUCK_PHOTO_LABELS[k]).join(', ')}` : null,
-          ].filter(Boolean)
-          toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
-        }
+        toast({
+          title: 'Требуется загрузить фото',
+          description: `Добавьте: ${missingPhotos.map((k) => TRUCK_PHOTO_LABELS[k]).join(', ')} — нейросеть прочитает карточку по СТС`,
+          variant: 'destructive',
+        })
       }
       return false
     }
 
     setBusy(quiet ? 'check-quiet' : 'check')
     try {
-      // ——— «Проверить» — реальная нейропроверка: полная цепочка (server + добор) читает СТС
-      // перед попаданием карточки в базу (Task 85) ———
-      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, stsBack: photos.stsBack, mode: 'accurate' })
+      // ——— реальная нейропроверка: одна сильная модель читает СТС, заполняет пустые поля
+      // и уточняет заполненные нейросетью перед попаданием карточки в базу (Task 86) ———
+      const res = await api.intakeVehicle({ kind: 'truck', sts: photos.sts, stsBack: photos.stsBack })
       const { merged, bad, refined } = mergeVehicle(res, true)
       const refinedNote = refined.length > 0 ? `Нейросеть уточнила: ${refined.map((k) => (k === 'vin' ? 'VIN' : TRUCK_LABELS[k])).join(', ')}` : ''
 
@@ -1032,6 +895,19 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       if (badList.length > 0) {
         if (!quiet) {
           toast({ title: 'Формат полей не прошёл правила «Авто в порт»', description: badList.join(' · '), variant: 'destructive' })
+        }
+        return false
+      }
+
+      // ——— после нейросети: не заполненными остались только то, что ИИ не смог прочитать ———
+      const missing = (Object.keys(TRUCK_LABELS) as (keyof TruckDraft)[]).filter((k) => merged[k].trim() === '')
+      if (missing.length > 0) {
+        if (!quiet) {
+          toast({
+            title: 'После проверки не заполнены поля',
+            description: `${missing.map((k) => TRUCK_LABELS[k]).join(', ')} — нейросеть не смогла прочитать, заполните вручную`,
+            variant: 'destructive',
+          })
         }
         return false
       }
@@ -1064,7 +940,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     } finally {
       setBusy(null)
     }
-  }, [admitted, busy, t, photos, carrierId, mergeVehicle, toast])
+  }, [admitted, busy, photos, carrierId, mergeVehicle, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -1090,7 +966,6 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         busy={busy}
         uploading={photoLoading !== null}
         admitted={admitted !== null}
-        onAutofill={() => void autofill()}
         onCheck={() => void check()}
         onRemove={() => onRemove(id)}
       />
@@ -1122,11 +997,8 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
       )}
       {/* ——— «замыливание» экрана с лупой, пока нейросеть работает над карточкой (Task 83) ——— */}
       <ScanOverlay
-        open={busy === 'fill' || busy === 'check'}
-        title={busy === 'fill' ? 'Автозаполнение' : 'Проверка карточки'}
-        steps={busy === 'fill'
-          ? ['Читаем СТС…', 'Распознаём поля…', 'Заполняем карточку…']
-          : undefined}
+        open={busy === 'check'}
+        title="Проверка карточки"
       />
     </section>
   )
@@ -1150,7 +1022,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
   })
   const [showErrors, setShowErrors] = useState(false)
   const [admitted, setAdmitted] = useState<string | null>(null)
-  /** чем занята карточка: fill — «Автозаполнение», check — «Проверить» (обе идут по одной сильной цепочке, Task 85) */
+  /** чем занята карточка: check — нейросеть проверяет (Task 86, одна кнопка) */
   const [busy, setBusy] = useState<CardBusy>(null)
   /** уверенность нейросети по полям (Task 83) */
   const [conf, setConf] = useState<Record<string, number>>({})
@@ -1188,8 +1060,8 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
   /** Правила «Авто в порт» по полям карточки прицепа: госномер — по шаблону прицепа (Task 80/83) */
   const fieldKinds: Record<keyof TrailerDraft, PortFieldKind> = { type: 'text', plate: 'plateTrailer', sts: 'sts', color: 'color', owner: 'text' }
 
-  /** Слить результат нейросети с ручным вводом: заполняются пустые поля, а при refine («Проверить»)
-   * и заполненные нейросетью, если человек их не правил; вернуть слитые значения
+  /** Слить результат нейросети с ручным вводом: заполняются пустые поля, заполненные нейросетью
+   * перечитываются заново, если человек их не правил; вернуть слитые значения
    * и подсветить поля, нарушающие формат (Task 83). Тип прицепа нейросеть не читает. */
   const mergeVehicle = useCallback((res: VehicleIntakeResult, refine = false) => {
     const { plate, sts, color, owner } = res.fields
@@ -1208,83 +1080,29 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     return { merged, bad, refined }
   }, [tr, ai, swapSts])
 
-  /** «Автозаполнение»: сильная нейроцепочка (точная модель + добор, Task 85) читает обе стороны СТС
-   * и заполняет пустые поля; в базу ничего не пишется. Без фото СТС — красный слот и тост. */
-  const autofill = useCallback(async (): Promise<boolean> => {
-    if (admitted || busy) return false
-    setShowErrors(true)
-    if (!photos.sts && !photos.stsBack) {
-      toast({
-        title: 'Требуется загрузить фото',
-        description: 'Добавьте фото СТС прицепа (лицевая и оборот) — нейросеть заполнит карточку по ним',
-        variant: 'destructive',
-      })
-      return false
-    }
-    setBusy('fill')
-    try {
-      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, stsBack: photos.stsBack, mode: 'fast' })
-      if (res.status === 'REUPLOAD' || res.status === 'REJECTED') {
-        if (res.swapped) swapSts()
-        toast({ title: res.crossCheck?.ok === false ? 'Стороны от разных СТС' : 'СТС не распознано', description: [res.message, res.swapped ? STS_SWAP_NOTE : null].filter(Boolean).join(' · '), variant: 'destructive' })
-        return false
-      }
-      const { merged, bad } = mergeVehicle(res)
-      const filled = (['plate', 'sts', 'color', 'owner'] as const).filter((k) => !tr[k].trim() && merged[k].trim())
-      const badList = Object.values(bad)
-      toast({
-        title: filled.length === 0
-          ? 'Нового прочитать не удалось'
-          : badList.length > 0 ? 'Заполнено, но есть нарушения формата' : 'Карточка заполнена нейросетью',
-        description: [
-          filled.length > 0 ? `Заполнено: ${filled.map((k) => TRAILER_LABELS[k]).join(', ')} — проверьте и нажмите «Проверить»` : 'Поля уже заполнены — нейросеть ничего не добавила',
-          badList.length > 0 ? badList.join(' · ') : null,
-          res.swapped ? STS_SWAP_NOTE : null,
-        ].filter(Boolean).join(' · '),
-        ...(badList.length > 0 ? { variant: 'destructive' as const } : {}),
-      })
-      return true
-    } catch (e) {
-      toast({ title: 'Автозаполнение не удалось', description: e instanceof Error ? e.message : 'Неизвестная ошибка', variant: 'destructive' })
-      return false
-    } finally {
-      setBusy(null)
-    }
-  }, [admitted, busy, photos.sts, photos.stsBack, mergeVehicle, swapSts, tr, toast])
-
   const check = useCallback(async (quiet = false): Promise<boolean> => {
     if (admitted) return true
     if (busy) return false
 
-    // ——— валидация «все поля и фото обязательны»: подсветка появляется только здесь ———
+    // ——— фото обязательны (сохраняются вместе с записью, Task 54): подсветка появляется только здесь ———
     setShowErrors(true)
-    const missing = (Object.keys(TRAILER_LABELS) as (keyof TrailerDraft)[]).filter((k) => tr[k].trim() === '')
     const missingPhotos = SOLO_PHOTO_KEYS.filter((k) => !photos[k])
-    if (missing.length > 0 || missingPhotos.length > 0) {
+    if (missingPhotos.length > 0) {
       if (!quiet) {
-        if (missing.length === 0 && missingPhotos.length > 0) {
-          // заполнено всё, кроме фото — тот самый случай из «проформы перевозчика» (Task 83)
-          toast({
-            title: 'Требуется загрузить фото',
-            description: `Добавьте: ${missingPhotos.map((k) => TRAILER_PHOTO_LABELS[k]).join(', ')}`,
-            variant: 'destructive',
-          })
-        } else {
-          const parts = [
-            missing.length > 0 ? `Поля: ${missing.map((k) => TRAILER_LABELS[k]).join(', ')}` : null,
-            missingPhotos.length > 0 ? `Фото: ${missingPhotos.map((k) => TRAILER_PHOTO_LABELS[k]).join(', ')}` : null,
-          ].filter(Boolean)
-          toast({ title: 'Не все поля заполнены', description: parts.join(' · '), variant: 'destructive' })
-        }
+        toast({
+          title: 'Требуется загрузить фото',
+          description: `Добавьте: ${missingPhotos.map((k) => TRAILER_PHOTO_LABELS[k]).join(', ')} — нейросеть прочитает карточку по СТС`,
+          variant: 'destructive',
+        })
       }
       return false
     }
 
     setBusy(quiet ? 'check-quiet' : 'check')
     try {
-      // ——— «Проверить» — реальная нейропроверка: полная цепочка (server + добор) читает СТС
-      // перед попаданием карточки в базу (Task 85) ———
-      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, stsBack: photos.stsBack, mode: 'accurate' })
+      // ——— реальная нейропроверка: одна сильная модель читает СТС, заполняет пустые поля
+      // и уточняет заполненные нейросетью перед попаданием карточки в базу (Task 86) ———
+      const res = await api.intakeVehicle({ kind: 'trailer', sts: photos.sts, stsBack: photos.stsBack })
       const { merged, bad, refined } = mergeVehicle(res, true)
       const refinedNote = refined.length > 0 ? `Нейросеть уточнила: ${refined.map((k) => TRAILER_LABELS[k]).join(', ')}` : ''
 
@@ -1300,6 +1118,19 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       if (badList.length > 0) {
         if (!quiet) {
           toast({ title: 'Формат полей не прошёл правила «Авто в порт»', description: badList.join(' · '), variant: 'destructive' })
+        }
+        return false
+      }
+
+      // ——— после нейросети: не заполненными остались только то, что ИИ не смог прочитать ———
+      const missing = (Object.keys(TRAILER_LABELS) as (keyof TrailerDraft)[]).filter((k) => merged[k].trim() === '')
+      if (missing.length > 0) {
+        if (!quiet) {
+          toast({
+            title: 'После проверки не заполнены поля',
+            description: `${missing.map((k) => TRAILER_LABELS[k]).join(', ')} — нейросеть не смогла прочитать, заполните вручную`,
+            variant: 'destructive',
+          })
         }
         return false
       }
@@ -1331,7 +1162,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     } finally {
       setBusy(null)
     }
-  }, [admitted, busy, tr, photos, carrierId, mergeVehicle, toast])
+  }, [admitted, busy, photos, carrierId, mergeVehicle, toast])
 
   // регистрация функции проверки для «Проверить все» (актуальная версия через ref-эффект)
   const checkRef = useRef(check)
@@ -1357,7 +1188,6 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
         busy={busy}
         uploading={photoLoading !== null}
         admitted={admitted !== null}
-        onAutofill={() => void autofill()}
         onCheck={() => void check()}
         onRemove={() => onRemove(id)}
       />
@@ -1390,11 +1220,8 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
       )}
       {/* ——— «замыливание» экрана с лупой, пока нейросеть работает над карточкой (Task 83) ——— */}
       <ScanOverlay
-        open={busy === 'fill' || busy === 'check'}
-        title={busy === 'fill' ? 'Автозаполнение' : 'Проверка карточки'}
-        steps={busy === 'fill'
-          ? ['Читаем СТС…', 'Распознаём поля…', 'Заполняем карточку…']
-          : undefined}
+        open={busy === 'check'}
+        title="Проверка карточки"
       />
     </section>
   )

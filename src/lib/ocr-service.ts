@@ -78,7 +78,7 @@ export async function ocrServiceStatus(): Promise<OcrServiceStatus> {
 /** Результат распознавания: прочитано; вид документа без шаблона (проверка вручную); сервис не ответил */
 export type OcrServiceResult = { kind: 'ok'; ocr: OcrOutput } | { kind: 'unsupported' } | { kind: 'unavailable' }
 
-// один документ — до ~40 с, с повторным точным проходом — до ~90 с; первый вызов ещё и грузит модели
+// один документ — до ~40 с, с повторными проходами (штамп, кадр ×1,5) — до ~90 с; первый вызов ещё и грузит модель
 const OCR_TIMEOUT_MS = 180_000
 
 let queue: Promise<unknown> = Promise.resolve()
@@ -92,17 +92,16 @@ function enqueue<T>(job: () => Promise<T>): Promise<T> {
 
 /**
  * Распознавание через локальный сервис (изображение или PDF — сервис читает первую страницу).
- * mode (Task 83) — устаревший параметр совместимости: с Task 85 движок всегда читает
- * полной цепочкой (точная модель + добор лёгкой), различие кнопок платформы ушло.
+ * Одна сильная модель (Task 86), параметр mode прежних кнопок убран.
  */
-export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean, mode?: 'fast' | 'accurate'): Promise<OcrServiceResult> {
+export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean): Promise<OcrServiceResult> {
   if (!ocrServiceEnabled()) return Promise.resolve({ kind: 'unavailable' })
   return enqueue(async (): Promise<OcrServiceResult> => {
     try {
       const res = await fetch(`${BASE}/ocr`, {
         method: 'POST',
         headers: headers(),
-        body: JSON.stringify({ type, dataUri, intake, ...(mode ? { mode } : {}) }),
+        body: JSON.stringify({ type, dataUri, intake }),
         signal: AbortSignal.timeout(OCR_TIMEOUT_MS),
       })
       if (res.status === 422) return { kind: 'unsupported' }
@@ -116,13 +115,11 @@ export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean, m
           confidences?: Record<string, number>
           detectedType?: DocType | 'UNKNOWN'
           side?: string
-          engineMode?: string
           confirmations?: Record<string, string[]>
         }
       }
       const ocr = j.ocr
       if (!j.ok || !ocr || typeof ocr.quality !== 'number' || !ocr.engine) return { kind: 'unavailable' }
-      const engineMode = ocr.engineMode === 'accurate' ? 'accurate' as const : ocr.engineMode === 'fast' ? 'fast' as const : undefined
       return {
         kind: 'ok',
         ocr: {
@@ -136,7 +133,6 @@ export function ocrServiceOcr(dataUri: string, type: DocType, intake: boolean, m
             ? { detectedType: KNOWN_TYPES.has(ocr.detectedType as DocType) ? ocr.detectedType : 'UNKNOWN' }
             : {}),
           ...(ocr.side === 'front' || ocr.side === 'back' ? { side: ocr.side } : {}),
-          ...(engineMode ? { engineMode } : {}),
           ...(ocr.confirmations ? { confirmations: ocr.confirmations } : {}),
         },
       }

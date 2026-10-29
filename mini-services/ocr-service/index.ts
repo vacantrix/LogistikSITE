@@ -5,20 +5,19 @@
  * по HTTP. Единственный движок — PaddleOCR (self-hosted Python, mini-services/paddle-ocr):
  *
  *   PADDLE_OCR_URL, по умолчанию http://127.0.0.1:3031/ocr
- *      (контракт: POST { image, docType, fields[], mode? } → { quality, fields, confidences, docType, side?, confirmations, engineMode })
+ *      (контракт: POST { image, docType, fields[] } → { quality, fields, confidences, docType, side?, confirmations })
  *      Принимает изображения и PDF (первая страница); 422 — вид документа не распознаётся автоматически.
- *      mode (Task 83): "fast" — лёгкая нейросеть (PP-OCRv5_mobile_det) для «Автозаполнения»,
- *      "accurate" — точная (PP-OCRv5_server_det) для «Проверить»; без mode — авто-подбор.
+ *      Одна сильная модель (Task 86): детекция PP-OCRv5_server_det, чтение eslav_PP-OCRv5_mobile_rec.
  *      Облачный резерв (GLM-4.6V) удалён (Task 79): фото документов не покидают наш сервер.
  *
  * Сервис слушает только 127.0.0.1 — снаружи он недоступен.
  *
  * Контракт ответа зеркалит OcrOutput из src/lib/verify.ts платформы:
- *   { engine, quality, fields, confidences, detectedType?, engineMode? }
+ *   { engine, quality, fields, confidences, detectedType? }
  *
  * Эндпоинты:
  *   GET  /health — статус сервиса и движка
- *   POST /ocr    — { type, dataUri, intake?, mode? } → { ok, ocr, chain }; 422 — вид документа без шаблона
+ *   POST /ocr    — { type, dataUri, intake? } → { ok, ocr, chain }; 422 — вид документа без шаблона
  *
  * Распознавание одного документа занимает 5–40 с, PaddleOCR обрабатывает их по одному,
  * поэтому таймауты здесь длинные, а очередь держит сама платформа (src/lib/ocr-service.ts).
@@ -54,8 +53,6 @@ interface OcrOutput {
   detectedType?: DocType | 'UNKNOWN'
   /** СТС: какая сторона на фото */
   side?: 'front' | 'back'
-  /** какая нейросеть читала: fast (лёгкая) / accurate (точная) — Task 83 */
-  engineMode?: 'fast' | 'accurate'
   confirmations?: Record<string, string[]>
 }
 
@@ -66,8 +63,6 @@ interface OcrRequestBody {
   type?: string
   dataUri?: string
   intake?: boolean
-  /** Task 83: "fast" — лёгкая модель («Автозаполнение»), "accurate" — точная («Проверить») */
-  mode?: string
 }
 
 // ---------------- утилиты ----------------
@@ -89,14 +84,14 @@ const DOC_TYPE_VALUES = DOC_TYPES
  *   PADDLE_OCR_URL=http://127.0.0.1:3031/ocr
  * Контракт: POST { image (dataUri), docType, fields[] } → { quality, fields, confidences, docType?, side? }
  */
-async function paddleOcr(dataUri: string, type: DocType, mode?: string): Promise<PaddleResult> {
+async function paddleOcr(dataUri: string, type: DocType): Promise<PaddleResult> {
   const url = PADDLE_URL
   if (!url) return null
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(TOKEN ? { 'X-OCR-Token': TOKEN } : {}) },
-      body: JSON.stringify({ image: dataUri, docType: type, fields: DOC_FIELDS[type], ...(mode ? { mode } : {}) }),
+      body: JSON.stringify({ image: dataUri, docType: type, fields: DOC_FIELDS[type] }),
       signal: AbortSignal.timeout(PADDLE_TIMEOUT_MS),
     })
     if (res.status === 422) return { kind: 'unsupported' }
@@ -107,7 +102,6 @@ async function paddleOcr(dataUri: string, type: DocType, mode?: string): Promise
       confidences?: Record<string, number>
       docType?: string
       side?: string
-      engineMode?: string
       confirmations?: Record<string, string[]>
     }
     if (typeof j.quality !== 'number' || !j.fields) return null
@@ -115,7 +109,6 @@ async function paddleOcr(dataUri: string, type: DocType, mode?: string): Promise
     const detectedType = DOC_TYPE_VALUES.includes(rawType as DocType)
       ? (rawType as DocType)
       : rawType === 'UNKNOWN' ? 'UNKNOWN' as const : undefined
-    const engineMode = j.engineMode === 'accurate' ? 'accurate' as const : j.engineMode === 'fast' ? 'fast' as const : undefined
     return {
       kind: 'ok',
       ocr: {
@@ -125,7 +118,6 @@ async function paddleOcr(dataUri: string, type: DocType, mode?: string): Promise
         confidences: j.confidences ?? {},
         ...(detectedType ? { detectedType } : {}),
         ...(j.side === 'front' || j.side === 'back' ? { side: j.side } : {}),
-        ...(engineMode ? { engineMode } : {}),
         ...(j.confirmations ? { confirmations: j.confirmations } : {}),
       },
     }
@@ -155,7 +147,7 @@ Bun.serve({
         description: 'Self-hosted OCR-микросервис проверки документов АЭМЗ Логистика',
         version: VERSION,
         engines: {
-          paddle: { configured: Boolean(PADDLE_URL), engine: 'PaddleOCR (self-hosted)', modes: ['fast', 'accurate'] },
+          paddle: { configured: Boolean(PADDLE_URL), engine: 'PaddleOCR (self-hosted)' },
         },
         activeEngine: lastEngine,
         processed,
@@ -180,11 +172,10 @@ Bun.serve({
 
       const chain: string[] = []
 
-      // PaddleOCR: mode — какая нейросеть читает (fast — лёгкая, accurate — точная; Task 83)
-      const mode = body?.mode === 'fast' || body?.mode === 'accurate' ? body.mode : undefined
-      const paddle = await paddleOcr(dataUri, type, mode)
+      // PaddleOCR: одна сильная модель (Task 86)
+      const paddle = await paddleOcr(dataUri, type)
       if (paddle?.kind === 'ok') {
-        chain.push(mode ? `paddleocr:${mode}` : 'paddleocr')
+        chain.push('paddleocr')
         lastEngine = paddle.ocr.engine
         processed += 1
         return json({ ok: true, ocr: paddle.ocr, chain })
@@ -204,4 +195,4 @@ Bun.serve({
 })
 
 console.log(`[aemz-ocr-service] запущен на http://127.0.0.1:${PORT} — движок: PaddleOCR(${PADDLE_URL})`,
-  '— нейросети: fast (лёгкая) / accurate (точная) по кнопкам платформы')
+  '— одна сильная модель (Task 86)')

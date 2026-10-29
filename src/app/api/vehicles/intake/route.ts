@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
-import { analyzeIntakeDoc, buildIntakeDraft, type OcrMode, type VerifyVerdict } from '@/lib/verify'
+import { analyzeIntakeDoc, buildIntakeDraft, type VerifyVerdict } from '@/lib/verify'
 import { validatePortField, type PortFieldKind } from '@/lib/port-fields'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
 import { startOcrJob } from '@/lib/ocr-jobs'
@@ -26,15 +26,12 @@ const fmtSts = (d: string) => `${d.slice(0, 2)} ${d.slice(2, 4)} ${d.slice(4)}`
  * POST /api/vehicles/intake — распознавание СТС для одиночных карточек
  * «Добавить ТС» / «Добавить прицеп» (Task 83).
  *
- * Принимает { kind, sts?, stsBack?, mode }: лицевую сторону (марка, госномер, VIN, номер СТС, цвет)
+ * Принимает { kind, sts?, stsBack? }: лицевую сторону (марка, госномер, VIN, номер СТС, цвет)
  * и оборот (собственник, номер СТС) — хотя бы одну. Стороны, загруженные не в свои слоты,
  * меняются местами (swapped). Номер СТС сверяется между сторонами: не совпал — стороны
  * от разных СТС, итог REJECTED, собственник с такого оборота не подставляется.
  *
- * Нейросети (mode):
- *   "fast"     — лёгкая модель PP-OCRv5_mobile_det — кнопка «Автозаполнение»;
- *   "accurate" — точная PP-OCRv5_server_det — кнопка «Проверить»;
- *   без mode   — автоподбор движка.
+ * Одна сильная модель (Task 86) — бывший параметр mode (fast/accurate) убран.
  *
  * Результат нормализуется и проверяется правилами «Авто в порт» (src/lib/port-fields.ts):
  * мусор вида «22о2/гвкгк» возвращается списком проблем, а не молча попадает в карточку.
@@ -49,7 +46,6 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => null)
   const kind = body?.kind === 'trailer' ? 'trailer' : 'truck'
-  const mode: OcrMode | undefined = body?.mode === 'fast' || body?.mode === 'accurate' ? body.mode : undefined
   const front = (body?.sts?.dataUri ? body.sts : null) as Upload | null
   const back = (body?.stsBack?.dataUri ? body.stsBack : null) as Upload | null
 
@@ -64,7 +60,7 @@ export async function POST(req: NextRequest) {
   const started = startOcrJob<VehicleIntakeResult>(async () => {
     const settings = await loadVerifySettings()
     const read = (u: Upload | null) => (u
-      ? analyzeIntakeDoc(String(u.fileName ?? '').slice(0, 200), 'STS', u.dataUri!, settings, mode)
+      ? analyzeIntakeDoc(String(u.fileName ?? '').slice(0, 200), 'STS', u.dataUri!, settings)
       : Promise.resolve(null))
     const [vFront, vBack] = await Promise.all([read(front), read(back)])
 
@@ -125,7 +121,6 @@ export async function POST(req: NextRequest) {
       status,
       quality: Math.min(...verdicts.map((v) => v.quality)),
       engine: (f ?? b)!.engine,
-      engineMode: (f ?? b)!.engineMode,
       message,
       fields,
       confidence: {

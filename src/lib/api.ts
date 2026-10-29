@@ -178,16 +178,16 @@ export const api = {
   verifyDocuments: (id: string) =>
     fetch(`/api/requests/${id}/verify`, withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).then(json<{ request: RequestDTO }>),
 
-  /** Нейросеть распознаёт документы нового водителя и возвращает черновик карточки (фоновая задача) */
-  intakeDriver: (docs: Partial<Record<string, { fileName: string; dataUri: string }>>, mode?: 'fast' | 'accurate') =>
+  /** Нейросеть распознаёт документы нового водителя и возвращает черновик карточки (фоновая задача).
+   * Одна сильная модель (Task 86) — бывшие кнопки «Автозаполнение»/«Проверить» объединены. */
+  intakeDriver: (docs: Partial<Record<string, { fileName: string; dataUri: string }>>) =>
     runOcrJob<IntakeResult>(
-      fetch('/api/drivers/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs, mode }) })).then(json<{ jobId: string }>),
+      fetch('/api/drivers/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs }) })).then(json<{ jobId: string }>),
     ),
 
-  /** Распознавание СТС для карточек «Добавить ТС»/«Добавить прицеп» (Task 83):
-   * mode "fast" — лёгкая нейросеть («Автозаполнение"), "accurate" — точная («Проверить»);
+  /** Распознавание СТС для карточек «Добавить ТС»/«Добавить прицеп» (Task 83);
    * выполняется фоновой задачей — клиент опрашивает статус, шлюз не обрывает ответ */
-  intakeVehicle: (body: { kind: 'truck' | 'trailer'; sts?: { fileName: string; dataUri: string }; stsBack?: { fileName: string; dataUri: string }; mode?: 'fast' | 'accurate' }) =>
+  intakeVehicle: (body: { kind: 'truck' | 'trailer'; sts?: { fileName: string; dataUri: string }; stsBack?: { fileName: string; dataUri: string } }) =>
     runOcrJob<VehicleIntakeResult>(
       fetch('/api/vehicles/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ jobId: string }>),
     ),

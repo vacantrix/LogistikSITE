@@ -5,10 +5,9 @@
  *
  * Распознавание — только локальный OCR-сервис на нашем сервере (PaddleOCR,
  * mini-services/paddle-ocr): фото документов не покидают сервер. Одна сильная
- * цепочка для всех операций (Task 85): сначала точная модель PP-OCRv5_server_det,
- * что не дочитает — добирает лёгкая PP-OCRv5_mobile_det; параметр mode
- * ("fast"/"accurate", Task 83) сохранён в контракте для совместимости, различие
- * кнопок ушло — «Автозаполнение» и «Проверить» читают одинаково полно.
+ * модель на все операции (Task 86): детекция PP-OCRv5_server_det, чтение
+ * eslav_PP-OCRv5_mobile_rec; двухрежимность «fast/accurate» и различие кнопок
+ * «Автозаполнение»/«Проверить» убраны — карточку читает и проверяет одна кнопка.
  *   Облачный резерв (GLM-4.6V) удалён (Task 79).
  * Ничего не подставляется: при сбое нейросети код не «читает» данные из заявки.
  * Имитация распознавания осталась только для демо-образцов (SVG) и только при DEMO_SAMPLES=1.
@@ -132,8 +131,6 @@ export interface OcrOutput {
   detectedType?: DocType | 'UNKNOWN'
   /** сторона документа (у СТС — лицевая или оборот) */
   side?: 'front' | 'back'
-  /** основной проход выполняет точная модель; «fast» встречается в старых сохранённых данных (Task 83) */
-  engineMode?: 'fast' | 'accurate'
   /** независимые подтверждения, найденные самим движком: копии номера на полях паспорта и т. п. */
   confirmations?: Record<string, string[]>
 }
@@ -147,8 +144,6 @@ export interface VerifyVerdict {
   confidences: Record<string, number>
   issues: string[]
   message: string
-  /** основной проход выполняет точная модель; «fast» встречается в старых сохранённых данных (Task 83) */
-  engineMode?: 'fast' | 'accurate'
   /** фактически распознанный вид документа (заполняется при первичном вводе) */
   detectedType?: DocType | 'UNKNOWN' | null
   /** файл загружен в слот movedFrom, а на нём другой документ комплекта — проверен как он */
@@ -255,20 +250,15 @@ export class OcrUnavailableError extends Error {
   constructor() { super('Сервис распознавания недоступен или занят') }
 }
 
-/** Режим запроса к OCR (Task 83) — сохранён ради совместимости контракта; с Task 85 обе
- * кнопки платформы идут по одной сильной цепочке, движок различие игнорирует */
-export type OcrMode = 'fast' | 'accurate'
-
 /**
  * Распознавание настоящего фото: только локальный сервис на нашем сервере
  * (облачный резерв удалён, Task 79 — фото документов не покидают сервер).
- * mode — устаревший параметр совместимости (Task 83→85): движок всегда читает полной
- * цепочкой (точная модель + добор лёгкой), различие кнопок ушло.
+ * Одна сильная модель (Task 86), различие режимов fast/accurate убрано.
  * 'unsupported' — у движка нет шаблона этого вида документа (проверка вручную);
  * OcrUnavailableError — сервис не ответил: проверку нужно повторить.
  */
-export async function recognize(dataUri: string, type: DocType, intake: boolean, mode?: OcrMode): Promise<OcrOutput | 'unsupported'> {
-  const local = await ocrServiceOcr(dataUri, type, intake, mode)
+export async function recognize(dataUri: string, type: DocType, intake: boolean): Promise<OcrOutput | 'unsupported'> {
+  const local = await ocrServiceOcr(dataUri, type, intake)
   if (local.kind === 'ok') return local.ocr
   if (local.kind === 'unsupported') return 'unsupported'
   throw new OcrUnavailableError()
@@ -321,7 +311,6 @@ export function applyRules(
   const { fields, confidences } = ocr
   const verdict = (status: VerifyVerdict['status'], message: string): VerifyVerdict => ({
     status, quality: ocr.quality, engine: ocr.engine, fields, confidences, issues, message,
-    ...(ocr.engineMode ? { engineMode: ocr.engineMode } : {}),
   })
 
   // 1. Качество изображения
@@ -648,7 +637,6 @@ export async function analyzeIntakeDoc(
   type: DocType,
   dataUri: string,
   settings: VerifySettings,
-  mode?: OcrMode,
   retype?: DocType[],
 ): Promise<VerifyVerdict> {
   if (dataUri.startsWith('data:image/svg')) {
@@ -667,7 +655,7 @@ export async function analyzeIntakeDoc(
 
   let ocr: OcrOutput | 'unsupported'
   try {
-    ocr = await recognize(dataUri, type, true, mode)
+    ocr = await recognize(dataUri, type, true)
   } catch (e) {
     if (!(e instanceof OcrUnavailableError)) throw e
     return {

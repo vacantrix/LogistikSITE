@@ -26,7 +26,7 @@ import pypdfium2 as pdfium
 
 import engine
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PADDLE_OCR_PORT", "3031"))
 TOKEN = os.environ.get("OCR_SERVICE_TOKEN", "")
@@ -90,22 +90,21 @@ def decode_image(data_uri):
 
 
 def warmup():
-    """Мало памяти (Task 83, стенд 4 ГБ): модели НЕ держим в диспетчере — каждый запрос
-    обслуживает короткоживущий процесс (см. analyze_subprocess): одна модель, ОДИН документ,
-    память возвращается системе; цена — ~10–20 с на загрузку модели в каждом запросе.
-    Память есть: обе модели грузятся при старте и остаются тёплыми — документ за секунды."""
+    """Мало памяти (Task 83, стенд 4 ГБ): модель НЕ держим в диспетчере — каждый запрос
+    обслуживает короткоживущий процесс (см. analyze_subprocess): ОДИН документ,
+    память возвращается системе; цена — ~5–20 с на загрузку модели в каждом запросе.
+    Память есть: модель грузится при старте и остаётся тёплой — документ за секунды."""
     if engine.LOW_MEMORY:
         STATE["ready"] = True
-        print("[paddle-ocr] режим экономии памяти: модели — по запросу, в отдельном процессе", flush=True)
+        print("[paddle-ocr] режим экономии памяти: распознавание — в отдельном процессе на запрос", flush=True)
         return
     try:
         with LOCK:
-            engine.get_ocr("fast")
-            engine.get_ocr("accurate")
+            engine.get_ocr()
         STATE["ready"] = True
-        print("[paddle-ocr] модели загружены (лёгкая и точная)", flush=True)
+        print("[paddle-ocr] модель загружена и тёплая", flush=True)
     except Exception as e:  # noqa: BLE001 — сервис должен жить и сообщать статус
-        print(f"[paddle-ocr] ошибка загрузки моделей: {e}", flush=True)
+        print(f"[paddle-ocr] ошибка загрузки модели: {e}", flush=True)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -167,17 +166,13 @@ class Handler(BaseHTTPRequestHandler):
         path = decode_image(data_uri)
         if not path:
             return self.send_json({"ok": False, "error": "нужно изображение JPG, PNG, WebP или PDF"}, 400)
-        # Task 85 — одна сильная цепочка: точная модель — основной проход, лёгкая добирает
-        # недочитанное; mode от кнопок платформы сохранён для совместимости контракта
-        mode = body.get("mode")
-        if mode not in ("fast", "accurate"):
-            mode = None
+        # Task 86 — одна сильная модель: mode кнопок платформы больше не существует
         t0 = time.time()
         try:
             with LOCK:
                 # Task 83: при нехватке памяти — короткоживущий процесс на документ
-                # (на стенде 4 ГБ иначе OOM-killer), иначе тёплые модели этого процесса
-                res = engine.analyze_subprocess(path, mode) if engine.LOW_MEMORY else engine.analyze(path, mode=mode)
+                # (на стенде 4 ГБ иначе OOM-killer), иначе тёплая модель этого процесса
+                res = engine.analyze_subprocess(path) if engine.LOW_MEMORY else engine.analyze(path)
             STATE["ready"] = True
         except Exception as e:  # noqa: BLE001
             print(f"[paddle-ocr] ошибка распознавания: {type(e).__name__}: {e}", flush=True)
@@ -198,7 +193,6 @@ class Handler(BaseHTTPRequestHandler):
             "confidences": res["confidences"],
             "detectedType": res["docType"],
             "confirmations": res["confirmations"],
-            "engineMode": res.get("engineMode") or mode or "accurate",
             **({"side": res["side"]} if res.get("side") else {}),
         }
         if platform:

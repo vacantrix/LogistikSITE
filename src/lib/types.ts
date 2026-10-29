@@ -760,8 +760,6 @@ export interface VehicleIntakeResult {
   status: 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL' | 'PENDING'
   quality: number
   engine: string
-  /** какая нейросеть читала: fast (лёгкая) / accurate (точная) */
-  engineMode?: 'fast' | 'accurate'
   message: string
   fields: { brand: string; plate: string; vin: string; sts: string; color: string; owner: string }
   confidence: Partial<Record<'brand' | 'plate' | 'vin' | 'sts' | 'color' | 'owner', number>>

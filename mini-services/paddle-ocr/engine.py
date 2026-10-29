@@ -14,13 +14,15 @@ PaddleOCR (три нейросети: поиск строк, ориентаци�
 страница регистрации, водительское удостоверение, СТС (лицевая сторона и оборот),
 доверенность по форме М-2.
 
-Точность (Task 85): все операции платформы читает одна сильная цепочка — сначала точная
-модель поиска строк (PP-OCRv5 server), а что она не дочитала на изношенных сканах, добирает
-лёгкая (mobile): у каждой модели строки находит свои (боевой тест: точная нашла фамилию,
-лёгкая — отчество), слияние проходов читает больше, чем любая модель по отдельности.
+Одна сильная модель (Task 86, боевой тест): детекция — PP-OCRv5_server_det, чтение —
+eslav_PP-OCRv5_mobile_rec. Лёгкая модель детекции (mobile_det) убрана: это была вторая
+сеть «на добор», а сильнее server_det в PaddleOCR для кириллицы нет (у server_rec и
+PP-OCRv6_rec словари без кириллицы — проверено по inference.yml). Недочитанные места
+добирает не вторая модель, а повторные проходы по кадру: целый лист, штамп прописки
+крупным планом (stamp_pass), кадр ×1,5 и разворот на 180°.
 """
 import os
-import gc
+import math
 import re
 from datetime import date
 
@@ -46,23 +48,18 @@ PLATFORM_TYPE = {"passport": "PASSPORT_PHOTO", "passport_registration": "PASSPOR
                  "poa": "POA", "unknown": "UNKNOWN"}
 SUPPORTED = {"PASSPORT_PHOTO", "PASSPORT_REG", "LICENSE", "STS", "POA"}
 
-# модели (Task 85): точная — основной проход всех операций, лёгкая — автоматический
-# добор полей, которые точная не дочитала (переопределяются переменными окружения)
-FAST_DET = os.environ.get("OCR_DET_FAST", "PP-OCRv5_mobile_det")
-ACCURATE_DET = os.environ.get("OCR_DET_ACCURATE", "PP-OCRv5_server_det")
+# модели (Task 86 — одна сильная цепочка, переопределяются переменными окружения):
+# детекция — PP-OCRv5_server_det (сильнейшая из кириллических в PaddleOCR), чтение —
+# eslav_PP-OCRv5_mobile_rec (у server_rec/PP-OCRv6_rec словари без кириллицы — проверено)
+DET_MODEL = os.environ.get("OCR_DET_MODEL", "PP-OCRv5_server_det")
 REC_MODEL = os.environ.get("OCR_REC_MODEL", "eslav_PP-OCRv5_mobile_rec")
 UPSCALE_BELOW = int(os.environ.get("OCR_UPSCALE_BELOW", "1300"))   # мелкие сканы увеличиваем вдвое
-# точная модель ищет строки на кадре не больше этого размера: на фото паспорта 1500×2000 — 38 с вместо 70,
-# поля те же (сами строки читаются с исходного кадра)
-ACCURATE_MAX_SIDE = int(os.environ.get("OCR_ACCURATE_MAX_SIDE", "1600"))
-# режим экономии памяти (Task 84): большой кадр в быстрой модели выдавливал сервисы стенда
-# (OOM-killer, exit 137 на фото 1500×2100 при ~1,8 ГБ свободных): детекция — на кадре до этого лимита,
-# сами строки читаются с исходного фото, поля те же
-FAST_DET_LIMIT = int(os.environ.get("OCR_DET_FAST_LIMIT", "736"))
-# …но на 736 px паспорт на листе А4 не узнаётся вовсе. Повторный проход (документ не узнан или поля
-# не дочитаны) ищет строки на кадре до 1216 px. Замер пика памяти процесса на фото 1440×1920:
-# 736 px — 0,44 ГБ, 1216 px — 0,64 ГБ, без лимита — 1,1 ГБ; строк на 1216 находится больше всего
-FAST_DET_RETRY_LIMIT = int(os.environ.get("OCR_DET_FAST_RETRY_LIMIT", "1216"))
+# детекция ищет строки на кадре не больше этого размера: на фото паспорта 1500×2000 — 38 с вместо 70,
+# поля те же (сами строки читаются с исходного кадра). Лестницу при нехватке памяти задаёт
+# _run_isolated этой же переменной у ребёнка
+DET_MAX_SIDE = int(os.environ.get("OCR_DET_MAX_SIDE", "1600"))
+# повторный проход по штампу прописки: вырезка штампа увеличивается до этого размера (см. stamp_pass)
+STAMP_TARGET = int(os.environ.get("OCR_STAMP_TARGET", "1500"))
 
 
 def available_mb():
@@ -91,12 +88,24 @@ def available_mb():
     return 4096
 
 
-# Режим экономии памяти (Task 83, стенд 4 ГБ): одна нейросеть в памяти, документ — в отдельном
-# процессе, мелкий кадр для точной модели. При запасе памяти обе модели держатся тёплыми.
+# Режим экономии памяти (Task 83, стенд 4 ГБ): документ — в отдельном процессе.
+# При запасе памяти (≥6 ГБ свободных) модель живёт прямо в процессе сервиса.
 # OCR_LOW_MEMORY=1/0 — включить или выключить явно; иначе по свободной памяти при старте.
 _low = os.environ.get("OCR_LOW_MEMORY", "").strip()
 LOW_MEMORY = _low == "1" if _low in ("0", "1") else available_mb() < 6000
-MARGIN_MAX_SIDE = 2000   # полоса с номером на полях паспорта (см. read_margin_number)
+
+# Память стенда (Task 86): пиковая память детекции ≈ 4–5 ГБ на МПиксель входа, а пул paddle
+# растёт кумулятивно от прохода к проходу. Ограничиваем площадь входа детекции у ВСЕХ проходов
+# (целая страница, вырезка, штамп, полоса на полях) — не только сторону: у полос и вырезок
+# свои пропорции, лимит по стороне их не спасал.
+DET_AREA = float(os.environ.get("OCR_DET_AREA", "0.18"))   # МПиксель входа детекции
+
+
+def det_side_for(h, w):
+    """Лимит стороны кадра для детекции: вход ≤ DET_AREA МПиксель и ≤ DET_MAX_SIDE по стороне.
+    Мелкие кадры не увеличиваются (лимит = их большая сторона) — только крупные уменьшаются."""
+    scale = min(DET_MAX_SIDE / max(h, w), math.sqrt(DET_AREA * 1e6 / (h * w)), 1.0)
+    return max(64, int(max(h, w) * scale))
 
 
 def cyr(s):
@@ -145,10 +154,8 @@ def add_years(d, n):
 # ---------------- чтение текста ----------------
 
 _ocr = {}
-_mode = "accurate"
-_det_limit = None   # лимит кадра поиска строк лёгкой моделью на этот проход (None — FAST_DET_LIMIT)
 
-# признаки известных документов: если на фото нет ни одного, точный повторный проход не нужен —
+# признаки известных документов: если на фото нет ни одного, повторный проход не нужен —
 # это другая страница (военный учёт, семейное положение, оборот ВУ), её отправят на перезагрузку
 DOC_HINTS = ("ПАСПОРТ", "ФАМИЛИЯ", "ОТЧЕСТВО", "РОЖДЕНИЯ", "ПОДРАЗДЕЛЕНИЯ", "ВОДИТЕЛЬСК", "УДОСТОВЕРЕН",
                                    "СВИДЕТЕЛЬСТВО", "СОБСТВЕННИК", "ДОВЕРЕННОСТ", "ЗАРЕГИСТРИР", "МЕСТОЖИТЕЛЬ")
@@ -340,40 +347,32 @@ def lex_fix(text, line, kind):
     return out
 
 
-def get_ocr(mode=None):
-    """mode: accurate — точная модель (основной проход), fast — лёгкая (добор полей).
+def get_ocr():
+    """Единственная сильная цепочка (Task 86): детекция server_det + чтение eslav_rec.
 
-    Экономия памяти на стенде 4 ГБ (Task 83): в памяти держим ТОЛЬКО одну нейросеть —
-    при загрузке другой другая выгружается (server_det + mobile_det вместе ~3.2 ГБ → OOM-killer;
-    по одной ~0.6–1.2 ГБ). Переключение режима перезагружает модель (~10–20 с)."""
-    mode = mode or _mode
-    if mode not in _ocr:
+    Экономия памяти на стенде 4 ГБ (Task 83): модель — только одна, поэтому в памяти она
+    всегда одна; при LOW_MEMORY документ обслуживает короткоживущий процесс (см.
+    analyze_subprocess), и модель загружается в нём с нуля."""
+    if "main" not in _ocr:
         from paddleocr import PaddleOCR
         if RUSSIAN_ONLY:
             _hook_decoder()
-        # мало памяти — выгружаем другую нейросеть, если она загружена
-        for other in [m for m in _ocr if m != mode and LOW_MEMORY]:
-            del _ocr[other]
-            gc.collect()
         # enable_mkldnn=False: в PaddlePaddle 3.3 ускоритель oneDNN падает на этих моделях
-        _ocr[mode] = PaddleOCR(
-            text_detection_model_name=FAST_DET if mode == "fast" else ACCURATE_DET,
+        _ocr["main"] = PaddleOCR(
+            text_detection_model_name=DET_MODEL,
             text_recognition_model_name=REC_MODEL,
             use_doc_orientation_classify=False, use_doc_unwarping=False,
             use_textline_orientation=True, enable_mkldnn=False)
-    return _ocr[mode]
+    return _ocr["main"]
 
 
 def read_lines(path):
     ocr = get_ocr()
     _PROBS.clear()
-    if _mode == "accurate":
-        limit = {"text_det_limit_side_len": ACCURATE_MAX_SIDE, "text_det_limit_type": "max"}
-    elif LOW_MEMORY:
-        limit = {"text_det_limit_side_len": _det_limit or FAST_DET_LIMIT, "text_det_limit_type": "max"}
-    else:
-        limit = {}
-    res = ocr.predict(str(path), **limit)[0]
+    # лимит детекции — по площади входа (память стенда, см. det_side_for)
+    img = cv2.imdecode(np.fromfile(str(path), np.uint8), cv2.IMREAD_COLOR)
+    side = det_side_for(*img.shape[:2]) if img is not None else DET_MAX_SIDE
+    res = ocr.predict(str(path), text_det_limit_side_len=side, text_det_limit_type="max")[0]
     decoded = [(*greedy(p[b], chars), p[b], chars) for p, chars in _PROBS for b in range(p.shape[0])]
     angles = list(res.get("textline_orientation_angles") or [])
     if len(angles) != len(res["rec_texts"]):
@@ -513,12 +512,23 @@ def doc_type(lines):
         return "vehicle_registration_back"
     if any(mrz_clean(l["text"]).startswith("PNRUS") or mrz_bottom(l["text"]) for l in lines):
         return "passport"
-    marks = sum(m in flat for m in PASSPORT_MARKS)
-    margin_number = any(l["h"] > 1.5 * l["w"] and SERIES_NUMBER_RE.search(l["text"]) for l in lines)
-    if marks >= 3 or (marks >= 2 and margin_number and "ЗАРЕГИСТРИРОВАН" not in flat):
-        return "passport"
     if "ЗАРЕГИСТРИРОВАН" in flat or "МЕСТОЖИТЕЛЬСТВА" in flat:
         return "passport_registration"
+    marks = sum(m in flat for m in PASSPORT_MARKS)
+    margin_number = any(l["h"] > 1.5 * l["w"] and SERIES_NUMBER_RE.search(l["text"]) for l in lines)
+    if marks >= 3 or (marks >= 2 and margin_number):
+        return "passport"
+    # изношенная страница (боевой тест Task 86): подписи бланка прочитаны неузнаваемо («ФиИ», «Or0»),
+    # но структура видна — копия серии на полях вертикально, дата бланка, заглавные слова столбца ФИО
+    if margin_number and any(DATE_RE.search(l["text"]) for l in lines) \
+            and sum(1 for l in lines if is_upper_word(l["text"])) >= 2:
+        return "passport"
+    # СТС на изношенном скане (боевой тест Task 86): заголовок «СВИДЕТЕЛЬСТВО» не дочитан,
+    # но бланк узнаваем по подписям полей («Паспорт ТС №», массы, VIN, госномер).
+    # Проверка после паспорта: номер серии СТС совпадает по виду с серией паспорта.
+    if "ПАСПОРТТС" in flat or "МАКСМАССА" in flat or "МАССАВСНАРЯЖ" in flat \
+            or "ГОСНОМЕР" in flat or "VIN" in raw.upper():
+        return "vehicle_registration"
     return "unknown"
 
 
@@ -586,17 +596,6 @@ def ru_field(src, value):
     return f
 
 
-def _rus_text(l):
-    """Текст строки русскими буквами: перечитываем вероятности только русским алфавитом
-    (латинские двойники не выживают), без вероятностей — замена латинских двойников."""
-    if l.get("probs"):
-        text, _ = greedy(*l["probs"], allowed=RUSSIAN)
-        text = re.sub(r"\s+", " ", text).strip()
-        if text:
-            return text
-    return cyr(l["text"]).strip()
-
-
 def _lex_hit(word, kind):
     """Слово в словаре точно или с одной опечаткой («БЛАДИМИРОВИЧ» → «ВЛАДИМИРОВИЧ»), иначе None."""
     w = cyr(word).replace("Ё", "Е").strip(".").upper()
@@ -608,9 +607,8 @@ def _lex_hit(word, kind):
 
 
 def helper_ocr():
-    """Перечитывание мелких полей (код, номер на полях): точной моделью, а при нехватке памяти —
-    той, что уже загружена: вторая модель в том же процессе на стенде 4 ГБ — OOM (exit 137)."""
-    return get_ocr(_mode if LOW_MEMORY else "accurate")
+    """Перечитывание мелких полей (код, номер на полях) — той же единственной моделью (Task 86)."""
+    return get_ocr()
 
 
 def reread_code(path, f):
@@ -626,7 +624,8 @@ def reread_code(path, f):
     if crop.size == 0:
         return f
     big = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-    res = helper_ocr().predict(big, use_textline_orientation=False)[0]
+    res = helper_ocr().predict(big, use_textline_orientation=False,
+                               text_det_limit_side_len=det_side_for(*big.shape[:2]), text_det_limit_type="max")[0]
     for t, sc in zip(res["rec_texts"], res["rec_scores"]):
         m = re.fullmatch(r"\s*(\d{3})\s?[-–]\s?(\d{3})\s*", t)
         if m and float(sc) > (f["conf"] or 0):
@@ -652,9 +651,10 @@ def read_margin_number(path, lines):
     best = []
     for rot in (cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE):
         strip = cv2.resize(cv2.rotate(col, rot), None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-        # строки ищем на полосе не длиннее 2000 px (8 с вместо 20–30), читаются они с увеличенной полосы
+        # строки ищем на полосе с лимитом по площади входа (было: сторона ≤ 2000 px),
+        # читаются они с увеличенной полосы
         res = helper_ocr().predict(strip, use_textline_orientation=False,
-                                          text_det_limit_side_len=MARGIN_MAX_SIDE, text_det_limit_type="max")[0]
+                                          text_det_limit_side_len=det_side_for(*strip.shape[:2]), text_det_limit_type="max")[0]
         toks = sorted((float(np.array(p)[:, 0].min()), t.strip(), float(s))
                       for t, s, p in zip(res["rec_texts"], res["rec_scores"], res["rec_polys"]) if re.fullmatch(r"\d[\d ]*", t.strip()))
         found, i = [], 0
@@ -730,10 +730,12 @@ def mrz_forms(word):
     return forms
 
 
-def mrz_correct(visual, raw):
+def mrz_correct(visual, raw, kind=None):
     """Сверка ФИО бланка с МЧЗ: (значение, исправлено) или None.
     Совпало точно — подтверждение; отличается ровно одной буквой, и исправленное слово
-    совпадает с МЧЗ точно и однозначно — исправление («ИБАН» + «IVAN» → «ИВАН»)."""
+    совпадает с МЧЗ точно и однозначно — исправление («ИБАН» + «IVAN» → «ИВАН»).
+    kind (surname/name/patronymic) — словарь ФИО перевешивает: на изношенных сканах МЧЗ читается
+    с ошибкой («АЛЕКСЕГ» вместо «АЛЕКСЕЙ»), а словарное имя на бланке верно — не исправляем."""
     word = re.sub(r"\s+", " ", cyr(visual or "")).strip()
     if not word or not raw:
         return None
@@ -747,7 +749,12 @@ def mrz_correct(visual, raw):
             variants += [word[:i] + ch + word[i + 1:] for ch in RU_LETTERS]           # неверная буква
             variants.append(word[:i] + word[i + 1:])                                  # лишняя буква
         found.update(v for v in variants if v and mrz_forms(v) & targets)
-    return (found.pop(), True) if len(found) == 1 else None
+    if len(found) == 1:
+        fixed = found.pop()
+        if kind in ("name", "patronymic") and word in lex_words(kind) and fixed not in lex_words(kind):
+            return word, False   # словарь уверен в прочтении бланка — МЧЗ-вариант с ошибкой
+        return fixed, True
+    return None
 
 
 def mrz_name(part):
@@ -823,10 +830,10 @@ SETTLEMENT_FIXES = re.compile(r"(^|\s)(?:ФОП|ФОР|ГОП|ТОР|Г0Р|ГО�
 
 
 def fix_letters(value):
-    """«КОJIОМНА» → «КОЛОМНА»: «Л» нейросеть часто читает как латинские «JI»; «УI» — «УЛ»."""
+    """«КОJIОМНА» → «КОЛОМНА»: «Л» нейросеть часто читает как латинские «JI»; «УI»/«УJ» — «УЛ»."""
     if not value:
         return value
-    return re.sub(r"(?<![А-ЯA-Z])У[IІl|](?![А-ЯA-Z])", "УЛ", value.replace("JI", "Л"))
+    return re.sub(r"(?<![А-ЯA-Z])У[IІl|J](?![А-ЯA-Z])", "УЛ.", value.replace("JI", "Л"))
 
 
 # обрывок перед названием: «Г.», прочитанное как «F», греческая «Γ», «r»; «С.», «П.»
@@ -925,12 +932,6 @@ def extract_passport(path, lines):
                         f["surname"] = ru_field(col[-2], col[-2]["text"])
                     if not f["name"]["value"]:
                         f["name"] = ru_field(col[-1], low_name)
-            if not all(f[k]["value"] for k in ("surname", "name", "patronymic")):
-                # столбец недочитан — экспортируем кандидатов для слияния между проходами:
-                # у лёгкой и точной модели строки блока находит разные (боевой тест Task 85)
-                f["fio_col"] = [{"text": _rus_text(l), "conf": round(l["conf"], 3),
-                                 "cy": round(l["cy"], 1), "cx": round(l["cx"], 1), "h": round(l["h"], 1)}
-                                for l in col[-4:]]
             if os.environ.get("OCR_DEBUG_FIO"):
                 fio_now = {k: f[k]["value"] for k in ("surname", "name", "patronymic")}
                 print(f"[fio] sex={sex and sex['text']!r} col={[(l['text'], round(l['cy']), round(l['cx'])) for l in col]} ФИО={fio_now}", flush=True)
@@ -1377,7 +1378,7 @@ ADDR_PREFIX = {"УЛИЦА": "УЛ. ", "ДОМ": "Д. ", "КОРП": "КОРП. 
 
 
 def rows_of(lines):
-    """Фрагменты одного ряда (точная модель режет «25 | Июля 2001г.») — слева направо."""
+    """Фрагменты одного ряда (детекция режет «25 | Июля 2001г.») — слева направо."""
     rows = []
     for l in sorted(lines, key=lambda l: l["cy"]):
         row = next((r for r in rows if abs(r[0]["cy"] - l["cy"]) < 0.5 * min(r[0]["h"], l["h"])), None)
@@ -1411,6 +1412,26 @@ def join_rows(rows):
 def fix_numbers(value):
     """«Д. 1О» → «Д. 10»: буква О рядом с цифрами — ноль."""
     return re.sub(r"(?<=\d)[ОO]|[ОO](?=\d)", "0", value) if value else value
+
+
+# чистка адреса штампа (ажурный фон «РОССИЯ» мешает нейросети): скобка/точка с запятой вместо
+# точки после сокращения, «ОБП»/«ОБВ» → «ОБЛ.» (Л на ажуре читается как П/В)
+ADDR_PUNCT = re.compile(r"\b(Г|ГОР|С|П|ПОС|ДЕР|УЛ|КВ|Д|КОРП|ПР|ПЕР|ПРОЕЗД|РАЙОН|Р-Н)\)")
+ADDR_OBL = re.compile(r"\bОБ[ПВФГДКТ]\b\.?")
+ADDR_OBL_DOT = re.compile(r"\bОБЛ\b(?!\.)")
+
+
+def fix_addr_punct(value):
+    """Пунктуация адреса: «ЗАВЕРТЯЕВА; Д. 23, КВ) 98» → «…, Д. 23, КВ. 98», «ОБП» → «ОБЛ."."""
+    if not value:
+        return value
+    v = value.replace(";", ",").replace(" ,", ",")
+    v = ADDR_PUNCT.sub(r"\1.", v)
+    v = ADDR_OBL.sub("ОБЛ.", v)
+    v = ADDR_OBL_DOT.sub("ОБЛ.", v)
+    v = re.sub(r"\.{2,}", ".", v)   # «УЛ..» — точка добавлена дважды (fix_letters + ABBR_NO_DOT)
+    v = re.sub(r"\s{2,}", " ", v)
+    return v.strip(" ,")
 
 
 def reg_series_number(path, lines):
@@ -1473,12 +1494,14 @@ def extract_registration(lines):
                 f["reg_date"] = field(value, min(row, key=lambda l: l["conf"]))
                 break
     stop = next((l for l in lines if is_department(l["text"]) and (d is None or l["cy"] > d["cy"])), None)
+    # обрывки из 2 знаков не выбрасываем: «КВ.» и «98» детекция на изношенном штампе режет
+    # на такие куски (боевой тест: строка «КВ. 98» читается как «YJ» + «98» + «KB)»); шум — односимвольный
     addr = [l for l in lines if d and l["cy"] > d["cy"] + 0.5 * d["h"] and (stop is None or l["cy"] < stop["cy"] - 0.5 * stop["h"])
-            and len(re.sub(r"[^А-ЯA-Zа-яa-z0-9]", "", l["text"])) >= 3]
+            and len(re.sub(r"[^А-ЯA-Zа-яa-z0-9]", "", l["text"])) >= 2]
     if addr:
         worst = min(addr, key=lambda l: l["conf"])
         rows = [" ".join(lex_fix(cyr(l["text"]), l, "address") for l in r) for r in rows_of(addr)]
-        value = fix_letters(fix_numbers(labeled_address(" ".join(rows)) or join_rows(rows)))
+        value = fix_addr_punct(fix_letters(fix_numbers(labeled_address(" ".join(rows)) or join_rows(rows))))
         f["address"] = field(ABBR_NO_DOT.sub(lambda m: f"{m.group(1)}{m.group(2)}. ", value), worst)
     else:
         f["address"] = field(None, None)
@@ -1589,8 +1612,7 @@ def _needs_upscale(out):
         return True
     if t == "PASSPORT_PHOTO":
         keys = ("Фамилия", "Имя", "Отчество", "Дата рождения", "Серия и номер", "Дата выдачи", "Код подразделения")
-        # экономия памяти: повтор — та же лёгкая модель на кадре до 1216 px (5–10 с), его не жалко
-        # и ради места рождения и «Кем выдан»
+        # повтор дешёвый (строки читаются с кадра покрупнее), а поля нужные для сверки с заявкой
         return any(not f.get(k) for k in keys + (("Место рождения", "Кем выдан") if LOW_MEMORY else ()))
     if t == "PASSPORT_REG":
         # «5» вместо адреса — от адреса прочитан обрывок: тоже повтор
@@ -1601,37 +1623,22 @@ def _needs_upscale(out):
     return False
 
 
-def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
-    """Фото → {quality, sharpness, docType, side, fields, confidences, confirmations, engineMode}.
+def analyze(path, upscale_retry=True):
+    """Фото → {quality, sharpness, docType, side, fields, confidences, confirmations}.
     Поля называются так же, как в DOC_FIELDS (src/lib/verify.ts).
 
-    Task 85 — одна сильная цепочка для всех операций платформы («Автозаполнение» и «Проверить»
-    читают одинаково): сначала точная модель (PP-OCRv5_server_det), что не дочитает — добирает
-    лёгкая (PP-OCRv5_mobile_det). Параметр mode сохранён в сигнатуре ради совместимости вызовов,
-    различие кнопок ушло: и «Автозаполнение», и «Проверить» идут по полной цепочке."""
-    global _mode, _det_limit
+    Task 86 — одна сильная модель на все операции платформы («Проверить» единственная
+    кнопка). Недочитанные места добирают повторные проходы по кадру, все — той же моделью:
+    целый лист (если документ вырезан с полей), штамп прописки крупным планом (stamp_pass),
+    кадр ×1,5 и разворот на 180°."""
     from pathlib import Path
     path = Path(path)
     sharp = sharpness(path)
     quality = int(round(min(100.0, 60.0 * sharp / SHARPNESS_MIN)))
     work, cropped = prepare(path)
     try:
-        if mode == "fast":
-            # лёгкая модель одним проходом: так её запускает добор полей (analyze_subprocess,
-            # Task 85) — у неё свои строки на изношенных сканах, повторять точную смысла нет
-            _mode = "fast"
-            lines, work, turns = read_upright(work, path)
-            out = _analyze_lines(work, lines, quality, sharp)
-        else:
-            _mode = "accurate"
-            lines, work, turns = read_upright(work, path)
-            out = _analyze_lines(work, lines, quality, sharp)
-            # добор лёгкой моделью в том же процессе — только при запасе памяти (две модели
-            # вместе — OOM на стенде 4 ГБ); при экономии памяти добор делает отдельный
-            # процесс (analyze_subprocess): у каждой модели строки находит свои
-            if accurate_retry and not LOW_MEMORY and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
-                _mode = "fast"
-                out = _fill_gaps(out, _analyze_lines(work, read_lines(work), quality, sharp))
+        lines, work, turns = read_upright(work, path)
+        out = _analyze_lines(work, lines, quality, sharp)
         # документ вырезан с листа, но не узнан или главные поля не дочитаны: читаем и исходный кадр
         # и добираем пустое — результат по вырезке чувствителен к масштабу (×2,39 и ×2,392 — разное)
         if cropped and _incomplete(out):
@@ -1645,7 +1652,6 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                         pass
                 whole = rotated
             try:
-                _mode = "fast" if LOW_MEMORY else "accurate"
                 out = _fill_gaps(out, _analyze_lines(whole, read_lines(whole), quality, sharp), margin=0.1)
             finally:
                 if whole != path:
@@ -1653,18 +1659,20 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                         os.unlink(whole)
                     except OSError:
                         pass
+        # штамп прописки: его строки мелкие на фоне листа — детекция на кадре до DET_MAX_SIDE
+        # их теряет (боевой тест: из адреса остался обрывок «КВ98»). Вырезка штампа в нативном
+        # разрешении читает адрес целиком и стоит несколько секунд
+        if out["docType"] == "PASSPORT_REG" and _stamp_incomplete(out):
+            stamp_pass(work, lines, out, quality, sharp)
         # фото с телефона: документ занимает часть кадра, шрифт мелкий, защитный фон —
-        # документ не узнан или поля не дочитаны → проход по кадру, увеличенному в 1,5 раза,
-        # точной моделью (на странице регистрации ошибок в адресе стало 5 из 52 знаков вместо 20)
+        # документ не узнан или поля не дочитаны → проход по кадру, увеличенному в 1,5 раза
+        # (на странице регистрации ошибок в адресе стало 5 из 52 знаков вместо 20)
         if upscale_retry and _needs_upscale(out):
             big = scaled(work, 1.5, "_x15")
             if big:
                 try:
-                    _mode = "fast" if LOW_MEMORY else "accurate"
-                    _det_limit = FAST_DET_RETRY_LIMIT
                     out = _fill_gaps(out, _analyze_lines(big, read_lines(big), quality, sharp), margin=0.1)
                 finally:
-                    _det_limit = None
                     try:
                         os.unlink(big)
                     except OSError:
@@ -1676,7 +1684,6 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                 flipped = work.with_name(work.stem + "_r180.png")
                 cv2.imencode(".png", cv2.rotate(img, cv2.ROTATE_180))[1].tofile(str(flipped))
                 try:
-                    _mode = "fast" if LOW_MEMORY else "accurate"
                     second = _analyze_lines(flipped, read_lines(flipped), quality, sharp)
                     if second["docType"] != "UNKNOWN":
                         out = second
@@ -1686,28 +1693,123 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
                     except OSError:
                         pass
     finally:
-        _mode = "accurate"
         if work != path:
             try:
                 os.unlink(work)
             except OSError:
                 pass
-    # основной проход всегда точная модель — помечаем результат ею,
-    # даже если отдельные поля добраны лёгкой (последние проходы переключали _mode)
-    out["engineMode"] = "accurate"
     return out
+
+
+def _stamp_incomplete(out):
+    """Штамп прописки дочитан не полностью — нужен повтор крупным планом.
+    Адрес короче 12 букв (боевой тест: обрывок «КВ98» — 2 буквы; полный адрес — от 20)
+    или неуверенный, нет даты или кода подразделения."""
+    f, c = out["fields"], out["confidences"]
+    addr = f.get("Адрес регистрации") or ""
+    if len(re.findall(r"[А-ЯЁA-Z]", addr.upper())) < 12 or c.get("Адрес регистрации", 0) < 0.75:
+        return True
+    return not f.get("Дата регистрации") or not f.get("Код подразделения")
+
+
+def stamp_box(lines):
+    """Рамка штампа «МЕСТО ЖИТЕЛЬСТВА» в координатах кадра: объединённый прямоугольник опорных
+    строк (заголовок «ЗАРЕГИСТРИРОВАН», дата регистрации, код подразделения, «КВ.») с полями.
+    None — опорных строк нет: детекция не нашла штамп вовсе."""
+    head = next((l for l in lines if "ЗАРЕГИСТРИРОВАН" in cyr(l["text"])), None)
+    anchors = [head] if head else []
+    d = next((l for l in lines if parse_date(l["text"]) and (head is None or l["cy"] > head["cy"])), None)
+    if d:
+        anchors.append(d)
+    code = next((l for l in lines if re.fullmatch(r"\d{3}-\d{3}", l["text"].strip())), None)
+    if code:
+        anchors.append(code)
+    anchors += [l for l in lines if re.search(r"\bКВ", cyr(l["text"])) and re.search(r"\d", l["text"])][:2]
+    if not anchors:
+        return None
+    x0 = min(l["x0"] for l in anchors)
+    x1 = max(l["x1"] for l in anchors)
+    y0 = min(l["y0"] for l in anchors)
+    y1 = max(l["y1"] for l in anchors)
+    h = max(l["h"] for l in anchors)
+    w = max(x1 - x0, 12 * h)
+    # поля: в стороны — больше половины ширины штампа (адрес длиннее опорных строк); сверху —
+    # 3 высоты строки (заголовок «МЕСТО ЖИТЕЛЬСТВА»); снизу — много (14 высот): якорей мало,
+    # а под адресом ещё «КВ.», наименование подразделения и код «550-007» — все нужны в кадре.
+    # Лишнее в кадре не мешает (подпись, фон), недостающее — теряет поля.
+    return max(0.0, x0 - 0.7 * w), max(0.0, y0 - 3 * h), x1 + 0.7 * w, y1 + 14 * h
+
+
+def stamp_pass(work, lines, out, quality, sharp):
+    """Повторное чтение штампа прописки крупным планом (Task 86).
+    Страница регистрации на листе А4 или в обложке: строки штампа занимают 2–4 % высоты кадра,
+    детекция (кадр ограничен DET_MAX_SIDE ради памяти) находит только обрывки. Вырезка штампа
+    в нативном разрешении, увеличенная до STAMP_TARGET px, даёт строкам 3–4-кратный размер —
+    адрес читается целиком; кадр маленький, памяти — копейки, времени — несколько секунд."""
+    box = stamp_box(lines)
+    if not box:
+        return
+    img = cv2.imdecode(np.fromfile(str(work), np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = box
+    x0, y0, x1, y1 = max(0, int(x0)), max(0, int(y0)), min(w, int(x1)), min(h, int(y1))
+    if x1 - x0 < 80 or y1 - y0 < 60:
+        return
+    crop = img[y0:y1, x0:x1]
+    side = max(crop.shape[:2])
+    k = max(1.0, min(PREP_MAX_SCALE, STAMP_TARGET / side))
+    if k > 1.0:
+        crop = cv2.resize(crop, None, fx=k, fy=k, interpolation=cv2.INTER_CUBIC)
+    tmp = work.with_name(work.stem + "_stamp.png")
+    cv2.imencode(".png", crop)[1].tofile(str(tmp))
+    try:
+        second = _analyze_lines(tmp, read_lines(tmp), quality, sharp)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    _merge_stamp(out, second)
+
+
+def _merge_stamp(main, extra):
+    """Штамповый проход читает штамп с большим разрешением — его адрес полнее whole-page:
+    замещаем адрес, если тот длиннее (conf строки-обрывка вроде «YI» не в счёт — он тянет
+    вниз уверенность всей строки, боевой тест Task 86); пустые дату и код добираем.
+    Страница регистрации — адрес один, сверять стороны не нужно."""
+    if extra["docType"] != "PASSPORT_REG":
+        return
+    letters = lambda s: len(re.findall(r"[А-ЯЁA-Z]", (s or "").upper()))
+    addr = (extra["fields"].get("Адрес регистрации") or "").strip()
+    cur = (main["fields"].get("Адрес регистрации") or "").strip()
+    if addr and extra["confidences"].get("Адрес регистрации", 0) >= 0.2 and letters(addr) > letters(cur):
+        main.get("confirmations", {}).pop("Адрес регистрации", None)
+        main["fields"]["Адрес регистрации"] = addr
+        main["confidences"]["Адрес регистрации"] = extra["confidences"].get("Адрес регистрации", 0)
+    for k in ("Дата регистрации", "Код подразделения", "Серия и номер"):
+        v = (extra["fields"].get(k) or "").strip()
+        if v and not main["fields"].get(k):
+            main["fields"][k] = v
+            main["confidences"][k] = extra["confidences"].get(k, 0)
 
 
 def _fill_gaps(main, extra, margin=None):
     """Пустые поля основного прохода — из второго прохода того же документа (той же стороны).
-    margin — заменять и заполненные поля, если второй проход увереннее хотя бы на столько."""
+    margin — заменять и заполненные поля, если второй проход увереннее хотя бы на столько
+    И не короче по содержанию: уверенный обрывок («…Д. 23» без «КВ. 98») не должен затирать
+    более полный адрес менее уверенного прохода по штампу крупным планом (боевой тест Task 86)."""
     if main["docType"] == "UNKNOWN":
         return extra if extra["docType"] != "UNKNOWN" else main
     if extra["docType"] != main["docType"] or extra.get("side") != main.get("side"):
         return main
+    letters = lambda s: len(re.findall(r"[А-ЯЁA-Z0-9]", (s or "").upper()))
     for k, v in extra["fields"].items():
-        better = margin is not None and extra["confidences"].get(k, 0) > main["confidences"].get(k, 0) + margin
-        if v and (not main["fields"].get(k) or better):
+        cur = main["fields"].get(k) or ""
+        better = margin is not None and extra["confidences"].get(k, 0) > main["confidences"].get(k, 0) + margin \
+            and letters(v) >= letters(cur) - 1
+        if v and (not cur or better):
             main.get("confirmations", {}).pop(k, None)
             main["fields"][k] = v
             main["confidences"][k] = extra["confidences"].get(k, 0)
@@ -1723,7 +1825,7 @@ def _filled(out):
 def _analyze_lines(path, lines, quality, sharp):
     dtype = doc_type(lines)
     out = {"quality": quality, "sharpness": round(sharp, 1), "docType": PLATFORM_TYPE[dtype], "side": "front",
-           "fields": {}, "confidences": {}, "confirmations": {}, "engineMode": _mode}
+           "fields": {}, "confidences": {}, "confirmations": {}}
 
     def put(label, f):
         out["fields"][label] = f["value"] or ""
@@ -1734,9 +1836,6 @@ def _analyze_lines(path, lines, quality, sharp):
 
     if dtype == "passport":
         f, copies = extract_passport(path, lines)
-        if f.get("fio_col"):
-            # кандидаты столбца ФИО — для слияния между проходами (см. _fuse_fio)
-            out["fioCol"] = f.pop("fio_col")
         mrz = read_mrz(lines)
         if mrz:
             labels = {"surname": "Фамилия", "name": "Имя", "patronymic": "Отчество", "birth_date": "Дата рождения",
@@ -1751,7 +1850,7 @@ def _analyze_lines(path, lines, quality, sharp):
                 raw = mrz.get(key + "_raw")
                 if raw and cur["value"]:
                     # ФИО: бланк сверяется с МЧЗ (таблицы МВД и ICAO); одна неверная буква исправляется
-                    fixed = mrz_correct(cur["value"], raw)
+                    fixed = mrz_correct(cur["value"], raw, kind=key)
                     if fixed:
                         word, changed = fixed
                         f[key] = {"value": word, "conf": round(max(conf, cur["conf"] or 0), 3), "line": cur["line"]}
@@ -1858,109 +1957,59 @@ def _analyze_lines(path, lines, quality, sharp):
 
     return out
 
-def drop_models():
-    """Выгрузить нейросети из памяти этого процесса (Task 83).
-    Перед запуском ребёнка с точной моделью: её веса не должны делить RAM
-    с быстрой моделью родителя — на стенде 4 ГБ каждая сотня мегабайт решает."""
-    _ocr.clear()
-    gc.collect()
 
-
-def analyze_subprocess(path, mode=None):
-    """Распознавание в отдельном процессе (мало памяти). Если точная модель (server) не узнала
-    документ или не дочитала поля — ещё один процесс с лёгкой добирает пустое: у каждой модели
-    строки находит свои, слияние проходов читает больше (Task 85, боевой тест: точная нашла
-    фамилию «АЛЕКСЕЕВ», лёгкая — отчество «ВЛАДИМИРОВИЧ», ни одна по отдельности — не обе).
-    Параметр mode сохранён ради совместимости вызовов — основной процесс всегда точный."""
-    out = _run_isolated(path, mode)
-    if out["docType"] == "UNKNOWN" or not all(out["fields"].values()):
+def analyze_subprocess(path):
+    """Распознавание в отдельном короткоживущем процессе (мало памяти, Task 83): модель
+    загружается с нуля, распознаёт ОДИН документ и возвращает память системе.
+    Документ дочитан не до конца или не узнан — второй процесс на ступень ниже: на другом
+    лимите детекции строки находятся другие (Task 86), пустое добирается слиянием."""
+    out = _run_isolated(path)
+    if out["docType"] == "UNKNOWN" or _incomplete(out):
         try:
-            extra = _run_isolated(path, "fast")
-            out = _fill_gaps(out, extra)
-            _fuse_fio(out, extra)
+            out = _fill_gaps(out, _run_isolated(path, step=1))
         except RuntimeError:
             pass
     return out
 
 
-def _fuse_fio(main, extra):
-    """Дочитать ФИО страницы паспорта из столбца, слитого из двух проходов (Task 85).
-    На изношенных сканах у лёгкой и точной модели строки блока ФИО находит разные: ни у
-    одной нет трёх строк подряд, вместе — есть. Заполняет только пустые поля; значение
-    подчистую читается русским алфавитом ещё в ребенке (_rus_text), опечатки чинит словарь."""
-    if main.get("docType") != "PASSPORT_PHOTO":
-        return
-    col = sorted((main.get("fioCol") or []) + (extra.get("fioCol") or []), key=lambda l: l["cy"])
-    merged = []
-    for l in col:
-        if merged:
-            prev = merged[-1]
-            a = cyr(l["text"]).replace("Ё", "Е").upper()
-            b = cyr(prev["text"]).replace("Ё", "Е").upper()
-            if abs(l["cy"] - prev["cy"]) < 1.5 * max(l["h"], prev["h"]) and (a == b or _lev(a, b) <= 1):
-                continue   # та же строка у обеих моделей — оставляем первую (основной проход идёт первым)
-        merged.append(l)
-    values = {}
-    if len(merged) >= 3:
-        for label, l in zip(("Фамилия", "Имя", "Отчество"), merged[-3:]):
-            values[label] = (l, l["text"])
-    elif len(merged) == 2:
-        # две из трёх: на бланке порядок фамилия → имя → отчество, хвост подсказывает словарь
-        upper, lower = merged[-2], merged[-1]
-        low_pat = _lex_hit(lower["text"], "patronymic")
-        low_name = _lex_hit(lower["text"], "name")
-        if low_pat and not low_name:
-            values = {"Фамилия": (upper, upper["text"]), "Отчество": (lower, low_pat)}
-        elif low_name and not low_pat:
-            values = {"Фамилия": (upper, upper["text"]), "Имя": (lower, low_name)}
-        else:
-            return
-    for label, (l, raw) in values.items():
-        if not main["fields"].get(label):
-            rf = ru_field({"text": raw, "conf": l["conf"], "probs": None}, raw)
-            main["fields"][label] = rf["value"] or ""
-            main["confidences"][label] = float(rf["conf"] or 0.0)
-
-
-def _run_isolated(path, mode=None):
+def _run_isolated(path, step=0):
     """analyze() в отдельном короткоживущем процессе (Task 83, стенд 4 ГБ).
 
-    Точная нейросеть (PP-OCRv5_server_det) вместе с быстрой и пулом инференса
-    не влезает в память: OOM-killer убивает сервис. Отдельный процесс загружает
-    только нужную модель, распознаёт ОДИН документ и возвращает память системе.
-    Вызывается для mode='accurate' (кнопка «Проверить») и для авто-повтора.
-
-    Лимит стороны детекции выбирается по свободной памяти (точной модели нужно
-    ~2 ГБ на 736px): если памяти мало, сразу стартуем с мелкого кадра; если
-    ребёнка всё же убило (OOM, exit 137) — повторяем с меньшим лимитом."""
+    Детекция server_det на большом кадре требует больше памяти, чем есть свободной:
+    OOM-killer убивает сервис. Отдельный процесс распознаёт ОДИН документ и возвращает
+    память системе. step — ступень лестницы: 0 — максимальный кадр, 1+ — ниже (и память,
+    и качество ниже, но строки детекция находит другие). Лестница по свободной памяти
+    (замер стенда: сторона 736 не влезает при ~2 ГБ свободных); если ребёнка убило
+    (OOM, exit 137) — повторяем со следующей ступенью."""
     import json as _json
     import os as _os
     import subprocess as _sp
     import sys as _sys
 
-    def run_child(limit):
+    def run_child(limit, area):
         env = dict(_os.environ)
         if limit:
-            env["OCR_ACCURATE_MAX_SIDE"] = str(limit)
+            env["OCR_DET_MAX_SIDE"] = str(limit)
+        env["OCR_DET_AREA"] = str(area)
         # __file__ — сам engine.py (sys.argv[0] у сервера — server.py, он займет порт)
-        args = [_sys.executable, _os.path.abspath(__file__), str(path), mode or "auto"]
+        args = [_sys.executable, _os.path.abspath(__file__), str(path)]
         # вывод ребёнка — UTF-8 с обеих сторон: на Windows по умолчанию cp1251, и кириллица
         # в JSON ломала чтение результата (паспорт падал, СТС читался с искажениями)
         env["PYTHONIOENCODING"] = "utf-8"
         return _sp.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=290, env=env)
 
     avail_mb = available_mb()
-    if avail_mb >= 6000:
-        attempts = [ACCURATE_MAX_SIDE, 736, 560]
-    elif avail_mb >= 2600:
-        attempts = [736, 560, 448]
+    # ступени — (лимит стороны, лимит площади входа детекции): каждое понижение реально
+    # снижает память (иначе на маленьких сканах сторона 560 и 448 дают один вход до капа площади)
+    if avail_mb >= 2600:
+        attempts = [(DET_MAX_SIDE, DET_AREA), (736, 0.15), (560, 0.12)]
     elif avail_mb >= 1900:
-        attempts = [560, 448]
+        attempts = [(560, 0.18), (448, 0.12), (384, 0.09)]
     else:
-        attempts = [448, 384]
+        attempts = [(448, 0.12), (384, 0.09), (320, 0.07)]
     last_err = "subprocess не вернул результат"
-    for limit in attempts:
-        run = run_child(limit)
+    for limit, area in attempts[max(0, step):]:
+        run = run_child(limit, area)
         if run.returncode in (137, -9):
             # процесс убит системой из-за нехватки памяти — последняя строка stderr тут ни при чём
             last_err = f"нехватка памяти: распознавание остановлено системой (OOM, кадр {limit} px)"
@@ -1975,7 +2024,7 @@ def _run_isolated(path, mode=None):
 
 
 if __name__ == "__main__":
-    # CLI для analyze_subprocess: python3 engine.py <image> [fast|accurate|auto]
+    # CLI для analyze_subprocess: python3 engine.py <image>
     import json as _json
     import sys as _sys
     # ребёнок расходуемый (OOM → родитель повторит с меньшим кадром): при нехватке памяти
@@ -1986,8 +2035,6 @@ if __name__ == "__main__":
             _fh.write("800")
     except OSError:
         pass
-    _argv_mode = _sys.argv[2] if len(_sys.argv) > 2 else None
-    _mode_arg = _argv_mode if _argv_mode in ("fast", "accurate") else None
-    _res = analyze(_sys.argv[1], mode=_mode_arg)
-    _out = {k: _res.get(k) for k in ("quality", "sharpness", "docType", "side", "fields", "confidences", "confirmations", "engineMode", "fioCol")}
+    _res = analyze(_sys.argv[1])
+    _out = {k: _res.get(k) for k in ("quality", "sharpness", "docType", "side", "fields", "confidences", "confirmations")}
     print("###JSON###" + _json.dumps(_out, ensure_ascii=False))
