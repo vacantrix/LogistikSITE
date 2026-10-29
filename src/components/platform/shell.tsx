@@ -22,7 +22,7 @@
  */
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
-  ArrowLeft, BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
+  ArrowLeft, BarChart3, Building2, Cable, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
   History, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Phone, Save, ScanSearch, ShieldCheck, Truck,
   UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
@@ -504,6 +504,24 @@ function AccountMenu({ user, profile, compact, canEditProfile, onLogout, onAddAc
                 <UserPen className="h-4 w-4" aria-hidden />
                 Изменить профиль
               </button>
+            )}
+            {/* заглушка 1С (демо-стенд): только у стороны грузоотправителя —
+                перевозчик из 1С заявки не отправляет (Task: onec-stub-install) */}
+            {user.role !== 'carrier' && (
+              <DropdownMenuItem
+                onSelect={() => {
+                  // окно без 'noopener': с этой опцией window.open обязан вернуть null,
+                  // и запасной переход срабатывал бы всегда — платформа «уезжала» со страницы.
+                  // Опенер обнуляем вручную (страница того же origin — это безопасно).
+                  const win = window.open('/1c-simulator/start.html', '_blank')
+                  if (win) { try { win.opener = null } catch { /* ignore */ } }
+                  else window.location.assign('/1c-simulator/start.html') // вкладку заблокировал браузер — открываем здесь
+                }}
+                className="gap-2.5"
+              >
+                <Cable className="h-4 w-4" aria-hidden />
+                Симулятор 1С «Заказы»
+              </DropdownMenuItem>
             )}
             {others.length > 0 && (
               <>

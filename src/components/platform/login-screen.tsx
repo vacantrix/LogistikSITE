@@ -241,6 +241,19 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
         <span className="ml-2 rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
           V 1.01
         </span>
+        {DEMO_PASSWORD && (
+          <>
+            {' · '}
+            <a
+              href="/1c-simulator/start.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline decoration-blue-300/40 underline-offset-2 transition-colors hover:text-white"
+            >
+              Симулятор 1С
+            </a>
+          </>
+        )}
       </footer>
     </div>
   )
