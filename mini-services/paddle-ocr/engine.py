@@ -586,6 +586,27 @@ def ru_field(src, value):
     return f
 
 
+def _rus_text(l):
+    """Текст строки русскими буквами: перечитываем вероятности только русским алфавитом
+    (латинские двойники не выживают), без вероятностей — замена латинских двойников."""
+    if l.get("probs"):
+        text, _ = greedy(*l["probs"], allowed=RUSSIAN)
+        text = re.sub(r"\s+", " ", text).strip()
+        if text:
+            return text
+    return cyr(l["text"]).strip()
+
+
+def _lex_hit(word, kind):
+    """Слово в словаре точно или с одной опечаткой («БЛАДИМИРОВИЧ» → «ВЛАДИМИРОВИЧ»), иначе None."""
+    w = cyr(word).replace("Ё", "Е").strip(".").upper()
+    lex = lex_words(kind)
+    if w in lex:
+        return w
+    near = lex_near(w, kind, 1)
+    return min(near, key=lambda v: _lev(v, w)) if near else None
+
+
 def helper_ocr():
     """Перечитывание мелких полей (код, номер на полях): точной моделью, а при нехватке памяти —
     той, что уже загружена: вторая модель в том же процессе на стенде 4 ГБ — OOM (exit 137)."""
@@ -842,6 +863,8 @@ def above_value(lines, anchor, pred, rows=6.0):
 
 
 def extract_passport(path, lines):
+    if os.environ.get("OCR_DEBUG_FIO"):
+        print(f"[fio] extract_passport: строк={len(lines)}: {[l['text'][:20] for l in lines]}", flush=True)
     f = {}
     for key, word in (("surname", "фамил"), ("name", "имя"), ("patronymic", "отчеств")):
         v = near_label(lines, word, is_upper_word)
@@ -864,20 +887,53 @@ def extract_passport(path, lines):
              and abs(l["cx"] - top["cx"]) < 0.8 * max(l["w"], top["w"]) and is_upper_word(l["text"]) and not re.search(r"\d", l["text"])]
         v = min(c, key=lambda l: abs(l["cy"] - (top["cy"] + bottom["cy"]) / 2)) if c else None
         f["name"] = ru_field(v, v["text"] if v else None)
+    ref = None   # якорь столбца ФИО: дата рождения рядом с полом (фолбэк даты рождения ниже)
     if not all(f[k]["value"] for k in ("surname", "name", "patronymic")):
         # подписи «Фамилия», «Имя», «Отчество» прочитаны неузнаваемо («2», «HME»): ФИО — три строки
         # заглавными в столбце значений над строкой «МУЖ./ЖЕН.» и датой рождения
         sex = next((l for l in lines if re.search(r"МУЖ|ЖЕН", cyr(l["text"]))), None)
+        col = []
         if sex:
             row = [l for l in lines if DATE_RE.search(l["text"]) and abs(l["cy"] - sex["cy"]) < 1.5 * sex["h"]]
             ref = max(row, key=lambda l: l["w"]) if row else sex
-            col = sorted((l for l in lines if 0.5 * sex["h"] < sex["cy"] - l["cy"] < 12 * sex["h"]
+        else:
+            # «МУЖ./ЖЕН.» не прочитался (боевой скан Task 85): якорим на самую нижнюю дату
+            # страницы — дата рождения стоит рядом с полом, столбец ФИО выше неё
+            dates = [l for l in lines if DATE_RE.search(l["text"])]
+            ref = max(dates, key=lambda l: l["cy"]) if dates else None
+        if ref:
+            col = sorted((l for l in lines if 0.5 * ref["h"] < ref["cy"] - l["cy"] < 12 * ref["h"]
                           and ref["x0"] - 2 * ref["h"] < l["cx"] < ref["x1"] and is_upper_word(l["text"])
                           and not re.search(r"\d|РОССИЙ|ФЕДЕРАЦ|ПАСПОРТ", cyr(l["text"]))), key=lambda l: l["cy"])
             if len(col) >= 3:
                 for key, l in zip(("surname", "name", "patronymic"), col[-3:]):
                     if not f[key]["value"]:
                         f[key] = ru_field(l, l["text"])
+            elif len(col) == 2:
+                # две из трёх строк: на бланке порядок всегда фамилия → имя → отчество,
+                # какую из них не хватает подсказывает лексикон: хвост-отчество («…ОВИЧ/ОВНА»)
+                # или имя (Task 85)
+                low_pat = _lex_hit(col[-1]["text"], "patronymic")
+                low_name = _lex_hit(col[-1]["text"], "name")
+                if low_pat and not low_name:
+                    if not f["surname"]["value"]:
+                        f["surname"] = ru_field(col[-2], col[-2]["text"])
+                    if not f["patronymic"]["value"]:
+                        f["patronymic"] = ru_field(col[-1], low_pat)
+                elif low_name and not low_pat:
+                    if not f["surname"]["value"]:
+                        f["surname"] = ru_field(col[-2], col[-2]["text"])
+                    if not f["name"]["value"]:
+                        f["name"] = ru_field(col[-1], low_name)
+            if not all(f[k]["value"] for k in ("surname", "name", "patronymic")):
+                # столбец недочитан — экспортируем кандидатов для слияния между проходами:
+                # у лёгкой и точной модели строки блока находит разные (боевой тест Task 85)
+                f["fio_col"] = [{"text": _rus_text(l), "conf": round(l["conf"], 3),
+                                 "cy": round(l["cy"], 1), "cx": round(l["cx"], 1), "h": round(l["h"], 1)}
+                                for l in col[-4:]]
+            if os.environ.get("OCR_DEBUG_FIO"):
+                fio_now = {k: f[k]["value"] for k in ("surname", "name", "patronymic")}
+                print(f"[fio] sex={sex and sex['text']!r} col={[(l['text'], round(l['cy']), round(l['cx'])) for l in col]} ФИО={fio_now}", flush=True)
     # имя и отчество — из словаря имён («ИБАН» → «ИВАН»), если нейросеть допускала такое чтение
     for key, kind in (("name", "name"), ("patronymic", "patronymic")):
         if f[key]["value"] and f[key]["line"]:
@@ -920,6 +976,10 @@ def extract_passport(path, lines):
     else:
         f["birth_place"] = field(None, None)
     v = near_label(lines, "рожд", lambda t: bool(DATE_RE.search(t)))
+    if not v and ref is not None and DATE_RE.search(ref["text"]):
+        # подпись «Дата рождения» не прочиталась («poxenиs», Task 85): якорная дата — рядом
+        # с полом — и есть дата рождения (она самая нижняя дата страницы с фото)
+        v = ref
     f["birth_date"] = field(DATE_RE.search(v["text"]).group(0) if v else None, v)
     copies = read_margin_number(path, lines)
     if copies:
@@ -1556,15 +1616,22 @@ def analyze(path, accurate_retry=True, mode=None, upscale_retry=True):
     quality = int(round(min(100.0, 60.0 * sharp / SHARPNESS_MIN)))
     work, cropped = prepare(path)
     try:
-        _mode = "accurate"
-        lines, work, turns = read_upright(work, path)
-        out = _analyze_lines(work, lines, quality, sharp)
-        # добор лёгкой моделью в том же процессе — только при запасе памяти (две модели
-        # вместе — OOM на стенде 4 ГБ); при экономии памяти добор делает отдельный
-        # процесс (analyze_subprocess): у каждой модели строки находит свои
-        if accurate_retry and not LOW_MEMORY and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
+        if mode == "fast":
+            # лёгкая модель одним проходом: так её запускает добор полей (analyze_subprocess,
+            # Task 85) — у неё свои строки на изношенных сканах, повторять точную смысла нет
             _mode = "fast"
-            out = _fill_gaps(out, _analyze_lines(work, read_lines(work), quality, sharp))
+            lines, work, turns = read_upright(work, path)
+            out = _analyze_lines(work, lines, quality, sharp)
+        else:
+            _mode = "accurate"
+            lines, work, turns = read_upright(work, path)
+            out = _analyze_lines(work, lines, quality, sharp)
+            # добор лёгкой моделью в том же процессе — только при запасе памяти (две модели
+            # вместе — OOM на стенде 4 ГБ); при экономии памяти добор делает отдельный
+            # процесс (analyze_subprocess): у каждой модели строки находит свои
+            if accurate_retry and not LOW_MEMORY and (out["docType"] == "UNKNOWN" or not all(out["fields"].values())):
+                _mode = "fast"
+                out = _fill_gaps(out, _analyze_lines(work, read_lines(work), quality, sharp))
         # документ вырезан с листа, но не узнан или главные поля не дочитаны: читаем и исходный кадр
         # и добираем пустое — результат по вырезке чувствителен к масштабу (×2,39 и ×2,392 — разное)
         if cropped and _incomplete(out):
@@ -1667,6 +1734,9 @@ def _analyze_lines(path, lines, quality, sharp):
 
     if dtype == "passport":
         f, copies = extract_passport(path, lines)
+        if f.get("fio_col"):
+            # кандидаты столбца ФИО — для слияния между проходами (см. _fuse_fio)
+            out["fioCol"] = f.pop("fio_col")
         mrz = read_mrz(lines)
         if mrz:
             labels = {"surname": "Фамилия", "name": "Имя", "patronymic": "Отчество", "birth_date": "Дата рождения",
@@ -1801,14 +1871,55 @@ def analyze_subprocess(path, mode=None):
     документ или не дочитала поля — ещё один процесс с лёгкой добирает пустое: у каждой модели
     строки находит свои, слияние проходов читает больше (Task 85, боевой тест: точная нашла
     фамилию «АЛЕКСЕЕВ», лёгкая — отчество «ВЛАДИМИРОВИЧ», ни одна по отдельности — не обе).
-    Параметр mode сохранён ради совместимости вызовов — цепочка одна для всех операций."""
+    Параметр mode сохранён ради совместимости вызовов — основной процесс всегда точный."""
     out = _run_isolated(path, mode)
     if out["docType"] == "UNKNOWN" or not all(out["fields"].values()):
         try:
-            out = _fill_gaps(out, _run_isolated(path, "fast"))
+            extra = _run_isolated(path, "fast")
+            out = _fill_gaps(out, extra)
+            _fuse_fio(out, extra)
         except RuntimeError:
             pass
     return out
+
+
+def _fuse_fio(main, extra):
+    """Дочитать ФИО страницы паспорта из столбца, слитого из двух проходов (Task 85).
+    На изношенных сканах у лёгкой и точной модели строки блока ФИО находит разные: ни у
+    одной нет трёх строк подряд, вместе — есть. Заполняет только пустые поля; значение
+    подчистую читается русским алфавитом ещё в ребенке (_rus_text), опечатки чинит словарь."""
+    if main.get("docType") != "PASSPORT_PHOTO":
+        return
+    col = sorted((main.get("fioCol") or []) + (extra.get("fioCol") or []), key=lambda l: l["cy"])
+    merged = []
+    for l in col:
+        if merged:
+            prev = merged[-1]
+            a = cyr(l["text"]).replace("Ё", "Е").upper()
+            b = cyr(prev["text"]).replace("Ё", "Е").upper()
+            if abs(l["cy"] - prev["cy"]) < 1.5 * max(l["h"], prev["h"]) and (a == b or _lev(a, b) <= 1):
+                continue   # та же строка у обеих моделей — оставляем первую (основной проход идёт первым)
+        merged.append(l)
+    values = {}
+    if len(merged) >= 3:
+        for label, l in zip(("Фамилия", "Имя", "Отчество"), merged[-3:]):
+            values[label] = (l, l["text"])
+    elif len(merged) == 2:
+        # две из трёх: на бланке порядок фамилия → имя → отчество, хвост подсказывает словарь
+        upper, lower = merged[-2], merged[-1]
+        low_pat = _lex_hit(lower["text"], "patronymic")
+        low_name = _lex_hit(lower["text"], "name")
+        if low_pat and not low_name:
+            values = {"Фамилия": (upper, upper["text"]), "Отчество": (lower, low_pat)}
+        elif low_name and not low_pat:
+            values = {"Фамилия": (upper, upper["text"]), "Имя": (lower, low_name)}
+        else:
+            return
+    for label, (l, raw) in values.items():
+        if not main["fields"].get(label):
+            rf = ru_field({"text": raw, "conf": l["conf"], "probs": None}, raw)
+            main["fields"][label] = rf["value"] or ""
+            main["confidences"][label] = float(rf["conf"] or 0.0)
 
 
 def _run_isolated(path, mode=None):
@@ -1878,5 +1989,5 @@ if __name__ == "__main__":
     _argv_mode = _sys.argv[2] if len(_sys.argv) > 2 else None
     _mode_arg = _argv_mode if _argv_mode in ("fast", "accurate") else None
     _res = analyze(_sys.argv[1], mode=_mode_arg)
-    _out = {k: _res.get(k) for k in ("quality", "sharpness", "docType", "side", "fields", "confidences", "confirmations", "engineMode")}
+    _out = {k: _res.get(k) for k in ("quality", "sharpness", "docType", "side", "fields", "confidences", "confirmations", "engineMode", "fioCol")}
     print("###JSON###" + _json.dumps(_out, ensure_ascii=False))
