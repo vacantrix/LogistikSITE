@@ -16,14 +16,16 @@ import { ScanSearch } from 'lucide-react'
 
 const DEFAULT_STEPS = ['Проверяем…', 'Читаем документ…', 'Распознаём поля…', 'Сверяем данные…']
 
-/** Сменяющиеся сообщения: монтируется заново при каждом открытии — состояние всегда с нуля */
+/** Сменяющиеся сообщения + счётчик секунд: видно, что нейросеть живо работает (а не зависла) */
 function ScanMessages({ list, title, sub }: { list: string[]; title?: string; sub?: string }) {
   const [idx, setIdx] = useState(0)
+  const [sec, setSec] = useState(0)
 
-  // сообщения меняются каждые ~1.9 с, пока оверлей открыт
+  // сообщения меняются каждые ~1.9 с, счётчик тикает каждую секунду, пока оверлей открыт
   useEffect(() => {
     const t = setInterval(() => setIdx((i) => i + 1), 1900)
-    return () => clearInterval(t)
+    const s = setInterval(() => setSec((v) => v + 1), 1000)
+    return () => { clearInterval(t); clearInterval(s) }
   }, [])
 
   const message = list[idx % list.length]
@@ -67,6 +69,10 @@ function ScanMessages({ list, title, sub }: { list: string[]; title?: string; su
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* счётчик секунд: распознавание честно занимает 20–90 с (модель грузится на каждый
+          запрос в режиме экономии памяти) — таймер показывает, что всё работает */}
+      <div className="mt-1 text-xs font-medium tabular-nums text-slate-500">{sec} с</div>
 
       {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
 

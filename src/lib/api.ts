@@ -109,6 +109,42 @@ async function json<T>(res: Response): Promise<T> {
   return data as T
 }
 
+/**
+ * Фоновая нейрооперация (распознавание документов). POST мгновенно отвечает
+ * { jobId } (202), дальше клиент короткими запросами опрашивает GET /api/ocr-jobs,
+ * пока задача не завершится. Так шлюз перед приложением не обрывает длинный ответ
+ * (раньше через ~30 с браузер получал «Ошибка запроса (502)», хотя сервер успешно
+ * дорабатывал), а нейросеть может считать сколько угодно — прогресс не теряется.
+ */
+async function runOcrJob<T>(start: Promise<{ jobId?: string }>): Promise<T> {
+  const { jobId } = await start
+  if (!jobId) throw new Error('Не удалось запустить распознавание')
+  const t0 = Date.now()
+  let pause = 500 // первый опрос сразу, дальше раз в 1.5 с
+  for (;;) {
+    await new Promise((r) => setTimeout(r, pause))
+    pause = 1500
+    let res: Response
+    try {
+      res = await fetch(`/api/ocr-jobs?id=${encodeURIComponent(jobId)}`, withAuth({ cache: 'no-store' }))
+    } catch {
+      continue // единичный сбой сети не отменяет задачу — сервер продолжает считать
+    }
+    if (res.ok) {
+      const data = (await res.json().catch(() => null)) as { status?: string; result?: T; error?: string } | null
+      if (data?.status === 'done') return data.result as T
+      if (data?.status === 'error') throw new Error(data.error || 'Распознавание не удалось')
+    } else if (res.status === 404) {
+      // рестарт сервера: задача потеряна — честно просим повторить
+      throw new Error('Задача распознавания потеряна — повторите операцию')
+    } else if (res.status === 401) {
+      throw new Error('Требуется вход в систему')
+    }
+    // прочие коды (5xx/502 единичного опроса) — не фатальны, продолжаем опрос
+    if (Date.now() - t0 > 10 * 60_000) throw new Error('Распознавание идёт слишком долго — повторите операцию')
+  }
+}
+
 export const api = {
   me: () => fetch('/api/auth/me', withAuth({ cache: 'no-store' })).then(json<{ user: SessionUserDTO }>),
   logout: () => {
@@ -142,14 +178,19 @@ export const api = {
   verifyDocuments: (id: string) =>
     fetch(`/api/requests/${id}/verify`, withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).then(json<{ request: RequestDTO }>),
 
-  /** Нейросеть распознаёт документы нового водителя и возвращает черновик карточки */
+  /** Нейросеть распознаёт документы нового водителя и возвращает черновик карточки (фоновая задача) */
   intakeDriver: (docs: Partial<Record<string, { fileName: string; dataUri: string }>>, mode?: 'fast' | 'accurate') =>
-    fetch('/api/drivers/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs, mode }) })).then(json<IntakeResult>),
+    runOcrJob<IntakeResult>(
+      fetch('/api/drivers/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ docs, mode }) })).then(json<{ jobId: string }>),
+    ),
 
   /** Распознавание СТС для карточек «Добавить ТС»/«Добавить прицеп» (Task 83):
-   * mode "fast" — лёгкая нейросеть («Автозаполнение»), "accurate" — точная («Проверить») */
+   * mode "fast" — лёгкая нейросеть («Автозаполнение"), "accurate" — точная («Проверить»);
+   * выполняется фоновой задачей — клиент опрашивает статус, шлюз не обрывает ответ */
   intakeVehicle: (body: { kind: 'truck' | 'trailer'; sts?: { fileName: string; dataUri: string }; stsBack?: { fileName: string; dataUri: string }; mode?: 'fast' | 'accurate' }) =>
-    fetch('/api/vehicles/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<VehicleIntakeResult>),
+    runOcrJob<VehicleIntakeResult>(
+      fetch('/api/vehicles/intake', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ jobId: string }>),
+    ),
 
   /** Подсказки проформы водителя: адрес и место рождения — из карты, «Кем выдан» — по региону и базе */
   suggest: (body: { kind: SuggestKind; q?: string; region?: string; county?: string; address?: string; lat?: number; lon?: number; level?: 'place' }) =>
@@ -159,9 +200,11 @@ export const api = {
   suggestAddress: (q: string) =>
     fetch('/api/suggest', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'address' as const, q }) })).then(json<{ items: Suggestion[]; unavailable?: boolean }>).then((d) => ({ items: d.items ?? [] })),
 
-  /** Мгновенная нейропроверка одного документа при загрузке (соответствие вида + качество + поля) */
+  /** Мгновенная нейропроверка одного документа при загрузке (соответствие вида + качество + поля), фоновая задача */
   checkDocument: (body: { type: string; fileName: string; dataUri: string }) =>
-    fetch('/api/documents/check', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ verdict: IntakeDocVerdict }>),
+    runOcrJob<{ verdict: IntakeDocVerdict }>(
+      fetch('/api/documents/check', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ jobId: string }>),
+    ),
 
   /** Массовая подача заявок из Excel: назначение водителя/ТС на список выигранных рейсов */
   bulkAssign: (body: { rows: { requestId: string; driverId: string; truckId: string; trailerId?: string }[] }) =>
