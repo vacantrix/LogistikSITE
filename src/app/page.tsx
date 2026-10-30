@@ -138,7 +138,17 @@ export default function Page() {
       if (wasConnectedRef.current) setConnLost(true)
     }
     socket.on('disconnect', onLost)
-    socket.on('connect_error', onLost)
+    const onError = (err: Error) => {
+      onLost()
+      // сессия недействительна (истекла или отозвана): бесконечный цикл переподключений
+      // бессмысленен — шина отвечает «unauthorized» на каждый заход. Прекращаем попытки
+      // и возвращаемся на экран входа тем же механизмом, что и для 401 от API
+      if (/unauthorized/i.test(err?.message ?? '')) {
+        socket.disconnect()
+        window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+      }
+    }
+    socket.on('connect_error', onError)
     socket.on('platform:update', (ev?: { type?: string }) => {
       // смена прав: пересчитать свои права и обновить данные (списки учёток, кнопки разделов)
       if (ev?.type === 'PERMS_CHANGED') setPermTick((t) => t + 1)

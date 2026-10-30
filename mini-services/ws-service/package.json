@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Real-time шина платформы АЭМЗ Логистика: socket.io для браузеров + /notify для Next.js API",
   "scripts": {
-    "dev": "bun --hot index.ts",
-    "start:node": "node --env-file-if-exists=../../.env.local index.ts"
+    "dev": "bun --hot --env-file=../../.env index.ts",
+    "start:node": "node --env-file-if-exists=../../.env --env-file-if-exists=../../.env.local index.ts"
   },
   "dependencies": {
     "socket.io": "^4.8.4"

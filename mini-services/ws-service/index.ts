@@ -83,10 +83,13 @@ const io = new Server(httpServer, {
   pingInterval: 25000,
 })
 
+/** Временная метка для журнала: без неё нельзя сопоставить обрывы с событиями платформы */
+const ts = (): string => new Date().toISOString()
+
 io.on('connection', (socket) => {
-  console.log(`[ws] client connected: ${socket.id} (online: ${io.engine.clientsCount})`)
-  socket.on('disconnect', () => {
-    console.log(`[ws] client disconnected: ${socket.id} (online: ${io.engine.clientsCount})`)
+  console.log(`[ws ${ts()}] client connected: ${socket.id} (online: ${io.engine.clientsCount})`)
+  socket.on('disconnect', (reason) => {
+    console.log(`[ws ${ts()}] client disconnected: ${socket.id} reason=${reason} (online: ${io.engine.clientsCount})`)
   })
 })
 
@@ -112,9 +115,9 @@ const notifyServer = createServer((req, res) => {
           ts: new Date().toISOString(),
         }
         io.emit('platform:update', event)
-        console.log(`[ws] broadcast ${event.type} → ${io.engine.clientsCount} client(s)`)
+        console.log(`[ws ${ts()}] broadcast ${event.type} → ${io.engine.clientsCount} client(s)`)
       } catch (e) {
-        console.error('[ws] bad notify payload:', e)
+        console.error(`[ws ${ts()}] bad notify payload:`, e)
       }
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end('{"ok":true}')
