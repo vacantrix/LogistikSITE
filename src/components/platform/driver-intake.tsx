@@ -21,7 +21,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  BadgeCheck, CarFront, CircleAlert, CircleCheck, IdCard, ScanLine, Truck, Trash2, X,
+  BadgeCheck, CarFront, CircleAlert, CircleCheck, IdCard, ScanLine, Truck, Trash2, Wand2, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,6 +33,7 @@ import {
 } from '@/components/platform/proforma-fields'
 import ScanOverlay from '@/components/platform/scan-overlay'
 import { useToast } from '@/hooks/use-toast'
+import { demoDriver, demoTrailer, demoTruck } from '@/lib/demo-fill'
 import { api } from '@/lib/api'
 import { isPositiveIssue } from '@/lib/doc-issues'
 import { DOC_TYPE_LABEL } from '@/lib/status'
@@ -43,6 +44,24 @@ import type { Suggestion } from '@/lib/suggest'
 
 /** Ровно два типа прицепа (утверждено пользователем, Task 32) */
 export const TRAILER_TYPES = ['Полуприцеп-штора', 'Полуприцепы-контейнеровозы'] as const
+
+/** Кнопка «Автозаполнение» (демо-стенд): подставляет валидные демонстрационные данные в карточку.
+ *  Форматные правила «Авто в порт» соблюдаются генератором (src/lib/demo-fill.ts). */
+export function AutofillButton({ onClick, disabled, kind }: { onClick: () => void; disabled?: boolean; kind: string }) {
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={onClick}
+      disabled={disabled}
+      title={`Заполнить карточку демонстрационными данными (${kind})`}
+      className="gap-1.5"
+    >
+      <Wand2 className="h-4 w-4 text-violet-600" aria-hidden />
+      Автозаполнение
+    </Button>
+  )
+}
 
 /** Человекочитаемые имена обязательных полей — для подсветки и текста ошибок (Task 44) */
 export const DRIVER_LABELS: Record<string, string> = {
@@ -291,6 +310,18 @@ export default function DriverLine({
   })
   const ai = useAiFields<keyof typeof d, DocType>()
 
+  /** Демо-автозаполнение: подставить валидные демонстрационные данные во все поля водителя.
+   *  Форматные правила соблюдаются генератором; фото не трогаем — их приносит загрузчик. */
+  const autofill = useCallback(() => {
+    setD((cur) => ({ ...cur, ...demoDriver() }))
+    setConf({})
+    setShowErrors(false)
+    toast({
+      title: 'Демо-данные подставлены',
+      description: 'Поля заполнены автоматически — загрузите фото документов и запустите «Проверить»',
+    })
+  }, [toast])
+
   const setUpload = useCallback(async (type: DocType, file: File) => {
     if (!(await loadUpload(type, file))) return
     // новое фото — прежний вердикт по этому шагу больше не действует,
@@ -457,6 +488,9 @@ export default function DriverLine({
         )}
         <span className="flex-1" />
         {!admitted && (
+          <AutofillButton onClick={autofill} disabled={lock} kind="водитель" />
+        )}
+        {!admitted && (
           <Button
             size="sm"
             onClick={() => void check()}
@@ -602,9 +636,9 @@ export interface SoloLineProps {
   onRemove: (id: string) => void
 }
 
-/** Шапка одиночной карточки: иконка, заголовок, метка, кнопка «Проверить» и удаления */
+/** Шапка одиночной карточки: иконка, заголовок, метка, кнопка «Автозаполнение», «Проверить» и удаления */
 function SoloHeader({
-  icon, title, index, kind, tag, busy, admitted, uploading = false, onCheck, onRemove,
+  icon, title, index, kind, tag, busy, admitted, uploading = false, onCheck, onAutofill, onRemove,
 }: {
   icon: ReactNode
   title: string
@@ -617,6 +651,8 @@ function SoloHeader({
   /** фото ещё загружается — кнопка нейросети ждёт */
   uploading?: boolean
   onCheck: () => void
+  /** демо-автозаполнение (не передаётся, когда карточке оно не нужно) */
+  onAutofill?: () => void
   onRemove: () => void
 }) {
   return (
@@ -632,6 +668,9 @@ function SoloHeader({
         <StatusDot dot="bg-emerald-500" className="text-xs">допущено в базу</StatusDot>
       )}
       <span className="flex-1" />
+      {!admitted && onAutofill && (
+        <AutofillButton onClick={onAutofill} disabled={busy !== null || uploading} kind={kind} />
+      )}
       {!admitted && (
         <Button
           size="sm"
@@ -952,6 +991,18 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
     return () => registerCheck(id, null)
   }, [id, registerCheck])
 
+  /** Демо-автозаполнение тягача: валидные госномер/VIN/СТС по правилам «Авто в порт» */
+  const autofill = useCallback(() => {
+    setT(demoTruck())
+    setConf({})
+    setFormatBad({})
+    setShowErrors(false)
+    toast({
+      title: 'Демо-данные подставлены',
+      description: 'Поля тягача заполнены автоматически — загрузите фото и запустите «Проверить»',
+    })
+  }, [toast])
+
   return (
     <section
       className="rounded-xl border border-slate-200 bg-white p-4"
@@ -967,6 +1018,7 @@ export function TruckLine({ id, index, carrierId, initial, registerCheck, onRemo
         uploading={photoLoading !== null}
         admitted={admitted !== null}
         onCheck={() => void check()}
+        onAutofill={autofill}
         onRemove={() => onRemove(id)}
       />
       {admitted !== null ? (
@@ -1174,6 +1226,18 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
     return () => registerCheck(id, null)
   }, [id, registerCheck])
 
+  /** Демо-автозаполнение прицепа: валидный госномер (АВ1234 23) и СТС по правилам порта */
+  const autofill = useCallback(() => {
+    setTr(demoTrailer(TRAILER_TYPES[Math.floor(Math.random() * TRAILER_TYPES.length)]))
+    setConf({})
+    setFormatBad({})
+    setShowErrors(false)
+    toast({
+      title: 'Демо-данные подставлены',
+      description: 'Поля прицепа заполнены автоматически — загрузите фото и запустите «Проверить»',
+    })
+  }, [toast])
+
   return (
     <section
       className="rounded-xl border border-slate-200 bg-white p-4"
@@ -1189,6 +1253,7 @@ export function TrailerLine({ id, index, carrierId, initial, registerCheck, onRe
         uploading={photoLoading !== null}
         admitted={admitted !== null}
         onCheck={() => void check()}
+        onAutofill={autofill}
         onRemove={() => onRemove(id)}
       />
       {admitted !== null ? (

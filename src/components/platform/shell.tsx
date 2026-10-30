@@ -23,7 +23,7 @@
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
   ArrowLeft, BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
-  History, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Phone, Save, ScanSearch, ShieldCheck, Truck,
+  History, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Save, ScanSearch, ShieldCheck, Truck,
   UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
 import {
@@ -65,6 +65,7 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'] },
   { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'] },
   { key: 'admin-db', label: 'База данных', roles: ['admin'] },
+  { key: 'arch', label: 'Архитектура', roles: ['admin'] },
   { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'] },
 ]
 
@@ -84,6 +85,7 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   journal: { Icon: History, short: 'Журнал' },
   'admin-users': { Icon: UserCog, short: 'Профили' },
   'admin-db': { Icon: Database, short: 'База' },
+  arch: { Icon: Network, short: 'Архитектура' },
   support: { Icon: MessagesSquare, short: 'Обращения' },
 }
 

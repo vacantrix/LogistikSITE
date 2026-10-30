@@ -30,6 +30,7 @@ import EdoTab from '@/components/platform/edo'
 import SupportTab from '@/components/platform/support'
 import AdminUsersTab from '@/components/platform/admin-users'
 import AdminDbTab from '@/components/platform/admin-db'
+import ArchitectureTab from '@/components/platform/architecture'
 import { PermProvider, useCan } from '@/components/platform/perms'
 
 /** Роль интерфейса из пользователя сессии */
@@ -231,6 +232,7 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
           {tab === 'support' && <SupportTab {...tabProps} />}
           {tab === 'admin-users' && <AdminUsersTab {...tabProps} />}
           {tab === 'admin-db' && <AdminDbTab {...tabProps} />}
+          {tab === 'arch' && <ArchitectureTab {...tabProps} />}
         </>
       )}
 

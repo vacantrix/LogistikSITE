@@ -16,8 +16,9 @@
  *   { engine, quality, fields, confidences, detectedType? }
  *
  * Эндпоинты:
- *   GET  /health — статус сервиса и движка
- *   POST /ocr    — { type, dataUri, intake? } → { ok, ocr, chain }; 422 — вид документа без шаблона
+ *   GET  /health   — статус сервиса и движка
+ *   GET  /upstream — живая проверка нейросети (health движка на ПК перевозчика через туннель)
+ *   POST /ocr      — { type, dataUri, intake? } → { ok, ocr, chain }; 422 — вид документа без шаблона
  *
  * Распознавание одного документа занимает 5–40 с, PaddleOCR обрабатывает их по одному,
  * поэтому таймауты здесь длинные, а очередь держит сама платформа (src/lib/ocr-service.ts).
@@ -137,6 +138,9 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<PaddleResult> 
 let lastEngine: string | null = null
 let processed = 0
 
+/** База удалённого движка из PADDLE_URL (…/ocr → без /ocr) — для живой проверки /upstream */
+const ENGINE_BASE = PADDLE_URL.replace(/\/ocr\/?$/, '')
+
 Bun.serve({
   port: PORT,
   hostname: '127.0.0.1',
@@ -160,6 +164,33 @@ Bun.serve({
         uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
         time: new Date().toISOString(),
       })
+    }
+
+    // ——— живая проверка движка на ПК перевозчика (лёгкий GET /health через туннель, без OCR) ———
+    if (url.pathname === '/upstream' && req.method === 'GET') {
+      if (!ENGINE_BASE) return json({ ok: false, error: 'Движок не настроен (PADDLE_OCR_URL пуст)' }, 503)
+      const t0 = Date.now()
+      try {
+        const res = await fetch(`${ENGINE_BASE}/health`, {
+          headers: {
+            ...(UPSTREAM_TOKEN ? { 'X-OCR-Token': UPSTREAM_TOKEN } : {}),
+            ...(ENGINE_BASE.includes('ngrok') ? { 'ngrok-skip-browser-warning': '1' } : {}),
+          },
+          signal: AbortSignal.timeout(8000),
+        })
+        const ms = Date.now() - t0
+        const j = (await res.json().catch(() => null)) as { engine?: string; version?: string; gpu?: string } | null
+        return json({
+          ok: res.ok,
+          ms,
+          status: res.status,
+          engine: j?.engine ?? null,
+          version: j?.version ?? null,
+          gpu: j?.gpu ?? null,
+        })
+      } catch (e) {
+        return json({ ok: false, ms: Date.now() - t0, error: e instanceof Error ? e.message : 'движок не ответил' })
+      }
     }
 
     // ——— распознавание документа ———
