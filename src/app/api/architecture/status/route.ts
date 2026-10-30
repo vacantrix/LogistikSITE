@@ -26,11 +26,11 @@ export interface ServiceStatusItem {
 }
 
 /** Обёртка: замер времени + безопасный перехват */
-async function probe(id: string, fn: () => Promise<Omit<ServiceStatusItem, 'ms'>>): Promise<ServiceStatusItem> {
+async function probe(id: string, fn: () => Promise<{ ok: boolean; detail: string }>): Promise<ServiceStatusItem> {
   const t0 = Date.now()
   try {
     const r = await fn()
-    return { id, ms: Date.now() - t0, ...r }
+    return { ...r, id, ms: Date.now() - t0 }
   } catch (e) {
     return { id, ok: false, ms: Date.now() - t0, detail: e instanceof Error ? e.message : 'не ответил' }
   }

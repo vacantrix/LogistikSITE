@@ -144,3 +144,27 @@
     overflow: visible;
   }
 }
+
+/* Проводник «Архитектуры»: рендер README.md (react-markdown + remark-gfm).
+   Темы плагина typography нет — оформляем вручную, в стиле платформы. */
+.markdown-view > :first-child { margin-top: 0; }
+.markdown-view h1 { margin: 1.1em 0 0.5em; font-size: 1.35rem; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 0.3em; }
+.markdown-view h2 { margin: 1.2em 0 0.45em; font-size: 1.12rem; font-weight: 700; color: #0f172a; }
+.markdown-view h3 { margin: 1em 0 0.4em; font-size: 1rem; font-weight: 600; color: #1e293b; }
+.markdown-view h4 { margin: 0.9em 0 0.35em; font-size: 0.92rem; font-weight: 600; color: #334155; }
+.markdown-view p { margin: 0.55em 0; line-height: 1.65; }
+.markdown-view ul, .markdown-view ol { margin: 0.55em 0; padding-left: 1.5em; }
+.markdown-view ul { list-style: disc; }
+.markdown-view ol { list-style: decimal; }
+.markdown-view li { margin: 0.25em 0; line-height: 1.6; }
+.markdown-view li > input[type='checkbox'] { margin-right: 0.4em; }
+.markdown-view a { color: #047857; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.markdown-view strong { color: #0f172a; }
+.markdown-view code { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 0.05em 0.35em; font-size: 0.85em; }
+.markdown-view pre { background: #0e1b2c; color: #dbe7f3; border-radius: 8px; padding: 0.9em 1.1em; overflow-x: auto; margin: 0.7em 0; line-height: 1.55; }
+.markdown-view pre code { background: transparent; border: 0; padding: 0; color: inherit; font-size: 0.85em; }
+.markdown-view blockquote { border-left: 3px solid #cbd5e1; padding: 0.1em 0 0.1em 1em; margin: 0.7em 0; color: #64748b; }
+.markdown-view hr { border: 0; border-top: 1px solid #e2e8f0; margin: 1.2em 0; }
+.markdown-view table { border-collapse: collapse; margin: 0.8em 0; width: 100%; display: block; overflow-x: auto; }
+.markdown-view th, .markdown-view td { border: 1px solid #e2e8f0; padding: 0.4em 0.7em; text-align: left; vertical-align: top; font-size: 0.88em; }
+.markdown-view th { background: #f8fafc; font-weight: 600; color: #334155; }

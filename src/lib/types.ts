@@ -241,6 +241,90 @@ export interface SettingsDTO {
   rules: Record<string, string>
 }
 
+/** Настройки нейросети: пропуск документов (админ-раздел «Нейросеть») */
+export interface NnSettingsDTO {
+  /** одновременные распознавания (1–4) */
+  parallel: number
+  /** таймаут одного документа, сек (30–300) */
+  timeoutSec: number
+  /** кэш повторных сканов, минут (0 — выключен) */
+  cacheMin: number
+  /** длинная сторона фото после сжатия, px (0 — без сжатия) */
+  maxSide: number
+}
+
+export interface NnLimitsDTO {
+  parallel: { min: number; max: number }
+  timeoutSec: { min: number; max: number }
+  cacheMin: { min: number; max: number }
+  maxSide: { min: number; max: number }
+}
+
+export interface NnStatusDTO {
+  settings: NnSettingsDTO
+  defaults: NnSettingsDTO
+  limits: NnLimitsDTO
+  service: {
+    running: boolean
+    version?: string
+    activeEngine?: string | null
+    processed?: number
+    uptimeSec?: number
+    paddleConfigured?: boolean
+  }
+  queue: { active: number; waiting: number }
+  cache: { size: number; hits: number; savedMs: number }
+  time: string
+}
+
+export interface NnTestResultDTO {
+  ok: boolean
+  ms: number
+  docType: string
+  label: string
+  quality?: number
+  engine?: string
+  detectedType?: string | null
+  fieldsCount?: number
+  fieldsTotal?: number
+  error?: string
+}
+
+/** Живая проверка движка нейросети (лёгкий запрос через шлюз, без OCR) */
+export interface NnUpstreamDTO {
+  ok: boolean
+  ms: number
+  status?: number
+  engine?: string | null
+  version?: string | null
+  gpu?: string | null
+  error?: string | null
+}
+
+/** Узел файлового дерева проводника «Архитектуры» */
+export interface FileNodeDTO {
+  n: string
+  p: string
+  d: boolean
+  s?: number
+  m?: string
+  b?: boolean
+  v?: boolean
+  c?: FileNodeDTO[]
+}
+
+/** Ответ чтения файла проводника */
+export interface FileReadDTO {
+  path: string
+  name: string
+  size: number
+  mtime: string
+  binary: boolean
+  sensitive: boolean
+  truncated: boolean
+  content: string | null
+}
+
 export interface ReportSummary {
   kpi: {
     openRequests: number

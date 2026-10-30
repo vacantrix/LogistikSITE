@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  AccessDataDTO, AccessUserInput, AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, IntakeDocVerdict, IntakeResult, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
+  AccessDataDTO, AccessUserInput, AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, FileNodeDTO, FileReadDTO, IntakeDocVerdict, IntakeResult, NnLimitsDTO, NnStatusDTO, NnSettingsDTO, NnTestResultDTO, NnUpstreamDTO, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
 import type { ReportId, ReportPreview, ReportSettings } from '@/lib/reports/catalog'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
@@ -338,6 +338,20 @@ export const api = {
   settings: () => fetch('/api/settings', withAuth({ cache: 'no-store' })).then(json<SettingsDTO>),
   saveSettings: (data: Partial<SettingsDTO>) =>
     fetch('/api/settings', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<SettingsDTO>),
+
+  /** Нейросеть (админ): настройки пропуска документов, статус, тестовый прогон */
+  nnStatus: () => fetch('/api/admin/nn', withAuth({ cache: 'no-store' })).then(json<NnStatusDTO>),
+  saveNn: (settings: Partial<NnSettingsDTO>) =>
+    fetch('/api/admin/nn', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })).then(json<{ settings: NnSettingsDTO; limits: NnLimitsDTO }>),
+  nnAction: (body: { action: 'upstream' | 'test' | 'clear-cache'; docType?: string; fresh?: boolean }) =>
+    fetch('/api/admin/nn', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<NnUpstreamDTO & NnTestResultDTO & { ok: boolean; cache?: NnStatusDTO['cache'] }>),
+
+  /** Файловый проводник «Архитектуры» (админ): дерево, чтение, сохранение */
+  fileTree: () => fetch('/api/admin/files?op=tree', withAuth({ cache: 'no-store' })).then(json<{ root: string; tree: FileNodeDTO[]; truncated: boolean }>),
+  fileRead: (path: string) =>
+    fetch(`/api/admin/files?op=read&path=${encodeURIComponent(path)}`, withAuth({ cache: 'no-store' })).then(json<FileReadDTO>),
+  fileSave: (path: string, content: string) =>
+    fetch('/api/admin/files', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }) })).then(json<{ ok: boolean; path: string; size: number; mtime: string }>),
 
   /** Журнал событий платформы (Task 76, только логист): лента + статистика за 24 ч */
   platformLog: (params?: { level?: string; q?: string; limit?: number }) => {

@@ -1,0 +1,25 @@
+# mini-services/ — отдельные процессы платформы
+
+Каждый сервис — независимый процесс со своим портом и `package.json`
+(запуск: `bun install && bun run dev` внутри своей папки). Клиент обращается к ним
+только через шлюз Caddy по относительному пути с `?XTransformPort=<порт>` —
+прямые порты в URL клиента запрещены.
+
+| Сервис | Порт | Назначение | README |
+|---|---|---|---|
+| `ws-service` | 3003 | real-time шина socket.io: событие `platform:update` после записей в БД — вкладки всех пользователей обновляются без перезагрузки. Сессия проверяется на входе (кука или `?token=`) | `ws-service/README.md` |
+| `ocr-service` | 3020 | OCR-шлюз: принимает скан от платформы (X-OCR-Token), передаёт движку через ngrok-туннель, возвращает поля и уверенности. Слушает только 127.0.0.1 | `ocr-service/README.md` |
+| `paddle-ocr` | 3031 | **Python**-движок PaddleOCR, разворачивается на ПК перевозчика (Windows): детекция PP-OCRv5 server_det + чтение mobile_rec, ~2,3 с на документ; наружу — вечный ngrok-домен | `paddle-ocr/README.md` |
+| `diadoc-mock` | 3080 | стенд ЭДО: мок Диадока для статусов ЭТрН SENT/SIGNED | — |
+
+Схема вызовов:
+
+```
+Next.js (:3000)  →  ws-service (:3003)        socket.io, XTransformPort=3003
+Next.js (:3000)  →  ocr-service (:3020)       POST /ocr { type, dataUri }
+ocr-service      →  PaddleOCR (:3031, ngrok)  POST /ocr { image, docType, fields }
+```
+
+Настройки пропуска документов (параллельность, таймаут, кэш, сжатие) хранятся в БД
+платформы и применяются в `src/lib/ocr-service.ts` до вызова шлюза — менять что-либо
+в сервисах не нужно.

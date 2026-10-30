@@ -22,8 +22,8 @@
  */
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
-  ArrowLeft, BarChart3, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
-  History, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Save, ScanSearch, ShieldCheck, Truck,
+  ArrowLeft, BarChart3, Brain, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
+  History, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Save, ScanSearch, ShieldCheck, SlidersHorizontal, Truck,
   UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
 import {
@@ -63,6 +63,8 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier', 'admin'] },
   { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'] },
   { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'] },
+  { key: 'nn', label: 'Нейросеть', roles: ['admin'] },
+  { key: 'settings', label: 'Настройки', roles: ['admin'] },
   { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'] },
   { key: 'admin-db', label: 'База данных', roles: ['admin'] },
   { key: 'arch', label: 'Архитектура', roles: ['admin'] },
@@ -83,6 +85,8 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   directory: { Icon: FolderOpen, short: 'Справочники' },
   reports: { Icon: BarChart3, short: 'Отчёты' },
   journal: { Icon: History, short: 'Журнал' },
+  nn: { Icon: Brain, short: 'Нейросеть' },
+  settings: { Icon: SlidersHorizontal, short: 'Настройки' },
   'admin-users': { Icon: UserCog, short: 'Профили' },
   'admin-db': { Icon: Database, short: 'База' },
   arch: { Icon: Network, short: 'Архитектура' },
