@@ -90,7 +90,7 @@ const C: Contour[] = ['carrier']
 const A: Contour[] = ['admin']
 
 export const PERMS: PermItem[] = [
-  { key: 'draft:create', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Создание черновиков', hint: 'Кнопки «Создать заявку» и «Новая заявка»' },
+  { key: 'draft:create', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Создание черновиков', hint: 'Кнопка «Новая заявка» в «Черновиках заявок»' },
   { key: 'draft:edit', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Правка черновиков', hint: 'Редактирование черновиков и заявок до начала работы' },
   { key: 'draft:delete', group: 'Заявки и торги', contours: L, risk: 'normal', label: 'Удаление черновиков', hint: 'Корзина в «Черновиках заявок»' },
   { key: 'request:publish', group: 'Заявки и торги', contours: L, risk: 'important', label: 'Публикация на площадку', hint: '«Опубликовать» — выставить черновик на торги' },

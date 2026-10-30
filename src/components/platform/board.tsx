@@ -21,7 +21,6 @@ import {
   Lock,
   Map as MapIcon,
   MapPin,
-  Plus,
   ScanSearch,
   Search,
   Send,
@@ -65,7 +64,6 @@ import {
   type TabProps,
 } from '@/components/platform/common'
 import { RouteButton, RoutePointsInline } from '@/components/platform/route-dialog'
-import { RequestFormDialog } from '@/components/platform/request-form'
 import { AnimatedRate } from '@/components/platform/animated-rate'
 import { useCan } from '@/components/platform/perms'
 import { useToast } from '@/hooks/use-toast'
@@ -478,11 +476,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   const [mapOpen, setMapOpen] = useState(false)
   const [focusPointId, setFocusPointId] = useState<string | null>(null)
 
-  // ——— создание заявки — только логист (Task 64): общая форма request-form.tsx ———
-  const [createOpen, setCreateOpen] = useState(false)
-  // экран успеха (Task 64): «Заявка №XXXX успешно создана» — номер и куда попала заявка
-  const [created, setCreated] = useState<{ number: string; draft: boolean } | null>(null)
-
   // торговый стенд и решения логиста (вместо отдельной вкладки «Торги»)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [events, setEvents] = useState<EventFeedItem[]>([])
@@ -841,15 +834,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
 
   return (
     <section aria-label="Площадка заявок">
-      <SectionHeader title="Площадка заявок">
-        {/* право draft:create (Task 111): без него кнопки создания нет вовсе */}
-        {isStaff && can('draft:create') && (
-          <Button onClick={() => setCreateOpen(true)} className="gap-1.5" aria-label="Создать заявку">
-            <Plus className="h-4 w-4" aria-hidden />
-            Создать заявку
-          </Button>
-        )}
-      </SectionHeader>
+      {/* Создание заявок — только из «Черновиков заявок» (кнопка «Новая заявка» там);
+          на площадке — только приём ставок и управление уже опубликованными */}
+      <SectionHeader title="Площадка заявок" />
 
       {!isStaff && !activeCarrierId && (
         <NoticeLine tone="warning" className="mb-4">Выберите перевозчика в шапке, чтобы действовать от его имени</NoticeLine>
@@ -1146,46 +1133,6 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
             </Card>
           )}
         </div>
-      )}
-
-      {/* Форма новой заявки (Task 64) — внутреннему контуру с правом draft:create (Task 111):
-          опубликовать или сохранить в черновики */}
-      {isStaff && can('draft:create') && createOpen && (
-        <RequestFormDialog
-          open
-          onOpenChange={setCreateOpen}
-          onDone={(request, result) => {
-            if (result === 'published') setRequests((prev) => [request, ...(prev ?? [])])
-            setCreated({ number: request.number, draft: result === 'draft' })
-          }}
-        />
-      )}
-
-      {/* Экран успеха (Task 64): лаконичное окно с переходом в реестр или созданием следующей */}
-      {isStaff && (
-        <Dialog open={created !== null} onOpenChange={(o) => { if (!o) setCreated(null) }}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader className="items-center text-center">
-              <DialogTitle className="flex flex-col items-center gap-3 text-lg font-semibold text-slate-900">
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700" aria-hidden>
-                  <CheckCircle2 className="h-6 w-6" />
-                </span>
-                {created?.draft ? `Черновик ${created.number} сохранён` : `Заявка ${created?.number} успешно создана`}
-              </DialogTitle>
-              <DialogDescription className="sr-only">
-                {created?.draft ? 'Черновик сохранён' : 'Заявка опубликована на площадке'}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="sm:justify-center">
-              <Button variant="outline" onClick={() => { setCreated(null); setCreateOpen(true) }}>
-                Создать ещё одну
-              </Button>
-              <Button onClick={() => { const draft = created?.draft; setCreated(null); onNavigate(draft ? 'drafts' : 'requests') }}>
-                {created?.draft ? 'Перейти в черновики' : 'Перейти в реестр'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       )}
 
       {/* Диалог ставки (торги / закрытые ставки) */}
