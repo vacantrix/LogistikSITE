@@ -29,7 +29,8 @@ Bearer-токен или подписанная кука. Права прове�
 | `admin/users · access` | GET/POST | **админ** | учётки, роли, шаблоны доступа |
 | `permissions · profile` | GET/PUT | все | матрица прав, свой профиль |
 | `platform-log · /client` | GET/POST | логист+ | техжурнал платформы; клиентские ошибки |
-| `support/tickets[/id]` | GET/POST/PATCH | все | обращения в поддержку |
+| `support/tickets[/id]` | GET/POST/PATCH | все | обращения и чаты: перевозчик — в поддержку, логист/админ пишут перевозчику первыми (`targetCarrierId`) |
+| `support/carriers` | GET | логист, админ | адресаты чатов персонала (компании-перевозчики) |
 | `integration/1c/*` | GET/POST | **X-API-Key** | шина 1С: ping, dictionaries, requests, etrn, info |
 | `architecture/status` | GET | **админ** | живые статусы всех контуров |
 

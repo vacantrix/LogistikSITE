@@ -9,14 +9,14 @@
  * Папка с README.md при открытии сразу показывает его — у каждого блока проекта
  * своё описание в README.
  *
- * Второй вид — «Карта»: логическая схема системы (что от чего зависит) с живыми
- * статусами контуров. Описания и легенда — в README.md и README каждого блока.
+ * Второй вид — «Карта»: потоковая схема (что и куда течёт — стрелки между контурами)
+ * с живыми статусами контуров. Описания и легенда — в README.md и README каждого блока.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, ArrowDown, Box, Brain, BrainCircuit, Braces, Building2, ChevronRight, Circle, Cpu, Database,
-  FileCode2, FileCog, FileText, FileWarning, Folder, FolderOpen, Globe, Hash, History, Hourglass,
-  Image as ImageIcon, Layers, Loader2, Lock, Monitor, Network, Pencil, Plug, RefreshCw, Save,
+  AlertTriangle, ArrowDown, ArrowUp, Box, Brain, BrainCircuit, Braces, Building2, ChevronRight, Circle, Cpu, Database,
+  FileCode2, FileCog, FileText, FileWarning, Folder, FolderOpen, Gauge, Globe, Hash, History, Hourglass,
+  Image as ImageIcon, Layers, Loader2, Lock, MessagesSquare, Monitor, Network, Pencil, Plug, RefreshCw, Save,
   Search, Server, ShieldAlert, Users, Waypoints, X,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
@@ -362,37 +362,82 @@ function SchemeBox({ status, statusId, icon: Icon, label, sub, tone = 'slate' }:
   )
 }
 
-/** Стрелка между уровнями схемы с подписью канала */
-function SchemeArrow({ label }: { label: string }) {
+/**
+ * Пара потоков между контурами: слева — что уходит вниз (к следующему контуру),
+ * справа — что возвращается наверх. Подписи краткие, по одной строке на поток.
+ */
+function FlowArrows({ down, up }: { down: string[]; up: string[] }) {
   return (
-    <div className="flex flex-col items-center py-1" aria-hidden>
-      <span className="text-[10px] font-medium text-slate-500">{label}</span>
-      <ArrowDown className="h-4 w-4 text-slate-400" />
+    <div className="grid gap-2 py-1.5 sm:grid-cols-2" role="img" aria-label="Потоки данных между контурами">
+      <div className="flex items-start gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-emerald-200 bg-white text-emerald-600" aria-hidden>
+          <ArrowDown className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Вниз — запросы и данные</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {down.map((d) => (
+              <li key={d} className="flex gap-1.5 text-[11px] leading-snug text-slate-600">
+                <ArrowDown className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" aria-hidden />
+                <span>{d}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500" aria-hidden>
+          <ArrowUp className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Наверх — ответы и события</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {up.map((u) => (
+              <li key={u} className="flex gap-1.5 text-[11px] leading-snug text-slate-600">
+                <ArrowUp className="mt-0.5 h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                <span>{u}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
     </div>
   )
 }
 
 /**
- * Наглядная карта: пользователи → сервер АЭМЗ (платформа, БД с фото, очередь)
- * → ПК нейросети АЭМЗ (GPU). Живые точки — из /api/architecture/status.
+ * Потоковая карта: что и куда течёт между контурами. Три контура — пользователи
+ * и 1С, сервер АЭМЗ, узел нейросети. Между ними — пары стрелок: что уходит вниз
+ * и что возвращается наверх. Живые точки — из /api/architecture/status.
  */
 function SchematicMap({ status }: { status: StatusItem[] | null }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 shadow-sm sm:p-4">
-      {/* уровень 1 — пользователи */}
+      {/* уровень 1 — пользователи и 1С */}
       <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
           <Users className="h-3.5 w-3.5" aria-hidden />
-          Пользователи — загружают фото и файлы одновременно
+          Пользователи и системы — работают одновременно
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <SchemeBox status={status} icon={Monitor} label="Логист / админ" sub="браузер: торги, сверка, настройки, мониторинг очереди" />
-          <SchemeBox status={status} icon={Monitor} label="Перевозчик" sub="браузер: ставки, документы — до 20 фото за подачу" />
-          <SchemeBox status={status} statusId="onec" icon={Building2} label="1С:ERP / шина 1С" sub="X-API-Key: заявки, статусы рейсов, ЭТрН" />
+          <SchemeBox status={status} icon={Monitor} label="Перевозчик" sub="браузер: заявки, документы, обращения" />
+          <SchemeBox status={status} icon={Monitor} label="Логист / администрация" sub="браузер: торги, сверка, чаты, настройки" />
+          <SchemeBox status={status} statusId="onec" icon={Building2} label="1С:ERP грузоотправителя" sub="заказы и статусы по X-API-Key" />
         </div>
       </div>
 
-      <SchemeArrow label="HTTPS · единый внешний порт (Caddy)" />
+      <FlowArrows
+        down={[
+          'заявки, ставки, фото и сканы документов (до 20 фото за подачу)',
+          'обращения и чаты: перевозчик ↔ логист/администрация',
+          '1С: заказы на перевозку → черновики заявок, подтверждения ЭТрН',
+        ]}
+        up={[
+          'статусы, уведомления и события в реальном времени',
+          'вердикты проверок, документы и печатные формы',
+          '1С: реестр рейсов, статусы, ЭТрН',
+        ]}
+      />
 
       {/* уровень 2 — сервер АЭМЗ */}
       <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
@@ -400,33 +445,53 @@ function SchematicMap({ status }: { status: StatusItem[] | null }) {
           <Building2 className="h-3.5 w-3.5" aria-hidden />
           Сервер АЭМЗ — веб-платформа; фото и файлы хранятся здесь
         </p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
           <SchemeBox status={status} statusId="web" icon={Globe} label="Веб-платформа" sub="Next.js · порт 3000 · UI + REST API" tone="emerald" />
-          <SchemeBox status={status} statusId="db" icon={Database} label="База данных" sub="SQLite · заявки, сканы (dataUri), настройки" tone="emerald" />
-          <SchemeBox status={status} statusId="ws" icon={Waypoints} label="Real-time шина" sub="socket.io · порт 3003 · обновления у всех" tone="emerald" />
+          <SchemeBox status={status} statusId="db" icon={Database} label="База данных" sub="SQLite · заявки, сканы, чаты, настройки" tone="emerald" />
+          <SchemeBox status={status} statusId="ws" icon={Waypoints} label="Real-time шина" sub="socket.io · порт 3003" tone="emerald" />
+          <SchemeBox icon={MessagesSquare} label="Обращения и чаты" sub="перевозчик ↔ логист/админ · вложения до 10 МБ" tone="emerald" />
           <SchemeBox status={status} statusId="ocr-gateway" icon={Server} label="OCR-шлюз" sub="bun · порт 3020 · общая очередь фото" tone="emerald" />
         </div>
       </div>
 
-      <SchemeArrow label="X-OCR-Token · машина берёт «максимум фото в обработке», остальные ждут" />
+      <FlowArrows
+        down={[
+          'фото из общей очереди — не больше «максимума фото в обработке» (настройка под VRAM)',
+          'X-OCR-Token · шлюз слушает только 127.0.0.1',
+        ]}
+        up={[
+          'распознанные поля + уверенности по каждому фото',
+          'качество фото и вид документа',
+        ]}
+      />
 
-      {/* уровень 3 — GPU-ПК нейросети */}
+      {/* уровень 3 — узел нейросети */}
       <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
           <Cpu className="h-3.5 w-3.5" aria-hidden />
-          ПК нейросети АЭМЗ — отдельная машина с GPU (подбор по VRAM)
+          Нейросеть на серверах АЭМЗ — сейчас показательно на отдельном GPU-ПК (временный стенд)
         </p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <SchemeBox status={status} statusId="neural" icon={BrainCircuit} label="PaddleOCR · порт 3031" sub="детекция + чтение · ~2,3 с на документ" tone="amber" />
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <SchemeBox status={status} statusId="neural" icon={BrainCircuit} label="PaddleOCR · порт 3031" sub="детекция + чтение документов" tone="amber" />
+          <div className="flex min-w-0 items-start gap-2.5 rounded-lg border border-amber-200 bg-white px-3 py-2.5 shadow-sm">
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700" aria-hidden>
+              <Gauge className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold leading-tight text-slate-900">Слоты под VRAM</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                Одновременно обрабатывается столько фото, сколько позволяет видеопамять («максимум фото в обработке»).
+              </p>
+            </div>
+          </div>
           <div className="flex min-w-0 items-start gap-2.5 rounded-lg border border-amber-200 bg-white px-3 py-2.5 shadow-sm">
             <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700" aria-hidden>
               <Hourglass className="h-3.5 w-3.5" />
             </span>
             <div className="min-w-0">
-              <p className="text-[13px] font-semibold leading-tight text-slate-900">Общая очередь фото</p>
+              <p className="text-[13px] font-semibold leading-tight text-slate-900">Общая очередь ожидания</p>
               <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                Несколько перевозчиков подают одновременно — очередь одна: машина берёт в работу
-                «максимум фото в обработке» (настройка под VRAM), остальные честно ждут своего хода.
+                Фото сверх слотов честно ждут своего хода — неважно, сколько перевозчиков подали единовременно.
               </p>
             </div>
           </div>

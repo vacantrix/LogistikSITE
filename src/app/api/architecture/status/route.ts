@@ -79,7 +79,7 @@ export async function GET() {
       return { ok: true, detail: `v${j.version ?? '?'} · документов: ${j.processed ?? 0} · аптайм ${upText}` }
     }),
 
-    // нейросеть АЭМЗ (выделенный GPU-ПК): лёгкий health движка через шлюз (без OCR)
+    // нейросеть на серверах АЭМЗ (сейчас показательно на отдельном GPU-ПК): лёгкий health движка через шлюз (без OCR)
     // + живая нагрузка общей очереди: сколько фото в обработке / ждут
     probe('neural', async () => {
       const [res, queue, nn] = await Promise.all([

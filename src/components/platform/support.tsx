@@ -2,9 +2,15 @@
 
 /**
  * «Обращения» (Task 109-b) — чат поддержки платформы.
- * Перевозчики и экспедиторы создают обращения (тема, категория, описание, вложения),
- * описывают проблему и получают консультацию логиста или администрации прямо в ветке.
- * Логист и администрация видят все обращения, отвечают и закрывают решённые.
+ *
+ * Логика по ролям (переработка): обращение всегда адресовано «через платформу»:
+ *  — перевозчик создаёт обращение в поддержку (тема, категория, описание, вложения)
+ *    и получает консультацию логиста или администрации прямо в ветке;
+ *  — логист и администрация видят все обращения, отвечают в них и закрывают решённые,
+ *    а могут и НАПИСАТЬ ПЕРЕВОЗЧИКУ первыми — выбирают компанию, и дальше это обычный
+ *    чат двух сторон. Обращение «на администрацию» из персонала невозможно ни в UI,
+ *    ни на сервере.
+ *
  * Вложения — документы и медиа (фото, PDF, офисные форматы) суммарно до 10 МБ на
  * обращение: клиент проверяет тип и остаток лимита, сервер дублирует проверку и
  * присылает понятные ошибки. Слева — список обращений (поиск и фильтр статуса считает
@@ -14,6 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
+  Building2,
   CheckCheck,
   Download,
   FileText,
@@ -29,6 +36,7 @@ import {
 import {
   EmptyState, ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
+import { SearchSelect } from '@/components/platform/search-select'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -411,6 +419,10 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
 
   // ——— новое обращение ———
   const [newOpen, setNewOpen] = useState(false)
+  const isStaffRole = role === 'logist' || role === 'admin'
+  // персонал пишет конкретной компании-перевозчику (обращение «на администрацию» невозможно)
+  const [carriers, setCarriers] = useState<{ id: string; name: string; inn: string; access: boolean }[] | null>(null)
+  const [nCarrierId, setNCarrierId] = useState('')
   const [nSubject, setNSubject] = useState('')
   const [nCategory, setNCategory] = useState<TicketCategory>('other')
   const [nBody, setNBody] = useState('')
@@ -552,26 +564,34 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
     }
   }
 
-  /** Создать обращение: первое сообщение — описание проблемы */
+  /** Создать обращение: первое сообщение — описание проблемы.
+   *  Персонал обязательно указывает перевозчика — чат адресован его компании. */
   const createTicket = async () => {
     const subject = nSubject.trim()
     const text = nBody.trim()
     if (!subject || !text || creating) return
+    if (isStaffRole && !nCarrierId) return
     setCreating(true)
     try {
       const d = await api.createTicket({
         subject,
         category: nCategory,
         body: text,
+        ...(isStaffRole ? { targetCarrierId: nCarrierId } : {}),
         attachments: nPending.map((f) => ({ fileName: f.fileName, dataUri: f.dataUri })),
       })
-      toast({ title: `Обращение №${d.ticket.number} создано — ответим в этой ветке` })
+      toast({
+        title: isStaffRole
+          ? `Сообщение перевозчику №${d.ticket.number} отправлено — ответ придёт в этой ветке`
+          : `Обращение №${d.ticket.number} создано — ответим в этой ветке`,
+      })
       setNewOpen(false)
       setNSubject('')
       setNBody('')
       setNPending([])
       setNError(null)
       setNCategory('other')
+      setNCarrierId('')
       setOpenId(d.ticket.id)
       await loadList()
     } catch (e) {
@@ -596,7 +616,7 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
         title="Обращения"
         desc={role === 'carrier'
           ? 'Опишите проблему — логист или администрация ответят прямо здесь. К обращению можно приложить документы и медиа до 10 МБ.'
-          : 'Обращения перевозчиков: отвечайте в ветке, закрывайте решённые.'}
+          : 'Обращения перевозчиков — отвечайте в ветке. Можно и написать перевозчику первыми: выберите компанию, дальше это обычный чат.'}
       />
 
       <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
@@ -614,9 +634,14 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
               />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Button className="h-11 flex-1 sm:flex-none" onClick={() => setNewOpen(true)}>
+              <Button className="h-11 flex-1 sm:flex-none" onClick={() => {
+                setNewOpen(true)
+                if (isStaffRole && carriers === null) {
+                  void api.supportCarriers().then((d) => setCarriers(d.carriers)).catch(() => setCarriers([]))
+                }
+              }}>
                 <Plus className="h-4 w-4" aria-hidden />
-                Новое обращение
+                {isStaffRole ? 'Написать перевозчику' : 'Новое обращение'}
               </Button>
               <div className="min-w-[150px] flex-1 sm:max-w-[190px]">
                 <Select value={status} onValueChange={(v) => setStatus(v as TicketFilter)}>
@@ -645,7 +670,7 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
                 ? 'Измените условия поиска или фильтр статуса'
                 : role === 'carrier'
                   ? 'Создайте обращение — опишите проблему, платформа ответит в ветке'
-                  : 'Перевозчики создают обращения кнопкой «Новое обращение»'}
+                  : 'Перевозчики создают обращения кнопкой «Новое обращение»; вы можете написать им первыми'}
             />
           )}
 
@@ -753,7 +778,16 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
                         <span aria-hidden>·</span>
                         <span>{TICKET_CATEGORY_META[t.category]}</span>
                         <span aria-hidden>·</span>
-                        <span>Автор: {t.authorName}{t.carrierName ? ` · ${t.carrierName}` : ''}</span>
+                        {t.carrierName && (
+                          <>
+                            <span className="inline-flex items-center gap-1">
+                              <Building2 className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden />
+                              {t.carrierName}
+                            </span>
+                            <span aria-hidden>·</span>
+                          </>
+                        )}
+                        <span>{isStaffRole ? `Автор: ${t.authorName}` : `Создал: ${t.authorName}`}</span>
                         <span aria-hidden>·</span>
                         <span>создано {fmtDateTime(t.createdAt)}</span>
                       </div>
@@ -823,7 +857,7 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
                               void send()
                             }
                           }}
-                          placeholder={role === 'carrier' ? 'Опишите проблему или уточните детали…' : 'Ответ перевозчику…'}
+                          placeholder={role === 'carrier' ? 'Опишите проблему или уточните детали…' : 'Сообщение перевозчику…'}
                           rows={3}
                           aria-label="Сообщение в обращение"
                         />
@@ -849,23 +883,44 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
         </div>
       </div>
 
-      {/* ——— новое обращение ——— */}
+      {/* ——— новое обращение: перевозчик — в поддержку, персонал — перевозчику ——— */}
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Новое обращение</DialogTitle>
+            <DialogTitle>{isStaffRole ? 'Написать перевозчику' : 'Новое обращение'}</DialogTitle>
             <DialogDescription>
-              Опишите проблему — логист или администрация ответят в этой ветке. К обращению можно приложить документы и медиа до 10 МБ.
+              {isStaffRole
+                ? 'Выберите компанию и напишите сообщение — переписка продолжится в этой ветке, перевозчик получит уведомление.'
+                : 'Опишите проблему — логист или администрация ответят в этой ветке. К обращению можно приложить документы и медиа до 10 МБ.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {isStaffRole && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ticket-carrier">Перевозчик</Label>
+                <SearchSelect
+                  id="ticket-carrier"
+                  value={nCarrierId}
+                  onChange={setNCarrierId}
+                  placeholder={carriers === null ? 'Загрузка списка…' : 'Выберите компанию'}
+                  ariaLabel="Выбор перевозчика для нового обращения"
+                  emptyText="Перевозчики не найдены"
+                  options={(carriers ?? []).map((c) => ({
+                    value: c.id,
+                    label: c.name,
+                    sub: `${c.inn}${c.access ? '' : ' · доступ закрыт'}`,
+                    muted: !c.access,
+                  }))}
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="ticket-subject">Тема</Label>
               <Input
                 id="ticket-subject"
                 value={nSubject}
                 onChange={(e) => setNSubject(e.target.value)}
-                placeholder="Например: Не приходит доверенность по заявке Z-1042"
+                placeholder={isStaffRole ? 'Например: Уточнение по экипажу заявки Z-1042' : 'Например: Не приходит доверенность по заявке Z-1042'}
                 maxLength={200}
               />
             </div>
@@ -883,14 +938,16 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="ticket-body">Описание</Label>
+              <Label htmlFor="ticket-body">{isStaffRole ? 'Сообщение' : 'Описание'}</Label>
               <Textarea
                 id="ticket-body"
                 rows={5}
                 value={nBody}
                 onChange={(e) => setNBody(e.target.value)}
-                placeholder="Опишите проблему: что случилось, по какой заявке (номер Z-…), что нужно от платформы"
-                aria-label="Описание проблемы"
+                placeholder={isStaffRole
+                  ? 'Напишите перевозчику: вопрос, задача или уточнение по заявке (номер Z-…)'
+                  : 'Опишите проблему: что случилось, по какой заявке (номер Z-…), что нужно от платформы'}
+                aria-label={isStaffRole ? 'Сообщение перевозчику' : 'Описание проблемы'}
               />
             </div>
             <div>
@@ -912,13 +969,17 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
             <Button variant="outline" className="h-11" onClick={() => setNewOpen(false)} disabled={creating}>
               Отмена
             </Button>
-            <Button className="h-11" onClick={() => void createTicket()} disabled={creating || !nSubject.trim() || !nBody.trim()}>
+            <Button
+              className="h-11"
+              onClick={() => void createTicket()}
+              disabled={creating || !nSubject.trim() || !nBody.trim() || (isStaffRole && !nCarrierId)}
+            >
               {creating
                 ? <>
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  Создаём…
+                  Отправляем…
                 </>
-                : 'Создать обращение'}
+                : isStaffRole ? 'Отправить перевозчику' : 'Создать обращение'}
             </Button>
           </DialogFooter>
         </DialogContent>

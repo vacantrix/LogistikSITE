@@ -8,8 +8,8 @@
 | Сервис | Порт | Назначение | README |
 |---|---|---|---|
 | `ws-service` | 3003 | real-time шина socket.io: событие `platform:update` после записей в БД — вкладки всех пользователей обновляются без перезагрузки. Сессия проверяется на входе (кука или `?token=`) | `ws-service/README.md` |
-| `ocr-service` | 3020 | OCR-шлюз: принимает скан от платформы (X-OCR-Token), передаёт движку на ПК нейросети АЭМЗ, возвращает поля и уверенности. Слушает только 127.0.0.1 | `ocr-service/README.md` |
-| `paddle-ocr` | 3031 | **Python**-движок PaddleOCR на выделенном GPU-ПК в инфраструктуре АЭМЗ (подбор параллельности по VRAM): детекция PP-OCRv5 server_det + чтение mobile_rec, ~2,3 с на документ | `paddle-ocr/README.md` |
+| `ocr-service` | 3020 | OCR-шлюз: принимает скан от платформы (X-OCR-Token), передаёт движку нейросети на серверах АЭМЗ, возвращает поля и уверенности. Слушает только 127.0.0.1 | `ocr-service/README.md` |
+| `paddle-ocr` | 3031 | **Python**-движок PaddleOCR нейросети на серверах АЭМЗ (сейчас показательно на отдельном GPU-ПК; параллельность подбирается по VRAM): детекция PP-OCRv5 server_det + чтение mobile_rec | `paddle-ocr/README.md` |
 | `diadoc-mock` | 3080 | стенд ЭДО: мок Диадока для статусов ЭТрН SENT/SIGNED | — |
 
 Схема вызовов:
@@ -17,7 +17,7 @@
 ```
 Next.js (:3000)  →  ws-service (:3003)        socket.io, XTransformPort=3003
 Next.js (:3000)  →  ocr-service (:3020)       POST /ocr { type, dataUri }
-ocr-service      →  PaddleOCR (:3031, ПК нейросети АЭМЗ)  POST /ocr { image, docType, fields }
+ocr-service      →  PaddleOCR (:3031, нейросеть АЭМЗ)  POST /ocr { image, docType, fields }
 ```
 
 Настройки пропуска документов (максимум фото в обработке, таймаут, кэш, сжатие) хранятся в БД

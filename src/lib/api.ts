@@ -322,12 +322,15 @@ export const api = {
   deleteRequestFile: (id: string, fileId: string) =>
     fetch(`/api/requests/${id}/files?fileId=${encodeURIComponent(fileId)}`, withAuth({ method: 'DELETE' })).then(json<{ ok: boolean }>),
 
-  /** Обращения в поддержку (Task 109) */
+  /** Обращения и чаты (Task 109): перевозчик — в поддержку, персонал — перевозчику */
   tickets: (params?: { status?: string; q?: string }) => {
     const sp = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v) as [string, string][])
     return fetch(`/api/support/tickets${sp.toString() ? `?${sp}` : ''}`, withAuth({ cache: 'no-store' })).then(json<{ tickets: TicketDTO[] }>)
   },
-  createTicket: (body: { subject: string; category: string; body: string; attachments?: { fileName: string; dataUri: string }[] }) =>
+  /** Адресаты чатов персонала: компании-перевозчики (id, название, ИНН) */
+  supportCarriers: () =>
+    fetch('/api/support/carriers', withAuth({ cache: 'no-store' })).then(json<{ carriers: { id: string; name: string; inn: string; access: boolean }[] }>),
+  createTicket: (body: { subject: string; category: string; body: string; targetCarrierId?: string; attachments?: { fileName: string; dataUri: string }[] }) =>
     fetch('/api/support/tickets', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ ticket: TicketDTO }>),
   ticketThread: (id: string) =>
     fetch(`/api/support/tickets/${id}`, withAuth({ cache: 'no-store' })).then(json<TicketThreadDTO>),

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isStaff, requireUser } from '@/lib/auth'
-import { notifyAdmins, notifyLogists, notifyUser } from '@/lib/notify-users'
+import { notifyAdmins, notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { plog } from '@/lib/platform-log'
 import { attachmentError, canAccessTicket, TICKET_MAX_SIZE, toTicketDTO } from '@/lib/tickets'
 import type { TicketMessageDTO, TicketThreadDTO } from '@/lib/types'
@@ -54,10 +54,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 /**
- * POST /api/support/tickets/[id] — сообщение в ветке:
+ * POST /api/support/tickets/[id] — сообщение в ветке (чат обеих сторон):
  * { body, attachments?: [{ fileName, dataUri }] }
- * Ответ платформы (логист/администрация) переводит обращение в «Есть ответ»,
- * сообщение перевозчика возвращает в «Открыто».
+ * Сообщение платформы (логист/администрация) переводит обращение в «Есть ответ»,
+ * сообщение перевозчика возвращает в «Открыто». Уведомление уходит компании
+ * перевозчика — чат виден всем учёткам компании.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser()
@@ -118,10 +119,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     message: `Обращение №${ticket.number}: ${staff ? 'ответ платформы' : 'сообщение перевозчика'} (${auth.name})`,
   })
 
-  // уведомления — после транзакции (правило P1008)
+  // уведомления — после транзакции (правило P1008); уведомляем компанию перевозчика —
+  // ветка общая для всех учёток компании, кем бы ни было начато обращение
   try {
     if (staff) {
-      await notifyUser(ticket.authorId, {
+      await notifyCarrier(ticket.carrierId, {
         type: 'TICKET_REPLY',
         title: `Ответ по обращению №${ticket.number}`,
         body: `${auth.name}: ${text.slice(0, 140) || 'приложил файл к обращению'}`,
@@ -169,13 +171,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     message: `Обращение №${ticket.number} ${action === 'close' ? 'закрыто' : 'открыто заново'} (${auth.name})`,
   })
 
+  // платформа закрыла ветку — сообщаем компании перевозчика (в т. ч. чатам, начатым платформой)
   if (action === 'close' && isStaff(auth.role) && ticket.authorId !== auth.id) {
     try {
-      await notifyUser(ticket.authorId, {
+      await notifyCarrier(ticket.carrierId, {
         type: 'TICKET_CLOSED',
         title: `Обращение №${ticket.number} закрыто`,
         body: `${auth.name} закрыл обращение. Если вопрос остался — откройте его заново или создайте новое обращение`,
       })
+    } catch (e) {
+      console.error('ticket close notification error', e)
+    }
+  } else if (action === 'close' && !isStaff(auth.role)) {
+    try {
+      const payload = {
+        type: 'TICKET_CLOSED' as const,
+        title: `Обращение №${ticket.number} закрыто`,
+        body: `${auth.name} закрыл обращение`,
+      }
+      await notifyLogists(payload)
+      await notifyAdmins(payload)
     } catch (e) {
       console.error('ticket close notification error', e)
     }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isStaff, requireUser } from '@/lib/auth'
-import { notifyAdmins, notifyLogists } from '@/lib/notify-users'
+import { notifyAdmins, notifyCarrier, notifyLogists } from '@/lib/notify-users'
 import { plog } from '@/lib/platform-log'
 import { attachmentError, TICKET_CATEGORIES, TICKET_MAX_SIZE, toTicketDTO } from '@/lib/tickets'
 import type { TicketCategory } from '@/lib/types'
@@ -40,24 +40,49 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/support/tickets — создать обращение (Task 109):
- * { subject, category, body, attachments?: [{ fileName, dataUri }] }
- * Первое сообщение — описание проблемы; вложения в рамках 10 МБ на обращение.
+ * POST /api/support/tickets — создать чат (Task 109 + переработка логики обращений).
+ *
+ * Направления строго по роли:
+ *  — перевозчик создаёт обращение в поддержку платформы (логист/администрация отвечают в ветке);
+ *  — логист/администрация пишут ПЕРЕВОЗЧИКУ первыми: обязательно указывают компанию
+ *    (targetCarrierId). Обращение «на администрацию» от персонала невозможно — это
+ *    исключено на уровне API.
+ *
+ * Первое сообщение — описание; вложения в рамках 10 МБ на обращение.
+ * Персональный чат стартует в статусе ANSWERED: слово за перевозчиком.
  */
 export async function POST(req: NextRequest) {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
 
   const body = (await req.json().catch(() => null)) as {
-    subject?: unknown; category?: unknown; body?: unknown
+    subject?: unknown; category?: unknown; body?: unknown; targetCarrierId?: unknown
     attachments?: { fileName?: unknown; dataUri?: unknown }[]
   } | null
 
+  const staff = isStaff(auth.role)
   const subject = typeof body?.subject === 'string' ? body.subject.trim().slice(0, 200) : ''
   const text = typeof body?.body === 'string' ? body.body.trim().slice(0, 5000) : ''
   const category = TICKET_CATEGORIES.includes(body?.category as TicketCategory) ? (body?.category as TicketCategory) : 'other'
   if (!subject) return NextResponse.json({ error: 'Укажите тему обращения' }, { status: 400 })
-  if (!text) return NextResponse.json({ error: 'Опишите проблему — без описания обращение не создать' }, { status: 400 })
+  if (!text) return NextResponse.json({ error: staff ? 'Напишите сообщение перевозчику — без текста не создать' : 'Опишите проблему — без описания обращение не создать' }, { status: 400 })
+
+  // ——— адресат: персонал пишет конкретной компании-перевозчику, перевозчик — платформе ———
+  let carrierId: string | null = auth.carrierId ?? null
+  let carrierName: string | null = null
+  if (staff) {
+    const targetId = typeof body?.targetCarrierId === 'string' ? body.targetCarrierId : ''
+    if (!targetId) return NextResponse.json({ error: 'Выберите перевозчика — обращения внутри платформы не создаются' }, { status: 400 })
+    const target = await db.carrier.findUnique({ where: { id: targetId }, select: { id: true, name: true } })
+    if (!target) return NextResponse.json({ error: 'Перевозчик не найден' }, { status: 400 })
+    carrierId = target.id
+    carrierName = target.name
+  } else {
+    const carrier = auth.carrierId
+      ? await db.carrier.findUnique({ where: { id: auth.carrierId }, select: { name: true } })
+      : null
+    carrierName = carrier?.name ?? null
+  }
 
   const atts = (body?.attachments ?? []).filter((a) => a && typeof a === 'object')
   let sizeTotal = 0
@@ -67,23 +92,18 @@ export async function POST(req: NextRequest) {
     sizeTotal += Math.floor(((a.dataUri as string).length * 3) / 4)
   }
 
-  // компания автора — для кабинета перевозчика (обращение видно всем учёткам компании)
-  const carrier = auth.carrierId
-    ? await db.carrier.findUnique({ where: { id: auth.carrierId }, select: { name: true } })
-    : null
-
   const ticket = await db.$transaction(async (tx) => {
     const max = await tx.ticket.aggregate({ _max: { number: true } })
     const number = (max._max.number ?? 0) + 1
     return tx.ticket.create({
       data: {
-        number, subject, category, status: 'OPEN',
+        number, subject, category, status: staff ? 'ANSWERED' : 'OPEN',
         authorId: auth.id, authorName: auth.name,
-        carrierId: auth.carrierId, carrierName: carrier?.name ?? null,
+        carrierId, carrierName,
         sizeTotal,
         messages: {
           create: {
-            authorId: auth.id, authorName: auth.name, authorRole: auth.role, staff: false, body: text,
+            authorId: auth.id, authorName: auth.name, authorRole: auth.role, staff, body: text,
             attachments: {
               create: atts.map((a) => {
                 const uri = a.dataUri as string
@@ -106,18 +126,28 @@ export async function POST(req: NextRequest) {
   await plog({
     type: 'TICKET_CREATED', source: 'api/support/tickets',
     actor: { login: auth.login, name: auth.name, role: auth.role },
-    message: `Новое обращение №${ticket.number}: ${subject} (${auth.name})`,
+    message: staff
+      ? `Сообщение перевозчику №${ticket.number}: ${subject} → ${carrierName} (${auth.name})`
+      : `Новое обращение №${ticket.number}: ${subject} (${auth.name})`,
   })
 
-  // уведомления — после транзакции: платформа (логисты и администрация) узнаёт о новом обращении
-  const payload = {
-    type: 'TICKET_NEW' as const,
-    title: `Новое обращение №${ticket.number}`,
-    body: `${auth.name}: ${subject}`,
-  }
+  // уведомления — после транзакции: слово у той стороны, которой адресован чат
   try {
-    await notifyLogists(payload)
-    await notifyAdmins(payload)
+    if (staff) {
+      await notifyCarrier(carrierId, {
+        type: 'TICKET_NEW',
+        title: `Новое обращение №${ticket.number} от платформы`,
+        body: `${auth.name}: ${subject}`,
+      })
+    } else {
+      const payload = {
+        type: 'TICKET_NEW' as const,
+        title: `Новое обращение №${ticket.number}`,
+        body: `${auth.name}: ${subject}`,
+      }
+      await notifyLogists(payload)
+      await notifyAdmins(payload)
+    }
   } catch (e) {
     console.error('ticket notification error', e)
   }

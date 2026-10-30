@@ -68,8 +68,8 @@ const TEST_DOCS: Record<string, { file: string; label: string }> = {
 
 /**
  * POST /api/admin/nn — действия:
- *   { action: 'upstream' } — живая проверка ПК нейросети (лёгкий запрос через шлюз, без OCR);
- *   { action: 'test', docType } — реальный прогон демо-скана: платформа → шлюз → GPU-ПК нейросети АЭМЗ;
+ *   { action: 'upstream' } — живая проверка узла нейросети (лёгкий запрос через шлюз, без OCR);
+ *   { action: 'test', docType } — реальный прогон демо-скана: платформа → шлюз → нейросеть на серверах АЭМЗ;
  *   { action: 'clear-cache' } — сбросить кэш повторных сканов.
  */
 export async function POST(req: NextRequest) {
@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
       ok: false, ms, docType, label: demo.label,
       error: result.kind === 'unsupported'
         ? 'Вид документа не распознаётся движком (422)'
-        : 'Нейросеть не ответила — проверьте ПК нейросети и связь с ним',
+        : 'Нейросеть не ответила — проверьте узел нейросети и связь с ним',
       settings: { parallel: settings.parallel, timeoutSec: settings.timeoutSec, cacheMin: settings.cacheMin, maxSide: settings.maxSide },
     })
   }

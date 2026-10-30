@@ -825,7 +825,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
               )}
             </div>
             <p className="mb-3 -mt-1 text-[11px] leading-snug text-slate-500">
-              Фото загружаются на серверы АЭМЗ и распознаются нейросетью на GPU-ПК завода: до {MAX_PHOTOS_PER_UPLOAD} фото
+              Фото загружаются на серверы АЭМЗ и распознаются нейросетью на серверах завода: до {MAX_PHOTOS_PER_UPLOAD} фото
               за одну подачу, остальное — общая очередь (несколько перевозчиков могут подавать одновременно).
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
