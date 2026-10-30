@@ -8,9 +8,10 @@ app/
 ├── layout.tsx        корневой layout (шрифты, тема, Toaster)
 ├── globals.css       Tailwind 4 + стили платформы (markdown-view, sticky-таблицы…)
 ├── page.tsx          весь интерфейс: сессия → экран входа / вкладки по роли
-├── instrumentation.ts  хук старта сервера (data-fixes)
 └── api/              REST API — см. api/README.md
 ```
+
+src/instrumentation.ts — хук старта сервера (data-fixes); живёт в src/, а не в src/app/.
 
 Почему один маршрут:
 

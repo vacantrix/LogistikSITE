@@ -6,7 +6,7 @@ Socket.io-сервис: после каждой значимой записи в
 
 ## События
 
-`BID_PLACED`, `REQUEST_AWARDED`, `DOCS_VERIFIED`, `PERMS_CHANGED` и др. —
+`BID_PLACED`, `WINNER_AWARDED`, `DOCS_VERIFIED`, `PERMS_CHANGED` и др. —
 вкладки по ним перечитывают свои данные через `api.*`.
 
 ## Подключение клиента

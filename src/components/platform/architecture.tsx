@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Box, Brain, BrainCircuit, Braces, Building2, ChevronRight, Circle, Cpu, Database,
-  FileCode2, FileCog, FileText, FileWarning, Folder, FolderOpen, Gauge, Globe, Hash, History, Hourglass,
+  FileCode2, FileCog, FileSignature, FileText, FileWarning, Folder, FolderOpen, Gauge, Globe, Hash, History, Hourglass,
   Image as ImageIcon, Layers, Loader2, Lock, MessagesSquare, Monitor, Network, Pencil, Plug, RefreshCw, Save,
   Search, Server, ShieldAlert, Users, Waypoints, X,
 } from 'lucide-react'
@@ -449,8 +449,9 @@ function SchematicMap({ status }: { status: StatusItem[] | null }) {
           <SchemeBox status={status} statusId="web" icon={Globe} label="Веб-платформа" sub="Next.js · порт 3000 · UI + REST API" tone="emerald" />
           <SchemeBox status={status} statusId="db" icon={Database} label="База данных" sub="SQLite · заявки, сканы, чаты, настройки" tone="emerald" />
           <SchemeBox status={status} statusId="ws" icon={Waypoints} label="Real-time шина" sub="socket.io · порт 3003" tone="emerald" />
-          <SchemeBox icon={MessagesSquare} label="Обращения и чаты" sub="перевозчик ↔ логист/админ · вложения до 10 МБ" tone="emerald" />
+          <SchemeBox status={status} icon={MessagesSquare} label="Обращения и чаты" sub="перевозчик ↔ логист/админ · вложения до 10 МБ" tone="emerald" />
           <SchemeBox status={status} statusId="ocr-gateway" icon={Server} label="OCR-шлюз" sub="bun · порт 3020 · общая очередь фото" tone="emerald" />
+          <SchemeBox status={status} icon={FileSignature} label="Диадок — мок-стенд ЭДО" sub="node · порт 3040 · этапы ЭТрН" tone="emerald" />
         </div>
       </div>
 
