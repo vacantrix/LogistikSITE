@@ -219,6 +219,24 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
   const role = roleOf(user)
   const activeCarrierId = role.kind === 'carrier' ? role.carrierId ?? null : null
   const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab, liveTick }
+  // долгий обрыв (аудит №3): первые секунды — блокирующий оверлей (штатный рестарт шины
+  // занимает 1–3 с), дальше — неблокирующий баннер: шина real-time — только ускорение,
+  // HTTP-автообновление (15–30 с) продолжает работать, блокировать работу нечестно
+  const [outageLong, setOutageLong] = useState(false)
+  const [outageDismissed, setOutageDismissed] = useState(false)
+  // сброс при восстановлении связи — корректировка состояния при изменении пропа
+  // (паттерн React «adjust state when props change», без setState внутри effect)
+  const [prevConnLost, setPrevConnLost] = useState(connLost)
+  if (prevConnLost !== connLost) {
+    setPrevConnLost(connLost)
+    setOutageLong(false)
+    setOutageDismissed(false)
+  }
+  useEffect(() => {
+    if (!connLost) return
+    const t = setTimeout(() => setOutageLong(true), 8000)
+    return () => clearTimeout(t)
+  }, [connLost])
   // защита: раздел недоступен текущей роли — показываем пояснение вместо содержимого;
   // часть разделов дополнительно закрыта правом (sectionAllowed — общее правило с меню)
   const allowed = navFor(role.kind).some((n) => n.key === tab) && sectionAllowed(tab, can)
@@ -250,9 +268,9 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
         </>
       )}
 
-      {/* оверлей потери соединения (Task 52): спиннер + «Восстанавливаем соединение».
-          Показывается при обрыве после установленной связи, исчезает при reconnect */}
-      {connLost && (
+      {/* потеря соединения (Task 52 + аудит №3): первые 8 секунд — оверлей (обычный
+          рестарт шины укладывается в 1–3 с), при долгом простое — неблокирующий баннер */}
+      {connLost && !outageLong && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-white/80 backdrop-blur-sm"
           role="alert"
@@ -264,6 +282,27 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
             <div className="text-sm font-semibold text-slate-900">Восстанавливаем соединение</div>
             <div className="text-xs text-slate-500">Связь с платформой прервалась — данные обновятся автоматически</div>
           </div>
+        </div>
+      )}
+      {connLost && outageLong && !outageDismissed && (
+        <div
+          className="fixed inset-x-0 top-0 z-[100] flex items-center justify-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2.5 shadow-md"
+          role="status"
+          aria-live="polite"
+          aria-label="Соединение потеряно, данные обновляются автоматически"
+        >
+          <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-amber-700" aria-hidden />
+          <div className="text-xs text-amber-900">
+            <span className="font-semibold">Нет связи с шиной реального времени</span>
+            <span className="hidden sm:inline"> — изменения приходят с задержкой до 30 секунд</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOutageDismissed(true)}
+            className="shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-100"
+          >
+            Продолжить работу
+          </button>
         </div>
       )}
     </Shell>
