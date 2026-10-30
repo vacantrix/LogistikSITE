@@ -10,6 +10,7 @@ import {
   Clock,
   ClipboardList,
   FileSignature,
+  FileCheck2,
   FileText,
   FileX,
   Files,
@@ -29,6 +30,7 @@ import {
   Upload,
   User,
   Users,
+  Wand2,
   Wrench,
   X,
 } from 'lucide-react'
@@ -68,6 +70,12 @@ import { REQUEST_FILE_META } from '@/lib/types'
 import type { BidDTO, CarrierDTO, DocStatus, DocType, RequestDTO } from '@/lib/types'
 
 const DOC_ORDER: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
+
+/**
+ * Лимит фото на разовую подачу документов на проверку (перевозчик): 20 фото за заход.
+ * Дальше фото встают в общую очередь нейросети АЭМЗ — следующий заход продолжает очередь.
+ */
+const MAX_PHOTOS_PER_UPLOAD = 20
 
 const DOC_ICONS: Record<DocType, typeof IdCard> = {
   PASSPORT_PHOTO: IdCard,
@@ -198,6 +206,8 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
   // свёрнутый загрузчик документов на этапе «Подтверждено» (Task 50)
   const [docsOpenId, setDocsOpenId] = useState<string | null>(null)
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({})
+  /** скрытые input[type=file][multiple] для автозаполнения комплекта (по заявке) */
+  const batchInputs = useRef<Record<string, HTMLInputElement | null>>({})
   // скрытые input'ы обмена документами с логистом (Task 109): ключ — вид файла (POA / REQUEST_DOC)
   const exchangeInputs = useRef<Record<string, HTMLInputElement | null>>({})
   // ——— окно ставки: форма → подтверждение → успех (как на площадке) ———
@@ -328,6 +338,51 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
         applyRequest(v.request)
         const doc = v.request.documents.find((d) => d.type === type)
         toastDocVerdict(type, doc?.status, doc?.issues ?? [], doc?.message ?? null)
+      } finally {
+        setVerifyingId(null)
+      }
+    } catch (e) {
+      toast({ title: 'Ошибка', description: errMsg(e), variant: 'destructive' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ——— автозаполнение: пачка фото (до 20 за раз) раскладывается по недостающим документам ———
+  const handleBatch = async (r: RequestDTO, files: File[]) => {
+    if (files.length === 0) return
+    if (files.length > MAX_PHOTOS_PER_UPLOAD) {
+      toast({
+        title: 'Слишком много фото за один заход',
+        description: `Разовая подача — до ${MAX_PHOTOS_PER_UPLOAD} фотографий. Загрузите первые ${MAX_PHOTOS_PER_UPLOAD}, следующий заход продолжит очередь.`,
+        variant: 'destructive',
+      })
+      return
+    }
+    const targets = DOC_ORDER.filter((t) => !r.documents.some((d) => d.type === t))
+    if (targets.length === 0) {
+      toast({ title: 'Все документы уже загружены', description: 'Замените нужный файл кнопкой «Заменить» у конкретного документа' })
+      return
+    }
+    setBusy(`${r.id}:batch`)
+    try {
+      const take = Math.min(files.length, targets.length)
+      for (let i = 0; i < take; i += 1) {
+        const dataUri = await fileToCompressedDataUri(files[i])
+        const up = await api.uploadDocument(r.id, { type: targets[i], fileName: files[i].name, dataUri })
+        applyRequest(up.request)
+      }
+      setVerifyingId(r.id)
+      try {
+        const v = await api.verifyDocuments(r.id)
+        applyRequest(v.request)
+        toast({
+          title: `Автозаполнение: ${take} фото — в очереди нейросети`,
+          description:
+            files.length > targets.length
+              ? `Фото распределены по ${take} недостающим документам; лишние ${files.length - targets.length} не назначены — все слоты уже заняты.`
+              : 'Фото загружены на серверы АЭМЗ и встали в общую очередь распознавания — итоги появятся у каждого документа.',
+        })
       } finally {
         setVerifyingId(null)
       }
@@ -669,6 +724,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                       : agentLine(r, myBid)
         const tl = bidding && now !== null && r.deadline ? timeLeft(r.deadline) : null
         const awarded = !grey && r.status === 'AWARDED'
+        /** комплект на нейропроверке (DOCS_REVIEW): та же секция документов — доложить/заменить фото,
+            иначе после вердиктов перевозчику негде исправить комплект */
+        const docsReview = !grey && r.status === 'DOCS_REVIEW' && r.winnerId === activeCarrierId
         /** завершённый рейс (Task 68): карточка остаётся в кабинете с итоговым статусом,
             агенту доступно только скрытие из кабинета — операции с рейсом у логиста */
         const closed = r.status === 'CLOSED'
@@ -712,6 +770,46 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                   Пропущено: {missingDocs.length} из {DOC_ORDER.length}
                 </StatusDot>
               )}
+              <span className="flex-1" />
+              {missingDocs.length > 0 && (
+                <>
+                  <input
+                    ref={(el) => {
+                      batchInputs.current[r.id] = el
+                    }}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    aria-label={`Автозаполнение недостающих документов по заявке ${r.number} — до ${MAX_PHOTOS_PER_UPLOAD} фото за раз`}
+                    onChange={(e) => {
+                      // ВАЖНО: сначала копируем файлы в массив — очистка value сбрасывает живой FileList,
+                      // и обработчик получил бы 0 файлов (автозаполнение молча ничего не делало)
+                      const picked = Array.from(e.target.files ?? [])
+                      e.target.value = ''
+                      if (picked.length > 0) void handleBatch(r, picked)
+                    }}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={busy !== null}
+                    onClick={() => batchInputs.current[r.id]?.click()}
+                    aria-label={`Автозаполнение документов по заявке ${r.number} (до ${MAX_PHOTOS_PER_UPLOAD} фото за раз)`}
+                  >
+                    {busy === `${r.id}:batch`
+                      ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                      : <Wand2 className="h-4 w-4" aria-hidden />}
+                    Автозаполнение
+                  </Button>
+                  <InfoTip label="Автозаполнение фото">
+                    Выберите до {MAX_PHOTOS_PER_UPLOAD} фотографий за раз — платформа сама разложит их по недостающим
+                    документам и поставит в общую очередь нейросети АЭМЗ. Если фото больше, чем слотов, лишние
+                    игнорируются; следующий заход продолжит очередь.
+                  </InfoTip>
+                </>
+              )}
               {hasPending && (
                 <Button
                   size="sm"
@@ -726,6 +824,10 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                 </Button>
               )}
             </div>
+            <p className="mb-3 -mt-1 text-[11px] leading-snug text-slate-500">
+              Фото загружаются на серверы АЭМЗ и распознаются нейросетью на GPU-ПК завода: до {MAX_PHOTOS_PER_UPLOAD} фото
+              за одну подачу, остальное — общая очередь (несколько перевозчиков могут подавать одновременно).
+            </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {DOC_ORDER.map((type) => {
                 const doc = r.documents.find((d) => d.type === type)
@@ -841,7 +943,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
             {verifyingId === r.id && (
               <span className="flex items-center gap-1.5 text-sm text-slate-600" role="status">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                Нейросеть проверяет…
+                Нейросеть проверяет: фото в общей очереди…
               </span>
             )}
           </div>
@@ -1164,20 +1266,26 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                     </div>
                   )}
 
-                  {/* ——— Подтверждено: агент выиграл тендер (Task 50) ——— */}
-                  {awarded && (
+                  {/* ——— Подтверждено: агент выиграл тендер (Task 50); в DOCS_REVIEW — та же секция
+                       документов: доложить/заменить фото (до 20 за подачу) ——— */}
+                  {(awarded || docsReview) && (
                     <div className="space-y-4 rounded-xl border border-slate-200 p-4 sm:p-5" role="status">
                       <div className="flex items-start gap-2.5">
-                        <Trophy className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
+                        {awarded ? <Trophy className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" aria-hidden /> : <FileCheck2 className="mt-0.5 h-5 w-5 shrink-0 text-blue-600" aria-hidden />}
                         <div className="min-w-0">
-                          <h4 className="text-base font-semibold leading-snug text-slate-900">Вы выиграли</h4>
+                          <h4 className="text-base font-semibold leading-snug text-slate-900">
+                            {awarded ? 'Вы выиграли' : 'Документы на проверке'}
+                          </h4>
                           <p className="mt-0.5 text-sm leading-snug text-slate-600">
-                            Ставка {rate(r.bestRate)} согласована, рейс закреплён за «{carrierName}».
+                            {awarded
+                              ? `Ставка ${rate(r.bestRate)} согласована, рейс закреплён за «${carrierName}».`
+                              : 'Комплект проходит нейропроверку АЭМЗ — здесь можно доложить недостающее или заменить фото (до 20 за одну подачу).'}
                           </p>
                         </div>
                       </div>
 
                       {/* Экипаж: что уже выбрано по рейсу */}
+                      {awarded && (
                       <div className="rounded-xl border border-slate-200 bg-white p-3.5">
                         <h5 className="flex items-center gap-2 text-sm font-medium text-slate-700">
                           <Users className="h-3.5 w-3.5 text-slate-400" aria-hidden />
@@ -1191,7 +1299,9 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           )}
                         </div>
                       </div>
+                      )}
 
+                      {awarded && (
                       <div className="flex flex-wrap items-center gap-2">
                         <Button
                           onClick={() => onNavigate('apply')}
@@ -1214,6 +1324,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
                           «Подать документы» — если нужно загрузить данные новых водителей, ТС или прицепа; «Назначение экипажей» — выбрать уже имеющихся.
                         </InfoTip>
                       </div>
+                      )}
 
                       {/* Документы: свёрнутый загрузчик — раскрывается, когда пора подавать комплект */}
                       <div className="border-t border-slate-200 pt-3">

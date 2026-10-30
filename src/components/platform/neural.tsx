@@ -3,12 +3,18 @@
 /**
  * Раздел «Нейросеть» (только администратор) — настройки пропуска документов.
  *
- * Значения хранятся в БД и применяются сразу после сохранения (очередь распознавания
- * перечитывает их перед каждым документом): параллельные распознавания, таймаут,
- * кэш повторных сканов и сжатие фото перед отправкой в туннель.
+ * Фото и файлы хранятся на серверах АЭМЗ; распознавание крутится на выделенном
+ * GPU-ПК нейросети (подбор по объёму VRAM). Значения хранятся в БД и применяются
+ * сразу после сохранения (очередь распознавания перечитывает их перед каждым
+ * документом): максимум фото в обработке, таймаут, кэш повторных сканов и сжатие
+ * фото перед отправкой на ПК нейросети.
  *
- * Здесь же — живая статистика контура (шлюз, очередь, кэш), проверка движка на ПК
- * перевозчика и реальный тестовый прогон демо-скана с замером времени.
+ * Многопользовательский сценарий: несколько перевозчиков могут подавать документы
+ * одновременно — все фото встают в общую очередь; машина берёт в работу не больше
+ * «максимума фото в обработке», остальные честно ждут своего хода.
+ *
+ * Здесь же — живая статистика контура (шлюз, очередь, кэш), проверка ПК нейросети
+ * и реальный тестовый прогон демо-скана с замером времени.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BrainCircuit, Eraser, Gauge, Hourglass, ImageDown, Layers, Play, RefreshCw, Save, Undo2, Waypoints } from 'lucide-react'
@@ -207,7 +213,9 @@ export default function NeuralTab(_: TabProps) {
             Пропуск документов
           </CardTitle>
           <CardDescription>
-            Скорость и надёжность распознавания. Изменения применяются сразу после сохранения — без перезапуска платформы
+            Скорость и надёжность распознавания на GPU-ПК нейросети АЭМЗ. Несколько перевозчиков могут подавать
+            документы одновременно — все фото встают в общую очередь, машина берёт в работу не больше
+            «максимума фото в обработке», остальные ждут. Изменения применяются сразу после сохранения — без перезапуска
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -215,13 +223,13 @@ export default function NeuralTab(_: TabProps) {
             <>
               <NnSlider
                 id="nn-parallel"
-                label="Одновременные распознавания"
+                label="Максимум фото в обработке"
                 value={draft.parallel}
                 min={lim.parallel.min}
                 max={lim.parallel.max}
                 step={1}
-                display={`${draft.parallel}`}
-                hint="Сколько сканов платформа отправляет движку одновременно. Больше — пачка документов проверяется быстрее, нейросеть не простаивает между документами."
+                display={`${draft.parallel} фото`}
+                hint="Сколько фотографий ПК нейросети обрабатывает одновременно — подбирается под объём VRAM видеокарты. Остальные фото автоматически ждут в общей очереди: неважно, сколько перевозчиков загрузили единовременно."
                 onChange={(v) => setDraft((d) => (d ? { ...d, parallel: v } : d))}
               />
 
@@ -233,7 +241,7 @@ export default function NeuralTab(_: TabProps) {
                 max={lim.timeoutSec.max}
                 step={10}
                 display={fmtSec(draft.timeoutSec)}
-                hint="Сколько ждать нейросеть по одному документу. Если движок завис или ноутбук уснул — документ раньше выйдет из ожидания и вернётся «на проверку»."
+                hint="Сколько ждать нейросеть по одному документу. Если ПК нейросети выключен или завис — документ раньше выйдет из ожидания и вернётся «на проверку»."
                 onChange={(v) => setDraft((d) => (d ? { ...d, timeoutSec: v } : d))}
               />
 
@@ -271,7 +279,7 @@ export default function NeuralTab(_: TabProps) {
                     max={lim.maxSide.max}
                     step={100}
                     display={`${draft.maxSide} px`}
-                    hint="Фото уменьшается до этого размера перед отправкой в туннель: меньше мегабайт и пикселей — быстрее распознавание. Слишком маленькое значение снижает читаемость мелкого текста."
+                    hint="Фото уменьшается до этого размера перед отправкой на ПК нейросети: меньше мегабайт и пикселей — быстрее распознавание. Слишком маленькое значение снижает читаемость мелкого текста."
                     onChange={(v) => setDraft((d) => (d ? { ...d, maxSide: v } : d))}
                   />
                 ) : (
@@ -314,7 +322,7 @@ export default function NeuralTab(_: TabProps) {
               value={svc?.running ? 'работает' : 'недоступна'}
               tone={svc?.running ? 'ok' : 'bad'}
             />
-            <StatChip Icon={Layers} label="Пул" value={`${status?.queue.active ?? 0} + ${status?.queue.waiting ?? 0} в ожидании`} />
+            <StatChip Icon={Layers} label="Очередь" value={`${status?.queue.active ?? 0} в работе · ${status?.queue.waiting ?? 0} ждут`} />
             <StatChip Icon={Gauge} label="Распознано" value={String(svc?.processed ?? 0)} />
             <StatChip Icon={Hourglass} label="Время работы" value={svc?.uptimeSec != null ? fmtUptime(svc.uptimeSec) : '—'} />
             <StatChip Icon={ImageDown} label="Кэш сканов" value={`${status?.cache.size ?? 0} · ${status?.cache.hits ?? 0} попаданий`} />
@@ -324,7 +332,7 @@ export default function NeuralTab(_: TabProps) {
           <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
             <Button variant="outline" className="gap-1.5" onClick={() => void checkEngine()} disabled={checking}>
               {checking ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> : <BrainCircuit className="h-4 w-4" aria-hidden />}
-              Проверить движок на ПК
+              Проверить ПК нейросети
             </Button>
             <Button variant="outline" className="gap-1.5" onClick={() => void clearCache()}>
               <Eraser className="h-4 w-4" aria-hidden />
@@ -349,7 +357,7 @@ export default function NeuralTab(_: TabProps) {
             Тестовый прогон
           </CardTitle>
           <CardDescription>
-            Реальный путь демо-скана: платформа → шлюз → туннель → нейросеть на ПК перевозчика. Замер — с учётом текущих настроек
+            Реальный путь демо-скана: платформа → шлюз → ПК нейросети АЭМЗ (GPU). Замер — с учётом текущих настроек
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

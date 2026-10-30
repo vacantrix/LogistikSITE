@@ -10,6 +10,8 @@ import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { onecApiKey } from '@/lib/onec'
+import { nnQueueStats } from '@/lib/ocr-service'
+import { nnSettings } from '@/lib/nn'
 
 export const dynamic = 'force-dynamic'
 
@@ -77,16 +79,24 @@ export async function GET() {
       return { ok: true, detail: `v${j.version ?? '?'} · документов: ${j.processed ?? 0} · аптайм ${upText}` }
     }),
 
-    // нейросеть на ПК перевозчика: лёгкий health движка через шлюз (без OCR)
+    // нейросеть АЭМЗ (выделенный GPU-ПК): лёгкий health движка через шлюз (без OCR)
+    // + живая нагрузка общей очереди: сколько фото в обработке / ждут
     probe('neural', async () => {
-      const res = await fetch(`${OCR_BASE}/upstream`, {
-        headers: OCR_TOKEN ? { 'X-OCR-Token': OCR_TOKEN } : {},
-        signal: withTimeout(10_000),
-        cache: 'no-store',
-      })
+      const [res, queue, nn] = await Promise.all([
+        fetch(`${OCR_BASE}/upstream`, {
+          headers: OCR_TOKEN ? { 'X-OCR-Token': OCR_TOKEN } : {},
+          signal: withTimeout(10_000),
+          cache: 'no-store',
+        }),
+        Promise.resolve(nnQueueStats()),
+        nnSettings(),
+      ])
       const j = (await res.json().catch(() => null)) as { ok?: boolean; ms?: number; engine?: string | null; version?: string | null; error?: string } | null
       if (!res.ok || !j?.ok) return { ok: false, detail: j?.error ?? `шлюз ответил HTTP ${res.status}` }
-      return { ok: true, detail: `движок ${j.engine ?? 'PaddleOCR'}${j.version ? ` v${j.version}` : ''} · ответ через туннель ${j.ms ?? '?'} мс` }
+      return {
+        ok: true,
+        detail: `движок ${j.engine ?? 'PaddleOCR'}${j.version ? ` v${j.version}` : ''} · фото: ${queue.active}/${nn.parallel} в обработке, ${queue.waiting} в очереди · ответ ${j.ms ?? '?'} мс`,
+      }
     }),
 
     // шина 1С: ключ задан → интеграция включена (эндпоинты в процессе платформы)

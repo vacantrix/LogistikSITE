@@ -6,6 +6,7 @@ import { notifyLive } from '@/lib/notify'
 import { notifyCarrier, notifyLogists, type NotifyPayload } from '@/lib/notify-users'
 import { inTx, loadRequestFor } from '@/lib/requests'
 import { loadVerifySettings } from '@/lib/settings'
+import { MAX_PHOTOS_PER_SUBMIT } from '@/lib/nn'
 import { plog, plogError } from '@/lib/platform-log'
 import { verifyDocument, expectedFor, OcrUnavailableError } from '@/lib/verify'
 import { allowedFor, permDenied } from '@/lib/permissions'
@@ -22,6 +23,13 @@ const ALL_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_
  * POST /api/requests/[id]/verify — проверка загруженных документов.
  * Пайплайн: качество → тип → распознавание (локальный OCR) → сверка → правила.
  * Итог по каждому документу: PASSED | REUPLOAD | REJECTED | MANUAL.
+ *
+ * Многопользовательский сценарий: фото загружаются на серверы АЭМЗ и попадают
+ * в общую очередь нейросети (src/lib/ocr-service.ts) — GPU-ПК берёт в работу
+ * не больше «максимума фото в обработке», остальные ждут. На разовый заход
+ * проверяется до MAX_PHOTOS_PER_SUBMIT фото: если PENDING-документов больше,
+ * остаток остаётся в очереди и обрабатывается следующим заходом (кнопка «Отправить
+ * на проверку» просто продолжает очередь).
  */
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser()
@@ -56,6 +64,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   })
   if (pending.length === 0) return respond()
 
+  // лимит разовой подачи: за один заход машина проверяет не больше 20 фото —
+  // остаток честно ждёт в общей очереди до следующего захода
+  const batch = pending.slice(0, MAX_PHOTOS_PER_SUBMIT)
+  const queuedLeft = pending.length - batch.length
+
   const [driver, truck] = await Promise.all([
     request.driverId ? db.driver.findUnique({ where: { id: request.driverId } }) : null,
     request.truckId ? db.truck.findUnique({ where: { id: request.truckId } }) : null,
@@ -67,10 +80,11 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const expected = expectedFor(driver, truck, request)
 
   // распознавание идёт вне транзакции (долго); результат записывается, только если документ не заменили за это время.
-  // Запросы к OCR-сервису выстраиваются в очередь (src/lib/ocr-service.ts) — документы распознаются по одному.
+  // Запросы к OCR-сервису выстраиваются в общую очередь (src/lib/ocr-service.ts) — фото уходят
+  // в машину по мере освобождения слотов, независимо от того, сколько людей загрузило одновременно.
   const unavailable: string[] = []
   const verdicts: { id: string; v: VerifyVerdict }[] = await Promise.all(
-    pending.map(async (doc) => {
+    batch.map(async (doc) => {
       try {
         return { id: doc.id, v: await verifyDocument(doc.id, doc.type as DocType, doc.dataUri, expected, settings, doc.fileName) }
       } catch (e) {
@@ -104,6 +118,16 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       type: 'OCR_FAILED', source: 'api/requests/verify',
       requestId: id, requestNumber: request.number, carrierName: request.winner?.name ?? null,
       message: `Сервис распознавания не ответил — документы остаются на проверке до повтора: ${unavailable.join(', ')} (№${request.number})`,
+    })
+  }
+  if (queuedLeft > 0) {
+    // остаток партии — в журнале заявки: следующий заход продолжит очередь
+    await db.event.create({
+      data: {
+        requestId: id,
+        type: 'DOC_VERIFIED',
+        message: `Лимит разовой подачи — ${MAX_PHOTOS_PER_SUBMIT} фото: ещё ${queuedLeft} ждут очереди, отправьте на проверку повторно`,
+      },
     })
   }
 

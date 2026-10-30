@@ -14,9 +14,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, Box, Brain, Braces, ChevronRight, Circle, Database, FileCode2, FileCog, FileText, FileWarning,
-  Folder, FolderOpen, Globe, Hash, History, Image as ImageIcon, Layers, Loader2, Lock, Network, Pencil, Plug, RefreshCw, Save,
-  Search, Server, ShieldAlert, X,
+  AlertTriangle, ArrowDown, Box, Brain, BrainCircuit, Braces, Building2, ChevronRight, Circle, Cpu, Database,
+  FileCode2, FileCog, FileText, FileWarning, Folder, FolderOpen, Globe, Hash, History, Hourglass,
+  Image as ImageIcon, Layers, Loader2, Lock, Monitor, Network, Pencil, Plug, RefreshCw, Save,
+  Search, Server, ShieldAlert, Users, Waypoints, X,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -320,6 +321,121 @@ function MapNode({ node, depth, open, onToggle }: { node: ArchNode; depth: numbe
   )
 }
 
+// ——— визуальная схема системы (карта, верхний уровень) ———
+
+const TONE_CLS: Record<'slate' | 'emerald' | 'amber', { box: string; icon: string }> = {
+  slate: { box: 'border-slate-200 bg-white', icon: 'border-slate-200 bg-slate-50 text-slate-500' },
+  emerald: { box: 'border-emerald-200 bg-white', icon: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+  amber: { box: 'border-amber-200 bg-white', icon: 'border-amber-200 bg-amber-50 text-amber-700' },
+}
+
+/** Блок схемы: живой статус (точка из опроса), заголовок, подпись и деталь последнего опроса */
+function SchemeBox({ status, statusId, icon: Icon, label, sub, tone = 'slate' }: {
+  status: StatusItem[] | null
+  statusId?: string
+  icon: typeof Server
+  label: string
+  sub?: string
+  tone?: 'slate' | 'emerald' | 'amber'
+}) {
+  const item = statusId ? status?.find((s) => s.id === statusId) : undefined
+  const ok = item?.ok
+  return (
+    <div className={`flex min-w-0 items-start gap-2.5 rounded-lg border px-3 py-2.5 shadow-sm ${TONE_CLS[tone].box}`} title={item?.detail}>
+      <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ${TONE_CLS[tone].icon}`} aria-hidden>
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1.5 text-[13px] font-semibold leading-tight text-slate-900">
+          <span
+            className={`h-2 w-2 shrink-0 rounded-full ${item === undefined ? 'bg-slate-300' : ok ? 'bg-emerald-500' : 'bg-red-500'}`}
+            aria-hidden
+          />
+          <span className="truncate">{label}</span>
+        </p>
+        {sub && <p className="mt-0.5 text-[11px] leading-snug text-slate-500">{sub}</p>}
+        {item && (
+          <p className={`mt-0.5 truncate font-mono text-[10px] ${ok ? 'text-slate-400' : 'text-red-500'}`}>{item.detail}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Стрелка между уровнями схемы с подписью канала */
+function SchemeArrow({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col items-center py-1" aria-hidden>
+      <span className="text-[10px] font-medium text-slate-500">{label}</span>
+      <ArrowDown className="h-4 w-4 text-slate-400" />
+    </div>
+  )
+}
+
+/**
+ * Наглядная карта: пользователи → сервер АЭМЗ (платформа, БД с фото, очередь)
+ * → ПК нейросети АЭМЗ (GPU). Живые точки — из /api/architecture/status.
+ */
+function SchematicMap({ status }: { status: StatusItem[] | null }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 shadow-sm sm:p-4">
+      {/* уровень 1 — пользователи */}
+      <div className="rounded-xl border border-dashed border-slate-300 bg-white/70 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <Users className="h-3.5 w-3.5" aria-hidden />
+          Пользователи — загружают фото и файлы одновременно
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <SchemeBox status={status} icon={Monitor} label="Логист / админ" sub="браузер: торги, сверка, настройки, мониторинг очереди" />
+          <SchemeBox status={status} icon={Monitor} label="Перевозчик" sub="браузер: ставки, документы — до 20 фото за подачу" />
+          <SchemeBox status={status} statusId="onec" icon={Building2} label="1С:ERP / шина 1С" sub="X-API-Key: заявки, статусы рейсов, ЭТрН" />
+        </div>
+      </div>
+
+      <SchemeArrow label="HTTPS · единый внешний порт (Caddy)" />
+
+      {/* уровень 2 — сервер АЭМЗ */}
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+          <Building2 className="h-3.5 w-3.5" aria-hidden />
+          Сервер АЭМЗ — веб-платформа; фото и файлы хранятся здесь
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <SchemeBox status={status} statusId="web" icon={Globe} label="Веб-платформа" sub="Next.js · порт 3000 · UI + REST API" tone="emerald" />
+          <SchemeBox status={status} statusId="db" icon={Database} label="База данных" sub="SQLite · заявки, сканы (dataUri), настройки" tone="emerald" />
+          <SchemeBox status={status} statusId="ws" icon={Waypoints} label="Real-time шина" sub="socket.io · порт 3003 · обновления у всех" tone="emerald" />
+          <SchemeBox status={status} statusId="ocr-gateway" icon={Server} label="OCR-шлюз" sub="bun · порт 3020 · общая очередь фото" tone="emerald" />
+        </div>
+      </div>
+
+      <SchemeArrow label="X-OCR-Token · машина берёт «максимум фото в обработке», остальные ждут" />
+
+      {/* уровень 3 — GPU-ПК нейросети */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+          <Cpu className="h-3.5 w-3.5" aria-hidden />
+          ПК нейросети АЭМЗ — отдельная машина с GPU (подбор по VRAM)
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <SchemeBox status={status} statusId="neural" icon={BrainCircuit} label="PaddleOCR · порт 3031" sub="детекция + чтение · ~2,3 с на документ" tone="amber" />
+          <div className="flex min-w-0 items-start gap-2.5 rounded-lg border border-amber-200 bg-white px-3 py-2.5 shadow-sm">
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-amber-200 bg-amber-50 text-amber-700" aria-hidden>
+              <Hourglass className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold leading-tight text-slate-900">Общая очередь фото</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                Несколько перевозчиков подают одновременно — очередь одна: машина берёт в работу
+                «максимум фото в обработке» (настройка под VRAM), остальные честно ждут своего хода.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ——— вкладка ———
 
 export default function ArchitectureTab(_: TabProps) {
@@ -522,19 +638,25 @@ export default function ArchitectureTab(_: TabProps) {
       </div>
 
       {view === 'map' ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="max-h-[72vh] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-            <ul role="tree" aria-label="Карта архитектуры платформы" className="space-y-0.5">
-              {ARCH_TREE.map((n) => (
-                <MapNode key={n.id} node={n} depth={0} open={mapOpen} onToggle={(id) => setMapOpen((cur) => {
-                  const s = new Set(cur)
-                  if (s.has(id)) s.delete(id)
-                  else s.add(id)
-                  return s
-                })} />
-              ))}
-            </ul>
-          </div>
+        <div className="space-y-3">
+          <SchematicMap status={status} />
+          <details className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+            <summary className="cursor-pointer select-none text-xs font-semibold text-slate-700">
+              Детали по узлам — полное дерево системы
+            </summary>
+            <div className="mt-3 max-h-[60vh] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+              <ul role="tree" aria-label="Карта архитектуры платформы" className="space-y-0.5">
+                {ARCH_TREE.map((n) => (
+                  <MapNode key={n.id} node={n} depth={0} open={mapOpen} onToggle={(id) => setMapOpen((cur) => {
+                    const s = new Set(cur)
+                    if (s.has(id)) s.delete(id)
+                    else s.add(id)
+                    return s
+                  })} />
+                ))}
+              </ul>
+            </div>
+          </details>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[320px_1fr]">
