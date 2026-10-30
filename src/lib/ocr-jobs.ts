@@ -14,6 +14,12 @@
  */
 export type OcrJobStatus = 'running' | 'done' | 'error'
 
+/** владелец задачи (аудит №4): кто создал — тот и читает результат; staff видит все */
+export interface OcrJobOwner {
+  login: string
+  staff: boolean
+}
+
 export interface OcrJob<T = unknown> {
   id: string
   status: OcrJobStatus
@@ -23,6 +29,8 @@ export interface OcrJob<T = unknown> {
   error?: string
   createdAt: number
   finishedAt?: number
+  /** кто создал задачу — без совпадения логина (для не-staff) результат не отдаётся */
+  owner?: OcrJobOwner
 }
 
 /** результат держим 15 минут — пользователь мог уйти с вкладки и вернуться */
@@ -51,11 +59,11 @@ function sweep(): void {
  * гасятся в статус задачи — маршрут уже ответил клиенту 202.
  * Возвращает null, если реестр переполнен (клиент получит просьбу подождать).
  */
-export function startOcrJob<T>(run: () => Promise<T>): { id: string } | null {
+export function startOcrJob<T>(run: () => Promise<T>, owner?: OcrJobOwner): { id: string } | null {
   sweep()
   if (JOBS.size >= MAX_JOBS) return null
   const id = crypto.randomUUID()
-  const job: OcrJob<T> = { id, status: 'running', createdAt: Date.now() }
+  const job: OcrJob<T> = { id, status: 'running', createdAt: Date.now(), ...(owner ? { owner } : {}) }
   JOBS.set(id, job as OcrJob)
   void (async () => {
     try {
@@ -71,8 +79,15 @@ export function startOcrJob<T>(run: () => Promise<T>): { id: string } | null {
   return { id }
 }
 
-/** Текущее состояние задачи (null — истекла или не существует) */
-export function getOcrJob(id: string): OcrJob | null {
+/**
+ * Текущее состояние задачи (null — истекла, не существует или чужая).
+ * Аудит №4: результат содержит распознанные персональные данные (паспорт, СТС),
+ * поэтому не-staff видит только свои задачи — чужой jobId отвечает «не найдена».
+ */
+export function getOcrJob(id: string, viewer?: OcrJobOwner): OcrJob | null {
   sweep()
-  return JOBS.get(id) ?? null
+  const job = JOBS.get(id) ?? null
+  if (!job) return null
+  if (job.owner && viewer && !viewer.staff && job.owner.login !== viewer.login) return null
+  return job
 }

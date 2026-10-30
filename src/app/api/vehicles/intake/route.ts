@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireUser } from '@/lib/auth'
+import { isStaff, requireUser } from '@/lib/auth'
 import { analyzeIntakeDoc, buildIntakeDraft, type VerifyVerdict } from '@/lib/verify'
 import { validatePortField, type PortFieldKind } from '@/lib/port-fields'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
       swapped,
       crossCheck,
     }
-  })
+  }, { login: auth.login, staff: isStaff(auth.role) })
 
   if (!started) return NextResponse.json({ error: 'Очередь распознавания переполнена — подождите немного и повторите' }, { status: 429 })
   return NextResponse.json({ jobId: started.id }, { status: 202 })

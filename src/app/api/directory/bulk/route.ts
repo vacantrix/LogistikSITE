@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic'
 
 const norm = (s: string) => s.replace(/\s/g, '').toUpperCase()
 
+/** поле импорта (аудит №4): только строки, trim и потолок длины — кривой Excel не уронит импорт частично
+ * и не запишет в справочник неограниченную строку; числа/объекты от клиента отбрасываются (как в directory/route) */
+const s = (v: unknown, max = 300): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
+
 /**
  * POST /api/directory/bulk — массовое пополнение базы аккаунта (импорт из Excel).
  * Тело: { carrierId?, drivers?: [...], trucks?: [...], trailers?: [...] }
@@ -44,7 +48,19 @@ export async function POST(req: NextRequest) {
 
     let driversCreated = 0
     let driversUpdated = 0
-    for (const d of driverRows) {
+    for (const raw of driverRows) {
+      const d = {
+        fullName: s(raw.fullName),
+        birthDate: s(raw.birthDate),
+        birthPlace: s(raw.birthPlace),
+        address: s(raw.address),
+        citizenship: s(raw.citizenship),
+        passport: s(raw.passport, 120),
+        passportIssuedBy: s(raw.passportIssuedBy),
+        passportIssuedDate: s(raw.passportIssuedDate),
+        phone: s(raw.phone, 60),
+        position: s(raw.position),
+      }
       if (!d.fullName) continue
       const passport = d.passport && d.passport !== '—' ? d.passport : ''
       const existing = passport ? existingDrivers.find((x) => norm(x.passport) === norm(passport)) : undefined
@@ -71,7 +87,11 @@ export async function POST(req: NextRequest) {
 
     let trucksCreated = 0
     let trucksUpdated = 0
-    for (const t of truckRows) {
+    for (const raw of truckRows) {
+      const t = {
+        brand: s(raw.brand), plate: s(raw.plate, 30), vin: s(raw.vin, 60), sts: s(raw.sts, 60),
+        color: s(raw.color), techTill: s(raw.techTill, 30), owner: s(raw.owner),
+      }
       if (!t.plate) continue
       const existing = existingTrucks.find((x) => norm(x.plate) === norm(t.plate))
       const payload = {
@@ -89,7 +109,11 @@ export async function POST(req: NextRequest) {
 
     let trailersCreated = 0
     let trailersUpdated = 0
-    for (const z of trailerRows) {
+    for (const raw of trailerRows) {
+      const z = {
+        plate: s(raw.plate, 30), sts: s(raw.sts, 60), type: s(raw.type),
+        color: s(raw.color), owner: s(raw.owner), techTill: s(raw.techTill, 30),
+      }
       if (!z.plate) continue
       const existing = existingTrailers.find((x) => norm(x.plate) === norm(z.plate))
       const payload = {
