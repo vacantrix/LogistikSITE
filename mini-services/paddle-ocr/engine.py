@@ -50,9 +50,13 @@ SUPPORTED = {"PASSPORT_PHOTO", "PASSPORT_REG", "LICENSE", "STS", "POA"}
 
 # модели (Task 86 — одна сильная цепочка, переопределяются переменными окружения):
 # детекция — PP-OCRv5_server_det (сильнейшая из кириллических в PaddleOCR), чтение —
-# eslav_PP-OCRv5_mobile_rec (у server_rec/PP-OCRv6_rec словари без кириллицы — проверено)
+# eslav_PP-OCRv5_mobile_rec (у server_rec/PP-OCRv6_rec словари без кириллицы — проверено).
+# Модели вне официального зоопарка (боевой набор v6 стенда NN: metrika-labs cyrillic-rec)
+# подключаются путями OCR_DET_MODEL_DIR / OCR_REC_MODEL_DIR — перекрывают скачивание по имени
 DET_MODEL = os.environ.get("OCR_DET_MODEL", "PP-OCRv5_server_det")
 REC_MODEL = os.environ.get("OCR_REC_MODEL", "eslav_PP-OCRv5_mobile_rec")
+DET_MODEL_DIR = os.environ.get("OCR_DET_MODEL_DIR") or None
+REC_MODEL_DIR = os.environ.get("OCR_REC_MODEL_DIR") or None
 UPSCALE_BELOW = int(os.environ.get("OCR_UPSCALE_BELOW", "1300"))   # мелкие сканы увеличиваем вдвое
 # детекция ищет строки на кадре не больше этого размера: на фото паспорта 1500×2000 — 38 с вместо 70,
 # поля те же (сами строки читаются с исходного кадра). Лестницу при нехватке памяти задаёт
@@ -361,6 +365,8 @@ def get_ocr():
         _ocr["main"] = PaddleOCR(
             text_detection_model_name=DET_MODEL,
             text_recognition_model_name=REC_MODEL,
+            text_detection_model_dir=DET_MODEL_DIR,
+            text_recognition_model_dir=REC_MODEL_DIR,
             use_doc_orientation_classify=False, use_doc_unwarping=False,
             use_textline_orientation=True, enable_mkldnn=False)
     return _ocr["main"]
