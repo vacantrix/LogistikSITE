@@ -10,7 +10,7 @@
  * новый вход добавляется в реестр и не выбрасывает другие аккаунты.
  */
 import { useState } from 'react'
-import { Building2, ChevronRight, CircleAlert, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
+import { Building2, ChevronRight, CircleAlert, Download, Eye, EyeOff, FileText, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
 import { activateAccount, listAccounts, saveSessionToken } from '@/lib/api'
 import type { SavedAccount } from '@/lib/accounts'
 import { LogoMark } from '@/components/platform/logo-mark'
@@ -41,6 +41,34 @@ const ROLE_LABEL: Record<'admin' | 'logist' | 'carrier', string> = {
   logist: 'логист АЭМЗ',
   carrier: 'перевозчик',
 }
+
+/** Документация платформы — раздаётся статикой из public/downloads (Word/PDF). */
+const PLATFORM_DOCS: { title: string; sub: string; formats: { label: string; href: string }[] }[] = [
+  {
+    title: 'Проектный отчёт платформы',
+    sub: 'Система · MVP · архитектура · OCR · ЭДО · риски и план',
+    formats: [
+      { label: 'Word', href: '/downloads/Проектный_отчет_Веб-платформа_АЭМЗ_Логистика.docx' },
+      { label: 'PDF', href: '/downloads/Проектный_отчет_Веб-платформа_АЭМЗ_Логистика.pdf' },
+    ],
+  },
+  {
+    title: 'Руководство пользователя',
+    sub: 'Роли, заявки, торги, документы, ЭТрН · 17 стр.',
+    formats: [
+      { label: 'Word', href: '/downloads/aemz-logistika-rukovodstvo-polzovatelya.docx' },
+      { label: 'PDF', href: '/downloads/aemz-logistika-rukovodstvo-polzovatelya.pdf' },
+    ],
+  },
+  {
+    title: 'Интеграция с 1С:Предприятие',
+    sub: 'REST API, ключи, модули 1С, curl · 17 стр.',
+    formats: [
+      { label: 'Word', href: '/downloads/aemz-logistika-integraciya-1c.docx' },
+      { label: 'PDF', href: '/downloads/aemz-logistika-integraciya-1c.pdf' },
+    ],
+  },
+]
 
 export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [login, setLogin] = useState('')
@@ -232,6 +260,41 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                 </ul>
               </div>
             )}
+          </div>
+
+          {/* Документация платформы: прямые ссылки на скачивание (Word) */}
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+              <FileText className="h-3.5 w-3.5" aria-hidden />
+              Документация платформы · Word / PDF
+            </p>
+            <ul className="mt-2 space-y-1.5">
+              {PLATFORM_DOCS.map((d) => (
+                <li key={d.formats[0].href}>
+                  <div className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5">
+                    <FileText className="h-4 w-4 shrink-0 text-teal-700" aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-slate-900">{d.title}</span>
+                      <span className="block truncate text-xs text-slate-500">{d.sub}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      {d.formats.map((f) => (
+                        <a
+                          key={f.href}
+                          href={f.href}
+                          download
+                          className="flex h-7 items-center rounded-md border border-slate-200 bg-slate-50 px-2 font-mono text-[10px] font-semibold text-slate-600 transition-colors hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800"
+                          aria-label={`Скачать «${d.title}» в формате ${f.label}`}
+                        >
+                          {f.label}
+                          <Download className="ml-1 h-3 w-3" aria-hidden />
+                        </a>
+                      ))}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </div>
