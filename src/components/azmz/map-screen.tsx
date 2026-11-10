@@ -42,7 +42,12 @@ import {
 } from '@/lib/demo/route-data'
 import { fmtClock, fmtKm } from '@/lib/format'
 
-const LIGHT_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
+/**
+ * Стиль идёт через НАШ сервер (/api/mapstyle → /api/maptiles/…): браузер не
+ * обращается к внешним tile-хостам напрямую — в закрытых/мобильных сетях
+ * это было причиной «карта не отображается».
+ */
+const LIGHT_STYLE_URL = '/api/mapstyle'
 
 const FALLBACK_STYLE = {
   version: 8 as const,
@@ -76,6 +81,7 @@ export function MapScreen() {
   const stopMarkersRef = useRef<MlMarker[]>([])
   const wizMarkersRef = useRef<MlMarker[]>([])
   const followRef = useRef(true)
+  const retryedRef = useRef(false)
   const simFRef = useRef(simF)
   simFRef.current = simF
   const [follow, setFollow] = useState(true)
@@ -116,9 +122,19 @@ export function MapScreen() {
       map.on('error', (e: { error?: { message?: string } }) => {
         // базовая карта могла не загрузиться (сеть) — маршрут и пометки всё равно отрисуются на фоне
         const msg = e?.error?.message ?? ''
-        if (msg.includes('style') && map.isStyleLoaded() === false) {
+        if (map.isStyleLoaded() === false) {
           map.setStyle(FALLBACK_STYLE)
+          // одна повторная попытка через 6 с: прокси/сеть могли моргнуть
+          if (!retryedRef.current) {
+            retryedRef.current = true
+            setTimeout(() => {
+              try {
+                map.setStyle(LIGHT_STYLE_URL)
+              } catch {}
+            }, 6_000)
+          }
         }
+        if (msg) console.warn('[azmz-map]', msg)
       })
       mapRef.current = map
       mapGlobalRef.current = map
