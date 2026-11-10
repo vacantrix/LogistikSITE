@@ -1,0 +1,420 @@
+'use client'
+
+/**
+ * Стор клиента — аналог Room-базы каркаса: единственный источник правды UI.
+ * Прямых обращений к сети из UI нет: запись через outbox (та же транзакция,
+ * как OutboxRepository.kt), чтение — прямо из стора. Синхронизация — движок
+ * src/lib/sync.ts (аналог PushWorker / PullWorker).
+ */
+
+import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import type {
+  ChatMessageSnapshot,
+  JournalEntry,
+  MarkDto,
+  MarkPublishOpPayload,
+  MarksSnapshot,
+  SystemNoteSnapshot,
+  TripEventSnapshot,
+  TripPointSnapshot,
+  TripSnapshot,
+} from '@/lib/protocol'
+import { START_F } from '@/lib/demo/route-data'
+
+export type View = 'map' | 'trip' | 'marks' | 'chat' | 'settings'
+export type ConnectionState = 'online' | 'syncing' | 'offline'
+
+export interface OutboxOp {
+  opId: string
+  type: string
+  payload: unknown
+  state: 'PENDING' | 'DONE' | 'REJECTED'
+  rejectReason?: string
+  attempts: number
+  createdAt: number
+}
+
+export interface PendingMark extends MarkDto {
+  pending: true
+}
+
+interface Toast {
+  id: number
+  text: string
+}
+
+interface WizardState {
+  step: 0 | 1 | 2 | 3 // 0 — закрыт; 1 точка старта; 2 точка конца; 3 форма
+  start?: { lng: number; lat: number }
+  end?: { lng: number; lat: number }
+  category: string
+  ttlHours: 6 | 12 | 720
+  comment: string
+}
+
+interface AzmzState {
+  hydrated: boolean
+  view: View
+  connection: ConnectionState
+  offlineMode: boolean
+  cursor: number
+  marksSince: number
+  lastSyncAt: number | null
+
+  trip: TripSnapshot | null
+  points: TripPointSnapshot[]
+  events: TripEventSnapshot[]
+  chat: ChatMessageSnapshot[]
+  notes: SystemNoteSnapshot[]
+  marks: MarkDto[]
+  pendingMarks: PendingMark[]
+  outbox: OutboxOp[]
+
+  simRunning: boolean
+  simProgressF: number
+  simSpeedKmh: number
+
+  toast: Toast | null
+  wizard: WizardState
+  eventDialogOpen: boolean
+  eventDialogPreselect: string | null
+
+  setHydrated: () => void
+  setView: (v: View) => void
+  setConnection: (c: ConnectionState) => void
+  setOfflineMode: (on: boolean) => void
+  setEventDialog: (open: boolean, preselect?: string | null) => void
+  showToast: (text: string) => void
+
+  enqueueOp: (type: string, payload: unknown) => string
+  pushResults: (results: { opId: string; status: string; rejectReason?: string }[]) => void
+
+  applyJournal: (entries: JournalEntry[], cursor: number) => void
+  applyMarksSnapshot: (snapshot: MarksSnapshot) => void
+
+  enqueueTripEvent: (event: TripEventSnapshot) => void
+  enqueueChatMessage: (message: ChatMessageSnapshot) => void
+  markNotesRead: () => void
+  voteMark: (markId: string, vote: 1 | -1) => void
+
+  publishMarkFromWizard: () => void
+  updateWizard: (patch: Partial<WizardState>) => void
+  cancelWizard: () => void
+  wizardTapPoint: (lng: number, lat: number) => void
+
+  setSimRunning: (on: boolean) => void
+  advanceSim: (dtSec: number) => void
+
+  resetDemo: () => void
+}
+
+function uuid(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
+function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
+  const idx = list.findIndex((x) => x.id === item.id)
+  if (idx === -1) return [...list, item]
+  const copy = [...list]
+  copy[idx] = item
+  return copy
+}
+
+const emptyWizard: WizardState = { step: 0, category: 'POTHOLE', ttlHours: 6, comment: '' }
+
+export const useAzmz = create<AzmzState>()(
+  persist(
+    (set, get) => ({
+      hydrated: false,
+      view: 'map',
+      connection: 'online',
+      offlineMode: false,
+      cursor: 0,
+      marksSince: 0,
+      lastSyncAt: null,
+
+      trip: null,
+      points: [],
+      events: [],
+      chat: [],
+      notes: [],
+      marks: [],
+      pendingMarks: [],
+      outbox: [],
+
+      simRunning: false,
+      simProgressF: START_F,
+      simSpeedKmh: 0,
+
+      toast: null,
+      wizard: emptyWizard,
+      eventDialogOpen: false,
+      eventDialogPreselect: null,
+
+      setHydrated: () => set({ hydrated: true }),
+      setView: (view) => set({ view }),
+      setConnection: (connection) => set({ connection }),
+      setOfflineMode: (offlineMode) => set({ offlineMode }),
+      setEventDialog: (eventDialogOpen, eventDialogPreselect = null) => set({ eventDialogOpen, eventDialogPreselect }),
+      showToast: (text) => {
+        const id = Date.now()
+        set({ toast: { id, text } })
+        setTimeout(() => {
+          if (get().toast?.id === id) set({ toast: null })
+        }, 3800)
+      },
+
+      enqueueOp: (type, payload) => {
+        const opId = uuid()
+        set((s) => ({
+          outbox: [...s.outbox, { opId, type, payload, state: 'PENDING', attempts: 0, createdAt: Date.now() }],
+        }))
+        return opId
+      },
+
+      pushResults: (results) => {
+        const s = get()
+        const handled = new Set(results.map((r) => r.opId))
+        const rejectedRateLimitOps = results
+          .filter((r) => r.status === 'REJECTED' && r.rejectReason === 'RATE_LIMIT')
+          .map((r) => r.opId)
+        const rejectedMarkIds = s.outbox
+          .filter((op) => rejectedRateLimitOps.includes(op.opId) && op.type === 'MARK_PUBLISH')
+          .map((op) => (op.payload as MarkPublishOpPayload).id)
+        const confirmedMarkIds = s.outbox
+          .filter(
+            (op) =>
+              op.type === 'MARK_PUBLISH' &&
+              handled.has(op.opId) &&
+              !rejectedRateLimitOps.includes(op.opId),
+          )
+          .map((op) => (op.payload as MarkPublishOpPayload).id)
+        set((st) => ({
+          outbox: st.outbox.filter((op) => !handled.has(op.opId)),
+          pendingMarks: st.pendingMarks.filter((m) => !confirmedMarkIds.includes(m.id) && !rejectedMarkIds.includes(m.id)),
+        }))
+        if (rejectedMarkIds.length > 0) {
+          get().showToast('Лимит: не более 10 пометок в час. Публикация отклонена.')
+        }
+      },
+
+      applyJournal: (entries, cursor) => {
+        set((s) => {
+          let { trip, points, events, chat, notes } = s
+          for (const e of entries) {
+            if (e.entity === 'TRIP' && e.op === 'UPSERT') trip = e.payload as TripSnapshot
+            else if (e.entity === 'TRIP_POINT' && e.op === 'UPSERT') points = upsertById(points, e.payload as TripPointSnapshot)
+            else if (e.entity === 'TRIP_EVENT' && e.op === 'UPSERT') events = upsertById(events, e.payload as TripEventSnapshot)
+            else if (e.entity === 'CHAT_MESSAGE' && e.op === 'UPSERT') chat = upsertById(chat, e.payload as ChatMessageSnapshot)
+            else if (e.entity === 'SYSTEM_NOTE' && e.op === 'UPSERT') notes = upsertById(notes, e.payload as SystemNoteSnapshot)
+          }
+          return { trip, points, events, chat, notes, cursor, lastSyncAt: Date.now() }
+        })
+      },
+
+      applyMarksSnapshot: (snapshot) => {
+        set((s) => {
+          // канал 2 инкрементальный (since): мержим по id, выкидываем протухшие
+          const byId = new Map(s.marks.map((m) => [m.id, m]))
+          for (const m of snapshot.marks) byId.set(m.id, m)
+          const now = Date.now()
+          return {
+            marks: [...byId.values()].filter((m) => m.expiresAt > now),
+            marksSince: snapshot.snapshotAt,
+          }
+        })
+      },
+
+      enqueueTripEvent: (event) => {
+        set((s) => ({
+          events: upsertById(s.events, event),
+          outbox: [
+            ...s.outbox,
+            { opId: uuid(), type: 'TRIP_EVENT_CREATE', payload: eventToPayload(event), state: 'PENDING', attempts: 0, createdAt: Date.now() },
+          ],
+        }))
+      },
+
+      enqueueChatMessage: (message) => {
+        set((s) => ({
+          chat: upsertById(s.chat, message),
+          outbox: [
+            ...s.outbox,
+            {
+              opId: uuid(),
+              type: 'CHAT_SEND',
+              payload: { id: message.id, tripId: message.tripId, body: message.body, createdAt: message.createdAt },
+              state: 'PENDING',
+              attempts: 0,
+              createdAt: Date.now(),
+            },
+          ],
+        }))
+      },
+
+      markNotesRead: () => {
+        set((s) => {
+          const unread = s.notes.filter((n) => !n.readAt)
+          if (unread.length === 0) return {}
+          return {
+            notes: s.notes.map((n) => (n.readAt ? n : { ...n, readAt: Date.now() })),
+            outbox: [
+              ...s.outbox,
+              ...unread.map((n) => ({
+                opId: uuid(),
+                type: 'NOTE_READ',
+                payload: { noteId: n.id },
+                state: 'PENDING' as const,
+                attempts: 0,
+                createdAt: Date.now(),
+              })),
+            ],
+          }
+        })
+      },
+
+      voteMark: (markId, vote) => {
+        set((s) => {
+          const patch = (m: MarkDto) => ({
+            ...m,
+            confirmCount: m.confirmCount + (vote === 1 ? 1 : 0),
+            outdatedCount: m.outdatedCount + (vote === -1 ? 1 : 0),
+          })
+          return {
+            marks: s.marks.map((m) => (m.id === markId ? patch(m) : m)),
+            outbox: [
+              ...s.outbox,
+              { opId: uuid(), type: 'MARK_VOTE', payload: { markId, vote }, state: 'PENDING', attempts: 0, createdAt: Date.now() },
+            ],
+          }
+        })
+      },
+
+      publishMarkFromWizard: () => {
+        const { wizard } = get()
+        if (!wizard.start || !wizard.end) return
+        const id = uuid()
+        const geometry = JSON.stringify({
+          type: 'LineString',
+          coordinates: [
+            [wizard.start.lng, wizard.start.lat],
+            [wizard.end.lng, wizard.end.lat],
+          ],
+        })
+        const payload: MarkPublishOpPayload = {
+          id,
+          category: wizard.category as MarkPublishOpPayload['category'],
+          geometry,
+          comment: wizard.comment.trim() || undefined,
+          ttlHours: wizard.ttlHours,
+          clientCreatedAt: Date.now(),
+        }
+        set((s) => ({
+          pendingMarks: [
+            ...s.pendingMarks,
+            {
+              id,
+              category: payload.category,
+              geometry,
+              comment: payload.comment,
+              ttlHours: payload.ttlHours,
+              confirmCount: 0,
+              outdatedCount: 0,
+              createdAt: Date.now(),
+              expiresAt: Date.now() + payload.ttlHours * 3_600_000,
+              pending: true,
+            } as PendingMark,
+          ],
+          wizard: emptyWizard,
+        }))
+        get().enqueueOp('MARK_PUBLISH', payload)
+        get().showToast('Пометка сохранена на устройстве' + (get().offlineMode ? ' — уйдёт при появлении сети' : ''))
+      },
+
+      updateWizard: (patch) => set((s) => ({ wizard: { ...s.wizard, ...patch } })),
+      cancelWizard: () => set({ wizard: emptyWizard }),
+      wizardTapPoint: (lng, lat) => {
+        const { wizard, updateWizard } = get()
+        if (wizard.step === 1) updateWizard({ start: { lng, lat }, step: 2 })
+        else if (wizard.step === 2) updateWizard({ end: { lng, lat }, step: 3 })
+      },
+
+      setSimRunning: (on) =>
+        set((s) => ({
+          simRunning: on,
+          simSpeedKmh: on ? 58 : 0,
+          // повторный запуск — сначала маршрута, чтобы демо было повторяемым
+          simProgressF: on ? START_F : s.simProgressF,
+        })),
+      advanceSim: (dtSec) => {
+        const s = get()
+        if (!s.simRunning || !s.trip) return
+        // 20× ускорение демо: скорость из геометрии, коммерческие км — от f
+        const totalM = 41_200 // реальная длина ломаной, метры (routeLengthM)
+        const speedMs = (s.simSpeedKmh / 3.6) * 20
+        const df = (speedMs * dtSec) / totalM
+        const nextF = Math.min(1, s.simProgressF + df)
+        const arrived = nextF >= 1 && s.simProgressF < 1
+        const jitter = Math.max(38, Math.min(66, s.simSpeedKmh + (Math.random() - 0.5) * 6))
+        set({ simProgressF: nextF, simSpeedKmh: arrived ? 0 : jitter })
+        if (arrived) {
+          get().showToast('Вы прибыли в точку выгрузки — отметьте событие')
+        }
+      },
+
+      resetDemo: () => {
+        if (typeof window !== 'undefined') {
+          window.localStorage.removeItem('azmz-driver-store')
+          window.location.reload()
+        }
+      },
+    }),
+    {
+      name: 'azmz-driver-store',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (s) => ({
+        view: s.view,
+        offlineMode: s.offlineMode,
+        cursor: s.cursor,
+        marksSince: s.marksSince,
+        lastSyncAt: s.lastSyncAt,
+        trip: s.trip,
+        points: s.points,
+        events: s.events,
+        chat: s.chat,
+        notes: s.notes,
+        marks: s.marks,
+        pendingMarks: s.pendingMarks,
+        outbox: s.outbox,
+        simRunning: s.simRunning,
+        simProgressF: s.simProgressF,
+        simSpeedKmh: s.simSpeedKmh,
+      }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHydrated()
+      },
+    },
+  ),
+)
+
+/** payload TRIP_EVENT_CREATE — та же структура, что TripEventOpPayload каркаса. */
+function eventToPayload(e: TripEventSnapshot) {
+  return {
+    id: e.id,
+    tripId: e.tripId,
+    tripPointId: e.tripPointId,
+    vehicleId: e.vehicleId,
+    deviceId: e.deviceId,
+    type: e.type,
+    occurredAt: e.occurredAt,
+    source: e.source,
+    lat: e.lat,
+    lon: e.lon,
+    note: e.note,
+  }
+}
