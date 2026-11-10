@@ -1,0 +1,9 @@
+# Профиль demo:.seeds демо-данных (DemoDataRunner) + печать SQL.
+spring:
+  config:
+    activate:
+      on-profile: demo
+
+logging:
+  level:
+    org.springframework.jdbc.core: INFO
