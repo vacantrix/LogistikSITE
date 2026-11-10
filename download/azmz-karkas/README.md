@@ -45,22 +45,23 @@ backend/
     trip/    — TripEventApplier (авто-закрытие, автостатусы)
     mark/    — MarkApplier (TTL автора, голоса, анти-спам)
     chat/    — ChatApplier
+    traffic/ — TrafficController (/traffic — канал 3, снимок пробок по bbox)
     config/  — SecurityConfig (каркас: X-Driver-Id; JWT смены — п.2)
     dev/     — DemoDataRunner (профиль demo)
-  src/main/resources/db/migration/  — Flyway V1–V6
+  src/main/resources/db/migration/  — Flyway V1–V7
 android/
-  app/               — 4 таба, индикатор связи, навигация
+  app/               — карта — постоянный фон, экраны — шторки; индикатор связи
   core/common/       — TripEventType + TripEventRules (правила общие с сервером), Geo, ConnectionState
-  core/data/         — Room (8 сущностей, DAO) + Retrofit-контракты
+  core/data/         — Room (8 сущностей + traffic-снимок, DAO) + Retrofit-контракты
   core/sync/         — AppGraph, OutboxRepository, Push/Pull воркеры, ConnectivityObserver, SyncScheduler
-  core/ui/           — тема дизайн-системы, ConnectionBadge, EventTimeline
+  core/ui/           — тема дизайн-системы, ConnectionBadge, TrafficChip, EventTimeline
   feature/map|trip|history|office/
 docs/                — erd.png, sync-flow.png
 ```
 
 ---
 
-## 3. Схема данных (V1–V6)
+## 3. Схема данных (V1–V7)
 
 | Таблица | Назначение |
 |---|---|
@@ -77,6 +78,7 @@ docs/                — erd.png, sync-flow.png
 | `sync_journal` | **Канал 1**: личный oplog водителя (seq, entity, op, payload-снимок) |
 | `chat_message`, `system_note` | Таб «Офис»: чат и «Заявка Z-1067 изменена офисом» |
 | `position_ping` | Закладка под дашборд директора (фаза 5), best-effort, мимо outbox |
+| `traffic_segment` | **Канал 3** — агрегат скоростей по сегментам дорог (пробки из телеметрии парка, без Yandex API) |
 
 ### Типы событий и пары
 
@@ -152,6 +154,39 @@ GET /api/driver/v1/sync/marks?minLat=54&minLon=37&maxLat=56&maxLon=38&since=1730
 коридора своего рейса. Истёкшие чистятся локально по `expiresAt`. Голос меняет
 `updated_at` → пометка приедет в следующем снимке. NB: при рейсах за 180°
 (Чукотка) клиент присылает два bbox.
+
+### Канал 3 — пробки (снимок по bbox, V7)
+
+```
+GET /api/driver/v1/traffic?minLat=54&minLon=37&maxLat=56&maxLon=38&since=1730000000000
+→ { "snapshotAt": 1730000123456,
+    "segments": [ { "id": "osm:way:123:0", "title": "А-146 · Гайдук",
+                     "geometry": "{…LineString…}", "level": 2,
+                     "speedKmh": 27, "onRoute": true, "updatedAt": 1730000100000 } ] }
+```
+
+Контракт повторяет канал 2 (общие данные, НЕ в журнал, два bbox за 180°).
+Отличия существенны внутри:
+
+* **Источник** — телеметрия собственного парка: `position_ping` (V6) →
+  map-matching на сегменты OSRM → медиана скорости за окно 15 мин при ≥ 3
+  разных ТС на сегмент. Yandex Traffic API запрещён лицензией на закрытый
+  код — как и тайлы (раздел 7). Опции этапа MVP+: обмен с другими
+  перевозчиками тем же контрактом, коммерческий провайдер трафика с
+  допустимой для РФ лицензией.
+* **Периодичность**: агрегат пересчитывается джобой раз в минуту, клиент
+  опрашивает раз в 60 с. Балл 1–10 и дельту ETA (+N мин к прибытию) клиент
+  считает по снимку сам — сервер не держит состояние сессии.
+* **Офлайн**: клиент остаётся на прошлом снимке (Room), картину дополняет
+  слой «водители для водителей» (`road_mark`) — он живёт без сети.
+* **152-ФЗ**: сегмент — агрегат ≥ 3 машин без идентификаторов, ПДн нет;
+  персональные треки остаются в `position_ping` с retention 90 дней.
+* **Маршрутизация с пробками** (этап MVP): OSRM с edge-скоростями из
+  `traffic_segment` — пересчёт маршрута при выезде и по запросу водителя.
+
+Демо-реализация канала: web-прототип (Next.js) с генератором трафика —
+`src/app/api/driver/v1/traffic/route.ts` в проекте демо; прод-цель — этот
+контроллер + `TrafficAggregationJob`.
 
 ---
 
@@ -281,8 +316,8 @@ curl 'http://localhost:8080/api/driver/v1/sync/marks?minLat=54&minLon=37&maxLat=
 
 | П. | Этап | Что каркас уже даёт |
 |---|---|---|
-| 1 | Каркас (2–3 нед) | Этот репозиторий: схема, скелеты, синхро-протокол |
-| 2 | MVP водителя (8–12 нед) | Экраны-каркасы, GPS-позиция, смарт-карточки, JWT-логин в смену, пуш-«будильник», расчёт «Осталось/Проехано» |
+| 1 | Каркас (2–3 нед) | Этот репозиторий: схема, скелеты, синхро-протокол, канал 3 (пробки) |
+| 2 | MVP водителя (8–12 нед) | Экраны-каркасы, GPS-позиция, смарт-карточки, JWT-логин в смену, пуш-«будильник», расчёт «Осталось/Проехано», TrafficAggregationJob + маршрутизация с пробками (OSRM edge-speeds) |
 | 3 | Пилот 5–10 машин | MDM (`device.mdm_enrollment_id`), принтер (`PrintingService`), чек-лист (`isCorridorReady`) |
 | 4 | Тахограф (4–6 нед) | Ручная загрузка диспетчером → ИАЦ РАТ; вне каркаса |
 | 5 | Дашборд директора (4–6 нед) | `position_ping`, автостатусы `trip.last_event_*`, `v_open_interval` |

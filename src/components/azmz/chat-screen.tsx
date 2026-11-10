@@ -1,10 +1,11 @@
 'use client'
 
 /**
- * Экран «Офис» — чат с диспетчером (мокап 3) + системные уведомления
+ * Шторка «Офис» — чат с диспетчером (мокап 3) + системные уведомления
  * (system_note). Отправка через outbox: без сети сообщение встаёт в очередь
  * и уходит при появлении связи. Диспетчерская часть демо-сервера отвечает
  * через sync_journal (интеграционная точка №3 каркаса).
+ * Карта остаётся фоном сверху.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -64,9 +65,9 @@ export function ChatScreen() {
   }
 
   return (
-    <div className="absolute inset-0 bg-[#F5F7FA] flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col">
       {/* шапка чата */}
-      <div className="bg-[#101E2E] px-4 pt-3 pb-3 shrink-0 flex items-center gap-3">
+      <div className="bg-[#101E2E] px-4 pt-2 pb-3 shrink-0 flex items-center gap-3 rounded-t-3xl">
         <div className="h-10 w-10 rounded-full bg-[#1B2E44] border border-white/10 flex items-center justify-center text-white font-bold text-[14px]">
           СД
         </div>

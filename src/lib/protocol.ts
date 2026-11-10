@@ -122,6 +122,32 @@ export interface MarksSnapshot {
   marks: MarkDto[]
 }
 
+// --- traffic (канал 3: снимок пробок по bbox, как пометки — НЕ в журнале) ---
+
+export type TrafficLevel = 0 | 1 | 2 | 3
+
+export interface TrafficSegment {
+  id: string
+  geometry: string // GeoJSON LineString
+  level: TrafficLevel
+  speedKmh: number
+  /** Название участка для панели пробок. */
+  title?: string
+  onRoute: boolean
+  updatedAt: number
+}
+
+export interface TrafficSnapshot {
+  snapshotAt: number
+  /** Балл 1–10 (как принято в навигаторах). */
+  score: number
+  /** Задержка на маршруте из-за пробок, мин. */
+  routeDelayMin: number
+  segments: TrafficSegment[]
+  /** Источники данных для панели (демо: телеметрия парка). */
+  contributors: number
+}
+
 // --- снимки строк журнала (совпадают с Room-сущностями клиента) ------------
 
 export interface TripSnapshot {

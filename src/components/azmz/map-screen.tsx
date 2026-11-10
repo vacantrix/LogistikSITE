@@ -4,7 +4,8 @@
  * Экран «Карта» (по мокапам 1, 2 и 4): карта — всегда первый экран,
  * баннер манёвра, знак лимита скорости, очередь связи, кнопка «Пометка»
  * (3-шаговый мастер), панель данных рейса внизу → открывает дашборд рейса.
- * Базовая карта: OSM/CARTO raster — без Yandex API (ограничение лицензии).
+ * Базовая карта: светлый OSM-стиль Positron (OpenFreeMap) — без Yandex API
+ * (ограничение лицензии). Линия маршрута и сегменты пробок идут по дорогам.
  */
 
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -18,6 +19,7 @@ import {
   CornerUpRight,
   Crosshair,
   Flag,
+  Layers,
   Search,
   Shield,
   Ban,
@@ -31,23 +33,21 @@ import {
 } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { ConnectionChip, OfflineHint } from '@/components/azmz/connection-chip'
-import { MARK_CATEGORIES, TTL_OPTIONS } from '@/lib/rules'
+import { MARK_CATEGORIES, TRAFFIC_LEVELS, trafficScoreColor, TTL_OPTIONS } from '@/lib/rules'
 import {
-  CONGESTION,
   DEMO_STREETS,
   MANEUVERS,
   pointAtFraction,
   routeLengthM,
-  sliceFraction,
 } from '@/lib/demo/route-data'
 import { fmtClock, fmtKm } from '@/lib/format'
 
-const DARK_STYLE_URL = 'https://tiles.openfreemap.org/styles/dark'
+const LIGHT_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 
 const FALLBACK_STYLE = {
-  version: 8,
+  version: 8 as const,
   sources: {},
-  layers: [{ id: 'bg', type: 'background' as const, paint: { 'background-color': '#15202E' } }],
+  layers: [{ id: 'bg', type: 'background' as const, paint: { 'background-color': '#DCE5EE' } }],
 }
 
 type LatLng = { lng: number; lat: number }
@@ -57,6 +57,8 @@ export function MapScreen() {
   const points = useAzmz((s) => s.points)
   const marks = useAzmz((s) => s.marks)
   const pendingMarks = useAzmz((s) => s.pendingMarks)
+  const traffic = useAzmz((s) => s.traffic)
+  const view = useAzmz((s) => s.view)
   const simF = useAzmz((s) => s.simProgressF)
   const simRunning = useAzmz((s) => s.simRunning)
   const simSpeed = useAzmz((s) => s.simSpeedKmh)
@@ -79,7 +81,15 @@ export function MapScreen() {
   const [follow, setFollow] = useState(true)
   const [sound, setSound] = useState(true)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [ready, setReady] = useState(false)
+  const [legendOpen, setLegendOpen] = useState(false)
+  /** Эпоха экземпляра карты: инкремент на 'load' — все слои/маркеры пересоздаются вместе с картой (устойчиво к hot-reload и StrictMode). */
+  const [mapEpoch, setMapEpoch] = useState(0)
+
+  /** Переключение режима сопровождения: ref и state меняются синхронно. */
+  const setFollowMode = (v: boolean) => {
+    followRef.current = v
+    setFollow(v)
+  }
 
   // --- инициализация карты (клиент-only) ------------------------------------
   useEffect(() => {
@@ -88,13 +98,14 @@ export function MapScreen() {
       const ml = await import('maplibre-gl')
       // Turbopack ломает относительный URL воркера — берём из public/ (same-origin)
       try {
-        ;(ml as { config?: { WORKER_URL?: string } }).config.WORKER_URL = '/maplibre-gl-worker.mjs'
+        const cfg = (ml as { config?: { WORKER_URL?: string } }).config
+        if (cfg) cfg.WORKER_URL = '/maplibre-gl-worker.mjs'
       } catch {}
       if (cancelled || !containerRef.current || mapRef.current) return
       mlRef.current = ml
       const map = new ml.Map({
         container: containerRef.current,
-        style: DARK_STYLE_URL,
+        style: LIGHT_STYLE_URL,
         center: [37.768, 44.726],
         zoom: 13.2,
         pitch: 0,
@@ -112,11 +123,13 @@ export function MapScreen() {
       mapRef.current = map
       mapGlobalRef.current = map
       ;(window as unknown as { __azmzMap?: MlMap }).__azmzMap = map
-      map.on('load', () => setReady(true))
+      map.on('load', () => setMapEpoch((v) => v + 1))
       map.on('click', (e) => {
         const w = useAzmz.getState().wizard
         if (w.step === 1 || w.step === 2) useAzmz.getState().wizardTapPoint(e.lngLat.lng, e.lngLat.lat)
       })
+      // свободное перетягивание выключает сопровождение — вернуться по прицелу
+      map.on('dragstart', () => setFollowMode(false))
     })()
     return () => {
       cancelled = true
@@ -127,18 +140,32 @@ export function MapScreen() {
     }
   }, [])
 
-  // --- слои маршрута и пометок ------------------------------------------------
+  // --- слои маршрута, трафика и пометок ----------------------------------------
   useEffect(() => {
     const map = mapRef.current
     const ml = mlRef.current
-    if (!ready || !map || !ml || !trip) return
+    if (!mapEpoch || !map || !ml || !trip) return
     if (!map.getSource('route')) {
       map.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') } })
-      map.addSource('congestion', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: sliceFraction(CONGESTION[0], CONGESTION[1]) } } })
+      map.addSource('traffic', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addSource('marks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-      map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#5A3608', 'line-width': 10 } })
+      map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 10 } })
       map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#F97316', 'line-width': 6 } })
-      map.addLayer({ id: 'congestion-line', type: 'line', source: 'congestion', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#EF4444', 'line-width': 6 } })
+      // трафик (канал 3): цвет по уровню, толщина — маршрут/боковые улицы
+      map.addLayer({
+        id: 'traffic-casing',
+        type: 'line',
+        source: 'traffic',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#FFFFFF', 'line-width': 9, 'line-opacity': 0.95 },
+      })
+      map.addLayer({
+        id: 'traffic-line',
+        type: 'line',
+        source: 'traffic',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ['get', 'color'], 'line-width': ['get', 'width'] },
+      })
       map.addLayer({
         id: 'mark-line',
         type: 'line',
@@ -157,13 +184,13 @@ export function MapScreen() {
     // камера стартует на грузовике (навигационный вид, как в мокапе 4)
     const p = pointAtFraction(simFRef.current)
     map.jumpTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4 })
-  }, [ready, trip])
+  }, [mapEpoch, trip])
 
   // грузовик и движение камеры
   useEffect(() => {
     const map = mapRef.current
     const ml = mlRef.current
-    if (!ready || !map || !ml || truckRef.current) return
+    if (!mapEpoch || !map || !ml || truckRef.current) return
     const el = document.createElement('div')
     el.className = 'azmz-truck'
     el.innerHTML = `
@@ -173,24 +200,24 @@ export function MapScreen() {
     truckInnerRef.current = el.querySelector('.azmz-truck-inner')
     const p = pointAtFraction(simFRef.current)
     truckRef.current = new ml.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map)
-  }, [ready])
+  }, [mapEpoch])
 
   // движение камеры и грузовика
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map || !truckRef.current) return
+    if (!mapEpoch || !map || !truckRef.current) return
     const p = pointAtFraction(simF)
     truckRef.current.setLngLat([p.lng, p.lat])
     if (truckInnerRef.current) truckInnerRef.current.style.transform = `rotate(${p.bearing}deg)`
     if (followRef.current) {
       map.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 950, easing: (t) => t })
     }
-  }, [simF, ready])
+  }, [simF, mapEpoch])
 
   // пометки → слой
   useEffect(() => {
     const map = mapRef.current
-    if (!ready || !map || !map.getSource('marks')) return
+    if (!mapEpoch || !map || !map.getSource('marks')) return
     const all = [...pendingMarks, ...marks]
     const feats = all.map((m) => ({
       type: 'Feature' as const,
@@ -198,13 +225,52 @@ export function MapScreen() {
       geometry: JSON.parse(m.geometry),
     }))
     ;(map.getSource('marks') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: feats })
-  }, [marks, pendingMarks, ready])
+  }, [marks, pendingMarks, mapEpoch])
+
+  // трафик → слой (канал 3): цвет по уровню, маршрут толще боковых улиц
+  useEffect(() => {
+    const map = mapRef.current
+    if (!mapEpoch || !map || !map.getSource('traffic')) return
+    const feats = (traffic?.segments ?? []).map((seg) => ({
+      type: 'Feature' as const,
+      properties: { color: TRAFFIC_LEVELS[seg.level]?.hex ?? '#22C55E', width: seg.onRoute ? 6.5 : 4.5 },
+      geometry: JSON.parse(seg.geometry),
+    }))
+    ;(map.getSource('traffic') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: feats })
+  }, [traffic, mapEpoch])
+
+  // камера: шторка открыта → обзор маршрута; закрыта → навигация за грузовиком
+  useEffect(() => {
+    const map = mapRef.current
+    if (!mapEpoch || !map || !trip) return
+    if (view === 'map') {
+      setFollowMode(true)
+      const p = pointAtFraction(simFRef.current)
+      map.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 750 })
+    } else {
+      setFollowMode(false)
+      const coords = (JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') as {
+        coordinates: [number, number][]
+      }).coordinates
+      const lons = coords.map((c) => c[0])
+      const lats = coords.map((c) => c[1])
+      const bottomFrac = view === 'traffic' ? 0.62 : view === 'marks' ? 0.72 : view === 'settings' ? 0.86 : 0.8
+      const h = map.getContainer().clientHeight
+      map.fitBounds(
+        [
+          [Math.min(...lons), Math.min(...lats)],
+          [Math.max(...lons), Math.max(...lats)],
+        ],
+        { padding: { top: 55, bottom: Math.round(h * bottomFrac), left: 26, right: 26 }, pitch: 0, bearing: 0, duration: 700 },
+      )
+    }
+  }, [view, mapEpoch, trip])
 
   // точки рейса → DOM-маркеры
   useEffect(() => {
     const map = mapRef.current
     const ml = mlRef.current
-    if (!ready || !map || !ml) return
+    if (!mapEpoch || !map || !ml) return
     stopMarkersRef.current.forEach((m) => m.remove())
     stopMarkersRef.current = []
     for (const pt of points) {
@@ -217,13 +283,13 @@ export function MapScreen() {
         <div class="azmz-stop-pin" style="background:${color}"></div>`
       stopMarkersRef.current.push(new ml.Marker({ element: el }).setLngLat([pt.lon, pt.lat]).addTo(map))
     }
-  }, [points, ready])
+  }, [points, mapEpoch])
 
   // мастер пометок: маркеры A/B + предпросмотр участка
   useEffect(() => {
     const map = mapRef.current
     const ml = mlRef.current
-    if (!ready || !map || !ml) return
+    if (!mapEpoch || !map || !ml) return
     wizMarkersRef.current.forEach((m) => m.remove())
     wizMarkersRef.current = []
     if (map.getLayer('wiz-line')) map.removeLayer('wiz-line')
@@ -260,9 +326,12 @@ export function MapScreen() {
         paint: { 'line-color': '#FACC15', 'line-width': 7, 'line-opacity': 0.85, 'line-dasharray': [1.5, 1.2] },
       })
     }
-  }, [wizard, ready])
+  }, [wizard, mapEpoch])
 
   const totalM = useMemo(() => routeLengthM(), [])
+
+  const delayMin = traffic?.routeDelayMin ?? 0
+  const etaMs = (trip?.plannedFinishAt ?? Date.now()) + delayMin * 60_000
 
   // следующий манёвр
   const nextManeuver = useMemo(() => {
@@ -273,7 +342,7 @@ export function MapScreen() {
   const arrived = simF >= MANEUVERS[MANEUVERS.length - 1].f
 
   const remainingM = trip ? (trip.routeDistanceM ?? 200_000) * (1 - simF) : 123_000
-  const etaClock = trip ? fmtClock(trip.plannedFinishAt) : '—'
+  const etaClock = trip ? fmtClock(etaMs) : '—'
   const tripCode = trip?.tripCode ?? 'Z-1067'
 
   const maneuverIcon = (type: string, cls: string) => {
@@ -284,7 +353,7 @@ export function MapScreen() {
   }
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-[#0E1826]">
+    <div className="absolute inset-0 overflow-hidden bg-[#DCE5EE]">
       {/* maplibre вешает .maplibregl-map { position: relative } — поэтому размеры через w/h-full, не inset */}
       <div ref={containerRef} className="w-full h-full" />
 
@@ -330,13 +399,36 @@ export function MapScreen() {
           border-radius: 999px;
           box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
         }
+        .azmz-legend-enter {
+          animation: azmz-legend-in 0.18s ease-out;
+        }
+        @keyframes azmz-legend-in {
+          from {
+            opacity: 0;
+            transform: translateX(8px);
+          }
+          to {
+            opacity: 1;
+            transform: none;
+          }
+        }
       `}</style>
 
       {/* --- верхние плашки ----------------------------------------------------- */}
       {!wizard.step || wizard.step === 3 ? (
         <div className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 pointer-events-none">
-          <div className="flex items-center gap-2 pointer-events-auto">
+          <div className="flex items-center gap-2 pointer-events-auto flex-wrap">
             <ConnectionChip />
+            {traffic && (
+              <button
+                onClick={() => setView('traffic')}
+                className="inline-flex items-center gap-1.5 bg-[#101E2E]/90 border border-white/15 text-white text-[11px] font-semibold rounded-full pl-2 pr-2.5 h-7 shadow"
+                aria-label="Пробки"
+              >
+                <span className="h-2 w-2 rounded-full" style={{ background: trafficScoreColor(traffic.score) }} />
+                Пробки {traffic.score}
+              </button>
+            )}
             <button
               onClick={() => setSearchOpen(true)}
               className="ml-auto h-8 w-8 rounded-full bg-[#101E2E]/90 border border-white/15 text-white flex items-center justify-center"
@@ -347,9 +439,12 @@ export function MapScreen() {
           </div>
           <OfflineHint />
 
-          {/* баннер манёвра (мокап 1) */}
+          {/* баннер манёвра (мокап 1); тап — пауза/возобновление сопровождения */}
           {nextManeuver && !arrived && (
-            <button onClick={() => setFollow((v) => !v)} className="pointer-events-auto text-left bg-[#2563EB] text-white rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl">
+            <button
+              onClick={() => setFollowMode(!followRef.current)}
+              className="pointer-events-auto text-left bg-[#2563EB] text-white rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl"
+            >
               {maneuverIcon(nextManeuver.type, 'h-7 w-7 shrink-0')}
               <div className="min-w-0">
                 <div className="text-lg font-bold leading-tight tabular-nums">
@@ -410,16 +505,18 @@ export function MapScreen() {
             <ZoomOut className="h-5 w-5" />
           </MapBtn>
           <MapBtn
-            label="Центрировать"
+            label="Вернуться к грузовику"
             active={follow}
             onClick={() => {
-              setFollow((v) => {
-                followRef.current = !v
-                return !v
-              })
+              setFollowMode(true)
+              const p = pointAtFraction(simFRef.current)
+              mapRef.current?.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 750 })
             }}
           >
             <Crosshair className="h-5 w-5" />
+          </MapBtn>
+          <MapBtn label="Легенда карты" active={legendOpen} onClick={() => setLegendOpen((v) => !v)}>
+            <Layers className="h-5 w-5" />
           </MapBtn>
           <MapBtn
             label="Звук"
@@ -444,41 +541,53 @@ export function MapScreen() {
       )}
 
       {/* --- знак лимита и скорость --------------------------------------------- */}
-      <div className="absolute left-3 bottom-[104px] z-20 flex flex-col items-center gap-1.5">
-        <div className="h-12 w-12 rounded-full bg-white border-[5px] border-[#DC2626] flex items-center justify-center shadow-lg">
-          <span className="text-[#15202B] font-black text-lg leading-none">60</span>
+      {view === 'map' && (
+        <div className="absolute left-3 bottom-[104px] z-20 flex flex-col items-center gap-1.5">
+          <div className="h-12 w-12 rounded-full bg-white border-[5px] border-[#DC2626] flex items-center justify-center shadow-lg">
+            <span className="text-[#15202B] font-black text-lg leading-none">60</span>
+          </div>
+          <div className="bg-[#101E2E]/90 text-white text-[12px] font-bold rounded-lg px-2 py-0.5 tabular-nums shadow">
+            {Math.round(simRunning ? simSpeed : 0)}
+          </div>
         </div>
-        <div className="bg-[#101E2E]/90 text-white text-[12px] font-bold rounded-lg px-2 py-0.5 tabular-nums shadow">
-          {Math.round(simRunning ? simSpeed : 0)}
-        </div>
-      </div>
+      )}
 
-      {/* --- панель данных рейса (мокап 1) -------------------------------------- */}
-      <button
-        onClick={() => setView('trip')}
-        className="absolute bottom-0 left-0 right-0 z-20 bg-[#101E2E] text-white px-4 py-3 flex items-end gap-4 text-left"
-        aria-label="Открыть дашборд рейса"
-      >
-        <div>
-          <div className="text-xl font-bold leading-none tabular-nums">{fmtKm(remainingM)}</div>
-          <div className="text-[10px] text-white/50 mt-1">Осталось</div>
-        </div>
-        <div>
-          <div className="text-xl font-bold leading-none tabular-nums">{etaClock}</div>
-          <div className="text-[10px] text-white/50 mt-1">Прибытие</div>
-        </div>
-        <div>
-          <div className="text-xl font-bold leading-none tabular-nums">2 ч 30 мин</div>
-          <div className="text-[10px] text-white/50 mt-1">В пути</div>
-        </div>
-        <div className="ml-auto flex items-center gap-1 text-[#F97316] font-bold text-sm">
-          {tripCode}
-          <ChevronRight className="h-4 w-4" />
-        </div>
-      </button>
+      {/* --- панель данных рейса (мокап 1) — только когда карта «чистая» --------- */}
+      {view === 'map' && (
+        <button
+          onClick={() => setView('trip')}
+          className="absolute bottom-0 left-0 right-0 z-20 bg-[#101E2E] text-white px-4 py-3 flex items-end gap-4 text-left"
+          aria-label="Открыть дашборд рейса"
+        >
+          <div>
+            <div className="text-xl font-bold leading-none tabular-nums">{fmtKm(remainingM)}</div>
+            <div className="text-[10px] text-white/50 mt-1">Осталось</div>
+          </div>
+          <div>
+            <div className="text-xl font-bold leading-none tabular-nums flex items-center gap-1.5">
+              {etaClock}
+              {delayMin > 0 && (
+                <span className="text-[11px] font-semibold text-[#FACC15] leading-none">+{delayMin}</span>
+              )}
+            </div>
+            <div className="text-[10px] text-white/50 mt-1">Прибытие{delayMin > 0 ? ' · пробки' : ''}</div>
+          </div>
+          <div>
+            <div className="text-xl font-bold leading-none tabular-nums">2 ч 30 мин</div>
+            <div className="text-[10px] text-white/50 mt-1">В пути</div>
+          </div>
+          <div className="ml-auto flex items-center gap-1 text-[#F97316] font-bold text-sm">
+            {tripCode}
+            <ChevronRight className="h-4 w-4" />
+          </div>
+        </button>
+      )}
 
       {/* --- поиск (офлайн-справочник улиц) -------------------------------------- */}
       {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} />}
+
+      {/* --- легенда карты -------------------------------------------------------- */}
+      {legendOpen && <MapLegend onClose={() => setLegendOpen(false)} />}
 
       {/* --- шаг 3 мастера: форма публикации (мокап 2) --------------------------- */}
       {wizard.step === 3 && <WizardSheet />}
@@ -501,12 +610,79 @@ function MapBtn({
     <button
       onClick={onClick}
       aria-label={label}
+      title={label}
       className={`h-10 w-10 rounded-xl border flex items-center justify-center shadow-lg transition-colors ${
         active ? 'bg-[#F97316] border-[#F97316] text-white' : 'bg-[#101E2E]/90 border-white/15 text-white'
       }`}
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * Легенда карты (открывается кнопкой «Слои»): маршрут, точки рейса,
+ * уровни пробок, категории пометок и назначение кнопок управления.
+ */
+function MapLegend({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="absolute right-14 top-28 z-30 w-[254px] max-h-[58%] overflow-y-auto rounded-2xl bg-white border border-black/10 shadow-2xl p-3.5 pointer-events-auto azmz-legend-enter">
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="text-[14px] font-bold text-[#15202B]">Легенда карты</div>
+        <button onClick={onClose} aria-label="Закрыть легенду">
+          <X className="h-4 w-4 text-[#64748B]" />
+        </button>
+      </div>
+
+      <LegendBlock title="Маршрут рейса">
+        <LegendLine swatch={<span className="h-[3px] w-6 rounded-full bg-[#F97316] inline-block" />} text="Маршрут Z-1067 (по дорогам)" />
+        <LegendLine swatch={<span className="h-3.5 w-3.5 rounded-md bg-[#F97316] border-2 border-white inline-block" />} text="Ваш грузовик" />
+        <LegendLine swatch={<span className="h-3 w-3 rounded-full bg-[#3B82F6] border-2 border-white inline-block" />} text="Погрузка" />
+        <LegendLine swatch={<span className="h-3 w-3 rounded-full bg-[#EF4444] border-2 border-white inline-block" />} text="Выгрузка" />
+        <LegendLine swatch={<span className="w-6 border-t-[3px] border-dashed border-[#FACC15] inline-block" />} text="Выбранный участок (пометка)" />
+      </LegendBlock>
+
+      <LegendBlock title="Пробки · обновление раз в минуту">
+        {TRAFFIC_LEVELS.map((l) => (
+          <LegendLine key={l.title} swatch={<span className="h-3 w-3 rounded-full inline-block" style={{ background: l.hex }} />} text={l.title} hint={l.speedHint} />
+        ))}
+      </LegendBlock>
+
+      <LegendBlock title="Пометки водителей">
+        {Object.entries(MARK_CATEGORIES).map(([code, meta]) => (
+          <LegendLine key={code} swatch={<span className="h-3 w-3 rounded-full inline-block" style={{ background: meta.hex }} />} text={meta.title} />
+        ))}
+      </LegendBlock>
+
+      <LegendBlock title="Кнопки карты">
+        <LegendLine swatch={<Crosshair className="h-3.5 w-3.5 text-[#F97316]" />} text="Вернуться к грузовику" hint="карта снова следует за машиной" />
+        <LegendLine swatch={<Pin className="h-3.5 w-3.5 text-[#F97316]" />} text="Новая пометка" hint="отметить участок дороги" />
+        <LegendLine swatch={<Layers className="h-3.5 w-3.5 text-[#F97316]" />} text="Эта легенда" />
+      </LegendBlock>
+
+      <div className="text-[10px] text-[#94A3B8] leading-snug pt-1">
+        Чтобы осмотреть карту свободно — перетяните её; прицел вернёт камеру к грузовику.
+      </div>
+    </div>
+  )
+}
+
+function LegendBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-3 last:mb-1">
+      <div className="text-[10px] font-bold uppercase tracking-wide text-[#94A3B8] mb-1.5">{title}</div>
+      <div className="space-y-1.5">{children}</div>
+    </div>
+  )
+}
+
+function LegendLine({ swatch, text, hint }: { swatch: React.ReactNode; text: string; hint?: string }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="flex items-center justify-center w-5 shrink-0">{swatch}</span>
+      <span className="flex-1 text-[12.5px] text-[#15202B] font-medium leading-tight">{text}</span>
+      {hint && <span className="text-[10px] text-[#94A3B8] text-right leading-tight max-w-[84px]">{hint}</span>}
+    </div>
   )
 }
 

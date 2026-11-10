@@ -92,3 +92,28 @@ export const TTL_OPTIONS: { hours: 6 | 12 | 720; title: string }[] = [
   { hours: 12, title: '12 часов' },
   { hours: 720, title: '30 дней' },
 ]
+
+/** Уровни пробок (канал 3). 0 — свободно … 3 — затор. */
+export const TRAFFIC_LEVELS: { title: string; hex: string; speedHint: string }[] = [
+  { title: 'Свободно', hex: '#22C55E', speedHint: '60+ км/ч' },
+  { title: 'Замедление', hex: '#FACC15', speedHint: '35–55 км/ч' },
+  { title: 'Пробка', hex: '#F97316', speedHint: '15–30 км/ч' },
+  { title: 'Затор', hex: '#EF4444', speedHint: 'до 12 км/ч' },
+]
+
+/** Цвет балла пробок 1–10 (чип на карте). */
+export function trafficScoreColor(score: number): string {
+  if (score <= 3) return '#22C55E'
+  if (score <= 5) return '#FACC15'
+  if (score <= 7) return '#F97316'
+  return '#EF4444'
+}
+
+/** Текстовая оценка балла. */
+export function trafficScoreTitle(score: number): string {
+  if (score <= 2) return 'дороги свободны'
+  if (score <= 4) return 'местами замедления'
+  if (score <= 6) return 'замедления на подъездах'
+  if (score <= 8) return 'пробки на основных участках'
+  return 'город стоит'
+}

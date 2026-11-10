@@ -16,13 +16,17 @@ import type {
   MarkPublishOpPayload,
   MarksSnapshot,
   SystemNoteSnapshot,
+  TrafficSnapshot,
   TripEventSnapshot,
   TripPointSnapshot,
   TripSnapshot,
 } from '@/lib/protocol'
-import { START_F } from '@/lib/demo/route-data'
+import { START_F, routeLengthM } from '@/lib/demo/route-data'
 
-export type View = 'map' | 'trip' | 'marks' | 'chat' | 'settings'
+/** Реальная длина дорожной ломаной, м (63 км А-146) — для пересчёта f. */
+const ROUTE_TOTAL_M = routeLengthM()
+
+export type View = 'map' | 'trip' | 'marks' | 'chat' | 'settings' | 'traffic'
 export type ConnectionState = 'online' | 'syncing' | 'offline'
 
 export interface OutboxOp {
@@ -70,6 +74,9 @@ interface AzmzState {
   marks: MarkDto[]
   pendingMarks: PendingMark[]
   outbox: OutboxOp[]
+  /** Канал 3: последний снимок пробок (работает офлайн — «стухнет» сам). */
+  traffic: TrafficSnapshot | null
+  trafficSince: number
 
   simRunning: boolean
   simProgressF: number
@@ -92,6 +99,7 @@ interface AzmzState {
 
   applyJournal: (entries: JournalEntry[], cursor: number) => void
   applyMarksSnapshot: (snapshot: MarksSnapshot) => void
+  applyTrafficSnapshot: (snapshot: TrafficSnapshot) => void
 
   enqueueTripEvent: (event: TripEventSnapshot) => void
   enqueueChatMessage: (message: ChatMessageSnapshot) => void
@@ -146,6 +154,8 @@ export const useAzmz = create<AzmzState>()(
       marks: [],
       pendingMarks: [],
       outbox: [],
+      traffic: null,
+      trafficSince: 0,
 
       simRunning: false,
       simProgressF: START_F,
@@ -226,6 +236,22 @@ export const useAzmz = create<AzmzState>()(
           return {
             marks: [...byId.values()].filter((m) => m.expiresAt > now),
             marksSince: snapshot.snapshotAt,
+          }
+        })
+      },
+
+      applyTrafficSnapshot: (snapshot) => {
+        set((s) => {
+          // пустой ответ (since не изменился) — оставляем прошлый снимок
+          if (snapshot.segments.length === 0 && s.traffic) {
+            return { trafficSince: snapshot.snapshotAt }
+          }
+          // мержим по id: боковые улицы/участки приходят только если в bbox
+          const byId = new Map(s.traffic?.segments.map((x) => [x.id, x]) ?? [])
+          for (const seg of snapshot.segments) byId.set(seg.id, seg)
+          return {
+            traffic: { ...snapshot, segments: [...byId.values()] },
+            trafficSince: snapshot.snapshotAt,
           }
         })
       },
@@ -355,7 +381,7 @@ export const useAzmz = create<AzmzState>()(
         const s = get()
         if (!s.simRunning || !s.trip) return
         // 20× ускорение демо: скорость из геометрии, коммерческие км — от f
-        const totalM = 41_200 // реальная длина ломаной, метры (routeLengthM)
+        const totalM = ROUTE_TOTAL_M
         const speedMs = (s.simSpeedKmh / 3.6) * 20
         const df = (speedMs * dtSec) / totalM
         const nextF = Math.min(1, s.simProgressF + df)
@@ -391,6 +417,8 @@ export const useAzmz = create<AzmzState>()(
         marks: s.marks,
         pendingMarks: s.pendingMarks,
         outbox: s.outbox,
+        traffic: s.traffic,
+        trafficSince: s.trafficSince,
         simRunning: s.simRunning,
         simProgressF: s.simProgressF,
         simSpeedKmh: s.simSpeedKmh,

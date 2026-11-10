@@ -1,10 +1,11 @@
 'use client'
 
 /**
- * Экран «Рейс» — дашборд Z-1067 (мокап 5): прогресс «Погрузка → Сейчас →
- * Разгрузка», большая карточка этапа (stageLabel из TripEventRules), 2×2
- * плитки, чёрная кнопка «Отметить событие» (работает без сети), таймлайн
- * событий с интервалами и ручными отметками.
+ * Шторка «Рейс» — дашборд Z-1067 (мокап 5): карта остаётся фоном сверху,
+ * прогресс «Погрузка → Сейчас → Разгрузка», большая карточка этапа
+ * (stageLabel из TripEventRules), 2×2 плитки, чёрная кнопка «Отметить событие»
+ * (работает без сети), таймлайн событий с интервалами.
+ * ETA учитывает задержку из-за пробок (канал 3).
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -21,8 +22,8 @@ import {
   Warehouse,
 } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
-import { stageLabel } from '@/lib/rules'
-import { fmtClock, fmtDuration, fmtKm } from '@/lib/format'
+import { stageLabel, trafficScoreColor, trafficScoreTitle } from '@/lib/rules'
+import { fmtClock, fmtDuration, fmtKm, timeAgo } from '@/lib/format'
 import { EventTimeline } from '@/components/azmz/event-timeline'
 
 function iconFor(type: string, cls = 'h-4 w-4'): React.ReactNode {
@@ -53,6 +54,7 @@ export function TripScreen() {
   const events = useAzmz((s) => s.events)
   const points = useAzmz((s) => s.points)
   const outbox = useAzmz((s) => s.outbox)
+  const traffic = useAzmz((s) => s.traffic)
   const setView = useAzmz((s) => s.setView)
   const setEventDialog = useAzmz((s) => s.setEventDialog)
   const simF = useAzmz((s) => s.simProgressF)
@@ -85,7 +87,7 @@ export function TripScreen() {
 
   if (!trip) {
     return (
-      <div className="absolute inset-0 bg-[#0B1724] flex items-center justify-center text-white/60 text-sm">
+      <div className="flex-1 flex items-center justify-center text-[#64748B] text-sm px-6 text-center">
         Рейс загружается из журнала синхронизации…
       </div>
     )
@@ -96,11 +98,13 @@ export function TripScreen() {
   const stageMs = Date.now() - lastEventAt
   const remainingM = (trip.routeDistanceM ?? 200_000) * (1 - simF)
   const passedM = (trip.routeDistanceM ?? 200_000) * simF
+  const delayMin = traffic?.routeDelayMin ?? 0
+  const arrivalMs = (unloading?.plannedArrivalAt ?? trip.plannedFinishAt ?? Date.now()) + delayMin * 60_000
 
   return (
-    <div className="absolute inset-0 bg-[#0B1724] overflow-hidden flex flex-col">
+    <div className="flex-1 min-h-0 flex flex-col">
       {/* шапка */}
-      <div className="bg-[#101E2E] px-4 pt-3 pb-4 shrink-0">
+      <div className="bg-[#101E2E] px-4 pt-2 pb-4 shrink-0 rounded-t-3xl">
         <div className="flex items-center gap-2">
           <button onClick={() => setView('map')} aria-label="Назад" className="text-white/70 hover:text-white">
             <ChevronLeft className="h-6 w-6" />
@@ -141,6 +145,33 @@ export function TripScreen() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {/* плашка пробок на маршруте */}
+        {traffic && (
+          <button
+            onClick={() => setView('traffic')}
+            className="w-full flex items-center gap-3 bg-[#16283D] border border-white/10 rounded-2xl px-4 py-3 text-left"
+          >
+            <div className="flex items-center gap-1.5">
+              {[0, 1, 2, 3].map((i) => (
+                <span
+                  key={i}
+                  className="h-6 w-1.5 rounded-full"
+                  style={{ background: i < Math.ceil((traffic.score / 10) * 4) ? trafficScoreColor(traffic.score) : 'rgba(255,255,255,0.12)' }}
+                />
+              ))}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-white text-[14px] font-semibold">
+                Пробки: {traffic.score} из 10 · {trafficScoreTitle(traffic.score)}
+              </div>
+              <div className="text-white/50 text-[11px]">{traffic.contributors} ТС парка · обновлено {timeAgo(traffic.snapshotAt)}</div>
+            </div>
+            {delayMin > 0 && (
+              <span className="text-[#FACC15] text-[15px] font-bold tabular-nums shrink-0">+{delayMin} мин</span>
+            )}
+          </button>
+        )}
+
         {/* герой-карточка */}
         <div className="bg-gradient-to-br from-[#16283D] to-[#101E2E] border border-white/10 rounded-2xl p-4">
           <div className="flex items-center gap-3">
@@ -161,7 +192,7 @@ export function TripScreen() {
         {/* плитки 2×2 */}
         <div className="grid grid-cols-2 gap-3">
           <Tile title="Осталось" value={fmtKm(remainingM)} />
-          <Tile title="Прибытие" value={fmtClock(unloading?.plannedArrivalAt ?? trip.plannedFinishAt)} />
+          <Tile title="Прибытие" value={fmtClock(arrivalMs)} hint={delayMin > 0 ? `пробки +${delayMin} мин` : undefined} />
           <Tile title="Пройдено" value={fmtKm(passedM)} />
           <Tile title="Отдых по тахографу" value="3 ч 15 мин" hint="за сутки" />
         </div>

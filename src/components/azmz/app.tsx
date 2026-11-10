@@ -1,14 +1,14 @@
 'use client'
 
 /**
- * Корневой шелл приложения водителя АЗМЗ. Мобильный кадр (по мокапам) +
- * настольные подсказки демо. Вкладки нижней панели — как на мокапах:
- * Поиск (карта), Пометки, Офис, Настройки; «Рейс» открывается из панели
- * данных маршрута (нажатие на 123 км / Z-1067).
+ * Корневой шелл приложения водителя АЗМЗ. Карта — ПОСТОЯННЫЙ фон: экраны
+ * «Рейс», «Пометки», «Офис», «Настройки» и «Пробки» открываются шторками
+ * (bottom sheets) поверх карты, как в навигационных приложениях. Мобильный
+ * кадр (по мокапам) + настольные подсказки демо.
  */
 
 import { useEffect, useState } from 'react'
-import { BatteryMedium, MapPin, MessageSquare, Search, Settings } from 'lucide-react'
+import { BatteryMedium, MapPin, MessageSquare, Search, Settings, TrafficCone } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { useSimTicker, useSyncEngine } from '@/lib/sync'
 import { MapScreen } from '@/components/azmz/map-screen'
@@ -16,6 +16,7 @@ import { TripScreen } from '@/components/azmz/trip-screen'
 import { MarksScreen } from '@/components/azmz/marks-screen'
 import { ChatScreen } from '@/components/azmz/chat-screen'
 import { SettingsScreen } from '@/components/azmz/settings-screen'
+import { TrafficScreen } from '@/components/azmz/traffic-screen'
 import { MarkEventDialog } from '@/components/azmz/event-dialog'
 import type { View } from '@/lib/store'
 
@@ -53,7 +54,7 @@ export default function App() {
 
       <div className="w-[430px] max-w-full h-[min(100dvh-32px,900px)] min-h-[560px] bg-[#F5F7FA] rounded-[38px] border border-[#22344A] shadow-[0_30px_80px_rgba(0,0,0,0.55)] overflow-hidden flex flex-col relative">
         {/* статусная строка устройства */}
-        <div className="bg-[#101E2E] text-white/90 h-9 flex items-center justify-between px-6 text-xs font-medium shrink-0">
+        <div className="bg-[#101E2E] text-white/90 h-9 flex items-center justify-between px-6 text-xs font-medium shrink-0 z-40 relative">
           <span className="tabular-nums">{clock}</span>
           <span className="tracking-[0.18em] uppercase text-[10px] text-white/60">АЗМЗ Логистика</span>
           <span className="flex items-center gap-1 tabular-nums">
@@ -67,11 +68,35 @@ export default function App() {
             <div className="absolute inset-0 flex items-center justify-center text-sm text-[#64748B]">Загрузка…</div>
           ) : (
             <>
-              {view === 'map' && <MapScreen />}
-              {view === 'trip' && <TripScreen />}
-              {view === 'marks' && <MarksScreen />}
-              {view === 'chat' && <ChatScreen />}
-              {view === 'settings' && <SettingsScreen />}
+              {/* Карта — постоянный фон, живёт всегда (слои, грузовик, камера) */}
+              <MapScreen />
+
+              {/* Шторки поверх карты */}
+              {view === 'trip' && (
+                <Sheet height="h-[76%]">
+                  <TripScreen />
+                </Sheet>
+              )}
+              {view === 'marks' && (
+                <Sheet height="h-[66%]">
+                  <MarksScreen />
+                </Sheet>
+              )}
+              {view === 'chat' && (
+                <Sheet height="h-[74%]">
+                  <ChatScreen />
+                </Sheet>
+              )}
+              {view === 'settings' && (
+                <Sheet height="h-[82%]">
+                  <SettingsScreen />
+                </Sheet>
+              )}
+              {view === 'traffic' && (
+                <Sheet height="h-[58%]">
+                  <TrafficScreen />
+                </Sheet>
+              )}
             </>
           )}
           {eventDialogOpen && <MarkEventDialog onClose={() => setEventDialog(false)} />}
@@ -85,7 +110,7 @@ export default function App() {
         {/* нижняя панель навигации — как в мокапе */}
         <nav className="bg-[#101E2E] h-16 shrink-0 flex items-stretch" aria-label="Главное меню">
           {items.map((it) => {
-            const active = view === it.tab || (it.tab === 'map' && view === 'trip')
+            const active = view === it.tab || (it.tab === 'map' && (view === 'trip' || view === 'traffic'))
             return (
               <button
                 key={it.key}
@@ -114,6 +139,37 @@ export default function App() {
   )
 }
 
+/** Шторка поверх карты: карта остаётся видимой и живой сверху. */
+function Sheet({ children, height }: { children: React.ReactNode; height: string }) {
+  return (
+    <div className="absolute inset-0 z-30 flex flex-col justify-end pointer-events-none">
+      <div
+        className={`pointer-events-auto ${height} max-h-full bg-[#F5F7FA] rounded-t-3xl shadow-[0_-12px_40px_rgba(0,0,0,0.35)] flex flex-col azmz-sheet-enter overflow-hidden`}
+      >
+        <div className="pt-2 pb-1 flex justify-center shrink-0">
+          <span className="w-12 h-1.5 rounded-full bg-[#C3CBD6]" aria-hidden />
+        </div>
+        {children}
+      </div>
+      <style jsx global>{`
+        @keyframes azmz-sheet-up {
+          from {
+            transform: translateY(18%);
+            opacity: 0.6;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        .azmz-sheet-enter {
+          animation: azmz-sheet-up 0.28s cubic-bezier(0.22, 0.9, 0.36, 1);
+        }
+      `}</style>
+    </div>
+  )
+}
+
 function SidePanel({ className = '' }: { className?: string }) {
   return (
     <div className={`${className} w-72 flex-col gap-4 text-slate-300`}>
@@ -121,17 +177,17 @@ function SidePanel({ className = '' }: { className?: string }) {
         <div className="h-10 w-10 rounded-xl bg-[#F97316] flex items-center justify-center text-white font-black text-lg">✓</div>
         <div>
           <div className="text-white font-bold">АЗМЗ Логистика</div>
-          <div className="text-xs text-slate-400">Сборка приложения из каркаса</div>
+          <div className="text-xs text-slate-400">Карта — фон · пробки онлайн</div>
         </div>
       </div>
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[13px] leading-relaxed">
         <div className="text-white font-semibold mb-2">Сценарий демо</div>
         <ol className="list-decimal ml-4 space-y-1.5 text-slate-300">
-          <li>Карта: баннер «Через 20 м — налево на Промышленную», лимит 60, очередь связи.</li>
-          <li>Нажмите на панель «123 км … Z-1067» внизу — откроется дашборд рейса.</li>
+          <li>Карта — постоянный фон: шторки не закрывают движение.</li>
+          <li>Чип «Пробки N» сверху — слой трафика на маршруте и улицах.</li>
+          <li>Панель «123 км … Z-1067» → дашборд рейса шторкой.</li>
           <li>«Отметить событие» — 8 типов, работает без сети.</li>
-          <li>Включите «Офлайн-режим» в Настройках — отметки встают в очередь.</li>
-          <li>Выключите — индикатор «Отправка: N» очистит очередь.</li>
+          <li>Офлайн-режим в Настройках: очередь + прошлый снимок пробок.</li>
         </ol>
       </div>
     </div>
@@ -142,18 +198,29 @@ function SidePanelDemo({ className = '' }: { className?: string }) {
   return (
     <div className={`${className} w-72 flex-col gap-4 text-slate-300`}>
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[13px] leading-relaxed">
+        <div className="text-white font-semibold mb-2 flex items-center gap-2">
+          <TrafficCone className="h-4 w-4 text-[#F97316]" />
+          Пробки: как устроено
+        </div>
+        <ul className="space-y-1.5 text-slate-300">
+          <li>Канал 3: <span className="text-[#F97316]">GET /traffic?bbox</span> — снимок, как пометки</li>
+          <li>Источник: телеметрия парка (position_ping → V7)</li>
+          <li>Обновление раз в минуту, офлайн — прошлый снимок</li>
+          <li>ETA пересчитывается: «+N мин из-за пробок»</li>
+        </ul>
+      </div>
+      <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[13px] leading-relaxed">
         <div className="text-white font-semibold mb-2">Что под капотом</div>
         <ul className="space-y-1.5 text-slate-300">
-          <li>Outbox + UUID-операции → <span className="text-[#F97316]">POST /sync/push</span> (идемпотентно)</li>
-          <li>Курсор журнала → <span className="text-[#F97316]">GET /sync/pull</span> (канал 1)</li>
+          <li>Outbox + UUID → <span className="text-[#F97316]">POST /sync/push</span> (идемпотентно)</li>
+          <li>Курсор → <span className="text-[#F97316]">GET /sync/pull</span> (канал 1)</li>
           <li>Пометки по bbox → <span className="text-[#F97316]">GET /sync/marks</span> (канал 2)</li>
           <li>Правила 8 событий = TripEventRules.kt</li>
-          <li>Авто-закрытие интервалов = TripEventApplier</li>
           <li>Карта: MapLibre + OSM/CARTO — без Yandex API</li>
         </ul>
       </div>
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[12px] text-slate-400">
-        Демо-сервер: Next.js API + SQLite, зеркалит Spring Boot каркаса (X-Driver-Id → этап MVP: JWT по смене).
+        Демо-сервер: Next.js API + SQLite, зеркалит Spring Boot каркаса. Прод-архитектура пробок — в README каркаса (V7).
       </div>
     </div>
   )

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { ensureSeeded } from '@/lib/server/seed'
 import { DRIVER_ID } from '@/lib/demo/route-data'
-import type { MarksSnapshot } from '@/lib/protocol'
+import type { MarkCategory, MarksSnapshot } from '@/lib/protocol'
 
 /**
  * GET /api/driver/v1/sync/marks — снимок активных пометок по bbox (канал 2).
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     snapshotAt: Date.now(),
     marks: marks.map((m) => ({
       id: m.id,
-      category: m.category,
+      category: m.category as MarkCategory,
       geometry: m.polylineGeoJson,
       comment: m.comment ?? undefined,
       ttlHours: m.ttlHours,

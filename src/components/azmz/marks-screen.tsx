@@ -1,10 +1,10 @@
 'use client'
 
 /**
- * Экран «Пометки» — список пометок водителей (слой 2): TTL автора,
+ * Шторка «Пометки» — список пометок водителей (слой 2): TTL автора,
  * голосование («подтверждаю» / «устарела», только порядок показа),
  * неопубликованные помечены «В очереди». Автор пометок не показывается
- * и не хранится (решение №7 каркаса).
+ * и не хранится (решение №7 каркаса). Карта остаётся фоном сверху.
  */
 
 import { useEffect, useState } from 'react'
@@ -29,8 +29,8 @@ export function MarksScreen() {
   const all = [...pendingMarks, ...marks].sort((a, b) => b.createdAt - a.createdAt)
 
   return (
-    <div className="absolute inset-0 bg-[#F5F7FA] flex flex-col">
-      <div className="bg-[#101E2E] px-4 pt-3 pb-4 shrink-0">
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="bg-[#101E2E] px-4 pt-2 pb-4 shrink-0 rounded-t-3xl">
         <div className="flex items-center gap-2">
           <button onClick={() => setView('map')} aria-label="Назад" className="text-white/70 hover:text-white">
             <ChevronLeft className="h-6 w-6" />

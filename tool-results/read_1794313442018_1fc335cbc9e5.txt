@@ -1,0 +1,656 @@
+     1→'use client'
+     2→
+     3→/**
+     4→ * Экран «Карта» (по мокапам 1, 2 и 4): карта — всегда первый экран,
+     5→ * баннер манёвра, знак лимита скорости, очередь связи, кнопка «Пометка»
+     6→ * (3-шаговый мастер), панель данных рейса внизу → открывает дашборд рейса.
+     7→ * Базовая карта: OSM/CARTO raster — без Yandex API (ограничение лицензии).
+     8→ */
+     9→
+    10→import 'maplibre-gl/dist/maplibre-gl.css'
+    11→import { useEffect, useMemo, useRef, useState } from 'react'
+    12→import type { GeoJSONSource, Map as MlMap, Marker as MlMarker } from 'maplibre-gl'
+    13→import {
+    14→  ArrowUp,
+    15→  ChevronRight,
+    16→  Construction,
+    17→  CornerUpLeft,
+    18→  CornerUpRight,
+    19→  Crosshair,
+    20→  Flag,
+    21→  Search,
+    22→  Shield,
+    23→  Ban,
+    24→  TriangleAlert,
+    25→  Volume2,
+    26→  VolumeX,
+    27→  X,
+    28→  ZoomIn,
+    29→  ZoomOut,
+    30→  Pin,
+    31→} from 'lucide-react'
+    32→import { useAzmz } from '@/lib/store'
+    33→import { ConnectionChip, OfflineHint } from '@/components/azmz/connection-chip'
+    34→import { MARK_CATEGORIES, TTL_OPTIONS } from '@/lib/rules'
+    35→import {
+    36→  CONGESTION,
+    37→  DEMO_STREETS,
+    38→  MANEUVERS,
+    39→  pointAtFraction,
+    40→  routeLengthM,
+    41→  sliceFraction,
+    42→} from '@/lib/demo/route-data'
+    43→import { fmtClock, fmtKm } from '@/lib/format'
+    44→
+    45→const DARK_STYLE_URL = 'https://tiles.openfreemap.org/styles/dark'
+    46→
+    47→const FALLBACK_STYLE = {
+    48→  version: 8,
+    49→  sources: {},
+    50→  layers: [{ id: 'bg', type: 'background' as const, paint: { 'background-color': '#15202E' } }],
+    51→}
+    52→
+    53→type LatLng = { lng: number; lat: number }
+    54→
+    55→export function MapScreen() {
+    56→  const trip = useAzmz((s) => s.trip)
+    57→  const points = useAzmz((s) => s.points)
+    58→  const marks = useAzmz((s) => s.marks)
+    59→  const pendingMarks = useAzmz((s) => s.pendingMarks)
+    60→  const simF = useAzmz((s) => s.simProgressF)
+    61→  const simRunning = useAzmz((s) => s.simRunning)
+    62→  const simSpeed = useAzmz((s) => s.simSpeedKmh)
+    63→  const wizard = useAzmz((s) => s.wizard)
+    64→  const setView = useAzmz((s) => s.setView)
+    65→  const updateWizard = useAzmz((s) => s.updateWizard)
+    66→  const setEventDialog = useAzmz((s) => s.setEventDialog)
+    67→  const showToast = useAzmz((s) => s.showToast)
+    68→
+    69→  const containerRef = useRef<HTMLDivElement>(null)
+    70→  const mapRef = useRef<MlMap | null>(null)
+    71→  const mlRef = useRef<typeof import('maplibre-gl') | null>(null)
+    72→  const truckRef = useRef<MlMarker | null>(null)
+    73→  const truckInnerRef = useRef<HTMLDivElement | null>(null)
+    74→  const stopMarkersRef = useRef<MlMarker[]>([])
+    75→  const wizMarkersRef = useRef<MlMarker[]>([])
+    76→  const followRef = useRef(true)
+    77→  const simFRef = useRef(simF)
+    78→  simFRef.current = simF
+    79→  const [follow, setFollow] = useState(true)
+    80→  const [sound, setSound] = useState(true)
+    81→  const [searchOpen, setSearchOpen] = useState(false)
+    82→  const [ready, setReady] = useState(false)
+    83→
+    84→  // --- инициализация карты (клиент-only) ------------------------------------
+    85→  useEffect(() => {
+    86→    let cancelled = false
+    87→    void (async () => {
+    88→      const ml = await import('maplibre-gl')
+    89→      // Turbopack ломает относительный URL воркера — берём из public/ (same-origin)
+    90→      try {
+    91→        ;(ml as { config?: { WORKER_URL?: string } }).config.WORKER_URL = '/maplibre-gl-worker.mjs'
+    92→      } catch {}
+    93→      if (cancelled || !containerRef.current || mapRef.current) return
+    94→      mlRef.current = ml
+    95→      const map = new ml.Map({
+    96→        container: containerRef.current,
+    97→        style: DARK_STYLE_URL,
+    98→        center: [37.768, 44.726],
+    99→        zoom: 13.2,
+   100→        pitch: 0,
+   101→        attributionControl: false,
+   102→        dragRotate: true,
+   103→        fadeDuration: 120,
+   104→      })
+   105→      map.on('error', (e: { error?: { message?: string } }) => {
+   106→        // базовая карта могла не загрузиться (сеть) — маршрут и пометки всё равно отрисуются на фоне
+   107→        const msg = e?.error?.message ?? ''
+   108→        if (msg.includes('style') && map.isStyleLoaded() === false) {
+   109→          map.setStyle(FALLBACK_STYLE)
+   110→        }
+   111→      })
+   112→      mapRef.current = map
+   113→      mapGlobalRef.current = map
+   114→      ;(window as unknown as { __azmzMap?: MlMap }).__azmzMap = map
+   115→      map.on('load', () => setReady(true))
+   116→      map.on('click', (e) => {
+   117→        const w = useAzmz.getState().wizard
+   118→        if (w.step === 1 || w.step === 2) useAzmz.getState().wizardTapPoint(e.lngLat.lng, e.lngLat.lat)
+   119→      })
+   120→    })()
+   121→    return () => {
+   122→      cancelled = true
+   123→      mapRef.current?.remove()
+   124→      mapRef.current = null
+   125→      mapGlobalRef.current = null
+   126→      truckRef.current = null
+   127→    }
+   128→  }, [])
+   129→
+   130→  // --- слои маршрута и пометок ------------------------------------------------
+   131→  useEffect(() => {
+   132→    const map = mapRef.current
+   133→    const ml = mlRef.current
+   134→    if (!ready || !map || !ml || !trip) return
+   135→    if (!map.getSource('route')) {
+   136→      map.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') } })
+   137→      map.addSource('congestion', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: sliceFraction(CONGESTION[0], CONGESTION[1]) } } })
+   138→      map.addSource('marks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+   139→      map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#5A3608', 'line-width': 10 } })
+   140→      map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#F97316', 'line-width': 6 } })
+   141→      map.addLayer({ id: 'congestion-line', type: 'line', source: 'congestion', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#EF4444', 'line-width': 6 } })
+   142→      map.addLayer({
+   143→        id: 'mark-line',
+   144→        type: 'line',
+   145→        source: 'marks',
+   146→        layout: { 'line-cap': 'round' },
+   147→        paint: { 'line-color': ['get', 'color'], 'line-width': 11, 'line-opacity': 0.72 },
+   148→      })
+   149→      map.addLayer({
+   150→        id: 'mark-dot',
+   151→        type: 'circle',
+   152→        source: 'marks',
+   153→        paint: { 'circle-radius': 6.5, 'circle-color': ['get', 'color'], 'circle-stroke-width': 2.5, 'circle-stroke-color': '#FFFFFF' },
+   154→      })
+   155→    }
+   156→
+   157→    // камера стартует на грузовике (навигационный вид, как в мокапе 4)
+   158→    const p = pointAtFraction(simFRef.current)
+   159→    map.jumpTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4 })
+   160→  }, [ready, trip])
+   161→
+   162→  // грузовик и движение камеры
+   163→  useEffect(() => {
+   164→    const map = mapRef.current
+   165→    const ml = mlRef.current
+   166→    if (!ready || !map || !ml || truckRef.current) return
+   167→    const el = document.createElement('div')
+   168→    el.className = 'azmz-truck'
+   169→    el.innerHTML = `
+   170→      <div class="azmz-truck-inner">
+   171→        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18h-5"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>
+   172→      </div>`
+   173→    truckInnerRef.current = el.querySelector('.azmz-truck-inner')
+   174→    const p = pointAtFraction(simFRef.current)
+   175→    truckRef.current = new ml.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map)
+   176→  }, [ready])
+   177→
+   178→  // движение камеры и грузовика
+   179→  useEffect(() => {
+   180→    const map = mapRef.current
+   181→    if (!ready || !map || !truckRef.current) return
+   182→    const p = pointAtFraction(simF)
+   183→    truckRef.current.setLngLat([p.lng, p.lat])
+   184→    if (truckInnerRef.current) truckInnerRef.current.style.transform = `rotate(${p.bearing}deg)`
+   185→    if (followRef.current) {
+   186→      map.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 950, easing: (t) => t })
+   187→    }
+   188→  }, [simF, ready])
+   189→
+   190→  // пометки → слой
+   191→  useEffect(() => {
+   192→    const map = mapRef.current
+   193→    if (!ready || !map || !map.getSource('marks')) return
+   194→    const all = [...pendingMarks, ...marks]
+   195→    const feats = all.map((m) => ({
+   196→      type: 'Feature' as const,
+   197→      properties: { color: MARK_CATEGORIES[m.category]?.hex ?? '#64748B', category: m.category },
+   198→      geometry: JSON.parse(m.geometry),
+   199→    }))
+   200→    ;(map.getSource('marks') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: feats })
+   201→  }, [marks, pendingMarks, ready])
+   202→
+   203→  // точки рейса → DOM-маркеры
+   204→  useEffect(() => {
+   205→    const map = mapRef.current
+   206→    const ml = mlRef.current
+   207→    if (!ready || !map || !ml) return
+   208→    stopMarkersRef.current.forEach((m) => m.remove())
+   209→    stopMarkersRef.current = []
+   210→    for (const pt of points) {
+   211→      const el = document.createElement('div')
+   212→      const color = pt.kind === 'loading' ? '#3B82F6' : pt.kind === 'unloading' ? '#EF4444' : '#64748B'
+   213→      const label = pt.kind === 'loading' ? 'Погрузка' : pt.kind === 'unloading' ? 'Выгрузка' : 'Точка'
+   214→      el.className = 'azmz-stop'
+   215→      el.innerHTML = `
+   216→        <div class="azmz-stop-label" style="background:${color}">${label}</div>
+   217→        <div class="azmz-stop-pin" style="background:${color}"></div>`
+   218→      stopMarkersRef.current.push(new ml.Marker({ element: el }).setLngLat([pt.lon, pt.lat]).addTo(map))
+   219→    }
+   220→  }, [points, ready])
+   221→
+   222→  // мастер пометок: маркеры A/B + предпросмотр участка
+   223→  useEffect(() => {
+   224→    const map = mapRef.current
+   225→    const ml = mlRef.current
+   226→    if (!ready || !map || !ml) return
+   227→    wizMarkersRef.current.forEach((m) => m.remove())
+   228→    wizMarkersRef.current = []
+   229→    if (map.getLayer('wiz-line')) map.removeLayer('wiz-line')
+   230→    if (map.getSource('wiz')) map.removeSource('wiz')
+   231→
+   232→    if (wizard.step === 0 || !wizard.start) return
+   233→    const mkAt = (p: LatLng, letter: string) => {
+   234→      const el = document.createElement('div')
+   235→      el.className = 'azmz-wiz-pin'
+   236→      el.textContent = letter
+   237→      return new ml.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map)
+   238→    }
+   239→    wizMarkersRef.current.push(mkAt(wizard.start, 'A'))
+   240→    if (wizard.end) {
+   241→      wizMarkersRef.current.push(mkAt(wizard.end, 'B'))
+   242→      map.addSource('wiz', {
+   243→        type: 'geojson',
+   244→        data: {
+   245→          type: 'Feature',
+   246→          properties: {},
+   247→          geometry: {
+   248→            type: 'LineString',
+   249→            coordinates: [
+   250→              [wizard.start.lng, wizard.start.lat],
+   251→              [wizard.end.lng, wizard.end.lat],
+   252→            ],
+   253→          },
+   254→        },
+   255→      })
+   256→      map.addLayer({
+   257→        id: 'wiz-line',
+   258→        type: 'line',
+   259→        source: 'wiz',
+   260→        paint: { 'line-color': '#FACC15', 'line-width': 7, 'line-opacity': 0.85, 'line-dasharray': [1.5, 1.2] },
+   261→      })
+   262→    }
+   263→  }, [wizard, ready])
+   264→
+   265→  const totalM = useMemo(() => routeLengthM(), [])
+   266→
+   267→  // следующий манёвр
+   268→  const nextManeuver = useMemo(() => {
+   269→    const m = MANEUVERS.find((mm) => mm.f > simF + 1e-9)
+   270→    return m ?? null
+   271→  }, [simF])
+   272→  const distToManeuver = nextManeuver ? (nextManeuver.f - simF) * totalM : 0
+   273→  const arrived = simF >= MANEUVERS[MANEUVERS.length - 1].f
+   274→
+   275→  const remainingM = trip ? (trip.routeDistanceM ?? 200_000) * (1 - simF) : 123_000
+   276→  const etaClock = trip ? fmtClock(trip.plannedFinishAt) : '—'
+   277→  const tripCode = trip?.tripCode ?? 'Z-1067'
+   278→
+   279→  const maneuverIcon = (type: string, cls: string) => {
+   280→    if (type === 'left') return <CornerUpLeft className={cls} />
+   281→    if (type === 'right') return <CornerUpRight className={cls} />
+   282→    if (type === 'arrive') return <Flag className={cls} />
+   283→    return <ArrowUp className={cls} />
+   284→  }
+   285→
+   286→  return (
+   287→    <div className="absolute inset-0 overflow-hidden bg-[#0E1826]">
+   288→      {/* maplibre вешает .maplibregl-map { position: relative } — поэтому размеры через w/h-full, не inset */}
+   289→      <div ref={containerRef} className="w-full h-full" />
+   290→
+   291→      <style jsx global>{`
+   292→        .azmz-truck-inner {
+   293→          width: 38px;
+   294→          height: 38px;
+   295→          background: #f97316;
+   296→          border: 2.5px solid #ffffff;
+   297→          border-radius: 12px;
+   298→          display: flex;
+   299→          align-items: center;
+   300→          justify-content: center;
+   301→          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+   302→        }
+   303→        .azmz-stop-label {
+   304→          color: #fff;
+   305→          font-size: 11px;
+   306→          font-weight: 700;
+   307→          padding: 2px 8px;
+   308→          border-radius: 8px;
+   309→          white-space: nowrap;
+   310→          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+   311→        }
+   312→        .azmz-stop-pin {
+   313→          width: 14px;
+   314→          height: 14px;
+   315→          border: 2.5px solid #fff;
+   316→          border-radius: 999px;
+   317→          margin: 4px auto 0;
+   318→        }
+   319→        .azmz-wiz-pin {
+   320→          width: 26px;
+   321→          height: 26px;
+   322→          background: #facc15;
+   323→          color: #15202b;
+   324→          font-weight: 800;
+   325→          font-size: 13px;
+   326→          display: flex;
+   327→          align-items: center;
+   328→          justify-content: center;
+   329→          border: 2.5px solid #fff;
+   330→          border-radius: 999px;
+   331→          box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+   332→        }
+   333→      `}</style>
+   334→
+   335→      {/* --- верхние плашки ----------------------------------------------------- */}
+   336→      {!wizard.step || wizard.step === 3 ? (
+   337→        <div className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 pointer-events-none">
+   338→          <div className="flex items-center gap-2 pointer-events-auto">
+   339→            <ConnectionChip />
+   340→            <button
+   341→              onClick={() => setSearchOpen(true)}
+   342→              className="ml-auto h-8 w-8 rounded-full bg-[#101E2E]/90 border border-white/15 text-white flex items-center justify-center"
+   343→              aria-label="Поиск"
+   344→            >
+   345→              <Search className="h-4 w-4" />
+   346→            </button>
+   347→          </div>
+   348→          <OfflineHint />
+   349→
+   350→          {/* баннер манёвра (мокап 1) */}
+   351→          {nextManeuver && !arrived && (
+   352→            <button onClick={() => setFollow((v) => !v)} className="pointer-events-auto text-left bg-[#2563EB] text-white rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl">
+   353→              {maneuverIcon(nextManeuver.type, 'h-7 w-7 shrink-0')}
+   354→              <div className="min-w-0">
+   355→                <div className="text-lg font-bold leading-tight tabular-nums">
+   356→                  {distToManeuver >= 950 ? `${(distToManeuver / 1000).toFixed(1).replace('.', ',')} км` : `${Math.max(0, Math.round(distToManeuver / 10) * 10)} м`}
+   357→                </div>
+   358→                <div className="text-[13px] leading-snug truncate">
+   359→                  {nextManeuver.type === 'left' && <>поверните налево на {nextManeuver.street}</>}
+   360→                  {nextManeuver.type === 'right' && <>поверните направо на {nextManeuver.street}</>}
+   361→                  {nextManeuver.type === 'straight' && <>продолжайте прямо, {nextManeuver.street}</>}
+   362→                  {nextManeuver.type === 'arrive' && <>финиш: {nextManeuver.street}</>}
+   363→                </div>
+   364→              </div>
+   365→            </button>
+   366→          )}
+   367→
+   368→          {/* смарт-карточка прибытия (мокап 4) */}
+   369→          {arrived && (
+   370→            <div className="pointer-events-auto bg-white text-[#15202B] rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl border border-black/5">
+   371→              <div className="flex-1">
+   372→                <div className="text-[13px] font-semibold">Вы прибыли в точку выгрузки</div>
+   373→                <div className="text-[11px] text-[#64748B]">Событие можно отметить вручную</div>
+   374→              </div>
+   375→              <button onClick={() => setEventDialog(true, 'ARRIVAL_UNLOADING')} className="bg-[#F97316] text-white text-[13px] font-bold rounded-xl px-4 h-9">
+   376→                Отметить
+   377→              </button>
+   378→            </div>
+   379→          )}
+   380→        </div>
+   381→      ) : (
+   382→        /* подсказка мастера (мокап 2, «2 из 3») */
+   383→        <div className="absolute top-3 left-3 right-3 z-30 flex flex-col gap-2">
+   384→          <div className="bg-[#101E2E]/95 text-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-xl">
+   385→            <Pin className="h-5 w-5 text-[#FACC15] shrink-0" />
+   386→            <div className="flex-1">
+   387→              <div className="text-[13px] font-semibold">
+   388→                {wizard.step === 1 ? 'Укажите начало участка' : 'Укажите конец участка'}
+   389→              </div>
+   390→              <div className="text-[11px] text-white/60">{wizard.step} из 3 · коснитесь карты</div>
+   391→            </div>
+   392→            <button
+   393→              onClick={() => useAzmz.getState().cancelWizard()}
+   394→              className="text-white/70 hover:text-white"
+   395→              aria-label="Отмена"
+   396→            >
+   397→              <X className="h-5 w-5" />
+   398→            </button>
+   399→          </div>
+   400→        </div>
+   401→      )}
+   402→
+   403→      {/* --- правые кнопки ------------------------------------------------------ */}
+   404→      {wizard.step === 0 && (
+   405→        <div className="absolute right-3 top-28 z-20 flex flex-col gap-2">
+   406→          <MapBtn label="Приблизить" onClick={() => mapRef.current?.zoomIn()}>
+   407→            <ZoomIn className="h-5 w-5" />
+   408→          </MapBtn>
+   409→          <MapBtn label="Отдалить" onClick={() => mapRef.current?.zoomOut()}>
+   410→            <ZoomOut className="h-5 w-5" />
+   411→          </MapBtn>
+   412→          <MapBtn
+   413→            label="Центрировать"
+   414→            active={follow}
+   415→            onClick={() => {
+   416→              setFollow((v) => {
+   417→                followRef.current = !v
+   418→                return !v
+   419→              })
+   420→            }}
+   421→          >
+   422→            <Crosshair className="h-5 w-5" />
+   423→          </MapBtn>
+   424→          <MapBtn
+   425→            label="Звук"
+   426→            active={sound}
+   427→            onClick={() => {
+   428→              setSound((v) => {
+   429→                showToast(!v ? 'Голосовые подсказки включены' : 'Голосовые подсказки выключены')
+   430→                return !v
+   431→              })
+   432→            }}
+   433→          >
+   434→            {sound ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+   435→          </MapBtn>
+   436→          <button
+   437→            onClick={() => updateWizard({ step: 1, start: undefined, end: undefined })}
+   438→            className="h-11 bg-[#F97316] text-white rounded-xl shadow-lg flex items-center gap-1.5 px-3 text-[13px] font-bold"
+   439→          >
+   440→            <Pin className="h-4.5 w-4.5" />
+   441→            Пометка
+   442→          </button>
+   443→        </div>
+   444→      )}
+   445→
+   446→      {/* --- знак лимита и скорость --------------------------------------------- */}
+   447→      <div className="absolute left-3 bottom-[104px] z-20 flex flex-col items-center gap-1.5">
+   448→        <div className="h-12 w-12 rounded-full bg-white border-[5px] border-[#DC2626] flex items-center justify-center shadow-lg">
+   449→          <span className="text-[#15202B] font-black text-lg leading-none">60</span>
+   450→        </div>
+   451→        <div className="bg-[#101E2E]/90 text-white text-[12px] font-bold rounded-lg px-2 py-0.5 tabular-nums shadow">
+   452→          {Math.round(simRunning ? simSpeed : 0)}
+   453→        </div>
+   454→      </div>
+   455→
+   456→      {/* --- панель данных рейса (мокап 1) -------------------------------------- */}
+   457→      <button
+   458→        onClick={() => setView('trip')}
+   459→        className="absolute bottom-0 left-0 right-0 z-20 bg-[#101E2E] text-white px-4 py-3 flex items-end gap-4 text-left"
+   460→        aria-label="Открыть дашборд рейса"
+   461→      >
+   462→        <div>
+   463→          <div className="text-xl font-bold leading-none tabular-nums">{fmtKm(remainingM)}</div>
+   464→          <div className="text-[10px] text-white/50 mt-1">Осталось</div>
+   465→        </div>
+   466→        <div>
+   467→          <div className="text-xl font-bold leading-none tabular-nums">{etaClock}</div>
+   468→          <div className="text-[10px] text-white/50 mt-1">Прибытие</div>
+   469→        </div>
+   470→        <div>
+   471→          <div className="text-xl font-bold leading-none tabular-nums">2 ч 30 мин</div>
+   472→          <div className="text-[10px] text-white/50 mt-1">В пути</div>
+   473→        </div>
+   474→        <div className="ml-auto flex items-center gap-1 text-[#F97316] font-bold text-sm">
+   475→          {tripCode}
+   476→          <ChevronRight className="h-4 w-4" />
+   477→        </div>
+   478→      </button>
+   479→
+   480→      {/* --- поиск (офлайн-справочник улиц) -------------------------------------- */}
+   481→      {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} />}
+   482→
+   483→      {/* --- шаг 3 мастера: форма публикации (мокап 2) --------------------------- */}
+   484→      {wizard.step === 3 && <WizardSheet />}
+   485→    </div>
+   486→  )
+   487→}
+   488→
+   489→function MapBtn({
+   490→  children,
+   491→  onClick,
+   492→  label,
+   493→  active,
+   494→}: {
+   495→  children: React.ReactNode
+   496→  onClick: () => void
+   497→  label: string
+   498→  active?: boolean
+   499→}) {
+   500→  return (
+   501→    <button
+   502→      onClick={onClick}
+   503→      aria-label={label}
+   504→      className={`h-10 w-10 rounded-xl border flex items-center justify-center shadow-lg transition-colors ${
+   505→        active ? 'bg-[#F97316] border-[#F97316] text-white' : 'bg-[#101E2E]/90 border-white/15 text-white'
+   506→      }`}
+   507→    >
+   508→      {children}
+   509→    </button>
+   510→  )
+   511→}
+   512→
+   513→function SearchOverlay({ onClose }: { onClose: () => void }) {
+   514→  const [q, setQ] = useState('')
+   515→  const list = DEMO_STREETS.filter((s) => s.name.toLowerCase().includes(q.trim().toLowerCase()))
+   516→  return (
+   517→    <div className="absolute inset-0 z-50 bg-[#0B1622]/96 backdrop-blur-sm flex flex-col">
+   518→      <div className="p-4 pb-2 flex items-center gap-2">
+   519→        <div className="flex-1 flex items-center gap-2 bg-white rounded-xl px-3 h-11">
+   520→          <Search className="h-4.5 w-4.5 text-[#64748B]" />
+   521→          <input
+   522→            autoFocus
+   523→            value={q}
+   524→            onChange={(e) => setQ(e.target.value)}
+   525→            placeholder="Улица, объект…"
+   526→            className="flex-1 outline-none text-[15px] bg-transparent"
+   527→          />
+   528→          <button onClick={onClose} aria-label="Закрыть поиск">
+   529→            <X className="h-5 w-5 text-[#64748B]" />
+   530→          </button>
+   531→        </div>
+   532→      </div>
+   533→      <div className="px-4 text-[11px] text-white/40 mb-1">Офлайн-справочник · PMTiles z14–z17</div>
+   534→      <div className="flex-1 overflow-y-auto px-4 pb-6">
+   535→        {list.map((s) => (
+   536→          <button
+   537→            key={s.name}
+   538→            onClick={() => {
+   539→              const map = mapGlobalRef.current
+   540→              map?.flyTo({ center: [s.lon, s.lat], zoom: 15.5, duration: 1200 })
+   541→              onClose()
+   542→            }}
+   543→            className="w-full text-left flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-3 mb-2"
+   544→          >
+   545→            <Pin className="h-4 w-4 text-[#F97316]" />
+   546→            <span className="text-white text-[14px]">{s.name}</span>
+   547→          </button>
+   548→        ))}
+   549→        {list.length === 0 && <div className="text-white/50 text-sm py-6 text-center">Ничего не найдено</div>}
+   550→      </div>
+   551→    </div>
+   552→  )
+   553→}
+   554→
+   555→// ссылка на карту для оверлеев (избегаем прокидки props через всё дерево)
+   556→export const mapGlobalRef: { current: MlMap | null } = { current: null }
+   557→
+   558→function WizardSheet() {
+   559→  const wizard = useAzmz((s) => s.wizard)
+   560→  const updateWizard = useAzmz((s) => s.updateWizard)
+   561→  const publishMarkFromWizard = useAzmz((s) => s.publishMarkFromWizard)
+   562→  const cancelWizard = useAzmz((s) => s.cancelWizard)
+   563→  const offlineMode = useAzmz((s) => s.offlineMode)
+   564→
+   565→  const catIcon = (c: string, cls: string) => {
+   566→    if (c === 'POTHOLE') return <TriangleAlert className={cls} />
+   567→    if (c === 'ROADWORKS') return <Construction className={cls} />
+   568→    if (c === 'POLICE') return <Shield className={cls} />
+   569→    if (c === 'ACCIDENT') return <TriangleAlert className={cls} />
+   570→    return <Ban className={cls} />
+   571→  }
+   572→
+   573→  const lengthHint = wizard.start && wizard.end ? `${Math.round(routeLengthM() * 0 + distM(wizard.start, wizard.end))} м` : ''
+   574→
+   575→  return (
+   576→    <div className="absolute bottom-0 left-0 right-0 z-40 bg-white rounded-t-3xl shadow-2xl px-4 pt-3 pb-5">
+   577→      <div className="w-10 h-1 bg-[#CBD5E1] rounded-full mx-auto mb-3" />
+   578→      <div className="flex items-baseline justify-between mb-3">
+   579→        <div className="text-[17px] font-bold text-[#15202B]">Новая пометка</div>
+   580→        <div className="text-[11px] text-[#64748B]">
+   581→          Участок {lengthHint} · 3 из 3
+   582→        </div>
+   583→      </div>
+   584→
+   585→      <div className="flex gap-1.5 flex-wrap mb-3">
+   586→        {Object.entries(MARK_CATEGORIES).map(([code, meta]) => {
+   587→          const sel = wizard.category === code
+   588→          return (
+   589→            <button
+   590→              key={code}
+   591→              onClick={() => updateWizard({ category: code })}
+   592→              className={`flex items-center gap-1.5 rounded-full px-3 h-9 text-[13px] font-semibold border transition-colors ${
+   593→                sel ? 'bg-[#15202B] text-white border-[#15202B]' : 'bg-white text-[#15202B] border-[#E2E8F0]'
+   594→              }`}
+   595→              style={sel ? { background: '#15202B' } : undefined}
+   596→            >
+   597→              {catIcon(code, 'h-4 w-4')}
+   598→              {meta.title}
+   599→            </button>
+   600→          )
+   601→        })}
+   602→      </div>
+   603→
+   604→      <div className="text-[12px] text-[#64748B] mb-1.5">На сколько</div>
+   605→      <div className="flex gap-1.5 mb-3">
+   606→        {TTL_OPTIONS.map((t) => {
+   607→          const sel = wizard.ttlHours === t.hours
+   608→          return (
+   609→            <button
+   610→              key={t.hours}
+   611→              onClick={() => updateWizard({ ttlHours: t.hours })}
+   612→              className={`rounded-full px-3.5 h-8 text-[13px] font-semibold border ${
+   613→                sel ? 'bg-[#F97316] text-white border-[#F97316]' : 'bg-white text-[#15202B] border-[#E2E8F0]'
+   614→              }`}
+   615→            >
+   616→              {t.title}
+   617→            </button>
+   618→          )
+   619→        })}
+   620→      </div>
+   621→
+   622→      <input
+   623→        value={wizard.comment}
+   624→        onChange={(e) => updateWizard({ comment: e.target.value })}
+   625→        placeholder="Комментарий (необязательно)"
+   626→        className="w-full h-11 rounded-xl border border-[#E2E8F0] px-3 text-[14px] outline-none focus:border-[#F97316] mb-4"
+   627→      />
+   628→
+   629→      <button
+   630→        onClick={publishMarkFromWizard}
+   631→        className="w-full h-12 rounded-xl bg-[#15202B] text-white font-bold text-[15px] mb-2 active:scale-[0.99] transition-transform"
+   632→      >
+   633→        Опубликовать
+   634→      </button>
+   635→      <div className="flex items-center justify-between">
+   636→        <button onClick={cancelWizard} className="text-[14px] text-[#64748B] font-medium py-1">
+   637→          Отмена
+   638→        </button>
+   639→        <div className="text-[11px] text-[#94A3B8] max-w-[220px] text-right">
+   640→          {offlineMode ? 'Уйдёт в очередь — уйдёт при появлении сети' : 'Сохраняется локально, отправка в фоне'}
+   641→        </div>
+   642→      </div>
+   643→    </div>
+   644→  )
+   645→}
+   646→
+   647→function distM(a: LatLng, b: LatLng): number {
+   648→  const R = 6371000
+   649→  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+   650→  const dLon = ((b.lng - a.lng) * Math.PI) / 180
+   651→  const la1 = (a.lat * Math.PI) / 180
+   652→  const la2 = (b.lat * Math.PI) / 180
+   653→  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2
+   654→  return Math.round(2 * R * Math.asin(Math.sqrt(h)))
+   655→}
+   656→

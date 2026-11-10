@@ -1,11 +1,16 @@
 /**
  * Демо-данные устройства: маршрут рейса Z-1067 (Абинск → Новороссийск),
  * манёвры для навигации, улицы офлайн-поиска, константы сессии.
- * Координаты — реальная трасса А-146 (геометрия иллюстративная, ~41 км;
- * коммерческие 200 км рейса считаются от routeDistanceM, решение прототипа).
+ * Геометрия маршрута — настоящие дороги OSM (трасса А-146, ~63 км):
+ * сгенерирована скриптом scripts/bake_route.py из OSRM, см. route-geometry.ts.
+ * Маршрут, манёвры и сегменты пробок идут ПО ДОРОГАМ. Коммерческие 200 км
+ * рейса считаются от routeDistanceM (решение прототипа).
  */
 
 import type { DemoStreet } from '@/lib/protocol'
+import { BAKED_MANEUVERS, BAKED_START_F, ROUTE_LNGLAT, SIDE_STREET_LINES } from './route-geometry'
+
+export { ROUTE_LNGLAT } from './route-geometry'
 
 export const DRIVER_ID = 'a1b2c3d4-1111-4222-8333-444455556666'
 export const VEHICLE_ID = 'b2c3d4e5-2222-4333-9444-555566667777'
@@ -16,23 +21,6 @@ export const DRIVER_NAME = 'Смирнов А. В.'
 export const VEHICLE_LABEL = 'КАМАЗ 65207 • АТ 2147 23'
 export const DISPATCHER_NAME = 'Соколов Д.'
 
-/** Ломаная маршрута [lng, lat] (GeoJSON-порядок). */
-export const ROUTE_LNGLAT: [number, number][] = [
-  [38.157, 44.8682], // Абинск, погрузка
-  [38.132, 44.8655],
-  [38.09, 44.852],
-  [38.05, 44.837],
-  [38.006, 44.825],
-  [37.962, 44.818], // Гайдук
-  [37.925, 44.804],
-  [37.895, 44.788],
-  [37.866, 44.779], // Верхнебаканский
-  [37.83, 44.76],
-  [37.8, 44.742],
-  [37.78, 44.731],
-  [37.768, 44.726],
-  [37.76, 44.7255], // Новороссийск, ул. Дорожная 15 — выгрузка
-]
 
 export const LOADING_POINT = {
   id: 'p1-loading-0000-4000-8000-000000000001',
@@ -100,8 +88,9 @@ function bearingDeg(a: [number, number], b: [number, number]): number {
 }
 
 /**
- * Манёвры навигации: доля вдоль маршрута (f), тип поворота, улица.
- * Первый манёвр стоит на f0 + ~20 м — баннер «Через 20 м» как в мокапе.
+ * Манёвры навигации: реальные шаги OSRM + контрольные точки А-146
+ * (генерирует scripts/bake_route.py). Первый манёвр после START_F стоит
+ * в ~20 м от грузовика — баннер «Через 20 м» как в мокапе.
  */
 export interface Maneuver {
   f: number
@@ -109,20 +98,38 @@ export interface Maneuver {
   street: string
 }
 
-const TOTAL_M = routeLengthM()
-export const START_F = 0.385 // пройдено 77 км из 200 км коммерческих
+export const MANEUVERS: Maneuver[] = BAKED_MANEUVERS
 
-export const MANEUVERS: Maneuver[] = [
-  { f: START_F + 20 / TOTAL_M, type: 'left', street: 'ул. Промышленная' },
-  { f: 0.415, type: 'right', street: 'ул. Дорожная' },
-  { f: 0.5, type: 'straight', street: 'ул. Строительная' },
-  { f: 0.62, type: 'left', street: 'ул. Лесная' },
-  { f: 0.86, type: 'right', street: 'съезд на Новороссийск' },
-  { f: 0.995, type: 'arrive', street: 'ул. Дорожная, 15' },
+/** Позиция грузовика на старте демо: за ~20 м до первого манёвра. */
+export const START_F = BAKED_START_F
+
+/**
+ * Сегменты трафика (канал 3): доли вдоль маршрута (по реальным контрольным
+ * точкам А-146) + боковые улицы города (дороги OSM). baseLevel — фоновая
+ * загруженность; серверная генерация накладывает детерминированную
+ * «жизнь» (обновление каждую минуту).
+ */
+export interface TrafficSegDef {
+  id: string
+  title: string
+  fRange?: [number, number] // участок вдоль маршрута
+  sideCoords?: [number, number][] // отдельная ломаная (боковые улицы)
+  baseLevel: 0 | 1 | 2 | 3
+  freeFlowKmh: number
+}
+
+export const TRAFFIC_SEGMENTS: TrafficSegDef[] = [
+  { id: 'tr1', title: 'А-146 · выезд из Абинска', fRange: [0, 0.15], baseLevel: 0, freeFlowKmh: 70 },
+  { id: 'tr2', title: 'А-146 · Гайдук', fRange: [0.15, 0.33], baseLevel: 1, freeFlowKmh: 70 },
+  { id: 'tr3', title: 'А-146 · Верхнебаканский', fRange: [0.33, 0.43], baseLevel: 1, freeFlowKmh: 65 },
+  { id: 'tr4', title: 'А-146 · ремонт моста', fRange: [0.43, 0.52], baseLevel: 3, freeFlowKmh: 65 },
+  { id: 'tr5', title: 'А-146 · перегон к Новороссийску', fRange: [0.52, 0.72], baseLevel: 1, freeFlowKmh: 60 },
+  { id: 'tr6', title: 'А-146 · объездная Новороссийска', fRange: [0.72, 0.92], baseLevel: 0, freeFlowKmh: 60 },
+  { id: 'tr7', title: 'Анапское шоссе · въезд в город', fRange: [0.92, 1], baseLevel: 2, freeFlowKmh: 50 },
+  { id: 'ts1', title: 'ул. Ленина · центр', sideCoords: SIDE_STREET_LINES.ts1, baseLevel: 2, freeFlowKmh: 50 },
+  { id: 'ts2', title: 'ул. Гагарина', sideCoords: SIDE_STREET_LINES.ts2, baseLevel: 1, freeFlowKmh: 50 },
+  { id: 'ts3', title: 'ул. Советов · съезд к порту', sideCoords: SIDE_STREET_LINES.ts3, baseLevel: 3, freeFlowKmh: 45 },
 ]
-
-/** Участок «пробки» по доле маршрута — красный сегмент. */
-export const CONGESTION: [number, number] = [0.44, 0.52]
 
 /** Улицы офлайн-поиска (PMTiles-коридор z14–z17). */
 export const DEMO_STREETS: DemoStreet[] = [

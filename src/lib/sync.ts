@@ -11,10 +11,19 @@
 import { useEffect, useRef } from 'react'
 import { useAzmz } from './store'
 import { DEVICE_ID, DRIVER_ID } from './demo/route-data'
-import type { JournalEntry, MarksSnapshot, PullResponse, PushOpResult, PushResponse } from './protocol'
+import type {
+  JournalEntry,
+  MarksSnapshot,
+  PullResponse,
+  PushOpResult,
+  PushResponse,
+  TrafficSnapshot,
+} from './protocol'
 
 const TICK_MS = 4000
 const PULL_LIMIT = 500
+/** Пробки обновляются раз в минуту — чаще тянуть незачем. */
+const TRAFFIC_INTERVAL_MS = 12_000
 
 function isOffline(): boolean {
   const s = useAzmz.getState()
@@ -86,6 +95,30 @@ async function doMarks(): Promise<void> {
   }
 }
 
+async function doTraffic(): Promise<void> {
+  const s = useAzmz.getState()
+  const t = s.trip
+  if (!t) return
+  const pad = 0.05
+  const minLat = (t.routeMinLat ?? 44.5) - pad
+  const maxLat = (t.routeMaxLat ?? 45.0) + pad
+  const minLon = (t.routeMinLon ?? 37.5) - pad
+  const maxLon = (t.routeMaxLon ?? 38.3) + pad
+  try {
+    const res = await fetch(
+      `/api/driver/v1/traffic?minLat=${minLat}&minLon=${minLon}&maxLat=${maxLat}&maxLon=${maxLon}&since=${s.trafficSince}`,
+      { headers: { 'X-Driver-Id': DRIVER_ID } },
+    )
+    if (!res.ok) return
+    const data = (await res.json()) as TrafficSnapshot
+    useAzmz.getState().applyTrafficSnapshot(data)
+  } catch {
+    // офлайн: остаёмся на прошлом снимке (он сохранён в сторе)
+  }
+}
+
+let lastTrafficAt = 0
+
 async function tick(): Promise<void> {
   const s = useAzmz.getState()
   if (isOffline()) {
@@ -97,6 +130,11 @@ async function tick(): Promise<void> {
   await doPush()
   await doPull()
   await doMarks()
+  const now = Date.now()
+  if (now - lastTrafficAt >= TRAFFIC_INTERVAL_MS) {
+    lastTrafficAt = now
+    await doTraffic()
+  }
   const after = useAzmz.getState()
   after.setConnection(after.outbox.length > 0 ? 'syncing' : 'online')
 }

@@ -1,9 +1,10 @@
 'use client'
 
 /**
- * Экран «Настройки»: смена и устройство (MDM, план этапа 2), состояние
- * синхронизации, офлайн-карты и — главное для демо — управление симуляцией:
- * офлайн-режим, движение по маршруту, инцидент офиса, журнал операций.
+ * Шторка «Настройки»: смена и устройство (MDM, план этапа 2), состояние
+ * синхронизации, офлайн-карты, пробки (канал 3) и — главное для демо —
+ * управление симуляцией: офлайн-режим, движение по маршруту, инцидент
+ * офиса, журнал операций. Карта остаётся фоном сверху.
  */
 
 import { ChevronLeft, Map as MapIcon, Radio, RotateCcw, Sliders, Zap } from 'lucide-react'
@@ -22,6 +23,7 @@ export function SettingsScreen() {
   const outbox = useAzmz((s) => s.outbox)
   const cursor = useAzmz((s) => s.cursor)
   const lastSyncAt = useAzmz((s) => s.lastSyncAt)
+  const traffic = useAzmz((s) => s.traffic)
   const showToast = useAzmz((s) => s.showToast)
   const resetDemo = useAzmz((s) => s.resetDemo)
 
@@ -37,8 +39,8 @@ export function SettingsScreen() {
   }
 
   return (
-    <div className="absolute inset-0 bg-[#F5F7FA] flex flex-col">
-      <div className="bg-[#101E2E] px-4 pt-3 pb-4 shrink-0 flex items-center gap-2">
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="bg-[#101E2E] px-4 pt-2 pb-4 shrink-0 flex items-center gap-2 rounded-t-3xl">
         <button onClick={() => setView('map')} aria-label="Назад" className="text-white/70 hover:text-white">
           <ChevronLeft className="h-6 w-6" />
         </button>
@@ -67,10 +69,12 @@ export function SettingsScreen() {
           <Row k="В очереди" v={`${outbox.length} опер.`} />
         </Section>
 
-        <Section icon={<MapIcon className="h-4 w-4 text-[#F97316]" />} title="Офлайн-карты">
+        <Section icon={<MapIcon className="h-4 w-4 text-[#F97316]" />} title="Офлайн-карты и пробки">
           <Row k="Покрытие" v="коридор маршрута, z14–z17 (PMTiles)" />
           <Row k="Обновление" v={fmtClock(Date.now() - 3_600_000 * 14)} />
           <Row k="Профиль дорог" v="грузовой: габариты, оси (OSRM)" />
+          <Row k="Пробки" v={traffic ? `канал 3 · балл ${traffic.score} · обновлено ${timeAgo(traffic.snapshotAt)}` : 'канал 3 · ждём первый снимок'} />
+          <Row k="Источник пробок" v="телеметрия ТС парка · без Yandex API" />
         </Section>
 
         <Section icon={<Zap className="h-4 w-4 text-[#F97316]" />} title="Демо-управление">
@@ -128,8 +132,8 @@ export function SettingsScreen() {
         </Section>
 
         <Section icon={<Sliders className="h-4 w-4 text-[#F97316]" />} title="О приложении">
-          <Row k="Версия" v="0.4.0 — сборка из каркаса АЗМЗ" />
-          <Row k="Синхронизация" v="outbox + курсор + bbox-снимок" />
+          <Row k="Версия" v="0.5.0 — карта-фон · пробки онлайн" />
+          <Row k="Синхронизация" v="outbox + курсор + 3 канала" />
           <Row k="Карты" v="MapLibre · OSM/CARTO (без Yandex API)" />
           <div className="text-[10px] text-[#94A3B8] pt-1 leading-snug">
             ПДн хранятся на сервере в РФ (152-ФЗ). Этап MVP: JWT по смене, RuStore Push, геозоны.
