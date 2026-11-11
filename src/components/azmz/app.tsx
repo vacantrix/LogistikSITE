@@ -1,13 +1,13 @@
 'use client'
 
 /**
- * Корневой шелл приложения водителя АЗМЗ. Стартовый экран — «Главная» (заявка
- * из 1С). Карта — ПОСТОЯННЫЙ фон; экраны открываются шторками (bottom sheets)
- * поверх карты, как в навигационных приложениях.
+ * Корневой шелл приложения водителя АЗМЗ.
  *
- * Доступы: пока заявка не взята и рейс не начат, внизу только «Главная»,
- * «История» и «Настройки». После предрейсовых фото и «Начать маршрут»
- * открывается всё остальное: навигация, «Пометки», «Офис», «2ГИС».
+ * До старта рейса — ПОЛНОЭКРАННЫЕ страницы без карты: «Главная» (логотип АЭМЗ
+ * + большая кнопка «Взять заявку» + фотофиксация), «История», «Настройки».
+ * После «Начать маршрут» открываются доступы: карта — постоянный фон, экраны
+ * открываются шторками (bottom sheets) поверх неё, как в навигационных
+ * приложениях.
  */
 
 import { useEffect, useState } from 'react'
@@ -16,6 +16,7 @@ import { useAzmz } from '@/lib/store'
 import { useSimTicker, useSyncEngine } from '@/lib/sync'
 import { MapScreen } from '@/components/azmz/map-screen'
 import { OrdersScreen } from '@/components/azmz/orders-screen'
+import { StartScreen } from '@/components/azmz/start-screen'
 import { HistoryScreen } from '@/components/azmz/history-screen'
 import { TripScreen } from '@/components/azmz/trip-screen'
 import { MarksScreen } from '@/components/azmz/marks-screen'
@@ -56,7 +57,7 @@ export default function App() {
   // если прошлый сеанс оставил нас в закрытом разделе — возвращаем на «Главную»
   useEffect(() => {
     if (!hydrated || unlocked) return
-    if (view === 'trip' || view === 'marks' || view === 'chat' || view === 'traffic' || view === 'gis2') {
+    if (view !== 'orders' && view !== 'history' && view !== 'settings') {
       setView('orders')
     }
   }, [hydrated, unlocked, view, setView])
@@ -92,10 +93,15 @@ export default function App() {
         <div className="flex-1 relative overflow-hidden">
           {!hydrated ? (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-[#64748B]">Загрузка…</div>
+          ) : !unlocked ? (
+            /* ДО старта рейса: полноэкранные страницы, карты нет.
+               Главная = логотип АЭМЗ + «Взять заявку» + фотофиксация. */
+            <div className="absolute inset-0 flex flex-col bg-[#F5F7FA]">
+              {view === 'history' ? <HistoryScreen /> : view === 'settings' ? <SettingsScreen /> : <StartScreen />}
+            </div>
           ) : (
             <>
-              {/* Карта — постоянный фон, живёт всегда (слои, грузовик, камера).
-                  Навигационные слои включаются только после «Начать маршрут». */}
+              {/* РЕЙС ИДЁТ: карта — постоянный фон (слои, грузовик, камера) */}
               <MapScreen />
 
               {/* Шторки поверх карты */}
@@ -126,7 +132,7 @@ export default function App() {
               )}
               {view === 'settings' && (
                 <Sheet height="h-[82%]">
-                  <SettingsScreen />
+                  <SettingsScreen inSheet />
                 </Sheet>
               )}
               {view === 'traffic' && (
@@ -227,9 +233,9 @@ function SidePanel({ className = '' }: { className?: string }) {
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[13px] leading-relaxed">
         <div className="text-white font-semibold mb-2">Сценарий демо</div>
         <ol className="list-decimal ml-4 space-y-1.5 text-slate-300">
-          <li>Приложение открывается на заявке: взять → маршрут 2ГИС → фото ТС и документов → «Начать маршрут».</li>
+          <li>Стартовый экран без карты: логотип АЭМЗ + большая кнопка «Взять заявку» → маршрут 2ГИС → фото ТС и документов.</li>
           <li>До старта рейса внизу только «Главная», «История» и «Настройки» — доступы закрыты.</li>
-          <li>После старта открываются «Пометки», «Офис», «2ГИС»; карта — постоянный фон.</li>
+          <li>После «Начать маршрут» открываются карта (постоянный фон), «Пометки», «Офис», «2ГИС».</li>
           <li>Чип «Пробки N» сверху — слой трафика на маршруте и улицах.</li>
           <li>Прибытие → «Завершить рейс» → заявка уходит в «Историю», из 1С приходит новая.</li>
         </ol>

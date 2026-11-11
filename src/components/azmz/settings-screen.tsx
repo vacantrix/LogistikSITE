@@ -14,7 +14,7 @@ import { syncNow } from '@/lib/sync'
 import { DEVICE_ID, DRIVER_NAME, VEHICLE_LABEL } from '@/lib/demo/route-data'
 import { fmtClock, timeAgo } from '@/lib/format'
 
-export function SettingsScreen() {
+export function SettingsScreen({ inSheet = false }: { inSheet?: boolean }) {
   const setView = useAzmz((s) => s.setView)
   const offlineMode = useAzmz((s) => s.offlineMode)
   const setOfflineMode = useAzmz((s) => s.setOfflineMode)
@@ -25,8 +25,11 @@ export function SettingsScreen() {
   const lastSyncAt = useAzmz((s) => s.lastSyncAt)
   const traffic = useAzmz((s) => s.traffic)
   const orderHistory = useAzmz((s) => s.orderHistory)
+  const orderStage = useAzmz((s) => s.orderStage)
   const showToast = useAzmz((s) => s.showToast)
   const resetDemo = useAzmz((s) => s.resetDemo)
+  // до старта рейса карты нет — «Назад» ведёт на «Главную», после — на карту
+  const backView = orderStage === 'in_progress' ? 'map' : 'orders'
 
   const runIncident = async () => {
     try {
@@ -41,8 +44,8 @@ export function SettingsScreen() {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="bg-[#101E2E] px-4 pt-2 pb-4 shrink-0 flex items-center gap-2 rounded-t-3xl">
-        <button onClick={() => setView('map')} aria-label="Назад" className="text-white/70 hover:text-white">
+      <div className={`bg-[#101E2E] px-4 pt-2 pb-4 shrink-0 flex items-center gap-2 ${inSheet ? 'rounded-t-3xl' : ''}`}>
+        <button onClick={() => setView(backView)} aria-label="Назад" className="text-white/70 hover:text-white">
           <ChevronLeft className="h-6 w-6" />
         </button>
         <div className="flex-1">

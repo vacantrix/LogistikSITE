@@ -14,7 +14,6 @@ import type { GeoJSONSource, Map as MlMap, Marker as MlMarker } from 'maplibre-g
 import {
   ArrowUp,
   ChevronRight,
-  ClipboardList,
   Construction,
   CornerUpLeft,
   CornerUpRight,
@@ -741,18 +740,7 @@ export function MapScreen() {
         </div>
       )}
 
-      {/* до старта рейса карта чистая — подсказываем путь к заявке */}
-      {view === 'map' && !tripActive && (
-        <button
-          onClick={() => setView('orders')}
-          className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-20 bg-[#101E2E]/90 border border-white/15 text-white text-[12px] font-semibold rounded-full pl-2.5 pr-3.5 h-9 shadow-xl flex items-center gap-2 whitespace-nowrap"
-        >
-          <ClipboardList className="h-4 w-4 text-[#F97316]" />
-          Заявка — вкладка «Главная»
-        </button>
-      )}
-
-      {/* --- панель данных рейса (мокап 1) — только когда карта «чистая» --------- */}
+      {/* панель данных рейса (мокап 1) — только когда карта «чистая» --------- */}
       {view === 'map' && tripActive && (
         <button
           onClick={() => setView('trip')}
