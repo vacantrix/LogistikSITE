@@ -43,6 +43,7 @@ import {
   routeLengthM,
 } from '@/lib/demo/route-data'
 import { fmtClock, fmtKm } from '@/lib/format'
+import { pointOnRoute } from '@/lib/demo/real-route'
 
 /**
  * Базовая карта: классический растровый 2ГИС — зелёные леса/парки, голубая
@@ -123,6 +124,7 @@ export function MapScreen() {
   const wizard = useAzmz((s) => s.wizard)
   const setView = useAzmz((s) => s.setView)
   const orderStage = useAzmz((s) => s.orderStage)
+  const realRoute = useAzmz((s) => s.realRoute)
   const updateWizard = useAzmz((s) => s.updateWizard)
   const setEventDialog = useAzmz((s) => s.setEventDialog)
   const showToast = useAzmz((s) => s.showToast)
@@ -148,6 +150,9 @@ export function MapScreen() {
   const styleFailCountRef = useRef(0)
   /** Рейс запущен кнопкой «Начать маршрут» — до этого карта чистая (без маршрута/грузовика). */
   const tripActive = orderStage === 'in_progress'
+  /** Активная геометрия: реальный маршрут 2ГИС, иначе демо А-146. */
+  const navPoint = (f: number) =>
+    realRoute ? pointOnRoute(realRoute.coords, f, realRoute.lengthM) : pointAtFraction(f)
 
   /** Переключение режима сопровождения: ref и state меняются синхронно. */
   const setFollowMode = (v: boolean) => {
@@ -248,8 +253,11 @@ export function MapScreen() {
     const map = mapRef.current
     const ml = mlRef.current
     if (!mapEpoch || !map || !ml || !trip || !tripActive) return
+    const routeGeo = realRoute
+      ? { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: realRoute.coords } }
+      : { type: 'Feature' as const, properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') }
     if (!map.getSource('route')) {
-      map.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') } })
+      map.addSource('route', { type: 'geojson', data: routeGeo })
       map.addSource('traffic', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addSource('marks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 10 } })
@@ -285,9 +293,11 @@ export function MapScreen() {
     }
 
     // камера стартует на грузовике (навигационный вид, как в мокапе 4)
-    const p = pointAtFraction(simFRef.current)
+    const p = navPoint(simFRef.current)
     map.jumpTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4 })
-  }, [mapEpoch, trip, tripActive])
+    // перезапрос маршрута (2ГИС) — обновляем геометрию уже созданного источника
+    ;(map.getSource('route') as GeoJSONSource | undefined)?.setData(routeGeo as never)
+  }, [mapEpoch, trip, tripActive, realRoute])
 
   // грузовик и движение камеры
   useEffect(() => {
@@ -301,21 +311,21 @@ export function MapScreen() {
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18h-5"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>
       </div>`
     truckInnerRef.current = el.querySelector('.azmz-truck-inner')
-    const p = pointAtFraction(simFRef.current)
+    const p = navPoint(simFRef.current)
     truckRef.current = new ml.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map)
-  }, [mapEpoch, tripActive])
+  }, [mapEpoch, tripActive, realRoute])
 
   // движение камеры и грузовика
   useEffect(() => {
     const map = mapRef.current
     if (!mapEpoch || !map || !truckRef.current) return
-    const p = pointAtFraction(simF)
+    const p = navPoint(simF)
     truckRef.current.setLngLat([p.lng, p.lat])
     if (truckInnerRef.current) truckInnerRef.current.style.transform = `rotate(${p.bearing}deg)`
     if (followRef.current) {
       map.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 950, easing: (t) => t })
     }
-  }, [simF, mapEpoch])
+  }, [simF, mapEpoch, realRoute])
 
   // пометки → слой
   useEffect(() => {
@@ -331,16 +341,26 @@ export function MapScreen() {
   }, [marks, pendingMarks, mapEpoch])
 
   // трафик → слой (канал 3): цвет по уровню, маршрут толще боковых улиц
+  // приоритет — пробочная окраска реального маршрута 2ГИС (fast/normal/slow)
   useEffect(() => {
     const map = mapRef.current
     if (!mapEpoch || !map || !map.getSource('traffic')) return
-    const feats = (traffic?.segments ?? []).map((seg) => ({
-      type: 'Feature' as const,
-      properties: { color: TRAFFIC_LEVELS[seg.level]?.hex ?? '#22C55E', width: seg.onRoute ? 6.5 : 4.5 },
-      geometry: JSON.parse(seg.geometry),
-    }))
+    const feats = realRoute
+      ? realRoute.segments.map((seg) => ({
+          type: 'Feature' as const,
+          properties: {
+            color: seg.level === 'slow' ? '#EF4444' : seg.level === 'normal' ? '#FACC15' : '#22C55E',
+            width: 6.5,
+          },
+          geometry: { type: 'LineString' as const, coordinates: seg.coords },
+        }))
+      : (traffic?.segments ?? []).map((seg) => ({
+          type: 'Feature' as const,
+          properties: { color: TRAFFIC_LEVELS[seg.level]?.hex ?? '#22C55E', width: seg.onRoute ? 6.5 : 4.5 },
+          geometry: JSON.parse(seg.geometry),
+        }))
     ;(map.getSource('traffic') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: feats })
-  }, [traffic, mapEpoch])
+  }, [traffic, mapEpoch, realRoute])
 
   // камера: шторка открыта → обзор маршрута; закрыта → навигация за грузовиком
   useEffect(() => {
@@ -348,13 +368,15 @@ export function MapScreen() {
     if (!mapEpoch || !map || !trip) return
     if (view === 'map') {
       setFollowMode(true)
-      const p = pointAtFraction(simFRef.current)
+      const p = navPoint(simFRef.current)
       map.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 750 })
     } else {
       setFollowMode(false)
-      const coords = (JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') as {
-        coordinates: [number, number][]
-      }).coordinates
+      const coords: [number, number][] = realRoute
+        ? realRoute.coords
+        : (JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') as {
+            coordinates: [number, number][]
+          }).coordinates
       const lons = coords.map((c) => c[0])
       const lats = coords.map((c) => c[1])
       const bottomFrac = view === 'traffic' ? 0.62 : view === 'marks' ? 0.72 : view === 'settings' ? 0.86 : 0.8
@@ -367,7 +389,7 @@ export function MapScreen() {
         { padding: { top: 55, bottom: Math.round(h * bottomFrac), left: 26, right: 26 }, pitch: 0, bearing: 0, duration: 700 },
       )
     }
-  }, [view, mapEpoch, trip])
+  }, [view, mapEpoch, trip, realRoute])
 
   // точки рейса → DOM-маркеры
   useEffect(() => {
@@ -431,20 +453,25 @@ export function MapScreen() {
     }
   }, [wizard, mapEpoch])
 
-  const totalM = useMemo(() => routeLengthM(), [])
+  const totalM = useMemo(() => (realRoute ? realRoute.lengthM : routeLengthM()), [realRoute])
 
   const delayMin = traffic?.routeDelayMin ?? 0
   const etaMs = (trip?.plannedFinishAt ?? Date.now()) + delayMin * 60_000
 
-  // следующий манёвр
+  // следующий манёвр — по активной геометрии (2ГИС или демо)
   const nextManeuver = useMemo(() => {
-    const m = MANEUVERS.find((mm) => mm.f > simF + 1e-9)
+    const list: Array<{ f: number; type: string; street: string }> = realRoute?.maneuvers ?? MANEUVERS
+    const m = list.find((mm) => mm.f > simF + 1e-9)
     return m ?? null
-  }, [simF])
+  }, [simF, realRoute])
   const distToManeuver = nextManeuver ? (nextManeuver.f - simF) * totalM : 0
-  const arrived = simF >= MANEUVERS[MANEUVERS.length - 1].f
+  const arrived = simF >= (realRoute ? 0.999 : MANEUVERS[MANEUVERS.length - 1].f)
 
-  const remainingM = trip ? (trip.routeDistanceM ?? 200_000) * (1 - simF) : 123_000
+  const remainingM = realRoute
+    ? realRoute.lengthM * (1 - simF)
+    : trip
+      ? (trip.routeDistanceM ?? 200_000) * (1 - simF)
+      : 123_000
   const etaClock = trip ? fmtClock(etaMs) : '—'
   const tripCode = trip?.tripCode ?? 'Z-1067'
 

@@ -98,6 +98,9 @@ export function OrdersScreen() {
   const beginPretrip = useAzmz((s) => s.beginPretrip)
   const completePretripStep = useAzmz((s) => s.completePretripStep)
   const startRoute = useAzmz((s) => s.startRoute)
+  const refetchRealRoute = useAzmz((s) => s.refetchRealRoute)
+  const realRoute = useAzmz((s) => s.realRoute)
+  const realRouteStatus = useAzmz((s) => s.realRouteStatus)
   const setView = useAzmz((s) => s.setView)
   const showToast = useAzmz((s) => s.showToast)
   const trip = useAzmz((s) => s.trip)
@@ -189,6 +192,9 @@ export function OrdersScreen() {
         </div>
       )
     } else if (orderStage === 'route_ready') {
+      // цифры — из реального ответа 2ГИС; при сбое — плановые из заявки
+      const km = realRoute ? Math.round(realRoute.lengthM / 1000) : active.distanceKm
+      const durMin = realRoute ? Math.max(1, Math.round(realRoute.durationS / 60)) : active.durationMin
       activeFlow = (
         <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4">
           <div className="flex items-center gap-2.5">
@@ -203,9 +209,18 @@ export function OrdersScreen() {
             {active.fromLabel} <span className="text-[#94A3B8]">→</span> {active.toLabel}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-[#64748B]">
-            <span className="font-bold text-[#15202B]">{active.distanceKm} км</span>
-            <span>≈ {Math.floor(active.durationMin / 60)} ч {active.durationMin % 60} мин</span>
+            <span className="font-bold text-[#15202B]">{km} км</span>
+            <span>≈ {Math.floor(durMin / 60)} ч {durMin % 60} мин</span>
             <span>с учётом пробок</span>
+          </div>
+          <div
+            className={`mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-full px-2 py-1 ${
+              realRouteStatus === 'ready' ? 'bg-[#22C55E]/12 text-[#15803D]' : 'bg-[#FACC15]/20 text-[#A16207]'
+            }`}
+          >
+            {realRouteStatus === 'ready'
+              ? '2ГИС Routing API · грузовик 28 т · пробки · реальные манёвры'
+              : 'Демо-геометрия А-146 — 2ГИС недоступен'}
           </div>
           <button
             onClick={beginPretrip}
@@ -213,6 +228,14 @@ export function OrdersScreen() {
           >
             К подготовке к рейсу
           </button>
+          {realRouteStatus === 'failed' && (
+            <button
+              onClick={refetchRealRoute}
+              className="mt-2 w-full h-9 text-[12px] font-semibold text-[#C2410C] bg-[#F97316]/10 rounded-xl"
+            >
+              Повторить запрос 2ГИС
+            </button>
+          )}
         </div>
       )
     } else if (orderStage === 'prep') {

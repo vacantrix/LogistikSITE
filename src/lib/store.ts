@@ -23,6 +23,7 @@ import type {
 } from '@/lib/protocol'
 import { START_F, routeLengthM } from '@/lib/demo/route-data'
 import { DEMO_ORDERS, PRETRIP_STEPS, type Order1C } from '@/lib/demo/orders-data'
+import { fetchRealRoute, type RealRoute } from '@/lib/demo/real-route'
 
 /** Реальная длина дорожной ломаной, м (63 км А-146) — для пересчёта f. */
 const ROUTE_TOTAL_M = routeLengthM()
@@ -106,6 +107,10 @@ interface AzmzState {
   /** Шаги фотофиксации активной заявки. */
   pretrip: PretripStepState[]
 
+  /** Реальный маршрут 2ГИС (строится на стадии routing, null — демо-геометрия). */
+  realRoute: RealRoute | null
+  realRouteStatus: 'idle' | 'loading' | 'ready' | 'failed'
+
   simRunning: boolean
   simProgressF: number
   simSpeedKmh: number
@@ -148,6 +153,8 @@ interface AzmzState {
   beginPretrip: () => void
   completePretripStep: (stepId: string, photo?: string) => void
   startRoute: () => void
+  /** Повторный запрос маршрута 2ГИС (если в прошлый раз был фолбэк). */
+  refetchRealRoute: () => void
 
   resetDemo: () => void
 }
@@ -200,6 +207,9 @@ export const useAzmz = create<AzmzState>()(
       activeOrderNumber: null,
       orderStage: 'idle',
       pretrip: [],
+
+      realRoute: null,
+      realRouteStatus: 'idle',
 
       toast: null,
       wizard: emptyWizard,
@@ -420,8 +430,8 @@ export const useAzmz = create<AzmzState>()(
       advanceSim: (dtSec) => {
         const s = get()
         if (!s.simRunning || !s.trip) return
-        // 20× ускорение демо: скорость из геометрии, коммерческие км — от f
-        const totalM = ROUTE_TOTAL_M
+        // 20× ускорение демо: длина активной геометрии — 2ГИС или демо А-146
+        const totalM = s.realRoute?.lengthM ?? ROUTE_TOTAL_M
         const speedMs = (s.simSpeedKmh / 3.6) * 20
         const df = (speedMs * dtSec) / totalM
         const nextF = Math.min(1, s.simProgressF + df)
@@ -437,14 +447,44 @@ export const useAzmz = create<AzmzState>()(
       setOrders: (orders) => set({ orders }),
       acceptOrder: (number) => {
         if (get().activeOrderNumber) return
-        set({ activeOrderNumber: number, orderStage: 'routing' })
-        get().showToast(`Заявка ${number} принята. Строим маршрут…`)
-        // демо-пауза «прокладывания маршрута» (в проде — ответ 2ГИС Routing API)
-        setTimeout(() => {
-          if (get().orderStage === 'routing' && get().activeOrderNumber === number) {
-            set({ orderStage: 'route_ready' })
+        set({ activeOrderNumber: number, orderStage: 'routing', realRouteStatus: 'loading' })
+        get().showToast(`Заявка ${number} принята. Запрашиваем маршрут в 2ГИС…`)
+        void (async () => {
+          const t0 = Date.now()
+          const rr = await fetchRealRoute()
+          // пауза «Строим маршрут…» минимум 1.6 с — чтобы запрос был заметен
+          const elapsed = Date.now() - t0
+          if (elapsed < 1600) await new Promise((r) => setTimeout(r, 1600 - elapsed))
+          const st = get()
+          if (st.activeOrderNumber !== number || st.orderStage !== 'routing') return
+          if (rr) {
+            set({ realRoute: rr, realRouteStatus: 'ready', orderStage: 'route_ready' })
+            get().showToast(`Маршрут 2ГИС: ${(rr.lengthM / 1000).toFixed(0)} км · ~${Math.round(rr.durationS / 60)} мин`)
+          } else {
+            set({ realRouteStatus: 'failed', orderStage: 'route_ready' })
+            get().showToast('2ГИС недоступен — маршрут по демо-геометрии А-146')
           }
-        }, 2600)
+        })()
+      },
+      refetchRealRoute: () => {
+        const number = get().activeOrderNumber
+        if (!number || get().realRouteStatus === 'loading') return
+        set({ orderStage: 'routing', realRouteStatus: 'loading' })
+        void (async () => {
+          const t0 = Date.now()
+          const rr = await fetchRealRoute()
+          const elapsed = Date.now() - t0
+          if (elapsed < 1600) await new Promise((r) => setTimeout(r, 1600 - elapsed))
+          const st = get()
+          if (st.activeOrderNumber !== number || st.orderStage !== 'routing') return
+          if (rr) {
+            set({ realRoute: rr, realRouteStatus: 'ready', orderStage: 'route_ready' })
+            get().showToast(`Маршрут 2ГИС: ${(rr.lengthM / 1000).toFixed(0)} км · ~${Math.round(rr.durationS / 60)} мин`)
+          } else {
+            set({ realRouteStatus: 'failed', orderStage: 'route_ready' })
+            get().showToast('2ГИС недоступен — маршрут по демо-геометрии А-146')
+          }
+        })()
       },
       beginPretrip: () =>
         set({
@@ -458,8 +498,13 @@ export const useAzmz = create<AzmzState>()(
           ),
         })),
       startRoute: () => {
+        const rr = get().realRoute
         set({ orderStage: 'in_progress', view: 'map' })
         get().setSimRunning(true)
+        // старт на реальной геометрии: за ~30 м до первого манёвра (баннер, как в мокапе)
+        if (rr && rr.maneuvers[0]) {
+          set({ simProgressF: Math.max(0, Math.min(rr.maneuvers[0].f - 30 / rr.lengthM, 0.99)) })
+        }
         get().showToast('Маршрут проложен — вы в пути. Рейс Z-1067')
       },
 
@@ -495,6 +540,8 @@ export const useAzmz = create<AzmzState>()(
         orders: s.orders,
         activeOrderNumber: s.activeOrderNumber,
         orderStage: s.orderStage,
+        realRoute: s.realRoute,
+        realRouteStatus: s.realRouteStatus,
         // превью фото не персистим: dataURL раздувает localStorage (квота 5 МБ)
         pretrip: s.pretrip.map((p) => ({ id: p.id, done: p.done, photoAt: p.photoAt })),
       }),
