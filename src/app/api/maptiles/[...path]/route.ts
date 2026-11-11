@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
  * Маршруты (всё под /api/maptiles/):
  *   fonts/<fontstack>/<range>.pbf        → глифы (SDF-шрифты)
  *   sprites/<set>/<name>[.json|.png|@2x] → спрайты иконок
+ *   2gis/{z}/{x}/{y}.png                 → базовая карта 2ГИС (зелёная, с водой)
  *   esri/{z}/{x}/{y}.png                 → резервный raster (Esri Light Gray)
  *   natural_earth/ne2sr/{z}/{x}/{y}.png  → raster-подложка Natural Earth
  *   planet                               → TileJSON (tiles переписываются)
@@ -28,6 +29,11 @@ import { NextRequest, NextResponse } from 'next/server'
 const UPSTREAM = 'https://tiles.openfreemap.org'
 /** Растровый fallback: светлый Esri World Light Gray (без ключа, z/y/x!). */
 const UPSTREAM_ESRI = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile'
+/** Базовая карта: классический растровый 2ГИС (зелёная с водой, z 0–18).
+ *  Публичный tile-сервер maps.2gis.com, 4 сабдомена; ключ не обязателен,
+ *  но если задан 2GIS_API_KEY — передаём (учёт на стороне 2ГИС). */
+const UPSTREAM_2GIS = 'https://tile{n}.maps.2gis.com/tiles'
+const GIS2_MAX_ZOOM = 18
 
 /** Кэш: тайлы/шрифты/спрайты — 6–11 ч (стабильные), TileJSON — 5 мин. */
 const cache = new Map<string, { ct: string; body: ArrayBuffer; exp: number }>()
@@ -81,13 +87,33 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const sub = (path ?? []).join('/')
   if (!sub) return NextResponse.json({ error: 'bad path' }, { status: 400 })
 
-  // esri/{z}/{x}/{y} → светлый растровый Esri (у него порядок z/y/x!),
-  // остальное — OpenFreeMap
+  // 2gis/{z}/{x}/{y} → базовая карта 2ГИС (зелёная с водой), баланс по 4 сабдоменам
   const parts = sub.split('/')
+  const isGis2 = parts[0] === '2gis' && parts.length === 4
   const isEsri = parts[0] === 'esri' && parts.length === 4
-  const upstreamUrl = isEsri
-    ? `${UPSTREAM_ESRI}/${parts[1]}/${parts[3]}/${parts[2]}`
-    : `${UPSTREAM}/${sub}`
+  let upstreamUrl: string
+  if (isGis2) {
+    const z = Number(parts[1])
+    const x = Number(parts[2])
+    // шаблон стиля — 2gis/{z}/{x}/{y}.png: срезаем расширение
+    const y = Number(parts[3].replace(/\.png$/i, ''))
+    const n = 1 << z
+    if (
+      !Number.isInteger(z) || !Number.isInteger(x) || !Number.isInteger(y) ||
+      z < 0 || z > GIS2_MAX_ZOOM || x < 0 || x >= n || y < 0 || y >= n
+    ) {
+      return NextResponse.json({ error: 'bad tile coords' }, { status: 400 })
+    }
+    const key = process.env['2GIS_API_KEY'] || process.env.NEXT_PUBLIC_2GIS_KEY || ''
+    upstreamUrl =
+      `${UPSTREAM_2GIS.replace('{n}', String((x + y) % 4))}?z=${z}&x=${x}&y=${y}` +
+      (key ? `&key=${encodeURIComponent(key)}` : '')
+  } else if (isEsri) {
+    // у Esri порядок z/y/x!
+    upstreamUrl = `${UPSTREAM_ESRI}/${parts[1]}/${parts[3]}/${parts[2]}`
+  } else {
+    upstreamUrl = `${UPSTREAM}/${sub}`
+  }
   const ttl = sub === 'planet' ? 5 * 60_000 : 6 * 3_600_000 + Math.floor(Math.random() * 5 * 3_600_000)
 
   const hit = cacheGet(upstreamUrl)

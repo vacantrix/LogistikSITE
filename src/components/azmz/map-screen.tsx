@@ -4,8 +4,8 @@
  * Экран «Карта» (по мокапам 1, 2 и 4): карта — всегда первый экран,
  * баннер манёвра, знак лимита скорости, очередь связи, кнопка «Пометка»
  * (3-шаговый мастер), панель данных рейса внизу → открывает дашборд рейса.
- * Базовая карта: светлый OSM-стиль Positron (OpenFreeMap) — без Yandex API
- * (ограничение лицензии). Линия маршрута и сегменты пробок идут по дорогам.
+ * Базовая карта: растровый 2ГИС (зелёная, с голубой водой, русские подписи)
+ * через наш прокси. Линия маршрута и сегменты пробок идут по дорогам.
  */
 
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -43,11 +43,34 @@ import {
 import { fmtClock, fmtKm } from '@/lib/format'
 
 /**
- * Стиль идёт через НАШ сервер (/api/mapstyle → /api/maptiles/…): браузер не
- * обращается к внешним tile-хостам напрямую — в закрытых/мобильных сетях
- * это было причиной «карта не отображается».
+ * Базовая карта: классический растровый 2ГИС — зелёные леса/парки, голубая
+ * вода, русские подписи (как в приложении 2ГИС). Тайлы идут ТОЛЬКО через наш
+ * прокси /api/maptiles/2gis/…: браузер не обращается к tile*.maps.2gis.com
+ * напрямую — в закрытых/мобильных сетях это было причиной «карта не отображается».
+ * Стиль инлайновый (не URL): его не может уронить недоступность сервиса стилей,
+ * ломается только отрисовка тайлов — тогда спускаемся на резервный растр Esri.
  */
-const LIGHT_STYLE_URL = '/api/mapstyle'
+function gis2Style() {
+  const base = typeof window === 'undefined' ? '' : window.location.origin
+  return {
+    version: 8 as const,
+    sources: {
+      '2gis': {
+        type: 'raster' as const,
+        tiles: [`${base}/api/maptiles/2gis/{z}/{x}/{y}.png`],
+        tileSize: 256,
+        minzoom: 0,
+        maxzoom: 18,
+        attribution: '© 2ГИС',
+      },
+    },
+    layers: [
+      // фон = цвет суши 2ГИС: пока тайлы едут, карта уже выглядит зелёной
+      { id: 'bg', type: 'background' as const, paint: { 'background-color': '#E9EDE2' } },
+      { id: '2gis', type: 'raster' as const, source: '2gis' },
+    ],
+  }
+}
 
 const FALLBACK_STYLE = {
   version: 8 as const,
@@ -153,7 +176,7 @@ export function MapScreen() {
       mlRef.current = ml
       const map = new ml.Map({
         container: containerRef.current,
-        style: LIGHT_STYLE_URL,
+        style: gis2Style() as never,
         center: [37.768, 44.726],
         zoom: 13.2,
         pitch: 0,
@@ -164,7 +187,7 @@ export function MapScreen() {
       map.on('error', (e: { error?: { message?: string } }) => {
         const msg = e?.error?.message ?? ''
         if (msg) console.warn('[azmz-map]', msg)
-        // стиль не загрузился — спускаемся по цепочке: вектор → растр → фон.
+        // стиль не загрузился — спускаемся по цепочке: 2ГИС-растр → Esri-растр → фон.
         if (map.isStyleLoaded() === false) {
           styleFailCountRef.current += 1
           if (styleFailCountRef.current === 1) {
