@@ -38,6 +38,7 @@ import { ConnectionChip, OfflineHint } from '@/components/azmz/connection-chip'
 import { MARK_CATEGORIES, TRAFFIC_LEVELS, trafficScoreColor, TTL_OPTIONS } from '@/lib/rules'
 import {
   DEMO_STREETS,
+  LOADING_POINT,
   MANEUVERS,
   pointAtFraction,
   routeLengthM,
@@ -127,6 +128,7 @@ export function MapScreen() {
   const realRoute = useAzmz((s) => s.realRoute)
   const updateWizard = useAzmz((s) => s.updateWizard)
   const setEventDialog = useAzmz((s) => s.setEventDialog)
+  const completeActiveTrip = useAzmz((s) => s.completeActiveTrip)
   const showToast = useAzmz((s) => s.showToast)
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -298,6 +300,25 @@ export function MapScreen() {
     // перезапрос маршрута (2ГИС) — обновляем геометрию уже созданного источника
     ;(map.getSource('route') as GeoJSONSource | undefined)?.setData(routeGeo as never)
   }, [mapEpoch, trip, tripActive, realRoute])
+
+  // после завершения рейса убираем навигационные слои — карта снова «чистая»
+  useEffect(() => {
+    if (tripActive) return
+    const map = mapRef.current
+    if (!map) return
+    if (map.getStyle() && map.getSource('route')) {
+      for (const id of ['route-line', 'route-casing', 'traffic-line', 'traffic-casing', 'mark-line', 'mark-dot']) {
+        if (map.getLayer(id)) map.removeLayer(id)
+      }
+      for (const id of ['route', 'traffic', 'marks']) {
+        if (map.getSource(id)) map.removeSource(id)
+      }
+    }
+    truckRef.current?.remove()
+    truckRef.current = null
+    // камера — спокойный вид на точку погрузки (без навигационного наклона)
+    map.easeTo({ center: [LOADING_POINT.lon, LOADING_POINT.lat], zoom: 10.6, pitch: 0, bearing: 0, duration: 900 })
+  }, [tripActive, mapEpoch])
 
   // грузовик и движение камеры
   useEffect(() => {
@@ -556,7 +577,8 @@ export function MapScreen() {
         <div className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 pointer-events-none">
           <div className="flex items-center gap-2 pointer-events-auto flex-wrap">
             <ConnectionChip />
-            {traffic && (
+            {/* чип пробок — часть «остального»: открывается вместе с доступами после старта */}
+            {traffic && tripActive && (
               <button
                 onClick={() => setView('traffic')}
                 className="inline-flex items-center gap-1.5 bg-[#101E2E]/90 border border-white/15 text-white text-[11px] font-semibold rounded-full pl-2 pr-2.5 h-7 shadow"
@@ -609,9 +631,15 @@ export function MapScreen() {
             <div className={`pointer-events-auto bg-white text-[#15202B] rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl border border-black/5 ${wizard.step === 0 ? 'ml-12' : ''}`}>
               <div className="flex-1">
                 <div className="text-[13px] font-semibold">Вы прибыли в точку выгрузки</div>
-                <div className="text-[11px] text-[#64748B]">Событие можно отметить вручную</div>
+                <div className="text-[11px] text-[#64748B]">Отметьте событие и завершите рейс</div>
+                <button
+                  onClick={completeActiveTrip}
+                  className="mt-1.5 text-[12px] font-bold text-[#C2410C] bg-[#F97316]/10 rounded-lg px-3 h-8"
+                >
+                  Завершить рейс → в «Историю»
+                </button>
               </div>
-              <button onClick={() => setEventDialog(true, 'ARRIVAL_UNLOADING')} className="bg-[#F97316] text-white text-[13px] font-bold rounded-xl px-4 h-9">
+              <button onClick={() => setEventDialog(true, 'ARRIVAL_UNLOADING')} className="bg-[#F97316] text-white text-[13px] font-bold rounded-xl px-4 h-9 shrink-0">
                 Отметить
               </button>
             </div>
@@ -639,8 +667,9 @@ export function MapScreen() {
         </div>
       )}
 
-      {/* --- кнопки по бокам: слева поиск/легенда/звук, справа зум/прицел/пометка --- */}
-      {wizard.step === 0 && (
+      {/* --- кнопки по бокам: слева поиск/легенда/звук, справа зум/прицел/пометка.
+           Часть «остального» — открываются только вместе с доступами (после старта рейса) --- */}
+      {wizard.step === 0 && tripActive && (
         <div className="absolute left-3 top-28 z-20 flex flex-col gap-2">
           <MapBtn label="Поиск" onClick={() => setSearchOpen(true)}>
             <Search className="h-5 w-5" />
@@ -662,7 +691,7 @@ export function MapScreen() {
           </MapBtn>
         </div>
       )}
-      {wizard.step === 0 && (
+      {wizard.step === 0 && tripActive && (
         <div className="absolute right-1 top-28 z-20 flex flex-col gap-2">
           <MapBtn label="Приблизить" onClick={() => mapRef.current?.zoomIn()}>
             <ZoomIn className="h-5 w-5" />
@@ -712,14 +741,14 @@ export function MapScreen() {
         </div>
       )}
 
-      {/* до старта рейса карта чистая — подсказываем путь к заявкам */}
+      {/* до старта рейса карта чистая — подсказываем путь к заявке */}
       {view === 'map' && !tripActive && (
         <button
           onClick={() => setView('orders')}
           className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-20 bg-[#101E2E]/90 border border-white/15 text-white text-[12px] font-semibold rounded-full pl-2.5 pr-3.5 h-9 shadow-xl flex items-center gap-2 whitespace-nowrap"
         >
           <ClipboardList className="h-4 w-4 text-[#F97316]" />
-          Возьмите заявку — вкладка «Заявки»
+          Заявка — вкладка «Главная»
         </button>
       )}
 

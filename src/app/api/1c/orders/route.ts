@@ -12,15 +12,16 @@ import { NextRequest, NextResponse } from 'next/server'
  *     ключ — в Vault, как и для 2ГИС). Ответ идемпотентный.
  *
  * POST /api/1c/orders
- *   body: { orderId, action: 'ACCEPT' | 'PRETRIP_STEP' | 'START_ROUTE', stepId?, at? }
+ *   body: { orderId, action: 'ACCEPT' | 'PRETRIP_STEP' | 'START_ROUTE' | 'COMPLETE_TRIP', stepId?, at? }
  *   → обратный канал: водитель взял заявку / выполнил шаг фотофиксации /
- *     начал маршрут. В проде пишется в 1С (статус заявки + печатная форма
- *     предрейсового осмотра). Демо: журнал в памяти процесса.
+ *     начал маршрут / завершил рейс. В проде пишется в 1С (статус заявки +
+ *     печатная форма предрейсового осмотра). Демо: журнал в памяти процесса,
+ *     GET по нему же помечает заявки выполненными (status: 'DONE').
  */
 
 import { DEMO_ORDERS } from '@/lib/demo/orders-data'
 
-type OrderAction = 'ACCEPT' | 'PRETRIP_STEP' | 'START_ROUTE'
+type OrderAction = 'ACCEPT' | 'PRETRIP_STEP' | 'START_ROUTE' | 'COMPLETE_TRIP' | 'ASSIGN'
 
 interface OrderEventLog {
   at: string
@@ -33,11 +34,19 @@ interface OrderEventLog {
 const eventLog: OrderEventLog[] = []
 
 export async function GET() {
+  // статусы отыгрываем по журналу: назначена диспетчером / рейс завершён
+  const done = new Set(eventLog.filter((e) => e.action === 'COMPLETE_TRIP').map((e) => e.orderId))
+  const assigned = new Set(eventLog.filter((e) => e.action === 'ASSIGN').map((e) => e.orderId))
+  const orders = DEMO_ORDERS.map((o) => {
+    if (done.has(o.number)) return { ...o, status: 'DONE' as const }
+    if (assigned.has(o.number)) return { ...o, status: 'ASSIGNED' as const, assignedBy: 'Диспетчер Е. Крылова' }
+    return o
+  })
   return NextResponse.json(
     {
       source: 'demo-seed',
       note: 'В проде — прокси к HTTP-сервису 1С (get_driver_orders), статусы назначений.',
-      orders: DEMO_ORDERS,
+      orders,
       eventLog,
     },
     { headers: { 'Cache-Control': 'no-store' } },
@@ -52,7 +61,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'bad json' }, { status: 400 })
   }
   const { orderId, action, stepId } = body
-  if (!orderId || !action || !['ACCEPT', 'PRETRIP_STEP', 'START_ROUTE'].includes(action)) {
+  if (!orderId || !action || !['ACCEPT', 'PRETRIP_STEP', 'START_ROUTE', 'COMPLETE_TRIP', 'ASSIGN'].includes(action)) {
     return NextResponse.json({ ok: false, error: 'orderId и action обязательны' }, { status: 400 })
   }
   if (action === 'PRETRIP_STEP' && !stepId) {

@@ -30,8 +30,8 @@ export interface Order1C {
   docs: string[]
   distanceKm: number
   durationMin: number
-  /** ASSIGNED — назначена водителю (можно взять); DISPATCH — ждёт решения диспетчерской. */
-  status: 'ASSIGNED' | 'DISPATCH'
+  /** ASSIGNED — назначена водителю (можно взять); DISPATCH — ждёт решения диспетчерской; DONE — выполнена (в истории). */
+  status: 'ASSIGNED' | 'DISPATCH' | 'DONE'
   /** Кто и когда назначил (диспетчерская). */
   assignedBy: string
 }
@@ -90,6 +90,66 @@ export const DEMO_ORDERS: Order1C[] = [
     durationMin: 540,
     status: 'DISPATCH',
     assignedBy: '—',
+  },
+]
+
+/**
+ * Выполненная заявка для экрана «История» (этап 1 — отдельной вкладкой,
+ * далее раздел переедет в «Настройки»). Заполняется: демо-сид + реальные
+ * завершённые рейсы (прибытие → «Завершить рейс»).
+ */
+export interface HistoryEntry {
+  number: string
+  client: string
+  cargo: string
+  fromLabel: string
+  toLabel: string
+  distanceKm: number
+  vehicle: string
+  /** Когда рейс фактически завершён (ISO). */
+  completedAt: string
+  /** Фактическое время в пути, мин (для истории — плановое в демо-сиде). */
+  durationMin: number
+  status: 'DONE'
+}
+
+/** Демо-история за прошлую неделю — чтобы вкладка не была пустой на старте. */
+export const DEMO_HISTORY: HistoryEntry[] = [
+  {
+    number: 'ЗК-1063',
+    client: 'ООО «Кубань Агро»',
+    cargo: 'Сахар-песок в мешках, 32 паллеты',
+    fromLabel: 'Тимашевск, элеватор',
+    toLabel: 'Краснодар, РЦ «Прогресс»',
+    distanceKm: 88,
+    vehicle: 'КАМАЗ 5490 · В 789 КС 93',
+    completedAt: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+    durationMin: 118,
+    status: 'DONE',
+  },
+  {
+    number: 'ЗК-1059',
+    client: 'ООО «Новороссийский терминал»',
+    cargo: 'Металлоконструкции (фермы), штучные',
+    fromLabel: 'Абинск, пл. АЗМЗ',
+    toLabel: 'Новороссийск, причал 27',
+    distanceKm: 115,
+    vehicle: 'МАЗ 5440 · А 123 БС 23',
+    completedAt: new Date(Date.now() - 2 * 24 * 3_600_000).toISOString(),
+    durationMin: 161,
+    status: 'DONE',
+  },
+  {
+    number: 'ЗК-1052',
+    client: 'ООО «Донсталь»',
+    cargo: 'Металлопрокат листовой, 2 шт.',
+    fromLabel: 'Абинск, пл. АЗМЗ',
+    toLabel: 'Ростов-на-Дону, склад №4',
+    distanceKm: 492,
+    vehicle: 'МАЗ 6312 · Е 345 ОР 23',
+    completedAt: new Date(Date.now() - 5 * 24 * 3_600_000).toISOString(),
+    durationMin: 552,
+    status: 'DONE',
   },
 ]
 

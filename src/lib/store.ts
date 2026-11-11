@@ -22,13 +22,13 @@ import type {
   TripSnapshot,
 } from '@/lib/protocol'
 import { START_F, routeLengthM } from '@/lib/demo/route-data'
-import { DEMO_ORDERS, PRETRIP_STEPS, type Order1C } from '@/lib/demo/orders-data'
+import { DEMO_HISTORY, DEMO_ORDERS, PRETRIP_STEPS, type HistoryEntry, type Order1C } from '@/lib/demo/orders-data'
 import { fetchRealRoute, type RealRoute } from '@/lib/demo/real-route'
 
 /** Реальная длина дорожной ломаной, м (63 км А-146) — для пересчёта f. */
 const ROUTE_TOTAL_M = routeLengthM()
 
-export type View = 'orders' | 'map' | 'trip' | 'marks' | 'chat' | 'settings' | 'traffic' | 'gis2'
+export type View = 'orders' | 'history' | 'map' | 'trip' | 'marks' | 'chat' | 'settings' | 'traffic' | 'gis2'
 export type ConnectionState = 'online' | 'syncing' | 'offline'
 
 /**
@@ -37,9 +37,10 @@ export type ConnectionState = 'online' | 'syncing' | 'offline'
  *   routing — заявку приняли, строим маршрут (2ГИС Routing API);
  *   route_ready — маршрут построен, можно переходить к фотофиксации;
  *   prep — предрейсовые фото (ТС × 3, документы заявки, ВУ, паспорт);
- *   in_progress — «Начать маршрут» нажата, рейс идёт.
+ *   in_progress — «Начать маршрут» нажата, рейс идёт (открываются все доступы);
+ *   completed — рейс завершён, заявка в «Истории», ждём новую из 1С.
  */
-export type OrderStage = 'idle' | 'routing' | 'route_ready' | 'prep' | 'in_progress'
+export type OrderStage = 'idle' | 'routing' | 'route_ready' | 'prep' | 'in_progress' | 'completed'
 
 export interface PretripStepState {
   id: string
@@ -106,6 +107,8 @@ interface AzmzState {
   orderStage: OrderStage
   /** Шаги фотофиксации активной заявки. */
   pretrip: PretripStepState[]
+  /** Выполненные заявки — вкладка «История» (этап 1; далее переедет в настройки). */
+  orderHistory: HistoryEntry[]
 
   /** Реальный маршрут 2ГИС (строится на стадии routing, null — демо-геометрия). */
   realRoute: RealRoute | null
@@ -155,6 +158,8 @@ interface AzmzState {
   startRoute: () => void
   /** Повторный запрос маршрута 2ГИС (если в прошлый раз был фолбэк). */
   refetchRealRoute: () => void
+  /** Рейс завершён: заявка → «История», ждём новую из 1С. */
+  completeActiveTrip: () => void
 
   resetDemo: () => void
 }
@@ -207,6 +212,7 @@ export const useAzmz = create<AzmzState>()(
       activeOrderNumber: null,
       orderStage: 'idle',
       pretrip: [],
+      orderHistory: DEMO_HISTORY,
 
       realRoute: null,
       realRouteStatus: 'idle',
@@ -444,7 +450,15 @@ export const useAzmz = create<AzmzState>()(
       },
 
       // --- воркфлоу заявки из 1С ------------------------------------------------
-      setOrders: (orders) => set({ orders }),
+      // merge, а не замена: локальный статус «выполнена» главнее демо-сида 1С,
+      // иначе после рефреша выполненная заявка вернётся в список назначенных
+      setOrders: (incoming) =>
+        set((s) => ({
+          orders: incoming.map((o) => {
+            const local = s.orders.find((x) => x.number === o.number)
+            return local?.status === 'DONE' ? { ...o, status: 'DONE' as const } : o
+          }),
+        })),
       acceptOrder: (number) => {
         if (get().activeOrderNumber) return
         set({ activeOrderNumber: number, orderStage: 'routing', realRouteStatus: 'loading' })
@@ -507,6 +521,67 @@ export const useAzmz = create<AzmzState>()(
         }
         get().showToast('Маршрут проложен — вы в пути. Рейс Z-1067')
       },
+      completeActiveTrip: () => {
+        const s = get()
+        const o = s.orders.find((x) => x.number === s.activeOrderNumber)
+        if (!o) return
+        const entry: HistoryEntry = {
+          number: o.number,
+          client: o.client,
+          cargo: o.cargo,
+          fromLabel: o.fromLabel,
+          toLabel: o.toLabel,
+          distanceKm: s.realRoute ? Math.round(s.realRoute.lengthM / 1000) : o.distanceKm,
+          vehicle: o.vehicle,
+          completedAt: new Date().toISOString(),
+          durationMin: s.realRoute ? Math.max(1, Math.round(s.realRoute.durationS / 60)) : o.durationMin,
+          status: 'DONE',
+        }
+        set({
+          orderHistory: [entry, ...s.orderHistory.filter((h) => h.number !== entry.number)],
+          // заявка уходит из диспетчерского списка — помечаем выполненной
+          orders: s.orders.map((x) => (x.number === o.number ? { ...x, status: 'DONE' as const } : x)),
+          activeOrderNumber: null,
+          orderStage: 'completed',
+          pretrip: [],
+          realRoute: null,
+          realRouteStatus: 'idle',
+          simRunning: false,
+          simProgressF: START_F,
+          simSpeedKmh: 0,
+          view: 'orders',
+        })
+        get().showToast('Рейс завершён — заявка сохранена в «Истории»')
+        // обратный канал в 1С: рейс закрыт (в проде — статус заявки «Выполнен»)
+        void fetch('/api/1c/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: o.number, action: 'COMPLETE_TRIP' }),
+        }).catch(() => {
+          /* тестовый режим: ответ 1С не блокирует водительский флоу */
+        })
+        // имитация потока 1С: через 7 с диспетчерская назначает следующую заявку
+        window.setTimeout(() => {
+          const st = get()
+          if (st.activeOrderNumber || st.orderStage !== 'completed') return
+          const next = st.orders.find((x) => x.status === 'DISPATCH')
+          if (!next) return
+          set({
+            orders: st.orders.map((x) =>
+              x.number === next.number ? { ...x, status: 'ASSIGNED' as const, assignedBy: 'Диспетчер Е. Крылова' } : x,
+            ),
+          })
+          // и фиксируем назначение в демо-1С, чтобы рефреш не сбросил статус
+          void fetch('/api/1c/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: next.number, action: 'ASSIGN' }),
+          }).catch(() => {
+            /* тестовый режим */
+          })
+          get().showToast(`Из 1С: назначена заявка ${next.number} — откройте «Главную»`)
+        }, 7_000)
+      },
 
       resetDemo: () => {
         if (typeof window !== 'undefined') {
@@ -540,6 +615,7 @@ export const useAzmz = create<AzmzState>()(
         orders: s.orders,
         activeOrderNumber: s.activeOrderNumber,
         orderStage: s.orderStage,
+        orderHistory: s.orderHistory,
         realRoute: s.realRoute,
         realRouteStatus: s.realRouteStatus,
         // превью фото не персистим: dataURL раздувает localStorage (квота 5 МБ)

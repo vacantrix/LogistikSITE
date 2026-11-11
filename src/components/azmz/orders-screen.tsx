@@ -1,15 +1,17 @@
 'use client'
 
 /**
- * Экран «Заявки» — новый вход водителя в приложение (поток 1С).
+ * Экран «Главная» — стартовый экран водителя (поток 1С).
  *
- * Сценарий (тестовый режим, заявки — из /api/1c/orders, в проде — HTTP-сервис 1С):
- *   1. Диспетчерская назначает заявку → водитель видит её в списке.
- *   2. «Взять заявку» → POST ACCEPT в 1С → строится маршрут (демо-пауза,
- *      в проде — 2ГИС Routing API: грузовик, пробки, альтернативы).
+ * Алгоритм (тестовый режим, заявки — из /api/1c/orders, в проде — HTTP-сервис 1С):
+ *   1. Приложение открывается сразу на заявке: пока заявка не пришла — экран
+ *      ожидания, доступы закрыты (только Главная / История / Настройки).
+ *   2. Заявка назначена → «Взять заявку» → POST ACCEPT в 1С → строится маршрут
+ *      (в проде — 2ГИС Routing API: грузовик, пробки, альтернативы).
  *   3. Предрейсовая фотофиксация: ТС бок/голова/сзади, документы по заявке,
  *      ВУ и паспорт. Каждый шаг уходит в 1С (POST PRETRIP_STEP).
- *   4. Все шаги закрыты → кнопка «Начать маршрут» → навигация на карте.
+ *   4. Все шаги закрыты → кнопка «Начать маршрут» → навигация и остальное
+ *      приложение (пометки, офис, 2ГИС) открывается.
  *
  * Фото: <input capture> открывает камеру телефона; на десктопе — выбор файла;
  * кнопка «Демо-снимок» позволяет пройти флоу без камеры. Превью сжимается
@@ -27,6 +29,7 @@ import {
   LoaderCircle,
   MapPin,
   Play,
+  Radar,
   Truck,
 } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
@@ -360,7 +363,8 @@ export function OrdersScreen() {
   }
 
   // --- список «новых» заявок --------------------------------------------------
-  const listOrders = orders.filter((o) => o.number !== activeOrderNumber)
+  const anyAssigned = orders.some((o) => o.status === 'ASSIGNED')
+  const listOrders = orders.filter((o) => o.number !== activeOrderNumber && o.status !== 'DONE')
   const detail = selected ? orders.find((o) => o.number === selected) : null
 
   const orderCard = (o: Order1C, clickable: boolean) => {
@@ -421,9 +425,9 @@ export function OrdersScreen() {
             </button>
           ) : null}
           <div className="flex-1 min-w-0">
-            <div className="text-[15px] font-black text-[#15202B] leading-tight">Заявки</div>
+            <div className="text-[15px] font-black text-[#15202B] leading-tight">Главная</div>
             <div className="text-[10.5px] text-[#64748B] leading-tight">
-              Из 1С: Сбыт → ТС и готовность → Диспетчерская
+              Заявки из 1С: Сбыт → ТС и готовность → Диспетчерская
               {refreshedAt ? ' · обновлено' : offlineMode ? ' · офлайн: локальные данные' : ''}
             </div>
           </div>
@@ -503,6 +507,30 @@ export function OrdersScreen() {
 
         {/* активный воркфлоу */}
         {activeFlow}
+
+        {/* рейс завершён: заявка ушла в «Историю», ждём новую из 1С */}
+        {!active && orderStage === 'completed' && !anyAssigned && (
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 flex flex-col items-center gap-2 text-center">
+            <CheckCircle2 className="h-9 w-9 text-[#22C55E]" />
+            <div className="text-[14px] font-bold text-[#15202B]">Рейс завершён</div>
+            <div className="text-[12px] text-[#64748B] leading-snug">
+              Заявка сохранена в «Истории». Как только диспетчерская назначит следующую — она появится здесь.
+            </div>
+          </div>
+        )}
+
+        {/* заявки ещё нет: стартовый экран ожидания — доступы закрыты */}
+        {!active && orderStage !== 'completed' && !anyAssigned && (
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-5 flex flex-col items-center gap-2 text-center">
+            <div className="h-12 w-12 rounded-full bg-[#F97316]/12 flex items-center justify-center">
+              <Radar className="h-6 w-6 text-[#F97316] animate-pulse" />
+            </div>
+            <div className="text-[14px] font-bold text-[#15202B]">Ожидание заявки из 1С…</div>
+            <div className="text-[12px] text-[#64748B] leading-snug">
+              Доступы откроются, когда придёт заявка: план рейса, маршрут, фотофиксация и навигация.
+            </div>
+          </div>
+        )}
 
         {/* заголовок списка */}
         {!detail && !activeOrderNumber && (

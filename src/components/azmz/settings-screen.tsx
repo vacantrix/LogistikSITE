@@ -7,7 +7,7 @@
  * офиса, журнал операций. Карта остаётся фоном сверху.
  */
 
-import { ChevronLeft, Map as MapIcon, Radio, RotateCcw, Sliders, Zap } from 'lucide-react'
+import { ChevronLeft, History, Map as MapIcon, Radio, RotateCcw, Sliders, Zap } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { ConnectionChip } from '@/components/azmz/connection-chip'
 import { syncNow } from '@/lib/sync'
@@ -24,6 +24,7 @@ export function SettingsScreen() {
   const cursor = useAzmz((s) => s.cursor)
   const lastSyncAt = useAzmz((s) => s.lastSyncAt)
   const traffic = useAzmz((s) => s.traffic)
+  const orderHistory = useAzmz((s) => s.orderHistory)
   const showToast = useAzmz((s) => s.showToast)
   const resetDemo = useAzmz((s) => s.resetDemo)
 
@@ -129,6 +130,24 @@ export function SettingsScreen() {
               </span>
             </div>
           ))}
+        </Section>
+
+        <Section icon={<History className="h-4 w-4 text-[#F97316]" />} title="История рейсов">
+          <div className="flex items-center justify-between gap-3 py-1.5">
+            <div>
+              <div className="text-[13px] text-[#15202B] font-medium">Выполненных заявок: {orderHistory.length}</div>
+              <div className="text-[11px] text-[#94A3B8]">Этап 1 — отдельной вкладкой; в следующем релизе раздел переедет сюда</div>
+            </div>
+            <button
+              onClick={() => {
+                setView('history')
+                showToast('История открыта — вкладка внизу')
+              }}
+              className="h-9 px-3 rounded-xl bg-[#15202B] text-white text-[12px] font-bold shrink-0"
+            >
+              Открыть
+            </button>
+          </div>
         </Section>
 
         <Section icon={<Sliders className="h-4 w-4 text-[#F97316]" />} title="О приложении">

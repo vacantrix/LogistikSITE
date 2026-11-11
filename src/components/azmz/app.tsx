@@ -1,18 +1,22 @@
 'use client'
 
 /**
- * Корневой шелл приложения водителя АЗМЗ. Карта — ПОСТОЯННЫЙ фон: экраны
- * «Рейс», «Пометки», «Офис», «Настройки» и «Пробки» открываются шторками
- * (bottom sheets) поверх карты, как в навигационных приложениях. Мобильный
- * кадр (по мокапам) + настольные подсказки демо.
+ * Корневой шелл приложения водителя АЗМЗ. Стартовый экран — «Главная» (заявка
+ * из 1С). Карта — ПОСТОЯННЫЙ фон; экраны открываются шторками (bottom sheets)
+ * поверх карты, как в навигационных приложениях.
+ *
+ * Доступы: пока заявка не взята и рейс не начат, внизу только «Главная»,
+ * «История» и «Настройки». После предрейсовых фото и «Начать маршрут»
+ * открывается всё остальное: навигация, «Пометки», «Офис», «2ГИС».
  */
 
 import { useEffect, useState } from 'react'
-import { BatteryMedium, ClipboardList, Layers, MapPin, MessageSquare, Settings, TrafficCone } from 'lucide-react'
+import { BatteryMedium, ClipboardList, History, Layers, MapPin, MessageSquare, Settings, TrafficCone } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { useSimTicker, useSyncEngine } from '@/lib/sync'
 import { MapScreen } from '@/components/azmz/map-screen'
 import { OrdersScreen } from '@/components/azmz/orders-screen'
+import { HistoryScreen } from '@/components/azmz/history-screen'
 import { TripScreen } from '@/components/azmz/trip-screen'
 import { MarksScreen } from '@/components/azmz/marks-screen'
 import { ChatScreen } from '@/components/azmz/chat-screen'
@@ -35,9 +39,12 @@ export default function App() {
   const setEventDialog = useAzmz((s) => s.setEventDialog)
   const orders = useAzmz((s) => s.orders)
   const activeOrderNumber = useAzmz((s) => s.activeOrderNumber)
+  const orderStage = useAzmz((s) => s.orderStage)
 
   const unreadNotes = notes.filter((n) => !n.readAt).length
   const availableOrders = orders.filter((o) => o.status === 'ASSIGNED' && o.number !== activeOrderNumber).length
+  // доступы: пока рейс не начат (фото не закрыты), приложение ограничено тремя вкладками
+  const unlocked = orderStage === 'in_progress'
   const [clock, setClock] = useState('')
   useEffect(() => {
     const upd = () => setClock(`${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`)
@@ -46,11 +53,24 @@ export default function App() {
     return () => clearInterval(t)
   }, [])
 
-  const items: { key: View; icon: React.ReactNode; label: string; badge?: number; tab: View }[] = [
-    { key: 'orders', tab: 'orders', icon: <ClipboardList className="h-5 w-5" />, label: 'Заявки', badge: availableOrders },
-    { key: 'marks', tab: 'marks', icon: <MapPin className="h-5 w-5" />, label: 'Пометки', badge: pendingMarks.length },
-    { key: 'chat', tab: 'chat', icon: <MessageSquare className="h-5 w-5" />, label: 'Офис', badge: unreadNotes },
-    { key: 'gis2', tab: 'gis2', icon: <Layers className="h-5 w-5" />, label: '2ГИС' },
+  // если прошлый сеанс оставил нас в закрытом разделе — возвращаем на «Главную»
+  useEffect(() => {
+    if (!hydrated || unlocked) return
+    if (view === 'trip' || view === 'marks' || view === 'chat' || view === 'traffic' || view === 'gis2') {
+      setView('orders')
+    }
+  }, [hydrated, unlocked, view, setView])
+
+  const items: { key: View; icon: React.ReactNode; label: string; badge?: number; tab: View; locked?: boolean }[] = [
+    { key: 'orders', tab: 'orders', icon: <ClipboardList className="h-5 w-5" />, label: 'Главная', badge: availableOrders },
+    { key: 'history', tab: 'history', icon: <History className="h-5 w-5" />, label: 'История' },
+    ...(unlocked
+      ? [
+          { key: 'marks' as View, tab: 'marks' as View, icon: <MapPin className="h-5 w-5" />, label: 'Пометки', badge: pendingMarks.length },
+          { key: 'chat' as View, tab: 'chat' as View, icon: <MessageSquare className="h-5 w-5" />, label: 'Офис', badge: unreadNotes },
+          { key: 'gis2' as View, tab: 'gis2' as View, icon: <Layers className="h-5 w-5" />, label: '2ГИС' },
+        ]
+      : []),
     { key: 'settings', tab: 'settings', icon: <Settings className="h-5 w-5" />, label: 'Настройки' },
   ]
 
@@ -82,6 +102,11 @@ export default function App() {
               {view === 'orders' && (
                 <Sheet height="h-[88%]">
                   <OrdersScreen />
+                </Sheet>
+              )}
+              {view === 'history' && (
+                <Sheet height="h-[84%]">
+                  <HistoryScreen />
                 </Sheet>
               )}
               {view === 'trip' && (
@@ -124,7 +149,7 @@ export default function App() {
           )}
         </div>
 
-        {/* нижняя панель навигации — как в мокапе */}
+        {/* нижняя панель навигации: Главная / История / (доступы) / Настройки */}
         <nav className="bg-[#101E2E] h-16 shrink-0 flex items-stretch" aria-label="Главное меню">
           {items.map((it) => {
             const active =
@@ -202,11 +227,11 @@ function SidePanel({ className = '' }: { className?: string }) {
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[13px] leading-relaxed">
         <div className="text-white font-semibold mb-2">Сценарий демо</div>
         <ol className="list-decimal ml-4 space-y-1.5 text-slate-300">
-          <li>«Заявки» (из 1С): взять заявку → маршрут → фото ТС и документов → «Начать маршрут».</li>
-          <li>Карта — постоянный фон: шторки не закрывают движение.</li>
+          <li>Приложение открывается на заявке: взять → маршрут 2ГИС → фото ТС и документов → «Начать маршрут».</li>
+          <li>До старта рейса внизу только «Главная», «История» и «Настройки» — доступы закрыты.</li>
+          <li>После старта открываются «Пометки», «Офис», «2ГИС»; карта — постоянный фон.</li>
           <li>Чип «Пробки N» сверху — слой трафика на маршруте и улицах.</li>
-          <li>«Отметить событие» — 8 типов, работает без сети.</li>
-          <li>Офлайн-режим в Настройках: очередь + прошлый снимок пробок.</li>
+          <li>Прибытие → «Завершить рейс» → заявка уходит в «Историю», из 1С приходит новая.</li>
         </ol>
       </div>
     </div>
