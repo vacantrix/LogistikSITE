@@ -400,3 +400,43 @@ Traffic Stats: RU-данные 2014 г.; HERE ушла в 2022; Google слой 
 тоннаж, пропуска) для автоподбора в диспетчерской; статусная модель заявки
 в 1С (новая → назначена → в работе → закрыта); формат печатной формы
 предрейсового осмотра.
+
+---
+
+## 14. Иконка и сборка APK без Android Studio
+
+### 14.1. Иконка
+
+Иконка сгенерирована в фирменных цветах дизайн-системы (тёмно-синий `#101E2E`
++ оранжевый `#F97316`, мотив «лого-квадрат с галочкой») и лежит в
+`android/app/src/main/res/`:
+
+| Что | Где |
+|---|---|
+| Legacy-иконки лаунчера (API < 26) | `mipmap-{m,h,xh,xxh,xxxh}dpi/ic_launcher.png`, рядом `ic_launcher_round.png` (круг) |
+| Adaptive-иконка (API 26+) | `mipmap-anydpi-v26/ic_launcher.xml` + `ic_launcher_background.png` / `ic_launcher_foreground.png` (108dp-канвасы во всех плотностях) |
+
+Веб-версия использует тот же рисунок: `public/icons/` (192/512, maskable,
+apple-touch 180, favicon.ico) и `public/manifest.webmanifest`.
+
+### 14.2. Сборка APK через GitHub Actions (без локальных инструментов)
+
+В репозитории есть workflow `.github/workflows/android-apk.yml` (JDK 17 +
+Gradle 8.9, задача `assembleDebug`). Порядок:
+
+1. Завести репозиторий на GitHub и запушить каркас (`git init && git add . && git commit && git remote add origin … && git push -u origin main`) — или кнопкой «Upload files» через веб-интерфейс.
+2. Открыть вкладку **Actions** → «Android APK» → **Run workflow** (или просто пуш в `main` запустит сборку сам).
+3. Через 5–10 минут в забеге появится артефакт **azmz-driver-apk** с `app-debug.apk`.
+4. Скачать, передать на телефон и установить (см. отдельную инструкцию «Установка на телефон»).
+
+Первый прогон может упасть на компиляции каркаса (версии в
+`gradle/libs.versions.toml` ориентировочные) — по логу Actions правится
+точечно; после фиксации сборка зелёная и повторяется по кнопке.
+
+### 14.3. Что поменять перед пилотом
+
+- `versionCode`/`versionName` в `android/app/build.gradle.kts`.
+- Подпись релиза (`key.properties` + `signingConfigs`) — debug-ключ годится
+  только для внутреннего теста.
+- `android:usesCleartextTraffic="true"` в манифесте — выключить, когда сервер
+  переедет на HTTPS.
