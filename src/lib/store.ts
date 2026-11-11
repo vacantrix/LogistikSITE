@@ -26,7 +26,7 @@ import { START_F, routeLengthM } from '@/lib/demo/route-data'
 /** Реальная длина дорожной ломаной, м (63 км А-146) — для пересчёта f. */
 const ROUTE_TOTAL_M = routeLengthM()
 
-export type View = 'map' | 'trip' | 'marks' | 'chat' | 'settings' | 'traffic'
+export type View = 'map' | 'trip' | 'marks' | 'chat' | 'settings' | 'traffic' | 'gis2'
 export type ConnectionState = 'online' | 'syncing' | 'offline'
 
 export interface OutboxOp {

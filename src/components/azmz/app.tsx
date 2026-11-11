@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { BatteryMedium, MapPin, MessageSquare, Search, Settings, TrafficCone } from 'lucide-react'
+import { BatteryMedium, Layers, MapPin, MessageSquare, Search, Settings, TrafficCone } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { useSimTicker, useSyncEngine } from '@/lib/sync'
 import { MapScreen } from '@/components/azmz/map-screen'
@@ -17,6 +17,7 @@ import { MarksScreen } from '@/components/azmz/marks-screen'
 import { ChatScreen } from '@/components/azmz/chat-screen'
 import { SettingsScreen } from '@/components/azmz/settings-screen'
 import { TrafficScreen } from '@/components/azmz/traffic-screen'
+import { Gis2Screen } from '@/components/azmz/gis2-screen'
 import { MarkEventDialog } from '@/components/azmz/event-dialog'
 import type { View } from '@/lib/store'
 
@@ -45,6 +46,7 @@ export default function App() {
     { key: 'map', tab: 'map', icon: <Search className="h-5 w-5" />, label: 'Поиск' },
     { key: 'marks', tab: 'marks', icon: <MapPin className="h-5 w-5" />, label: 'Пометки', badge: pendingMarks.length },
     { key: 'chat', tab: 'chat', icon: <MessageSquare className="h-5 w-5" />, label: 'Офис', badge: unreadNotes },
+    { key: 'gis2', tab: 'gis2', icon: <Layers className="h-5 w-5" />, label: '2ГИС' },
     { key: 'settings', tab: 'settings', icon: <Settings className="h-5 w-5" />, label: 'Настройки' },
   ]
 
@@ -97,6 +99,11 @@ export default function App() {
                   <TrafficScreen />
                 </Sheet>
               )}
+              {view === 'gis2' && (
+                <Sheet height="h-[86%]">
+                  <Gis2Screen />
+                </Sheet>
+              )}
             </>
           )}
           {eventDialogOpen && <MarkEventDialog onClose={() => setEventDialog(false)} />}
@@ -110,7 +117,9 @@ export default function App() {
         {/* нижняя панель навигации — как в мокапе */}
         <nav className="bg-[#101E2E] h-16 shrink-0 flex items-stretch" aria-label="Главное меню">
           {items.map((it) => {
-            const active = view === it.tab || (it.tab === 'map' && (view === 'trip' || view === 'traffic'))
+            const active =
+              view === it.tab ||
+              (it.tab === 'map' && (view === 'trip' || view === 'traffic' || view === 'gis2'))
             return (
               <button
                 key={it.key}
@@ -216,7 +225,7 @@ function SidePanelDemo({ className = '' }: { className?: string }) {
           <li>Курсор → <span className="text-[#F97316]">GET /sync/pull</span> (канал 1)</li>
           <li>Пометки по bbox → <span className="text-[#F97316]">GET /sync/marks</span> (канал 2)</li>
           <li>Правила 8 событий = TripEventRules.kt</li>
-          <li>Карта: MapLibre + OSM/CARTO — без Yandex API</li>
+          <li>Карта: MapLibre + OSM; вкладка 2ГИС — MapGL, пробки, Routing API</li>
         </ul>
       </div>
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[12px] text-slate-400">
