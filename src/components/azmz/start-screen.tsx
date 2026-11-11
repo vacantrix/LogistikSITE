@@ -26,6 +26,7 @@ import {
 import { useAzmz } from '@/lib/store'
 import { PRETRIP_STEPS, type Order1C, type PretripStepDef } from '@/lib/demo/orders-data'
 import { ConnectionChip } from '@/components/azmz/connection-chip'
+import { InstallAppButton } from '@/components/pwa/install-button'
 
 const fmtDT = (iso: string) =>
   new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -430,6 +431,9 @@ export function StartScreen() {
         <div className="flex items-start justify-between gap-2 relative">
           <AemzLogo />
           <ConnectionChip />
+        </div>
+        <div className="relative mt-3 flex">
+          <InstallAppButton />
         </div>
         {offlineMode && (
           <div className="relative mt-3 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#FDBA74] bg-[#F97316]/15 rounded-full px-2.5 py-1">

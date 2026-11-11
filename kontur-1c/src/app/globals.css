@@ -1,0 +1,280 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   1С:Предприятие 8.3 (интерфейс «Такси») — визуальные примитивы
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.c1-root {
+  font-family: 'Segoe UI', Tahoma, Verdana, Arial, sans-serif;
+  font-size: 13px;
+  color: #1c1c1c;
+  background: #f4f4f4;
+}
+
+/* Кнопка команды 1С */
+.c1-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  padding: 0 9px;
+  border: 1px solid #b4b4b4;
+  border-radius: 3px;
+  background: linear-gradient(#ffffff, #f7f7f7);
+  font-size: 12px;
+  line-height: 1;
+  color: #1c1c1c;
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+}
+.c1-btn:hover:not(:disabled) {
+  background: linear-gradient(#eef6fd, #ddecfa);
+  border-color: #6f9fca;
+}
+.c1-btn:active:not(:disabled) {
+  background: linear-gradient(#d9e9f9, #cbe0f5);
+}
+.c1-btn:disabled {
+  color: #a2a2a2;
+  border-color: #d6d6d6;
+  background: #fafafa;
+}
+/* Кнопка-команда с оранжевой заливкой (как «Путевые листы» в 1С) */
+.c1-btn-accent {
+  background: linear-gradient(#ffc451, #f0a020);
+  border-color: #cf8a12;
+  color: #4a2f00;
+  font-weight: 600;
+}
+.c1-btn-accent:hover:not(:disabled) {
+  background: linear-gradient(#ffd06b, #f7ab2e);
+  border-color: #b97d10;
+}
+/* Кнопка-иконка без рамки (строка заголовка формы) */
+.c1-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 3px;
+  color: #4d4d4d;
+  cursor: default;
+}
+.c1-iconbtn:hover {
+  background: #e2e2e2;
+  color: #1c1c1c;
+}
+
+/* Поля ввода / выбор 1С */
+.c1-input,
+.c1-select {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid #b4b4b4;
+  border-radius: 3px;
+  background: #ffffff;
+  font-size: 12px;
+  color: #1c1c1c;
+  outline: none;
+}
+.c1-input::placeholder { color: #9a9a9a; }
+.c1-input:focus,
+.c1-select:focus {
+  border-color: #ffc94d;
+  box-shadow: 0 0 0 1px #ffc94d;
+}
+.c1-input:disabled,
+.c1-select:disabled { background: #f2f2f2; color: #8a8a8a; }
+
+/* Метка отбора (Период:, Число машин: …) */
+.c1-label { font-size: 12px; color: #4d4d4d; }
+
+/* ── Таблица 1С ─────────────────────────────────────────────────────────── */
+.c1-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.c1-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 26px;
+  padding: 0 6px;
+  background: linear-gradient(#fbfbfb, #efefef);
+  border-right: 1px solid #d9d9d9;
+  border-bottom: 1px solid #c3c3c3;
+  font-weight: 400;
+  text-align: left;
+  color: #1c1c1c;
+  white-space: nowrap;
+  user-select: none;
+}
+.c1-table td {
+  height: 24px;
+  padding: 2px 6px;
+  border-right: 1px solid #e7e7e7;
+  border-bottom: 1px solid #e7e7e7;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+.c1-table tbody tr { background: #ffffff; }
+.c1-table tbody tr:hover { background: #f2f8fe; }
+.c1-row-sel,
+.c1-table tbody tr.c1-row-sel,
+.c1-table tbody tr.c1-row-sel:hover { background: #dcebfb; }
+.c1-row-green { background: #d9efd9 !important; }
+.c1-row-green:hover { background: #cbe9cb !important; }
+.c1-row-cyan { background: #3fd0d5 !important; }
+.c1-row-cyan:hover { background: #38c6cb !important; }
+.c1-row-yellow { background: #ffd966 !important; }
+.c1-row-yellow:hover { background: #ffd04d !important; }
+.c1-row-pink { background: #f7d8da !important; }
+.c1-row-pink:hover { background: #f3cccc !important; }
+
+.c1-link { color: #0f5ca6; cursor: pointer; text-decoration: none; }
+.c1-link:hover { text-decoration: underline; }
+
+/* Полоса прокрутки в стиле 1С */
+.c1-scroll { scrollbar-width: thin; scrollbar-color: #c9c9c9 #f4f4f4; }
+.c1-scroll::-webkit-scrollbar { width: 13px; height: 13px; }
+.c1-scroll::-webkit-scrollbar-track { background: #f4f4f4; }
+.c1-scroll::-webkit-scrollbar-thumb { background: #cdcdcd; border: 3px solid #f4f4f4; border-radius: 8px; }
+.c1-scroll::-webkit-scrollbar-thumb:hover { background: #b0b0b0; }
+
+/* Разделитель панелей 1С */
+.c1-splitter {
+  height: 5px;
+  background: #dcdcdc;
+  border-top: 1px solid #c3c3c3;
+  border-bottom: 1px solid #ffffff;
+  cursor: row-resize;
+}

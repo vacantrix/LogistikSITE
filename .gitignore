@@ -55,3 +55,9 @@ server.log
 # session artifacts
 tool-results/
 upload/
+
+# Платформа «Контур 1С» (развёрнута из handoff-архива)
+kontur-1c/node_modules/
+kontur-1c/.next/
+kontur-1c/dev.log
+kontur-1c/tsconfig.tsbuildinfo

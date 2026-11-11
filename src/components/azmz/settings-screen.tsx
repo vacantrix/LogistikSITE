@@ -10,6 +10,7 @@
 import { ChevronLeft, History, Map as MapIcon, Radio, RotateCcw, Sliders, Zap } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { ConnectionChip } from '@/components/azmz/connection-chip'
+import { InstallAppButton } from '@/components/pwa/install-button'
 import { syncNow } from '@/lib/sync'
 import { DEVICE_ID, DRIVER_NAME, VEHICLE_LABEL } from '@/lib/demo/route-data'
 import { fmtClock, timeAgo } from '@/lib/format'
@@ -55,6 +56,7 @@ export function SettingsScreen({ inSheet = false }: { inSheet?: boolean }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <InstallAppButton variant="block" />
         <Section icon={<Sliders className="h-4 w-4 text-[#F97316]" />} title="Смена и устройство">
           <Row k="Водитель" v={DRIVER_NAME} />
           <Row k="ТС" v={VEHICLE_LABEL} />

@@ -1,0 +1,329 @@
+// «Контур 1С» — эмулятор учётного контура 1С для приложения водителя «АЗМЗ Логистика»
+// Схема повторяет механику 1С: справочники (НСИ), документы, регистры, журнал регистрации,
+// план обмена (SyncJournal), идемпотентность push (SyncOperation).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // демо; для стенда — postgresql в DATABASE_URL
+  url      = env("DATABASE_URL")
+}
+
+// ─── Нумератор документов («1С»: префикс организации, периодичность, счётчик) ──
+
+model NumberCounter {
+  year  String @id // "2026"
+  last  Int    @default(1000)
+}
+
+// ─── Справочники («1С»: НСИ) ───────────────────────────────────────────────
+
+model Contractor {                           // Контрагенты
+  id        String   @id @default(uuid())
+  name      String
+  inn       String?
+  kind      String                            // customer | shipper | consignee
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  requests  TransportRequest[]
+}
+
+model Vehicle {                              // Транспортные средства
+  id         String   @id @default(uuid())
+  plate      String   @unique                // госномер
+  model      String                            // «МАЗ 5440»
+  kind       String                            // tractor | tipper | van
+  bodyType   String                            // tarp | fridge | flatbed | tank
+  capacityT  Float                             // грузоподъёмность, т
+  volumeM3   Float?
+  readiness  String   @default("ready")        // ready | maintenance | repair
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  requests   TransportRequest[]
+}
+
+model Trailer {                              // Прицепы
+  id        String   @id @default(uuid())
+  plate     String   @unique
+  model     String
+  type      String                            // tarp | fridge | flatbed
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  requests  TransportRequest[]
+}
+
+model Driver {                               // Водители (сотрудники)
+  id        String   @id @default(uuid())
+  fullName  String
+  phone     String?
+  licenseNo String?                           // номер ВУ
+  isActive  Boolean  @default(true)
+  appId     String?  @unique                  // значение заголовка X-Driver-Id
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  requests  TransportRequest[]
+}
+
+model Location {                             // Пункты погрузки/выгрузки
+  id               String @id @default(uuid())
+  name             String
+  address          String
+  lat              Float
+  lon              Float
+  geofenceRadiusM  Int    @default(300)
+  outgoingRequests TransportRequest[] @relation("fromLoc")
+  incomingRequests TransportRequest[] @relation("toLoc")
+}
+
+// ─── Документы ─────────────────────────────────────────────────────────────
+
+model TransportRequest {                     // «Заказ на ТС»
+  id              String    @id @default(uuid())
+  number          String    @unique          // ЗК-2026/0001 (нумератор)
+  externalId      String    @unique @default(uuid()) // GUID «объекта 1С»
+  createdAt       DateTime  @default(now())
+  status          String                     // NEW | DISPATCH | ASSIGNED | ACCEPTED | PRETRIP | IN_PROGRESS | DONE | CANCELLED
+  contractorId    String
+  cargo           String                     // наименование груза
+  weightT         Float
+  fromLocationId  String
+  toLocationId    String
+  loadingAt       DateTime                   // плановая погрузка
+  unloadingWindow String                     // «сегодня 14:00–16:00»
+  docs            String                     // JSON-массив строк (для фотофиксации)
+  vehicleId       String?
+  trailerId       String?
+  driverId        String?
+  assignedBy      String?                    // «Диспетчер Е. Крылова»
+  assignedAt      DateTime?
+  closeReason     String?                    // причина закрытия/отмены
+  tripId          String?   @unique
+  contractor      Contractor @relation(fields: [contractorId], references: [id])
+  fromLocation    Location   @relation("fromLoc", fields: [fromLocationId], references: [id])
+  toLocation      Location   @relation("toLoc", fields: [toLocationId], references: [id])
+  vehicle         Vehicle?   @relation(fields: [vehicleId], references: [id])
+  trailer         Trailer?   @relation(fields: [trailerId], references: [id])
+  driver          Driver?    @relation(fields: [driverId], references: [id])
+  trip            Trip?      @relation(fields: [tripId], references: [id])
+  statusHistory   StatusHistory[]
+  preTripInspection PreTripInspection?
+
+  @@index([status])
+}
+
+model Trip {                                 // Рейс — поля 1:1 с каркасом
+  id              String    @id @default(uuid())
+  tripCode        String    @unique          // = number заявки
+  status          String                     // assigned | in_progress | completed | cancelled
+  driverId        String?
+  vehicleId       String?
+  plannedStartAt  DateTime?
+  plannedFinishAt DateTime?
+  routeGeoJson    String?                    // GeoJSON LineString
+  routeStepsJson  String?                    // манёвры
+  routeDistanceM  Int?
+  routeDurationS  Int?
+  routeMinLat     Float?
+  routeMinLon     Float?
+  routeMaxLat     Float?
+  routeMaxLon     Float?
+  lastEventType   String?                    // автостатус из событий
+  lastEventAt     DateTime?
+  updatedAt       DateTime  @updatedAt
+  points          TripPoint[]
+  events          TripEvent[]
+  request         TransportRequest?
+}
+
+model TripPoint {
+  id                 String   @id @default(uuid())
+  tripId             String
+  seqNo              Int
+  kind               String   // loading | unloading | waypoint
+  name               String?
+  address            String?
+  lat                Float
+  lon                Float
+  geofenceRadiusM    Int      @default(300)
+  plannedArrivalAt   DateTime?
+  plannedDepartureAt DateTime?
+  trip               Trip     @relation(fields: [tripId], references: [id])
+
+  @@index([tripId])
+}
+
+model Waybill {                              // Путевой лист — 2-я очередь (каркас)
+  id        String   @id @default(uuid())
+  number    String   @unique
+  tripId    String   @unique
+  createdAt DateTime @default(now())
+}
+
+model PreTripInspection {                    // Предрейсовый осмотр (фотофиксация)
+  id         String   @id @default(uuid())
+  requestId  String   @unique
+  driverId   String
+  vehicleId  String?
+  createdAt  DateTime @default(now())
+  steps      PreTripStep[]
+  request    TransportRequest @relation(fields: [requestId], references: [id])
+}
+
+model PreTripStep {
+  id           String   @id @default(uuid())
+  inspectionId String
+  stepId       String   // veh_side | veh_front | veh_rear | order_docs | lic | passport
+  photoUrl     String?  // если photoDataUrl был передан
+  at           DateTime @default(now())
+  inspection   PreTripInspection @relation(fields: [inspectionId], references: [id])
+
+  @@unique([inspectionId, stepId])
+}
+
+// ─── Регистры ──────────────────────────────────────────────────────────────
+
+model StatusHistory {                        // «Регистр сведений: статусы»
+  id          Int      @id @default(autoincrement())
+  requestId   String
+  fromStatus  String?
+  toStatus    String
+  actor       String   // «Логист», «Диспетчер Е. Крылова», «driver:<uuid>»
+  comment     String?
+  at          DateTime @default(now())
+  request     TransportRequest @relation(fields: [requestId], references: [id])
+
+  @@index([requestId])
+}
+
+model RegistrationLog {                      // «Журнал регистрации» 1С
+  id        Int      @id @default(autoincrement())
+  user      String
+  action    String   // REQUEST_CREATE | ASSIGN | CANCEL | DRIVER_ACTION | PHOTO_VIEW | …
+  entity    String
+  entityId  String?
+  level     String   @default("info") // info | warning | error
+  at        DateTime @default(now())
+}
+
+// ─── Каркас приложения водителя (1:1 с миграциями V2–V7 каркаса) ───────────
+
+model TripEvent {
+  id                 String    @id @default(uuid())
+  tripId             String
+  tripPointId        String?
+  driverId           String
+  vehicleId          String
+  deviceId           String?
+  type               String    // DEPARTURE | ARRIVAL_LOADING | LOADING_DONE | REST_START | REST_END | ARRIVAL_UNLOADING | UNLOADING_DONE | TRIP_DONE
+  occurredAt         DateTime
+  source             String    // GEOFENCE | MANUAL | MANUAL_BACKDATED
+  lat                Float?
+  lon                Float?
+  note               String?
+  intervalClosedAt   DateTime?
+  intervalClosedBy   String?
+  intervalAutoClosed Boolean?
+  correctionOf       String?
+  editedAt           DateTime?
+  createdAt          DateTime  @default(now())
+  trip               Trip      @relation(fields: [tripId], references: [id])
+
+  @@index([tripId])
+}
+
+model RoadMark {
+  id              String   @id @default(uuid())
+  category        String   // POTHOLE | ROADWORKS | POLICE | ACCIDENT | CLOSED
+  polylineGeoJson String
+  comment         String?
+  ttlHours        Int      // 6 | 12 | 720
+  confirmCount    Int      @default(0)
+  outdatedCount   Int      @default(0)
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+  minLat          Float
+  minLon          Float
+  maxLat          Float
+  maxLon          Float
+
+  @@index([expiresAt])
+}
+
+model MarkVote {
+  id            Int      @id @default(autoincrement())
+  markId        String
+  voterDriverId String
+  vote          Int      // 1 | -1
+  createdAt     DateTime @default(now())
+
+  @@unique([markId, voterDriverId])
+}
+
+model MarkPublicationLog {
+  id          Int      @id @default(autoincrement())
+  driverId    String
+  publishedAt DateTime @default(now())
+
+  @@index([driverId, publishedAt])
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  driverId  String
+  tripId    String?
+  sender    String   // DRIVER | DISPATCHER
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([driverId])
+}
+
+model SystemNote {
+  id        String    @id @default(uuid())
+  driverId  String
+  kind      String    // ORDER_ASSIGNED | ORDER_CANCELLED | …
+  body      String
+  ref       String?   // JSON (id заявки/рейса)
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  @@index([driverId])
+}
+
+model SyncJournal {                          // «План обмена»: личный журнал водителя
+  seq       Int      @id @default(autoincrement())
+  driverId  String
+  entity    String   // TRIP | TRIP_POINT | TRIP_EVENT | CHAT_MESSAGE | SYSTEM_NOTE
+  op        String   // UPSERT | DELETE
+  payload   String   // JSON-снимок строки, camelCase, epoch millis
+  createdAt DateTime @default(now())
+
+  @@index([driverId, seq])
+}
+
+model SyncOperation {                        // Идемпотентность push
+  opId         String    @id
+  driverId     String
+  type         String    // TRIP_EVENT_CREATE | MARK_PUBLISH | MARK_VOTE | CHAT_SEND | NOTE_READ
+  payload      String
+  state        String    @default("PENDING") // APPLIED | DUPLICATE | REJECTED
+  rejectReason String?
+  attempts     Int       @default(0)
+  createdAt    DateTime  @default(now())
+  syncedAt     DateTime?
+}
+
+model TrafficSegment {                       // Канал 3: демо-генератор пробок
+  id        String   @id
+  title     String
+  geometry  String   // GeoJSON LineString
+  level     Int      // 1..10
+  speedKmh  Int
+  onRoute   Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
