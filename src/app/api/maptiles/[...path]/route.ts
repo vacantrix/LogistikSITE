@@ -135,14 +135,25 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   }
 
   try {
-    const res = await fetch(upstreamUrl, {
-      signal: AbortSignal.timeout(15_000),
-      headers: { accept: '*/*' },
-      // Next кэширует fetch сам — нам нужен наш собственный слой кэша
-      cache: 'no-store',
-    })
-    if (!res.ok || !res.body) {
-      return NextResponse.json({ error: `upstream ${res.status}` }, { status: 502 })
+    // ретрай один раз на 5xx/сети: апстрим-тайлсерверы иногда моргают,
+    // а 502 в браузере роняет плитку (и раньше — весь стиль)
+    let res: Response | null = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        res = await fetch(upstreamUrl, {
+          signal: AbortSignal.timeout(15_000),
+          headers: { accept: '*/*' },
+          // Next кэширует fetch сам — нам нужен наш собственный слой кэша
+          cache: 'no-store',
+        })
+        if ((res.ok && res.body) || res.status < 500) break
+      } catch (fetchErr) {
+        if (attempt === 1) throw fetchErr
+      }
+      await new Promise((r) => setTimeout(r, 450))
+    }
+    if (!res || !res.ok || !res.body) {
+      return NextResponse.json({ error: `upstream ${res?.status ?? 'network'}` }, { status: 502 })
     }
     const body = await res.arrayBuffer()
     const ct = res.headers.get('content-type') ?? contentTypeFor(sub)

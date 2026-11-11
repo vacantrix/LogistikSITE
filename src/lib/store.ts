@@ -22,12 +22,31 @@ import type {
   TripSnapshot,
 } from '@/lib/protocol'
 import { START_F, routeLengthM } from '@/lib/demo/route-data'
+import { DEMO_ORDERS, PRETRIP_STEPS, type Order1C } from '@/lib/demo/orders-data'
 
 /** Реальная длина дорожной ломаной, м (63 км А-146) — для пересчёта f. */
 const ROUTE_TOTAL_M = routeLengthM()
 
-export type View = 'map' | 'trip' | 'marks' | 'chat' | 'settings' | 'traffic' | 'gis2'
+export type View = 'orders' | 'map' | 'trip' | 'marks' | 'chat' | 'settings' | 'traffic' | 'gis2'
 export type ConnectionState = 'online' | 'syncing' | 'offline'
+
+/**
+ * Воркфлоу заявки (поток 1С → диспетчерская → водитель):
+ *   idle — заявка получена, водитель ещё не принял;
+ *   routing — заявку приняли, строим маршрут (2ГИС Routing API);
+ *   route_ready — маршрут построен, можно переходить к фотофиксации;
+ *   prep — предрейсовые фото (ТС × 3, документы заявки, ВУ, паспорт);
+ *   in_progress — «Начать маршрут» нажата, рейс идёт.
+ */
+export type OrderStage = 'idle' | 'routing' | 'route_ready' | 'prep' | 'in_progress'
+
+export interface PretripStepState {
+  id: string
+  done: boolean
+  photoAt?: number
+  /** Превью снимка (dataURL, уменьшенный до 360px) — НЕ персистится (квота localStorage). */
+  photo?: string
+}
 
 export interface OutboxOp {
   opId: string
@@ -78,6 +97,15 @@ interface AzmzState {
   traffic: TrafficSnapshot | null
   trafficSince: number
 
+  /** Заявки из 1С (демо-сид + refresh с /api/1c/orders). */
+  orders: Order1C[]
+  /** Номер активной заявки (взятой водителем). */
+  activeOrderNumber: string | null
+  /** Стадия воркфлоу заявки. */
+  orderStage: OrderStage
+  /** Шаги фотофиксации активной заявки. */
+  pretrip: PretripStepState[]
+
   simRunning: boolean
   simProgressF: number
   simSpeedKmh: number
@@ -114,6 +142,13 @@ interface AzmzState {
   setSimRunning: (on: boolean) => void
   advanceSim: (dtSec: number) => void
 
+  /** Воркфлоу заявки из 1С. */
+  setOrders: (orders: Order1C[]) => void
+  acceptOrder: (number: string) => void
+  beginPretrip: () => void
+  completePretripStep: (stepId: string, photo?: string) => void
+  startRoute: () => void
+
   resetDemo: () => void
 }
 
@@ -139,7 +174,7 @@ export const useAzmz = create<AzmzState>()(
   persist(
     (set, get) => ({
       hydrated: false,
-      view: 'map',
+      view: 'orders',
       connection: 'online',
       offlineMode: false,
       cursor: 0,
@@ -160,6 +195,11 @@ export const useAzmz = create<AzmzState>()(
       simRunning: false,
       simProgressF: START_F,
       simSpeedKmh: 0,
+
+      orders: DEMO_ORDERS,
+      activeOrderNumber: null,
+      orderStage: 'idle',
+      pretrip: [],
 
       toast: null,
       wizard: emptyWizard,
@@ -393,6 +433,36 @@ export const useAzmz = create<AzmzState>()(
         }
       },
 
+      // --- воркфлоу заявки из 1С ------------------------------------------------
+      setOrders: (orders) => set({ orders }),
+      acceptOrder: (number) => {
+        if (get().activeOrderNumber) return
+        set({ activeOrderNumber: number, orderStage: 'routing' })
+        get().showToast(`Заявка ${number} принята. Строим маршрут…`)
+        // демо-пауза «прокладывания маршрута» (в проде — ответ 2ГИС Routing API)
+        setTimeout(() => {
+          if (get().orderStage === 'routing' && get().activeOrderNumber === number) {
+            set({ orderStage: 'route_ready' })
+          }
+        }, 2600)
+      },
+      beginPretrip: () =>
+        set({
+          orderStage: 'prep',
+          pretrip: PRETRIP_STEPS.map((d) => ({ id: d.id, done: false })),
+        }),
+      completePretripStep: (stepId, photo) =>
+        set((s) => ({
+          pretrip: s.pretrip.map((p) =>
+            p.id === stepId ? { ...p, done: true, photoAt: Date.now(), photo: photo ?? p.photo } : p,
+          ),
+        })),
+      startRoute: () => {
+        set({ orderStage: 'in_progress', view: 'map' })
+        get().setSimRunning(true)
+        get().showToast('Маршрут проложен — вы в пути. Рейс Z-1067')
+      },
+
       resetDemo: () => {
         if (typeof window !== 'undefined') {
           window.localStorage.removeItem('azmz-driver-store')
@@ -422,6 +492,11 @@ export const useAzmz = create<AzmzState>()(
         simRunning: s.simRunning,
         simProgressF: s.simProgressF,
         simSpeedKmh: s.simSpeedKmh,
+        orders: s.orders,
+        activeOrderNumber: s.activeOrderNumber,
+        orderStage: s.orderStage,
+        // превью фото не персистим: dataURL раздувает localStorage (квота 5 МБ)
+        pretrip: s.pretrip.map((p) => ({ id: p.id, done: p.done, photoAt: p.photoAt })),
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated()

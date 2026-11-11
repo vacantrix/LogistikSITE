@@ -8,10 +8,11 @@
  */
 
 import { useEffect, useState } from 'react'
-import { BatteryMedium, Layers, MapPin, MessageSquare, Search, Settings, TrafficCone } from 'lucide-react'
+import { BatteryMedium, ClipboardList, Layers, MapPin, MessageSquare, Settings, TrafficCone } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { useSimTicker, useSyncEngine } from '@/lib/sync'
 import { MapScreen } from '@/components/azmz/map-screen'
+import { OrdersScreen } from '@/components/azmz/orders-screen'
 import { TripScreen } from '@/components/azmz/trip-screen'
 import { MarksScreen } from '@/components/azmz/marks-screen'
 import { ChatScreen } from '@/components/azmz/chat-screen'
@@ -32,8 +33,11 @@ export default function App() {
   const pendingMarks = useAzmz((s) => s.pendingMarks)
   const eventDialogOpen = useAzmz((s) => s.eventDialogOpen)
   const setEventDialog = useAzmz((s) => s.setEventDialog)
+  const orders = useAzmz((s) => s.orders)
+  const activeOrderNumber = useAzmz((s) => s.activeOrderNumber)
 
   const unreadNotes = notes.filter((n) => !n.readAt).length
+  const availableOrders = orders.filter((o) => o.status === 'ASSIGNED' && o.number !== activeOrderNumber).length
   const [clock, setClock] = useState('')
   useEffect(() => {
     const upd = () => setClock(`${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`)
@@ -43,7 +47,7 @@ export default function App() {
   }, [])
 
   const items: { key: View; icon: React.ReactNode; label: string; badge?: number; tab: View }[] = [
-    { key: 'map', tab: 'map', icon: <Search className="h-5 w-5" />, label: 'Поиск' },
+    { key: 'orders', tab: 'orders', icon: <ClipboardList className="h-5 w-5" />, label: 'Заявки', badge: availableOrders },
     { key: 'marks', tab: 'marks', icon: <MapPin className="h-5 w-5" />, label: 'Пометки', badge: pendingMarks.length },
     { key: 'chat', tab: 'chat', icon: <MessageSquare className="h-5 w-5" />, label: 'Офис', badge: unreadNotes },
     { key: 'gis2', tab: 'gis2', icon: <Layers className="h-5 w-5" />, label: '2ГИС' },
@@ -70,10 +74,16 @@ export default function App() {
             <div className="absolute inset-0 flex items-center justify-center text-sm text-[#64748B]">Загрузка…</div>
           ) : (
             <>
-              {/* Карта — постоянный фон, живёт всегда (слои, грузовик, камера) */}
+              {/* Карта — постоянный фон, живёт всегда (слои, грузовик, камера).
+                  Навигационные слои включаются только после «Начать маршрут». */}
               <MapScreen />
 
               {/* Шторки поверх карты */}
+              {view === 'orders' && (
+                <Sheet height="h-[88%]">
+                  <OrdersScreen />
+                </Sheet>
+              )}
               {view === 'trip' && (
                 <Sheet height="h-[76%]">
                   <TripScreen />
@@ -119,7 +129,7 @@ export default function App() {
           {items.map((it) => {
             const active =
               view === it.tab ||
-              (it.tab === 'map' && (view === 'trip' || view === 'traffic' || view === 'gis2'))
+              (it.tab === 'orders' && (view === 'map' || view === 'trip' || view === 'traffic' || view === 'gis2'))
             return (
               <button
                 key={it.key}
@@ -192,9 +202,9 @@ function SidePanel({ className = '' }: { className?: string }) {
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[13px] leading-relaxed">
         <div className="text-white font-semibold mb-2">Сценарий демо</div>
         <ol className="list-decimal ml-4 space-y-1.5 text-slate-300">
+          <li>«Заявки» (из 1С): взять заявку → маршрут → фото ТС и документов → «Начать маршрут».</li>
           <li>Карта — постоянный фон: шторки не закрывают движение.</li>
           <li>Чип «Пробки N» сверху — слой трафика на маршруте и улицах.</li>
-          <li>Панель «123 км … Z-1067» → дашборд рейса шторкой.</li>
           <li>«Отметить событие» — 8 типов, работает без сети.</li>
           <li>Офлайн-режим в Настройках: очередь + прошлый снимок пробок.</li>
         </ol>

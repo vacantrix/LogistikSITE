@@ -14,6 +14,7 @@ import type { GeoJSONSource, Map as MlMap, Marker as MlMarker } from 'maplibre-g
 import {
   ArrowUp,
   ChevronRight,
+  ClipboardList,
   Construction,
   CornerUpLeft,
   CornerUpRight,
@@ -29,6 +30,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  MapPinPlus,
   Pin,
 } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
@@ -120,6 +122,7 @@ export function MapScreen() {
   const simSpeed = useAzmz((s) => s.simSpeedKmh)
   const wizard = useAzmz((s) => s.wizard)
   const setView = useAzmz((s) => s.setView)
+  const orderStage = useAzmz((s) => s.orderStage)
   const updateWizard = useAzmz((s) => s.updateWizard)
   const setEventDialog = useAzmz((s) => s.setEventDialog)
   const showToast = useAzmz((s) => s.showToast)
@@ -143,6 +146,8 @@ export function MapScreen() {
   const [mapEpoch, setMapEpoch] = useState(0)
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading')
   const styleFailCountRef = useRef(0)
+  /** Рейс запущен кнопкой «Начать маршрут» — до этого карта чистая (без маршрута/грузовика). */
+  const tripActive = orderStage === 'in_progress'
 
   /** Переключение режима сопровождения: ref и state меняются синхронно. */
   const setFollowMode = (v: boolean) => {
@@ -187,8 +192,11 @@ export function MapScreen() {
       map.on('error', (e: { error?: { message?: string } }) => {
         const msg = e?.error?.message ?? ''
         if (msg) console.warn('[azmz-map]', msg)
-        // стиль не загрузился — спускаемся по цепочке: 2ГИС-растр → Esri-растр → фон.
-        if (map.isStyleLoaded() === false) {
+        // Ошибка ОДНОГО тайла (AJAXError на /api/maptiles/...) — не повод рушить
+        // стиль: blank-плитка на зуме менее страшна, чем ложный сход на резерв.
+        // Фолбэк — только если не грузится сам стиль (не тайл-ошибка).
+        const isTileError = /api\/maptiles/.test(msg)
+        if (!isTileError && map.isStyleLoaded() === false) {
           styleFailCountRef.current += 1
           if (styleFailCountRef.current === 1) {
             setMapStatus('raster')
@@ -239,7 +247,7 @@ export function MapScreen() {
   useEffect(() => {
     const map = mapRef.current
     const ml = mlRef.current
-    if (!mapEpoch || !map || !ml || !trip) return
+    if (!mapEpoch || !map || !ml || !trip || !tripActive) return
     if (!map.getSource('route')) {
       map.addSource('route', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') } })
       map.addSource('traffic', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -279,13 +287,13 @@ export function MapScreen() {
     // камера стартует на грузовике (навигационный вид, как в мокапе 4)
     const p = pointAtFraction(simFRef.current)
     map.jumpTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4 })
-  }, [mapEpoch, trip])
+  }, [mapEpoch, trip, tripActive])
 
   // грузовик и движение камеры
   useEffect(() => {
     const map = mapRef.current
     const ml = mlRef.current
-    if (!mapEpoch || !map || !ml || truckRef.current) return
+    if (!mapEpoch || !map || !ml || !tripActive || truckRef.current) return
     const el = document.createElement('div')
     el.className = 'azmz-truck'
     el.innerHTML = `
@@ -295,7 +303,7 @@ export function MapScreen() {
     truckInnerRef.current = el.querySelector('.azmz-truck-inner')
     const p = pointAtFraction(simFRef.current)
     truckRef.current = new ml.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map)
-  }, [mapEpoch])
+  }, [mapEpoch, tripActive])
 
   // движение камеры и грузовика
   useEffect(() => {
@@ -549,7 +557,7 @@ export function MapScreen() {
           )}
 
           {/* баннер манёвра (мокап 1); тап — пауза/возобновление сопровождения */}
-          {nextManeuver && !arrived && (
+          {tripActive && nextManeuver && !arrived && (
             <button
               onClick={() => setFollowMode(!followRef.current)}
               className={`pointer-events-auto text-left bg-[#2563EB] text-white rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl ${wizard.step === 0 ? 'ml-12' : ''}`}
@@ -570,7 +578,7 @@ export function MapScreen() {
           )}
 
           {/* смарт-карточка прибытия (мокап 4) */}
-          {arrived && (
+          {tripActive && arrived && (
             <div className={`pointer-events-auto bg-white text-[#15202B] rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl border border-black/5 ${wizard.step === 0 ? 'ml-12' : ''}`}>
               <div className="flex-1">
                 <div className="text-[13px] font-semibold">Вы прибыли в точку выгрузки</div>
@@ -586,7 +594,7 @@ export function MapScreen() {
         /* подсказка мастера (мокап 2, «2 из 3») */
         <div className="absolute top-3 left-3 right-3 z-30 flex flex-col gap-2">
           <div className="bg-[#101E2E]/95 text-white rounded-2xl px-4 py-3 flex items-center gap-3 shadow-xl">
-            <Pin className="h-5 w-5 text-[#FACC15] shrink-0" />
+            <MapPinPlus className="h-5 w-5 text-[#FACC15] shrink-0" />
             <div className="flex-1">
               <div className="text-[13px] font-semibold">
                 {wizard.step === 1 ? 'Укажите начало участка' : 'Укажите конец участка'}
@@ -628,7 +636,7 @@ export function MapScreen() {
         </div>
       )}
       {wizard.step === 0 && (
-        <div className="absolute right-3 top-28 z-20 flex flex-col gap-2">
+        <div className="absolute right-1 top-28 z-20 flex flex-col gap-2">
           <MapBtn label="Приблизить" onClick={() => mapRef.current?.zoomIn()}>
             <ZoomIn className="h-5 w-5" />
           </MapBtn>
@@ -646,18 +654,20 @@ export function MapScreen() {
           >
             <Crosshair className="h-5 w-5" />
           </MapBtn>
+          {/* Пометка: только иконка — «добавить запись на карте» (MapPinPlus) */}
           <button
             onClick={() => updateWizard({ step: 1, start: undefined, end: undefined })}
-            className="h-11 bg-[#F97316] text-white rounded-xl shadow-lg flex items-center gap-1.5 px-3 text-[13px] font-bold"
+            className="h-10 w-10 rounded-xl border border-[#F97316] bg-[#F97316] text-white flex items-center justify-center shadow-lg"
+            aria-label="Пометка на карте — добавить запись"
+            title="Пометка на карте — добавить запись"
           >
-            <Pin className="h-4.5 w-4.5" />
-            Пометка
+            <MapPinPlus className="h-5 w-5" />
           </button>
         </div>
       )}
 
       {/* --- знак лимита и скорость --------------------------------------------- */}
-      {view === 'map' && (
+      {view === 'map' && tripActive && (
         <div className="absolute left-3 bottom-[104px] z-20 flex flex-col items-center gap-1.5">
           <div className="h-12 w-12 rounded-full bg-white border-[5px] border-[#DC2626] flex items-center justify-center shadow-lg">
             <span className="text-[#15202B] font-black text-lg leading-none">60</span>
@@ -675,8 +685,19 @@ export function MapScreen() {
         </div>
       )}
 
+      {/* до старта рейса карта чистая — подсказываем путь к заявкам */}
+      {view === 'map' && !tripActive && (
+        <button
+          onClick={() => setView('orders')}
+          className="absolute bottom-[104px] left-1/2 -translate-x-1/2 z-20 bg-[#101E2E]/90 border border-white/15 text-white text-[12px] font-semibold rounded-full pl-2.5 pr-3.5 h-9 shadow-xl flex items-center gap-2 whitespace-nowrap"
+        >
+          <ClipboardList className="h-4 w-4 text-[#F97316]" />
+          Возьмите заявку — вкладка «Заявки»
+        </button>
+      )}
+
       {/* --- панель данных рейса (мокап 1) — только когда карта «чистая» --------- */}
-      {view === 'map' && (
+      {view === 'map' && tripActive && (
         <button
           onClick={() => setView('trip')}
           className="absolute bottom-0 left-0 right-0 z-20 bg-[#101E2E] text-white px-4 py-3 flex items-end gap-4 text-left"
