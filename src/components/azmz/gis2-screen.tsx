@@ -113,13 +113,17 @@ export function Gis2Screen() {
   const [res, setRes] = useState<RoutingResp | null>(null)
   const [resMeta, setResMeta] = useState<{ latencyMs?: number; cached?: boolean } | null>(null)
   const [warn, setWarn] = useState<string | null>(null)
+  const [netErr, setNetErr] = useState<string | null>(null)
   const [shortRoute, setShortRoute] = useState(true)
 
   /** Нарисовать линию и зарегистрировать для очистки. */
   const drawLine = useCallback((map: MapglAny, coordinates: [number, number][], color: string, width: number) => {
-     
-    const line = (map as any).addLine({ coordinates, color, width, zIndex: 20 }) as MapglObj
-    drawnRef.current.push(line)
+    try {
+      const line = (map as any).addLine({ coordinates, color, width, zIndex: 20 }) as MapglObj
+      drawnRef.current.push(line)
+    } catch {
+      /* API карты недоступно (ключ без сервиса MapGL) — пропускаем украшение */
+    }
   }, [])
 
   const clearRouteArt = useCallback(() => {
@@ -171,12 +175,19 @@ export function Gis2Screen() {
         mapRef.current = map
 
         // Наш рейс: линия маршрута А-146 + точки погрузки/выгрузки.
-        drawLine(map, ROUTE_LNGLAT as [number, number][], '#0F172A', 4)
-         
-        drawnRef.current.push(new window.mapgl.Marker(map, { coordinates: [LOADING_POINT.lon, LOADING_POINT.lat] }) as MapglObj)
-         
-        drawnRef.current.push(new window.mapgl.Marker(map, { coordinates: [UNLOADING_POINT.lon, UNLOADING_POINT.lat] }) as MapglObj)
+        // Всё необязательное — в try/catch: при ключе без сервиса MapGL объект
+        // карты создаётся, но без рабочего API (addLine/Marker могут отсутствовать),
+        // и сбой украшений не должен убивать вкладку.
         setReady(true)
+        try {
+          drawLine(map, ROUTE_LNGLAT as [number, number][], '#0F172A', 4)
+           
+          drawnRef.current.push(new window.mapgl.Marker(map, { coordinates: [LOADING_POINT.lon, LOADING_POINT.lat] }) as MapglObj)
+           
+          drawnRef.current.push(new window.mapgl.Marker(map, { coordinates: [UNLOADING_POINT.lon, UNLOADING_POINT.lat] }) as MapglObj)
+        } catch {
+          /* украшения карты недоступны — панель и фолбэк продолжают работать */
+        }
         // MapGL при ключе без сервиса «MapGL JS API» не всегда бросает исключение —
         // он рисует заглушку в контейнере. Детектируем её и переходим в фолбэк.
         window.setTimeout(() => {
@@ -206,6 +217,7 @@ export function Gis2Screen() {
     if (checking) return
     setChecking(true)
     setWarn(null)
+    setNetErr(null)
     clearRouteArt()
     const pts =
       shortRoute
@@ -231,8 +243,6 @@ export function Gis2Screen() {
         }),
       })
       const data = (await r.json()) as RoutingResp
-      // DEBUG: проверить, что реально считает работающий бандл
-      console.log('[gis2-debug] status=', data.status, 'result=', (data.result ?? []).length, 'err=', data.error)
       setRes(data)
       setResMeta({ latencyMs: data.meta?.latencyMs, cached: data.meta?.cached })
 
@@ -268,22 +278,27 @@ export function Gis2Screen() {
         }
         setSegs(collected)
         const map = mapRef.current
-        if (map && window.mapgl && !mapRejected) {
+        // Рисуем только если у объекта карты реально есть рабочий API:
+        // при ключе без сервиса MapGL JS API объект создаётся, но addLine отсутствует
+        // (TypeError раньше затирал результат проверки — см. catch ниже).
+        const canDraw = !!map && !mapRejected && typeof map['addLine'] === 'function'
+        if (map && canDraw) {
           for (const s of collected) {
             drawLine(map, s.coords, COLORS[s.color] ?? COLORS['ignore'], s.color === 'slow' ? 6 : 4)
           }
         }
       }
-    } catch {
-      setRes({ error: 'network', message: 'Не удалось связаться с сервером демо' })
+    } catch (e) {
+      // Сетевой сбой не должен затирать предыдущий хороший результат — показываем
+      // отдельный хинт, данные панели остаются на месте.
+      console.warn('[gis2] проверка обстановки не удалась:', e)
+      setNetErr('Не удалось связаться с сервером демо — повторите проверку.')
     } finally {
       setChecking(false)
     }
   }, [checking, shortRoute, clearRouteArt, drawLine])
 
   const variants = res ? extractVariants(res) : []
-  // DEBUG: что видит рендер
-  console.log('[gis2-render] variants=', variants.length, 'segs=', segs.length, 'resStatus=', res?.status, 'resErr=', res?.error)
 
   return (
     <div className="flex-1 min-h-0 flex flex-col relative">
@@ -312,6 +327,12 @@ export function Gis2Screen() {
           <div className="bg-[#451A03]/95 border border-[#F97316] text-[#FED7AA] rounded-2xl px-4 py-3 text-[13px] flex items-start gap-2 shadow-xl">
             <TriangleAlert className="h-5 w-5 text-[#F97316] shrink-0 mt-0.5" />
             <span>{warn}</span>
+          </div>
+        )}
+
+        {netErr && (
+          <div className="bg-[#FEF2F2]/95 border border-[#FECACA] text-[#B91C1C] rounded-2xl px-4 py-2.5 text-[12px] shadow-xl">
+            {netErr}
           </div>
         )}
 
@@ -349,7 +370,7 @@ export function Gis2Screen() {
                     onChange={(e) => setShortRoute(e.target.checked)}
                     className="accent-[#F97316] h-4 w-4"
                   />
-                  Короткий тест: Абинск → Крымск (~15 км; лимит демо-ключа 50 км)
+                  Короткий тест: Абинск → Крымск (~15 км); сними галочку — полный рейс до Новороссийска (~65 км, подтверждён тестом T3)
                 </label>
               </div>
 
@@ -368,7 +389,7 @@ export function Gis2Screen() {
                 <div className="text-[12px] text-[#B91C1C] bg-[#FEF2F2] border border-[#FECACA] rounded-xl px-3 py-2">
                   Routing API: status {res.status || '—'}
                   {res.message ? ` — ${res.message}` : ''}
-                  {res.status === 'ROUTE_NOT_FOUND' ? '' : ' (для демо-ключа расстояние между точками ограничено 50 км)'}
+                  {res.status === 'ROUTE_NOT_FOUND' ? ' — проверьте точки маршрута' : ''}
                 </div>
               )}
 
