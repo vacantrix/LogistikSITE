@@ -55,6 +55,34 @@ const FALLBACK_STYLE = {
   layers: [{ id: 'bg', type: 'background' as const, paint: { 'background-color': '#DCE5EE' } }],
 }
 
+/**
+ * Резервная подложка: растровые PNG-тайлы (светлый Esri World Light Gray через
+ * наш прокси). Без глифов/спрайтов/TileJSON — работает там, где векторная
+ * цепочка ломается (промежуточные прокси, строгие firewall). Маршрут/пробки/
+ * пометки рисуются поверх неё тем же кодом слоёв.
+ */
+function rasterStyle() {
+  const base = typeof window === 'undefined' ? '' : window.location.origin
+  return {
+    version: 8 as const,
+    sources: {
+      esri: {
+        type: 'raster' as const,
+        tiles: [`${base}/api/maptiles/esri/{z}/{x}/{y}.png`],
+        tileSize: 256,
+        attribution: '© Esri · © OpenStreetMap contributors',
+      },
+    },
+    layers: [
+      { id: 'bg', type: 'background' as const, paint: { 'background-color': '#F3F5F7' } },
+      { id: 'esri', type: 'raster' as const, source: 'esri' },
+    ],
+  }
+}
+
+/** Состояние базовой карты — показывается плашкой на экране (диагностика). */
+type MapStatus = 'loading' | 'ready' | 'raster' | 'nogl'
+
 type LatLng = { lng: number; lat: number }
 
 export function MapScreen() {
@@ -81,15 +109,17 @@ export function MapScreen() {
   const stopMarkersRef = useRef<MlMarker[]>([])
   const wizMarkersRef = useRef<MlMarker[]>([])
   const followRef = useRef(true)
-  const retryedRef = useRef(false)
   const simFRef = useRef(simF)
   simFRef.current = simF
   const [follow, setFollow] = useState(true)
   const [sound, setSound] = useState(true)
   const [searchOpen, setSearchOpen] = useState(false)
   const [legendOpen, setLegendOpen] = useState(false)
-  /** Эпоха экземпляра карты: инкремент на 'load' — все слои/маркеры пересоздаются вместе с картой (устойчиво к hot-reload и StrictMode). */
+  /** Эпоха экземпляра карты: инкремент на 'load' и 'style.load' — все слои/маркеры
+   *  пересоздаются вместе с картой и после переключения стиля (fallback). */
   const [mapEpoch, setMapEpoch] = useState(0)
+  const [mapStatus, setMapStatus] = useState<MapStatus>('loading')
+  const styleFailCountRef = useRef(0)
 
   /** Переключение режима сопровождения: ref и state меняются синхронно. */
   const setFollowMode = (v: boolean) => {
@@ -108,6 +138,18 @@ export function MapScreen() {
         if (cfg) cfg.WORKER_URL = '/maplibre-gl-worker.mjs'
       } catch {}
       if (cancelled || !containerRef.current || mapRef.current) return
+      // без WebGL MapLibre молча остаётся пустым — проверяем и сообщаем честно
+      const mlAny = ml as unknown as { supported?: () => boolean }
+      const probe = document.createElement('canvas')
+      const supported =
+        typeof mlAny.supported === 'function'
+          ? mlAny.supported()
+          : !!(probe.getContext('webgl2') ?? probe.getContext('webgl'))
+      if (!supported) {
+        setMapStatus('nogl')
+        console.error('[azmz-map] WebGL недоступен — карта не может инициализироваться')
+        return
+      }
       mlRef.current = ml
       const map = new ml.Map({
         container: containerRef.current,
@@ -120,26 +162,40 @@ export function MapScreen() {
         fadeDuration: 120,
       })
       map.on('error', (e: { error?: { message?: string } }) => {
-        // базовая карта могла не загрузиться (сеть) — маршрут и пометки всё равно отрисуются на фоне
         const msg = e?.error?.message ?? ''
+        if (msg) console.warn('[azmz-map]', msg)
+        // стиль не загрузился — спускаемся по цепочке: вектор → растр → фон.
         if (map.isStyleLoaded() === false) {
-          map.setStyle(FALLBACK_STYLE)
-          // одна повторная попытка через 6 с: прокси/сеть могли моргнуть
-          if (!retryedRef.current) {
-            retryedRef.current = true
+          styleFailCountRef.current += 1
+          if (styleFailCountRef.current === 1) {
+            setMapStatus('raster')
+            try {
+              map.setStyle(rasterStyle() as never)
+            } catch {}
+          } else {
+            setMapStatus('raster')
+            map.setStyle(FALLBACK_STYLE)
+            // тихая попытка вернуться на растр через 8 с (сеть могла ожить)
             setTimeout(() => {
               try {
-                map.setStyle(LIGHT_STYLE_URL)
+                map.setStyle(rasterStyle() as never)
               } catch {}
-            }, 6_000)
+            }, 8_000)
           }
         }
-        if (msg) console.warn('[azmz-map]', msg)
       })
       mapRef.current = map
       mapGlobalRef.current = map
       ;(window as unknown as { __azmzMap?: MlMap }).__azmzMap = map
-      map.on('load', () => setMapEpoch((v) => v + 1))
+      map.on('load', () => {
+        setMapEpoch((v) => v + 1)
+        if (styleFailCountRef.current === 0) setMapStatus('ready')
+      })
+      // setStyle (fallback) не поднимает 'load' — пересоздаём слои по 'style.load'
+      map.on('style.load', () => {
+        setMapEpoch((v) => v + 1)
+        if (styleFailCountRef.current === 0) setMapStatus('ready')
+      })
       map.on('click', (e) => {
         const w = useAzmz.getState().wizard
         if (w.step === 1 || w.step === 2) useAzmz.getState().wizardTapPoint(e.lngLat.lng, e.lngLat.lat)
@@ -430,6 +486,13 @@ export function MapScreen() {
         }
       `}</style>
 
+      {/* --- статус базовой карты (диагностика) --------------------------------- */}
+      {mapStatus === 'nogl' && (
+        <div className="absolute top-16 left-3 right-3 z-40 bg-[#7F1D1D]/95 text-white rounded-2xl px-4 py-3 shadow-xl text-[13px] leading-snug">
+          <b>Карта не запускается: браузер не отдаёт WebGL.</b> Откройте демо в обычном Chrome / Яндекс.Браузере (не во встроенном окне мессенджера) или включите аппаратное ускорение. Маршрут, пробки и пометки при этом продолжают работать.
+        </div>
+      )}
+
       {/* --- верхние плашки ----------------------------------------------------- */}
       {!wizard.step || wizard.step === 3 ? (
         <div className="absolute top-3 left-3 right-3 z-20 flex flex-col gap-2 pointer-events-none">
@@ -454,6 +517,20 @@ export function MapScreen() {
             </button>
           </div>
           <OfflineHint />
+
+          {/* плашка состояния базовой карты: загрузка / резервный растр */}
+          {mapStatus === 'loading' && (
+            <div className="pointer-events-none self-start inline-flex items-center gap-1.5 bg-[#101E2E]/85 border border-white/15 text-white/85 text-[11px] font-medium rounded-full px-2.5 h-6 shadow w-fit">
+              <span className="h-2 w-2 rounded-full bg-[#FACC15] animate-pulse" />
+              Базовая карта загружается…
+            </div>
+          )}
+          {mapStatus === 'raster' && (
+            <div className="pointer-events-none self-start inline-flex items-center gap-1.5 bg-[#7C2D12]/90 border border-[#F97316]/40 text-[#FDBA74] text-[11px] font-medium rounded-full px-2.5 h-6 shadow w-fit">
+              <span className="h-2 w-2 rounded-full bg-[#F97316]" />
+              Базовая карта в резервном режиме (растр) — маршрут и пробки работают
+            </div>
+          )}
 
           {/* баннер манёвра (мокап 1); тап — пауза/возобновление сопровождения */}
           {nextManeuver && !arrived && (
@@ -565,6 +642,13 @@ export function MapScreen() {
           <div className="bg-[#101E2E]/90 text-white text-[12px] font-bold rounded-lg px-2 py-0.5 tabular-nums shadow">
             {Math.round(simRunning ? simSpeed : 0)}
           </div>
+        </div>
+      )}
+
+      {/* --- атрибуция OSM (обязательна для OSM/CARTO) --------------------------- */}
+      {view === 'map' && (
+        <div className="absolute right-2 bottom-[76px] z-10 text-[9px] leading-none text-[#334155]/85 bg-white/60 rounded px-1.5 py-0.5 pointer-events-none">
+          © OpenStreetMap contributors{mapStatus === 'raster' ? ' · © Esri' : ''}
         </div>
       )}
 

@@ -19,12 +19,15 @@ import { NextRequest, NextResponse } from 'next/server'
  * Маршруты (всё под /api/maptiles/):
  *   fonts/<fontstack>/<range>.pbf        → глифы (SDF-шрифты)
  *   sprites/<set>/<name>[.json|.png|@2x] → спрайты иконок
+ *   esri/{z}/{x}/{y}.png                 → резервный raster (Esri Light Gray)
  *   natural_earth/ne2sr/{z}/{x}/{y}.png  → raster-подложка Natural Earth
  *   planet                               → TileJSON (tiles переписываются)
  *   planet/<version>/{z}/{x}/{y}.pbf     → векторные тайлы планеты
  */
 
 const UPSTREAM = 'https://tiles.openfreemap.org'
+/** Растровый fallback: светлый Esri World Light Gray (без ключа, z/y/x!). */
+const UPSTREAM_ESRI = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile'
 
 /** Кэш: тайлы/шрифты/спрайты — 6–11 ч (стабильные), TileJSON — 5 мин. */
 const cache = new Map<string, { ct: string; body: ArrayBuffer; exp: number }>()
@@ -78,7 +81,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const sub = (path ?? []).join('/')
   if (!sub) return NextResponse.json({ error: 'bad path' }, { status: 400 })
 
-  const upstreamUrl = `${UPSTREAM}/${sub}`
+  // esri/{z}/{x}/{y} → светлый растровый Esri (у него порядок z/y/x!),
+  // остальное — OpenFreeMap
+  const parts = sub.split('/')
+  const isEsri = parts[0] === 'esri' && parts.length === 4
+  const upstreamUrl = isEsri
+    ? `${UPSTREAM_ESRI}/${parts[1]}/${parts[3]}/${parts[2]}`
+    : `${UPSTREAM}/${sub}`
   const ttl = sub === 'planet' ? 5 * 60_000 : 6 * 3_600_000 + Math.floor(Math.random() * 5 * 3_600_000)
 
   const hit = cacheGet(upstreamUrl)
