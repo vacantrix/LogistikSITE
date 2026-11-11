@@ -6,7 +6,7 @@
  * Алгоритм заказчика: водитель кликнул на приложение → открывается этот экран
  * (логотип АЭМЗ + большая кнопка «Взять заявку»). Пока заявка не пришла —
  * режим ожидания. Далее шаги воркфлоу на этом же экране:
- *   Взять заявку → маршрут 2ГИС → фотофиксация (ТС, документы, ВУ, паспорт)
+ *   Взять заявку → маршрут по дорогам → фотофиксация (ТС, документы, ВУ, паспорт)
  *   → «Начать маршрут» — и только тогда открываются карта и всё остальное.
  */
 
@@ -189,13 +189,13 @@ export function StartScreen() {
         <div>
           <div className="text-[15px] font-bold text-[#15202B]">Строим маршрут…</div>
           <div className="text-[12px] text-[#64748B] mt-1">
-            2ГИС Routing API · грузовик {active.weightT.toFixed(1)} т · пробки · выбор наилучшего варианта
+            Маршрут по дорогам · грузовик {active.weightT.toFixed(1)} т · выбор наилучшего варианта
           </div>
         </div>
       </div>
     )
   } else if (active && orderStage === 'route_ready') {
-    // цифры — из реального ответа 2ГИС; при сбое — плановые из заявки
+    // цифры — из реального ответа OSRM; при сбое — плановые из заявки
     const km = realRoute ? Math.round(realRoute.lengthM / 1000) : active.distanceKm
     const durMin = realRoute ? Math.max(1, Math.round(realRoute.durationS / 60)) : active.durationMin
     body = (
@@ -222,8 +222,8 @@ export function StartScreen() {
           }`}
         >
           {realRouteStatus === 'ready'
-            ? '2ГИС Routing API · грузовик 28 т · пробки · реальные манёвры'
-            : 'Демо-геометрия А-146 — 2ГИС недоступен'}
+            ? 'Маршрут по дорогам OSM (OSRM) · без API-ключей'
+            : 'Демо-геометрия А-146 — сервис маршрутов недоступен'}
         </div>
         <button
           onClick={beginPretrip}
@@ -236,7 +236,7 @@ export function StartScreen() {
             onClick={refetchRealRoute}
             className="mt-2 w-full h-9 text-[12px] font-semibold text-[#C2410C] bg-[#F97316]/10 rounded-xl"
           >
-            Повторить запрос 2ГИС
+            Повторить запрос маршрута
           </button>
         )}
       </div>

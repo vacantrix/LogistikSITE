@@ -3,6 +3,8 @@ package ru.azmz.logistics.driver.core.common
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.sin
@@ -24,12 +26,14 @@ object Geo {
 
     /** bbox GeoJSON LineString: [minLat, minLon, maxLat, maxLon] или null. */
     fun bboxOfLineString(geoJson: String): DoubleArray? = runCatching {
-        val coords = Json.parseToJsonElement(geoJson).jsonArray
+        // GeoJSON LineString — объект {"type":"LineString","coordinates":[[lon,lat],…]}
+        val obj = Json.parseToJsonElement(geoJson).jsonObject
+        val coords = obj["coordinates"]?.jsonArray ?: return null
         var minLat = Double.MAX_VALUE; var minLon = Double.MAX_VALUE
         var maxLat = -Double.MAX_VALUE; var maxLon = -Double.MAX_VALUE
         for (c in coords) {
-            val lon = c.jsonArray[0].double
-            val lat = c.jsonArray[1].double
+            val lon = c.jsonArray[0].jsonPrimitive.double
+            val lat = c.jsonArray[1].jsonPrimitive.double
             minLat = minOf(minLat, lat); minLon = minOf(minLon, lon)
             maxLat = maxOf(maxLat, lat); maxLon = maxOf(maxLon, lon)
         }

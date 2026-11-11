@@ -48,7 +48,7 @@ export interface RealRoute {
   maneuvers: RealManeuver[]
   segments: RealRouteSegment[]
   fetchedAt: number
-  source: '2gis'
+  source: '2gis' | 'osrm'
 }
 
 const TRUCK_PARAMS = { mass: 28000, height: 4, width: 2.55, length: 14 }
@@ -198,30 +198,158 @@ function bearingDeg(a: [number, number], b: [number, number]): number {
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360
 }
 
-/** Запрос маршрута у 2ГИС через серверный прокси (ключ не покидает сервер). */
+/**
+ * Маршрут — публичный OSRM (данные OpenStreetMap, без API-ключей).
+ * 2ГИС убран из демо по решению пилота: запрос маршрута больше не зависит
+ * от 2ГИС Routing API и его ключа. Контракт RealRoute сохранён, поэтому
+ * карта, ETA и баннеры живут без изменений. В проде OSRM поднимается
+ * рядом с бэкендом каркаса (своя выгрузка OSM РФ) — адрес в одной переменной.
+ */
 export async function fetchRealRoute(signal?: AbortSignal): Promise<RealRoute | null> {
-  try {
-    const res = await fetch('/api/2gis/routing', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal,
-      body: JSON.stringify({
-        points: [
-          [LOADING_POINT.lon, LOADING_POINT.lat],
-          [UNLOADING_POINT.lon, UNLOADING_POINT.lat],
-        ],
-        transport: 'truck',
-        truck_params: TRUCK_PARAMS,
-        traffic_mode: 'jam',
-        output: 'detailed',
-      }),
-    })
-    if (!res.ok) return null
-    const data = (await res.json()) as { result?: Parameters<typeof parseRealRoute>[0][] }
-    const first = data?.result?.[0]
-    if (!first?.maneuvers?.length) return null
-    return parseRealRoute(first)
-  } catch {
-    return null
+  const variants = await fetchOsrmVariants(
+    { lat: LOADING_POINT.lat, lng: LOADING_POINT.lon },
+    { lat: UNLOADING_POINT.lat, lng: UNLOADING_POINT.lon },
+    signal,
+  )
+  const main = variants[0]
+  if (!main) return null
+  return {
+    coords: main.coords,
+    lengthM: main.lengthM,
+    roadDistanceM: main.lengthM,
+    durationS: main.durationS,
+    maneuvers: [],
+    segments: [],
+    fetchedAt: Date.now(),
+    source: 'osrm',
   }
 }
+
+export interface OsrmVariant {
+  coords: [number, number][]
+  lengthM: number
+  durationS: number
+}
+
+const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving/'
+
+/**
+ * Варианты поездки от точки до точки: [0] — рекомендованный, далее альтернативы
+ * (alternatives=true). Ничего не вернул (нет сети / офлайн) — пустой список,
+ * вызывающий остаётся на демо-геометрии.
+ */
+export async function fetchOsrmVariants(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  signal?: AbortSignal,
+): Promise<OsrmVariant[]> {
+  try {
+    const url =
+      `${OSRM_BASE}${from.lng},${from.lat};${to.lng},${to.lat}` +
+      '?overview=full&geometries=geojson&alternatives=true&steps=false'
+    const res = await fetch(url, { signal })
+    if (!res.ok) return []
+    const data = (await res.json()) as {
+      code?: string
+      routes?: Array<{ distance: number; duration: number; geometry: { coordinates: [number, number][] } }>
+    }
+    if (data.code !== 'Ok' || !data.routes?.length) return []
+    return data.routes.map((r) => ({
+      coords: r.geometry.coordinates,
+      lengthM: r.distance,
+      durationS: r.duration,
+    }))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Расстояние от точки до ближайшего участка ломаной, м.
+ * Основа решения «водитель отклонился → перестроить маршрут».
+ */
+export function distToPolylineM(
+  p: { lat: number; lng: number },
+  coords: [number, number][],
+): number {
+  if (coords.length === 0) return Number.POSITIVE_INFINITY
+  let best = Number.POSITIVE_INFINITY
+  for (const c of coords) {
+    const d = haversineM([p.lng, p.lat], c)
+    if (d < best) best = d
+    if (best < 25) break // ближе некуда — дальше не считаем
+  }
+  return best
+}
+
+export interface RouteProjection {
+  /** Пройдено вдоль маршрута до проекции точки, м. */
+  distAlongM: number
+  /** Отклонение точки от маршрута (до проекции), м. */
+  offRouteM: number
+  /** Доля вдоль маршрута [0..1]. */
+  f: number
+  /** Азимут сегмента, на который легла проекция, град. */
+  bearing: number
+}
+
+/**
+ * Проекция точки на ломаную маршрута: ГДЕ вдоль маршрута мы находимся и
+ * НАСКОЛЬКО от него отклонились. На этом стоят «осталось N км», ETA и
+ * финиш по фактическому приближению к точке выгрузки (вместо симуляции).
+ * Локальные метры (equirectangular) — для городских расстояний точность ~0,1%.
+ */
+export function projectOnRoute(
+  coords: [number, number][],
+  p: { lat: number; lng: number },
+): RouteProjection {
+  if (coords.length === 0) {
+    return { distAlongM: 0, offRouteM: Number.POSITIVE_INFINITY, f: 0, bearing: 0 }
+  }
+  if (coords.length === 1) {
+    return {
+      distAlongM: 0,
+      offRouteM: haversineM([p.lng, p.lat], coords[0]),
+      f: 0,
+      bearing: 0,
+    }
+  }
+  const cosLat0 = Math.cos((p.lat * Math.PI) / 180)
+  const mx = (c: [number, number]) => c[0] * 111_320 * cosLat0 // м по долготе
+  const my = (c: [number, number]) => c[1] * 110_574 // м по широте
+  const px = mx([p.lng, p.lat])
+  const py = my([p.lng, p.lat])
+  let bestD2 = Number.POSITIVE_INFINITY
+  let bestAlong = 0
+  let bestBearing = 0
+  let along = 0
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1]
+    const b = coords[i]
+    const ax = mx(a)
+    const ay = my(a)
+    const bx = mx(b)
+    const by = my(b)
+    const segLen = Math.hypot(bx - ax, by - ay)
+    const t =
+      segLen === 0
+        ? 0
+        : Math.max(0, Math.min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / (segLen * segLen)))
+    const cx = ax + (bx - ax) * t
+    const cy = ay + (by - ay) * t
+    const d2 = (px - cx) ** 2 + (py - cy) ** 2
+    if (d2 < bestD2) {
+      bestD2 = d2
+      bestAlong = along + segLen * t
+      bestBearing = bearingDeg(a, b)
+    }
+    along += segLen
+  }
+  return {
+    distAlongM: bestAlong,
+    offRouteM: Math.sqrt(bestD2),
+    f: along > 0 ? Math.min(1, bestAlong / along) : 0,
+    bearing: bestBearing,
+  }
+}
+

@@ -12,6 +12,7 @@ import ru.azmz.logistics.driver.core.data.db.TripEventEntity
 import ru.azmz.logistics.driver.core.data.net.MarkVoteOp
 import ru.azmz.logistics.driver.core.data.net.toOp
 import java.util.UUID
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**

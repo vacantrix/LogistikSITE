@@ -13,6 +13,7 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -27,8 +28,22 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
  */
 object AppGraph {
 
-    /** Эмулятор → localhost бэкенда. На устройстве — адрес стенда. */
-    const val DEFAULT_BASE_URL = "http://10.0.2.2:8080/api/driver/v1/"
+    /**
+     * Базовый адрес драйверского API. По умолчанию — демо-сервер этой сессии
+     * (Next.js API, зеркало Spring-каркаса): APK с телефона сразу видит данные.
+     * Для стенда/прода переопределить: AppGraph.init(context, "https://…/api/driver/v1/")
+     * или через BuildConfig на этапе MVP.
+     */
+    const val DEFAULT_BASE_URL =
+        "https://preview-chat-4f5cd358-4b1b-4e7a-a3bd-5f6d18b2cb9a.space-z.ai/api/driver/v1/"
+
+    /**
+     * Демо-водитель демо-сервера (Иванов С.П., рейс ЗК-2026/1067 Абинск →
+     * Новороссийск). Каркас без экрана логина (этап п.2, JWT): на первом
+     * старте устройство автоматически привязывается к этому водителю,
+     * чтобы APK сразу показывал заявки. Логин смены заменит это.
+     */
+    const val DEFAULT_DRIVER_ID = "06c075d1-3088-45f2-a7ae-090e8c355447"
 
     lateinit var db: AppDatabase
         private set
@@ -105,6 +120,10 @@ object AppGraph {
         outbox = OutboxRepository(db, json, clock)
         connectivity = ConnectivityObserver(appContext, db.outboxDao())
         _driverIdOverride.value = prefs.getString(KEY_DRIVER, null)
+        // пилот: без экрана логина привязываем устройство к демо-водителю сразу
+        if (prefs.getString(KEY_DRIVER, null).isNullOrBlank()) {
+            driverId = DEFAULT_DRIVER_ID
+        }
     }
 
     /** Текущий водитель для запросов DAO (каркас: может быть null до логина). */

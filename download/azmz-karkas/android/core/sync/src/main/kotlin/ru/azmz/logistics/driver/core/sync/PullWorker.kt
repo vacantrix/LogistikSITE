@@ -8,6 +8,7 @@ import ru.azmz.logistics.driver.core.data.net.IdOnly
 import ru.azmz.logistics.driver.core.data.net.JournalEntry
 import ru.azmz.logistics.driver.core.data.net.toEntity
 import java.util.concurrent.TimeUnit
+import kotlinx.serialization.json.decodeFromJsonElement
 
 /**
  * Дельта-синхронизация входящих:

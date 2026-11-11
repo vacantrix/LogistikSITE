@@ -10,8 +10,8 @@
  * приложениях.
  */
 
-import { useEffect, useState } from 'react'
-import { BatteryMedium, ClipboardList, History, Layers, MapPin, MessageSquare, Settings, TrafficCone } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ClipboardList, History, MapPin, MessageSquare, Settings, TrafficCone } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { useSimTicker, useSyncEngine } from '@/lib/sync'
 import { MapScreen } from '@/components/azmz/map-screen'
@@ -23,7 +23,6 @@ import { MarksScreen } from '@/components/azmz/marks-screen'
 import { ChatScreen } from '@/components/azmz/chat-screen'
 import { SettingsScreen } from '@/components/azmz/settings-screen'
 import { TrafficScreen } from '@/components/azmz/traffic-screen'
-import { Gis2Screen } from '@/components/azmz/gis2-screen'
 import { MarkEventDialog } from '@/components/azmz/event-dialog'
 import type { View } from '@/lib/store'
 
@@ -46,13 +45,6 @@ export default function App() {
   const availableOrders = orders.filter((o) => o.status === 'ASSIGNED' && o.number !== activeOrderNumber).length
   // доступы: пока рейс не начат (фото не закрыты), приложение ограничено тремя вкладками
   const unlocked = orderStage === 'in_progress'
-  const [clock, setClock] = useState('')
-  useEffect(() => {
-    const upd = () => setClock(`${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`)
-    upd()
-    const t = setInterval(upd, 20_000)
-    return () => clearInterval(t)
-  }, [])
 
   // если прошлый сеанс оставил нас в закрытом разделе — возвращаем на «Главную»
   useEffect(() => {
@@ -69,27 +61,18 @@ export default function App() {
       ? [
           { key: 'marks' as View, tab: 'marks' as View, icon: <MapPin className="h-5 w-5" />, label: 'Пометки', badge: pendingMarks.length },
           { key: 'chat' as View, tab: 'chat' as View, icon: <MessageSquare className="h-5 w-5" />, label: 'Офис', badge: unreadNotes },
-          { key: 'gis2' as View, tab: 'gis2' as View, icon: <Layers className="h-5 w-5" />, label: '2ГИС' },
         ]
       : []),
     { key: 'settings', tab: 'settings', icon: <Settings className="h-5 w-5" />, label: 'Настройки' },
   ]
 
   return (
-    <div className="min-h-screen bg-[#0A1420] text-[#15202B] flex items-center justify-center gap-8 px-3 py-4 xl:gap-12">
+    <div className="min-h-screen bg-[#0A1420] text-[#15202B] flex items-center justify-center gap-8 2xl:px-3 2xl:py-4 xl:gap-12">
       <SidePanel className="hidden 2xl:flex" />
 
-      <div className="w-[430px] max-w-full h-[min(100dvh-32px,900px)] min-h-[560px] bg-[#F5F7FA] rounded-[38px] border border-[#22344A] shadow-[0_30px_80px_rgba(0,0,0,0.55)] overflow-hidden flex flex-col relative">
-        {/* статусная строка устройства */}
-        <div className="bg-[#101E2E] text-white/90 h-9 flex items-center justify-between px-6 text-xs font-medium shrink-0 z-40 relative">
-          <span className="tabular-nums">{clock}</span>
-          <span className="tracking-[0.18em] uppercase text-[10px] text-white/60">АЗМЗ Логистика</span>
-          <span className="flex items-center gap-1 tabular-nums">
-            <BatteryMedium className="h-4 w-4 text-[#22C55E]" />
-            78%
-          </span>
-        </div>
-
+      {/* Полноэкранный контейнер: на телефоне — весь дисплей без рамки и статус-строки
+          (время/зарядка даёт система, в APK они скрываются immersive-режимом). */}
+      <div className="w-full max-w-full h-[100dvh] bg-[#F5F7FA] overflow-hidden flex flex-col relative 2xl:w-[430px] 2xl:h-[min(100dvh-32px,900px)] 2xl:min-h-[560px] 2xl:rounded-[38px] 2xl:border 2xl:border-[#22344A] 2xl:shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
         <div className="flex-1 relative overflow-hidden">
           {!hydrated ? (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-[#64748B]">Загрузка…</div>
@@ -106,43 +89,38 @@ export default function App() {
 
               {/* Шторки поверх карты */}
               {view === 'orders' && (
-                <Sheet height="h-[88%]">
+                <Sheet height="h-[88%]" onClose={() => setView('map')}>
                   <OrdersScreen />
                 </Sheet>
               )}
               {view === 'history' && (
-                <Sheet height="h-[84%]">
+                <Sheet height="h-[84%]" onClose={() => setView('map')}>
                   <HistoryScreen />
                 </Sheet>
               )}
               {view === 'trip' && (
-                <Sheet height="h-[76%]">
+                <Sheet height="h-[76%]" onClose={() => setView('map')}>
                   <TripScreen />
                 </Sheet>
               )}
               {view === 'marks' && (
-                <Sheet height="h-[66%]">
+                <Sheet height="h-[66%]" onClose={() => setView('map')}>
                   <MarksScreen />
                 </Sheet>
               )}
               {view === 'chat' && (
-                <Sheet height="h-[74%]">
+                <Sheet height="h-[74%]" onClose={() => setView('map')}>
                   <ChatScreen />
                 </Sheet>
               )}
               {view === 'settings' && (
-                <Sheet height="h-[82%]">
+                <Sheet height="h-[82%]" onClose={() => setView('map')}>
                   <SettingsScreen inSheet />
                 </Sheet>
               )}
               {view === 'traffic' && (
-                <Sheet height="h-[58%]">
+                <Sheet height="h-[58%]" onClose={() => setView('map')}>
                   <TrafficScreen />
-                </Sheet>
-              )}
-              {view === 'gis2' && (
-                <Sheet height="h-[86%]">
-                  <Gis2Screen />
                 </Sheet>
               )}
             </>
@@ -160,7 +138,7 @@ export default function App() {
           {items.map((it) => {
             const active =
               view === it.tab ||
-              (it.tab === 'orders' && (view === 'map' || view === 'trip' || view === 'traffic' || view === 'gis2'))
+              (it.tab === 'orders' && (view === 'map' || view === 'trip' || view === 'traffic'))
             return (
               <button
                 key={it.key}
@@ -189,15 +167,54 @@ export default function App() {
   )
 }
 
-/** Шторка поверх карты: карта остаётся видимой и живой сверху. */
-function Sheet({ children, height }: { children: React.ReactNode; height: string }) {
+/**
+ * Шторка поверх карты: карта остаётся видимой и живой сверху.
+ * Шторку МОЖНО опустить жестом: тянешь за ручку вниз — шторка следует
+ * за пальцем, отпустил — закрывается (возврат на карту).
+ */
+function Sheet({ children, height, onClose }: { children: React.ReactNode; height: string; onClose?: () => void }) {
+  const [dy, setDy] = useState(0)
+  const startY = useRef<number | null>(null)
+  const dragging = useRef(false)
+
+  const onDown = (e: React.PointerEvent) => {
+    startY.current = e.clientY
+    dragging.current = true
+  }
+  const onMove = (e: React.PointerEvent) => {
+    if (!dragging.current || startY.current === null) return
+    setDy(Math.max(0, e.clientY - startY.current))
+  }
+  const onUp = () => {
+    if (!dragging.current) return
+    dragging.current = false
+    const moved = dy
+    startY.current = null
+    setDy(0)
+    if (moved > 64) onClose?.()
+  }
+
   return (
     <div className="absolute inset-0 z-30 flex flex-col justify-end pointer-events-none">
       <div
         className={`pointer-events-auto ${height} max-h-full bg-[#F5F7FA] rounded-t-3xl shadow-[0_-12px_40px_rgba(0,0,0,0.35)] flex flex-col azmz-sheet-enter overflow-hidden`}
+        style={
+          dy > 0
+            ? { transform: `translateY(${dy}px)`, transition: 'none' }
+            : { transition: 'transform 0.25s cubic-bezier(0.22, 0.9, 0.36, 1)' }
+        }
       >
-        <div className="pt-2 pb-1 flex justify-center shrink-0">
-          <span className="w-12 h-1.5 rounded-full bg-[#C3CBD6]" aria-hidden />
+        {/* зона жеста: ручка + запас сверху, чтобы палец не промахнулся */}
+        <div
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={onUp}
+          onPointerCancel={onUp}
+          className="pt-2.5 pb-2 flex justify-center shrink-0 cursor-grab touch-none select-none"
+          style={{ touchAction: 'none' }}
+          aria-hidden
+        >
+          <span className="w-14 h-1.5 rounded-full bg-[#C3CBD6]" />
         </div>
         {children}
       </div>
@@ -233,10 +250,10 @@ function SidePanel({ className = '' }: { className?: string }) {
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[13px] leading-relaxed">
         <div className="text-white font-semibold mb-2">Сценарий демо</div>
         <ol className="list-decimal ml-4 space-y-1.5 text-slate-300">
-          <li>Стартовый экран без карты: логотип АЭМЗ + большая кнопка «Взять заявку» → маршрут 2ГИС → фото ТС и документов.</li>
+          <li>Стартовый экран без карты: логотип АЭМЗ + большая кнопка «Взять заявку» → маршрут по дорогам → фото ТС и документов.</li>
           <li>До старта рейса внизу только «Главная», «История» и «Настройки» — доступы закрыты.</li>
-          <li>После «Начать маршрут» открываются карта (постоянный фон), «Пометки», «Офис», «2ГИС».</li>
-          <li>Чип «Пробки N» сверху — слой трафика на маршруте и улицах.</li>
+          <li>После «Начать маршрут» открывается карта (постоянный фон): геопозиция водителя, маршрут с вариантами, «Пометки», «Офис».</li>
+          <li>Шторки экранов опускаются жестом вниз (История, Рейс, Пометки…).</li>
           <li>Прибытие → «Завершить рейс» → заявка уходит в «Историю», из 1С приходит новая.</li>
         </ol>
       </div>
@@ -266,7 +283,7 @@ function SidePanelDemo({ className = '' }: { className?: string }) {
           <li>Курсор → <span className="text-[#F97316]">GET /sync/pull</span> (канал 1)</li>
           <li>Пометки по bbox → <span className="text-[#F97316]">GET /sync/marks</span> (канал 2)</li>
           <li>Правила 8 событий = TripEventRules.kt</li>
-          <li>Карта: MapLibre + OSM; вкладка 2ГИС — MapGL, пробки, Routing API</li>
+          <li>Карта: MapLibre + OSM; маршрут — OSRM от геопозиции, перестроение при отклонении</li>
         </ul>
       </div>
       <div className="bg-[#0F1D2E] border border-[#1E324A] rounded-2xl p-4 text-[12px] text-slate-400">

@@ -4,8 +4,9 @@
  * Экран «Карта» (по мокапам 1, 2 и 4): карта — всегда первый экран,
  * баннер манёвра, знак лимита скорости, очередь связи, кнопка «Пометка»
  * (3-шаговый мастер), панель данных рейса внизу → открывает дашборд рейса.
- * Базовая карта: растровый 2ГИС (зелёная, с голубой водой, русские подписи)
- * через наш прокси. Линия маршрута и сегменты пробок идут по дорогам.
+ * Базовая карта: растровые тайлы OpenStreetMap (русские подписи).
+ * Маршрут строится ОТ геопозиции водителя (OSRM, с вариантами поездки)
+ * и перестраивается при отклонении от него.
  */
 
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -39,38 +40,35 @@ import {
   DEMO_STREETS,
   LOADING_POINT,
   MANEUVERS,
+  UNLOADING_POINT,
   pointAtFraction,
   routeLengthM,
 } from '@/lib/demo/route-data'
 import { fmtClock, fmtKm } from '@/lib/format'
-import { pointOnRoute } from '@/lib/demo/real-route'
+import { distToPolylineM, fetchOsrmVariants, pointOnRoute, projectOnRoute } from '@/lib/demo/real-route'
 
 /**
- * Базовая карта: классический растровый 2ГИС — зелёные леса/парки, голубая
- * вода, русские подписи (как в приложении 2ГИС). Тайлы идут ТОЛЬКО через наш
- * прокси /api/maptiles/2gis/…: браузер не обращается к tile*.maps.2gis.com
- * напрямую — в закрытых/мобильных сетях это было причиной «карта не отображается».
- * Стиль инлайновый (не URL): его не может уронить недоступность сервиса стилей,
- * ломается только отрисовка тайлов — тогда спускаемся на резервный растр Esri.
+ * Базовая карта: растровые тайлы OpenStreetMap — русские подписи, без API-ключей
+ * (2ГИС убран из демо по решению пилота). Стиль инлайновый (не URL): его не может
+ * уронить недоступность сервиса стилей; при проблемах с тайлами остаётся
+ * резервный растр Esri. Маршрут/пробки/пометки рисуются поверх тем же кодом слоёв.
  */
-function gis2Style() {
-  const base = typeof window === 'undefined' ? '' : window.location.origin
+function osmStyle() {
   return {
     version: 8 as const,
     sources: {
-      '2gis': {
+      osm: {
         type: 'raster' as const,
-        tiles: [`${base}/api/maptiles/2gis/{z}/{x}/{y}.png`],
+        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
         tileSize: 256,
-        minzoom: 0,
-        maxzoom: 18,
-        attribution: '© 2ГИС',
+        maxzoom: 19,
+        attribution: '© OpenStreetMap contributors',
       },
     },
     layers: [
-      // фон = цвет суши 2ГИС: пока тайлы едут, карта уже выглядит зелёной
+      // фон = цвет суши OSM: пока тайлы едут, карта уже выглядит живой
       { id: 'bg', type: 'background' as const, paint: { 'background-color': '#E9EDE2' } },
-      { id: '2gis', type: 'raster' as const, source: '2gis' },
+      { id: 'osm', type: 'raster' as const, source: 'osm' },
     ],
   }
 }
@@ -111,6 +109,16 @@ type MapStatus = 'loading' | 'ready' | 'raster' | 'nogl'
 
 type LatLng = { lng: number; lat: number }
 
+/** Маршрут от текущей геопозиции водителя (OSRM) + варианты поездки. */
+type NavRouteState = {
+  coords: [number, number][]
+  lengthM: number
+  durationS: number
+  alternatives: [number, number][][]
+  builtAt: number
+  rerouted: boolean
+}
+
 export function MapScreen() {
   const trip = useAzmz((s) => s.trip)
   const points = useAzmz((s) => s.points)
@@ -149,11 +157,28 @@ export function MapScreen() {
   const [mapEpoch, setMapEpoch] = useState(0)
   const [mapStatus, setMapStatus] = useState<MapStatus>('loading')
   const styleFailCountRef = useRef(0)
+
+  // --- реальная геопозиция водителя + маршрут от неё --------------------------
+  const [gps, setGps] = useState<{ lng: number; lat: number; heading: number | null; speedMps: number | null } | null>(null)
+  const [gpsDenied, setGpsDenied] = useState(false)
+  const [navRoute, setNavRoute] = useState<NavRouteState | null>(null)
+  const meMarkerRef = useRef<MlMarker | null>(null)
+  const lastRerouteRef = useRef(0)
+  const gpsRef = useRef(gps)
+  gpsRef.current = gps
   /** Рейс запущен кнопкой «Начать маршрут» — до этого карта чистая (без маршрута/грузовика). */
   const tripActive = orderStage === 'in_progress'
-  /** Активная геометрия: реальный маршрут 2ГИС, иначе демо А-146. */
+  /** Активная геометрия: маршрут от геопозиции (OSRM), иначе демо А-146. */
   const navPoint = (f: number) =>
     realRoute ? pointOnRoute(realRoute.coords, f, realRoute.lengthM) : pointAtFraction(f)
+
+  /** Живая навигация: есть и фикс GPS, и построенный маршрут — позиция/ETA по факту. */
+  const gpsMode = !!(tripActive && gps && navRoute)
+  /** Проекция текущего фикса на активный маршрут: «сколько прошли / сколько осталось». */
+  const navProj = useMemo(
+    () => (gpsMode && navRoute && gps ? projectOnRoute(navRoute.coords, { lat: gps.lat, lng: gps.lng }) : null),
+    [gpsMode, navRoute, gps],
+  )
 
   /** Переключение режима сопровождения: ref и state меняются синхронно. */
   const setFollowMode = (v: boolean) => {
@@ -187,7 +212,7 @@ export function MapScreen() {
       mlRef.current = ml
       const map = new ml.Map({
         container: containerRef.current,
-        style: gis2Style() as never,
+        style: osmStyle() as never,
         center: [37.768, 44.726],
         zoom: 13.2,
         pitch: 0,
@@ -201,7 +226,7 @@ export function MapScreen() {
         // Ошибка ОДНОГО тайла (AJAXError на /api/maptiles/...) — не повод рушить
         // стиль: blank-плитка на зуме менее страшна, чем ложный сход на резерв.
         // Фолбэк — только если не грузится сам стиль (не тайл-ошибка).
-        const isTileError = /api\/maptiles/.test(msg)
+        const isTileError = /api\/maptiles|tile\.openstreetmap\.org/.test(msg)
         if (!isTileError && map.isStyleLoaded() === false) {
           styleFailCountRef.current += 1
           if (styleFailCountRef.current === 1) {
@@ -246,23 +271,150 @@ export function MapScreen() {
       mapRef.current = null
       mapGlobalRef.current = null
       truckRef.current = null
+      meMarkerRef.current = null
     }
   }, [])
+
+  // --- слежение за геопозицией водителя (браузер, HTTPS) ---------------------
+  // Разрешение запрашивает система при первом watchPosition: пользователь
+  // видит системный диалог и сам решает. Без разрешения точка не появляется
+  // (демо живёт на симуляции грузовика, как раньше).
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGpsDenied(true)
+      return
+    }
+    const id = navigator.geolocation.watchPosition(
+      (pos) =>
+        setGps({
+          lng: pos.coords.longitude,
+          lat: pos.coords.latitude,
+          heading: Number.isFinite(pos.coords.heading) ? pos.coords.heading : null,
+          speedMps: Number.isFinite(pos.coords.speed) ? pos.coords.speed : null,
+        }),
+      () => setGpsDenied(true),
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    )
+    return () => navigator.geolocation.clearWatch(id)
+  }, [])
+
+  // --- точка «Я» на карте (геопозиция водителя) --------------------------------
+  useEffect(() => {
+    const map = mapRef.current
+    const ml = mlRef.current
+    if (!mapEpoch || !map || !ml || meMarkerRef.current) return
+    const el = document.createElement('div')
+    el.className = 'azmz-me'
+    el.innerHTML = '<div class="azmz-me-halo"></div><div class="azmz-me-dot"></div>'
+    meMarkerRef.current = new ml.Marker({ element: el }).setLngLat([0, 0]).addTo(map)
+    // до первого фикса точка спрятана: маркер не должен висеть в океане [0,0]
+    meMarkerRef.current.getElement().style.display = 'none'
+  }, [mapEpoch])
+
+  useEffect(() => {
+    const me = meMarkerRef.current
+    if (!gps || !me) return
+    me.setLngLat([gps.lng, gps.lat])
+    me.getElement().style.display = ''
+  }, [gps])
+
+  // живой GPS: симуляция грузовика не нужна — останавливаем её, чтобы она не
+  // показывала ложное «прибыли» и не дёргала камеру мимо реальной позиции
+  useEffect(() => {
+    if (gps && tripActive && simRunning) useAzmz.getState().setSimRunning(false)
+  }, [gps, tripActive, simRunning])
+
+  // --- маршрут от геопозиции: строим при старте рейса -------------------------
+  useEffect(() => {
+    if (!tripActive) {
+      setNavRoute(null)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const from = gps ?? { lat: LOADING_POINT.lat, lng: LOADING_POINT.lon }
+      const variants = await fetchOsrmVariants(
+        { lat: from.lat, lng: from.lng },
+        { lat: UNLOADING_POINT.lat, lng: UNLOADING_POINT.lon },
+      )
+      if (cancelled || !variants.length) return
+      setNavRoute({
+        coords: variants[0].coords,
+        lengthM: variants[0].lengthM,
+        durationS: variants[0].durationS,
+        alternatives: variants.slice(1).map((v) => v.coords),
+        builtAt: Date.now(),
+        rerouted: false,
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+    // gps сознательно не в зависимостях: маршрут строится один раз на старте рейса;
+    // дальнейшее перестроение — в эффекте ниже, по отклонению
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripActive])
+
+  // --- перестроение: водитель отклонился → маршрут от нового места --------------
+  useEffect(() => {
+    if (!tripActive || !gps || !navRoute) return
+    const dev = distToPolylineM({ lat: gps.lat, lng: gps.lng }, navRoute.coords)
+    if (dev <= 150) return
+    const now = Date.now()
+    if (now - lastRerouteRef.current < 15_000) return
+    lastRerouteRef.current = now
+    let cancelled = false
+    void (async () => {
+      const variants = await fetchOsrmVariants(
+        { lat: gps.lat, lng: gps.lng },
+        { lat: UNLOADING_POINT.lat, lng: UNLOADING_POINT.lon },
+      )
+      if (cancelled || !variants.length) return
+      setNavRoute({
+        coords: variants[0].coords,
+        lengthM: variants[0].lengthM,
+        durationS: variants[0].durationS,
+        alternatives: variants.slice(1).map((v) => v.coords),
+        builtAt: Date.now(),
+        rerouted: true,
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [gps, tripActive, navRoute])
+
+  // --- альтернативные варианты поездки → слой ---------------------------------
+  useEffect(() => {
+    const map = mapRef.current
+    if (!mapEpoch || !map || !map.getSource('alt')) return
+    const feats = (navRoute?.alternatives ?? []).map((coords) => ({
+      type: 'Feature' as const,
+      properties: {},
+      geometry: { type: 'LineString' as const, coordinates: coords },
+    }))
+    ;(map.getSource('alt') as GeoJSONSource | undefined)?.setData({ type: 'FeatureCollection', features: feats })
+  }, [navRoute, mapEpoch])
 
   // --- слои маршрута, трафика и пометок ----------------------------------------
   useEffect(() => {
     const map = mapRef.current
     const ml = mlRef.current
     if (!mapEpoch || !map || !ml || !trip || !tripActive) return
-    const routeGeo = realRoute
-      ? { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: realRoute.coords } }
+    const activeCoords = navRoute?.coords ?? realRoute?.coords ?? null
+    const routeGeo = activeCoords
+      ? { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: activeCoords } }
       : { type: 'Feature' as const, properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') }
     if (!map.getSource('route')) {
       map.addSource('route', { type: 'geojson', data: routeGeo })
+      map.addSource('alt', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addSource('traffic', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addSource('marks', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
       map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 10 } })
       map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#F97316', 'line-width': 6 } })
+      // альтернативные варианты поездки — серые пунктиром, основной — оранжевый
+      map.addLayer({ id: 'alt-casing', type: 'line', source: 'alt', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 8, 'line-opacity': 0.85 } })
+      map.addLayer({ id: 'alt-line', type: 'line', source: 'alt', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#94A3B8', 'line-width': 5, 'line-dasharray': [1.5, 1.2], 'line-opacity': 0.9 } })
       // трафик (канал 3): цвет по уровню, толщина — маршрут/боковые улицы
       map.addLayer({
         id: 'traffic-casing',
@@ -294,11 +446,12 @@ export function MapScreen() {
     }
 
     // камера стартует на грузовике (навигационный вид, как в мокапе 4)
-    const p = navPoint(simFRef.current)
-    map.jumpTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4 })
-    // перезапрос маршрута (2ГИС) — обновляем геометрию уже созданного источника
+    const gp0 = gpsRef.current
+    const p0 = gp0 ? { lng: gp0.lng, lat: gp0.lat, bearing: gp0.heading ?? 0 } : navPoint(simFRef.current)
+    map.jumpTo({ center: [p0.lng, p0.lat], bearing: p0.bearing, pitch: 55, zoom: 15.4 })
+    // перезапрос маршрута — обновляем геометрию уже созданного источника
     ;(map.getSource('route') as GeoJSONSource | undefined)?.setData(routeGeo as never)
-  }, [mapEpoch, trip, tripActive, realRoute])
+  }, [mapEpoch, trip, tripActive, realRoute, navRoute])
 
   // после завершения рейса убираем навигационные слои — карта снова «чистая»
   useEffect(() => {
@@ -306,10 +459,10 @@ export function MapScreen() {
     const map = mapRef.current
     if (!map) return
     if (map.getStyle() && map.getSource('route')) {
-      for (const id of ['route-line', 'route-casing', 'traffic-line', 'traffic-casing', 'mark-line', 'mark-dot']) {
+      for (const id of ['route-line', 'route-casing', 'alt-line', 'alt-casing', 'traffic-line', 'traffic-casing', 'mark-line', 'mark-dot']) {
         if (map.getLayer(id)) map.removeLayer(id)
       }
-      for (const id of ['route', 'traffic', 'marks']) {
+      for (const id of ['route', 'alt', 'traffic', 'marks']) {
         if (map.getSource(id)) map.removeSource(id)
       }
     }
@@ -331,21 +484,32 @@ export function MapScreen() {
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18h-5"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>
       </div>`
     truckInnerRef.current = el.querySelector('.azmz-truck-inner')
+    // при живой геопозиции вместо оранжевого грузовика — синяя точка «Я»
+    if (gpsRef.current) el.style.display = 'none'
     const p = navPoint(simFRef.current)
     truckRef.current = new ml.Marker({ element: el }).setLngLat([p.lng, p.lat]).addTo(map)
   }, [mapEpoch, tripActive, realRoute])
 
-  // движение камеры и грузовика
+  // грузовик ↔ точка «Я»: при живом GPS показываем только точку
+  useEffect(() => {
+    const truck = truckRef.current
+    if (truck) truck.getElement().style.display = gps ? 'none' : ''
+  }, [gps, mapEpoch, tripActive, realRoute])
+
+  // движение камеры и грузовика: при живой геопозиции — за водителем,
+  // иначе — демо-симуляция по маршруту
   useEffect(() => {
     const map = mapRef.current
     if (!mapEpoch || !map || !truckRef.current) return
-    const p = navPoint(simF)
+    const p = gps
+      ? { lng: gps.lng, lat: gps.lat, bearing: gps.heading ?? 0 }
+      : navPoint(simF)
     truckRef.current.setLngLat([p.lng, p.lat])
     if (truckInnerRef.current) truckInnerRef.current.style.transform = `rotate(${p.bearing}deg)`
     if (followRef.current) {
       map.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 950, easing: (t) => t })
     }
-  }, [simF, mapEpoch, realRoute])
+  }, [gps, simF, mapEpoch, realRoute])
 
   // пометки → слой
   useEffect(() => {
@@ -361,11 +525,11 @@ export function MapScreen() {
   }, [marks, pendingMarks, mapEpoch])
 
   // трафик → слой (канал 3): цвет по уровню, маршрут толще боковых улиц
-  // приоритет — пробочная окраска реального маршрута 2ГИС (fast/normal/slow)
+  // приоритет — пробочная окраска, если она реально пришла (сегменты непусты)
   useEffect(() => {
     const map = mapRef.current
     if (!mapEpoch || !map || !map.getSource('traffic')) return
-    const feats = realRoute
+    const feats = realRoute?.segments.length
       ? realRoute.segments.map((seg) => ({
           type: 'Feature' as const,
           properties: {
@@ -549,6 +713,38 @@ export function MapScreen() {
           border-radius: 999px;
           box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
         }
+        /* точка геопозиции водителя: синяя с белой обводкой + пульс-ореол */
+        .azmz-me {
+          position: relative;
+          width: 0;
+          height: 0;
+        }
+        .azmz-me-dot {
+          position: absolute;
+          left: -9px;
+          top: -9px;
+          width: 18px;
+          height: 18px;
+          background: #2563eb;
+          border: 3px solid #fff;
+          border-radius: 999px;
+          box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+        }
+        .azmz-me-halo {
+          position: absolute;
+          left: -22px;
+          top: -22px;
+          width: 44px;
+          height: 44px;
+          background: rgba(37, 99, 235, 0.18);
+          border-radius: 999px;
+          animation: azmz-me-pulse 2.2s ease-out infinite;
+        }
+        @keyframes azmz-me-pulse {
+          0% { transform: scale(0.6); opacity: 0.9; }
+          70% { transform: scale(1.6); opacity: 0.15; }
+          100% { transform: scale(1.6); opacity: 0; }
+        }
         .azmz-legend-enter {
           animation: azmz-legend-in 0.18s ease-out;
         }
@@ -601,6 +797,12 @@ export function MapScreen() {
             <div className="pointer-events-none self-start inline-flex items-center gap-1.5 bg-[#7C2D12]/90 border border-[#F97316]/40 text-[#FDBA74] text-[11px] font-medium rounded-full px-2.5 h-6 shadow w-fit">
               <span className="h-2 w-2 rounded-full bg-[#F97316]" />
               Базовая карта в резервном режиме (растр) — маршрут и пробки работают
+            </div>
+          )}
+          {gpsDenied && (
+            <div className="pointer-events-none self-start inline-flex items-center gap-1.5 bg-[#101E2E]/85 border border-white/15 text-white/85 text-[11px] font-medium rounded-full px-2.5 h-6 shadow w-fit">
+              <span className="h-2 w-2 rounded-full bg-[#EF4444]" />
+              Нет доступа к геопозиции — точка «Я» не видна
             </div>
           )}
 

@@ -2,6 +2,7 @@ package ru.azmz.logistics.driver.core.data.db
 
 import androidx.room.Entity
 import androidx.room.Index
+import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
 /**

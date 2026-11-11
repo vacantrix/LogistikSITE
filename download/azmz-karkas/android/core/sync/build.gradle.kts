@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -17,10 +18,12 @@ android {
 
 dependencies {
     api(project(":core:data"))
+    api(libs.kotlinx.serialization.json)
 
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.squareup.retrofit)
+    implementation(libs.squareup.retrofit.kotlinx.serialization)
     implementation(libs.squareup.okhttp)
     testImplementation(libs.junit)
 }

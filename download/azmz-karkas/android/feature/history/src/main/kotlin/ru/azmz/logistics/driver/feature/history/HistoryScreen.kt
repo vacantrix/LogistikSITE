@@ -15,6 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,12 +27,14 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.azmz.logistics.driver.core.common.TripEventType
 import ru.azmz.logistics.driver.core.sync.AppGraph
+import ru.azmz.logistics.driver.core.sync.SyncScheduler
 import ru.azmz.logistics.driver.core.ui.AzmzGray
 import ru.azmz.logistics.driver.core.ui.AzmzOrange
 import ru.azmz.logistics.driver.core.ui.EventTimeline
@@ -39,31 +43,40 @@ import ru.azmz.logistics.driver.core.ui.TimeFmt
 /**
  * Таб «История»: завершённые рейсы; у карточки — развёрнутая лента событий.
  * Статус и «последнее событие» заполняются автоматически из отметок водителя.
+ *
+ * «Шторка»: потянул список вниз — принудительный цикл синхронизации
+ * (push outbox + pull журнала), свежие завершённые рейсы приезжают сразу.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryScreen() {
+    val context = LocalContext.current
     val driverId = AppGraph.driverId.orEmpty()
     val trips by remember(driverId) { AppGraph.db.tripDao().flowHistory(driverId) }
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
-    if (trips.isEmpty()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text("История пуста", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                "Завершённые рейсы появятся здесь после синхронизации",
-                color = AzmzGray, fontSize = 13.sp,
-            )
+    PullToRefreshBox(
+        isRefreshing = false,
+        onRefresh = { SyncScheduler.kick(context) },
+    ) {
+        if (trips.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("История пуста", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Завершённые рейсы появятся здесь после синхронизации",
+                    color = AzmzGray, fontSize = 13.sp,
+                )
+            }
+            return@PullToRefreshBox
         }
-        return
-    }
 
-    LazyColumn(
+        LazyColumn(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -111,4 +124,5 @@ fun HistoryScreen() {
             }
         }
     }
+}
 }

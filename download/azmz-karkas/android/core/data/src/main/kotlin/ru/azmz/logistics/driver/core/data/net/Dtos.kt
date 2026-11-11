@@ -7,7 +7,9 @@ import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Query
 import ru.azmz.logistics.driver.core.common.Geo
+import ru.azmz.logistics.driver.core.data.db.ChatMessageEntity
 import ru.azmz.logistics.driver.core.data.db.RoadMarkEntity
+import ru.azmz.logistics.driver.core.data.db.TripEventEntity
 
 /**
  * Контракты синхронизации (зеркало SyncDtos бэкенда).
