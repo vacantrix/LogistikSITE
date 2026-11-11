@@ -531,13 +531,6 @@ export function MapScreen() {
                 Пробки {traffic.score}
               </button>
             )}
-            <button
-              onClick={() => setSearchOpen(true)}
-              className="ml-auto h-8 w-8 rounded-full bg-[#101E2E]/90 border border-white/15 text-white flex items-center justify-center"
-              aria-label="Поиск"
-            >
-              <Search className="h-4 w-4" />
-            </button>
           </div>
           <OfflineHint />
 
@@ -559,7 +552,7 @@ export function MapScreen() {
           {nextManeuver && !arrived && (
             <button
               onClick={() => setFollowMode(!followRef.current)}
-              className="pointer-events-auto text-left bg-[#2563EB] text-white rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl"
+              className={`pointer-events-auto text-left bg-[#2563EB] text-white rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl ${wizard.step === 0 ? 'ml-12' : ''}`}
             >
               {maneuverIcon(nextManeuver.type, 'h-7 w-7 shrink-0')}
               <div className="min-w-0">
@@ -578,7 +571,7 @@ export function MapScreen() {
 
           {/* смарт-карточка прибытия (мокап 4) */}
           {arrived && (
-            <div className="pointer-events-auto bg-white text-[#15202B] rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl border border-black/5">
+            <div className={`pointer-events-auto bg-white text-[#15202B] rounded-2xl px-3 py-2.5 flex items-center gap-3 shadow-xl border border-black/5 ${wizard.step === 0 ? 'ml-12' : ''}`}>
               <div className="flex-1">
                 <div className="text-[13px] font-semibold">Вы прибыли в точку выгрузки</div>
                 <div className="text-[11px] text-[#64748B]">Событие можно отметить вручную</div>
@@ -611,7 +604,29 @@ export function MapScreen() {
         </div>
       )}
 
-      {/* --- правые кнопки ------------------------------------------------------ */}
+      {/* --- кнопки по бокам: слева поиск/легенда/звук, справа зум/прицел/пометка --- */}
+      {wizard.step === 0 && (
+        <div className="absolute left-3 top-28 z-20 flex flex-col gap-2">
+          <MapBtn label="Поиск" onClick={() => setSearchOpen(true)}>
+            <Search className="h-5 w-5" />
+          </MapBtn>
+          <MapBtn label="Легенда карты" active={legendOpen} onClick={() => setLegendOpen((v) => !v)}>
+            <Layers className="h-5 w-5" />
+          </MapBtn>
+          <MapBtn
+            label="Звук"
+            active={sound}
+            onClick={() => {
+              setSound((v) => {
+                showToast(!v ? 'Голосовые подсказки включены' : 'Голосовые подсказки выключены')
+                return !v
+              })
+            }}
+          >
+            {sound ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+          </MapBtn>
+        </div>
+      )}
       {wizard.step === 0 && (
         <div className="absolute right-3 top-28 z-20 flex flex-col gap-2">
           <MapBtn label="Приблизить" onClick={() => mapRef.current?.zoomIn()}>
@@ -630,21 +645,6 @@ export function MapScreen() {
             }}
           >
             <Crosshair className="h-5 w-5" />
-          </MapBtn>
-          <MapBtn label="Легенда карты" active={legendOpen} onClick={() => setLegendOpen((v) => !v)}>
-            <Layers className="h-5 w-5" />
-          </MapBtn>
-          <MapBtn
-            label="Звук"
-            active={sound}
-            onClick={() => {
-              setSound((v) => {
-                showToast(!v ? 'Голосовые подсказки включены' : 'Голосовые подсказки выключены')
-                return !v
-              })
-            }}
-          >
-            {sound ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
           </MapBtn>
           <button
             onClick={() => updateWizard({ step: 1, start: undefined, end: undefined })}
@@ -668,10 +668,10 @@ export function MapScreen() {
         </div>
       )}
 
-      {/* --- атрибуция OSM (обязательна для OSM/CARTO) --------------------------- */}
-      {view === 'map' && (
+      {/* --- атрибуция — только в деградации на Esri-растр ----------------------- */}
+      {view === 'map' && mapStatus === 'raster' && (
         <div className="absolute right-2 bottom-[76px] z-10 text-[9px] leading-none text-[#334155]/85 bg-white/60 rounded px-1.5 py-0.5 pointer-events-none">
-          © OpenStreetMap contributors{mapStatus === 'raster' ? ' · © Esri' : ''}
+          © Esri
         </div>
       )}
 
