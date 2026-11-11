@@ -5,6 +5,8 @@
  *  - карта 2ГИС MapGL со слоем пробок (trafficOn: true) — данные обновляются
  *    у 2ГИС каждую минуту (dev.2gis.ru/api/routing, Q&A);
  *  - поверх — наш рейс Абинск → Новороссийск (А-146) и точки погрузки/выгрузки;
+ *  - ключ MapGL берётся в рантайме с GET /api/2gis/mapkey (не запекается
+ *    в бандл через NEXT_PUBLIC_* — иначе смена ключа требует пересборки);
  *  - панель «Проверить обстановку» вызывает серверный прокси
  *    POST /api/2gis/routing (Routing API 7.0.0, transport truck, traffic jam):
  *    в детальном ответе каждый сегмент имеет color fast/normal/slow —
@@ -69,7 +71,7 @@ function parseWktLine(s: string): [number, number][] {
 
 declare global {
   interface Window {
-    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+     
     mapgl?: any
   }
 }
@@ -93,7 +95,8 @@ function loadMapglSdk(key: string): Promise<void> {
 
 export function Gis2Screen() {
   const setView = useAzmz((s) => s.setView)
-  const key = process.env.NEXT_PUBLIC_2GIS_KEY || ''
+  /** null = ещё грузим конфигурацию, '' = ключ не настроен, строка = готов к инициализации. */
+  const [key, setKey] = useState<string | null>(null)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<MapglAny | null>(null)
@@ -102,6 +105,10 @@ export function Gis2Screen() {
 
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<'sdk_failed' | null>(null)
+  /** MapGL отверг ключ (сервис «MapGL JS API» не включён) — работаем в режиме без карты 2ГИС. */
+  const [mapRejected, setMapRejected] = useState(false)
+  /** Сегменты маршрута от Routing API — для рисования на MapGL и SVG-фолбэка. */
+  const [segs, setSegs] = useState<Array<{ coords: [number, number][]; color: string }>>([])
   const [checking, setChecking] = useState(false)
   const [res, setRes] = useState<RoutingResp | null>(null)
   const [resMeta, setResMeta] = useState<{ latencyMs?: number; cached?: boolean } | null>(null)
@@ -110,7 +117,7 @@ export function Gis2Screen() {
 
   /** Нарисовать линию и зарегистрировать для очистки. */
   const drawLine = useCallback((map: MapglAny, coordinates: [number, number][], color: string, width: number) => {
-    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+     
     const line = (map as any).addLine({ coordinates, color, width, zIndex: 20 }) as MapglObj
     drawnRef.current.push(line)
   }, [])
@@ -126,14 +133,30 @@ export function Gis2Screen() {
     drawnRef.current = []
   }, [])
 
-  /** Инициализация карты (один раз). */
+  /** Ключ MapGL — с сервера, в рантайме (один источник истины: 2GIS_API_KEY в .env). */
+  useEffect(() => {
+    let dead = false
+    fetch('/api/2gis/mapkey')
+      .then((r) => r.json())
+      .then((d: { key?: string }) => {
+        if (!dead) setKey(d.key || '')
+      })
+      .catch(() => {
+        if (!dead) setKey('')
+      })
+    return () => {
+      dead = true
+    }
+  }, [])
+
+  /** Инициализация карты (один раз, после получения ключа). */
   useEffect(() => {
     if (!key || !containerRef.current || mapRef.current) return
     let dead = false
     loadMapglSdk(key)
       .then(() => {
         if (dead || !containerRef.current || !window.mapgl) return
-        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+         
         const map = new window.mapgl.Map(
           containerRef.current,
           key,
@@ -149,11 +172,18 @@ export function Gis2Screen() {
 
         // Наш рейс: линия маршрута А-146 + точки погрузки/выгрузки.
         drawLine(map, ROUTE_LNGLAT as [number, number][], '#0F172A', 4)
-        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+         
         drawnRef.current.push(new window.mapgl.Marker(map, { coordinates: [LOADING_POINT.lon, LOADING_POINT.lat] }) as MapglObj)
-        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+         
         drawnRef.current.push(new window.mapgl.Marker(map, { coordinates: [UNLOADING_POINT.lon, UNLOADING_POINT.lat] }) as MapglObj)
         setReady(true)
+        // MapGL при ключе без сервиса «MapGL JS API» не всегда бросает исключение —
+        // он рисует заглушку в контейнере. Детектируем её и переходим в фолбэк.
+        window.setTimeout(() => {
+          if (!dead && (containerRef.current?.innerText ?? '').includes('MapGL key is invalid')) {
+            setMapRejected(true)
+          }
+        }, 3500)
       })
       .catch(() => {
         if (!dead) setError('sdk_failed')
@@ -201,6 +231,8 @@ export function Gis2Screen() {
         }),
       })
       const data = (await r.json()) as RoutingResp
+      // DEBUG: проверить, что реально считает работающий бандл
+      console.log('[gis2-debug] status=', data.status, 'result=', (data.result ?? []).length, 'err=', data.error)
       setRes(data)
       setResMeta({ latencyMs: data.meta?.latencyMs, cached: data.meta?.cached })
 
@@ -223,17 +255,22 @@ export function Gis2Screen() {
           baselineRef.current = best.durationS
         }
 
-        // Проблемные участки: рисуем геометрию 2ГИС по цветам сегментов.
+        // Проблемные участки: собираем геометрию 2ГИС по цветам сегментов
+        // (на MapGL — линиями, в фолбэке — SVG-схемой).
+        const collected: Array<{ coords: [number, number][]; color: string }> = []
+        for (const m of data.result?.[0]?.maneuvers ?? []) {
+          for (const g of m.outcoming_path?.geometry ?? []) {
+            if (!g.selection || !g.color) continue
+            const coords = parseWktLine(g.selection)
+            if (coords.length < 2) continue
+            collected.push({ coords, color: g.color })
+          }
+        }
+        setSegs(collected)
         const map = mapRef.current
-        if (map && window.mapgl) {
-          const geoms = data.result?.[0]?.maneuvers ?? []
-          for (const m of geoms) {
-            for (const g of m.outcoming_path?.geometry ?? []) {
-              if (!g.selection || !g.color) continue
-              const coords = parseWktLine(g.selection)
-              if (coords.length < 2) continue
-              drawLine(map, coords, COLORS[g.color] ?? COLORS['ignore'], g.color === 'slow' ? 6 : 4)
-            }
+        if (map && window.mapgl && !mapRejected) {
+          for (const s of collected) {
+            drawLine(map, s.coords, COLORS[s.color] ?? COLORS['ignore'], s.color === 'slow' ? 6 : 4)
           }
         }
       }
@@ -245,6 +282,8 @@ export function Gis2Screen() {
   }, [checking, shortRoute, clearRouteArt, drawLine])
 
   const variants = res ? extractVariants(res) : []
+  // DEBUG: что видит рендер
+  console.log('[gis2-render] variants=', variants.length, 'segs=', segs.length, 'resStatus=', res?.status, 'resErr=', res?.error)
 
   return (
     <div className="flex-1 min-h-0 flex flex-col relative">
@@ -277,22 +316,31 @@ export function Gis2Screen() {
         )}
 
         <div className="bg-white rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.35)] border border-[#E2E8F0] px-4 py-3 space-y-3 max-h-[46%] overflow-y-auto">
-          {!key ? (
+          {key === null ? (
+            <div className="text-[13px] text-[#64748B]">Загружаем конфигурацию карты…</div>
+          ) : key === '' ? (
             <div className="text-[13px] text-[#334155] space-y-1">
               <div className="font-semibold text-[#0F172A]">Нужен ключ 2ГИС</div>
               <div className="text-[#64748B]">
-                Пришлите токен (демо-ключ Platform Manager с сервисами MapGL JS API и Routing API) —
-                он будет записан в <code className="bg-[#F1F5F9] px-1 rounded">.env</code> (в git не попадает),
-                и вкладка заработает без правок кода.
+                Токен (демо-ключ Platform Manager с сервисами MapGL JS API и Routing API)
+                записывается в <code className="bg-[#F1F5F9] px-1 rounded">.env</code> (в git не попадает)
+                в переменную <code className="bg-[#F1F5F9] px-1 rounded">2GIS_API_KEY</code> — вкладка
+                подхватит его без правок кода.
               </div>
-            </div>
-          ) : error === 'sdk_failed' ? (
-            <div className="text-[13px] text-[#334155]">
-              SDK 2ГИС не загрузился из этого окружения (сеть/CSP). Ключ сохранён — проверим загрузку через
-              серверные тесты Routing API и, при необходимости, добавим прокси SDK.
             </div>
           ) : (
             <>
+              {(error === 'sdk_failed' || mapRejected) && (
+                <div className="text-[12px] text-[#92400E] bg-[#FFFBEB] border border-[#FDE68A] rounded-xl px-3 py-2 space-y-1">
+                  <div className="font-semibold">Слой MapGL недоступен для этого ключа — включён режим без карты 2ГИС</div>
+                  <div className="text-[#A16207]">
+                    Routing API ключ принимает (серверные тесты OK), но сервис «MapGL JS API» для него
+                    не включён в Platform Manager (или ключ привязан к другим доменам). Включите MapGL JS API
+                    для ключа — вкладка оживёт сама, без правок кода. Ниже проверка обстановки работает:
+                    схема участков строится по реальной геометрии Routing API.
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <label className="flex items-center gap-2 text-[13px] text-[#334155] cursor-pointer">
                   <input
@@ -307,7 +355,7 @@ export function Gis2Screen() {
 
               <button
                 onClick={checkSituation}
-                disabled={checking || !ready}
+                disabled={checking || (!ready && !mapRejected && error === null)}
                 className="w-full bg-[#F97316] disabled:bg-[#FDBA74] text-white font-semibold text-[14px] rounded-xl px-4 py-2.5 flex items-center justify-center gap-2"
               >
                 {checking ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Route className="h-4 w-4" />}
@@ -354,11 +402,14 @@ export function Gis2Screen() {
                     </div>
                   ))}
                   <div className="text-[11px] text-[#64748B] leading-relaxed">
-                    Проблемные участки (slow) подсвечены красным прямо по геометрии 2ГИС. Повторный запрос —
-                    сравнение ETA с базой: ≥ +5 мин → предупреждение о перемаршрутизации.
+                    Проблемные участки (slow) подсвечены красным по геометрии 2ГИС (на MapGL — линиями на карте,
+                    в режиме без карты — схемой ниже). Повторный запрос — сравнение ETA с базой:
+                    ≥ +5 мин → предупреждение о перемаршрутизации.
                   </div>
                 </div>
               )}
+
+              {segs.length > 0 && <RouteStrip segs={segs} />}
 
               {res?.error === 'no_key' && (
                 <div className="text-[12px] text-[#B91C1C]">
@@ -404,4 +455,53 @@ function extractVariants(data: RoutingResp): VariantInfo[] {
   }
   out.sort((a, b) => a.durationS - b.durationS)
   return out
+}
+
+/**
+ * SVG-схема маршрута по геометрии Routing API 2ГИС — фолбэк, когда слой MapGL
+ * недоступен для ключа (сервис MapGL JS API не включён). Цвет линии = color
+ * сегмента 2ГИС (fast/normal/slow), проблемные участки толще и красные.
+ */
+function RouteStrip({ segs }: { segs: Array<{ coords: [number, number][]; color: string }> }) {
+  let minX = Infinity
+  let maxX = -Infinity
+  let minY = Infinity
+  let maxY = -Infinity
+  for (const s of segs) {
+    for (const [lon, lat] of s.coords) {
+      if (lon < minX) minX = lon
+      if (lon > maxX) maxX = lon
+      if (lat < minY) minY = lat
+      if (lat > maxY) maxY = lat
+    }
+  }
+  if (!Number.isFinite(minX) || maxX - minX < 1e-6 || maxY - minY < 1e-6) return null
+  const W = 360
+  const pad = 8
+  const kx = (W - pad * 2) / (maxX - minX)
+  const H = Math.max(90, Math.min(190, (maxY - minY) * kx + pad * 2))
+  const ky = (H - pad * 2) / (maxY - minY)
+  const px = (lon: number) => pad + (lon - minX) * kx
+  const py = (lat: number) => H - pad - (lat - minY) * ky
+  const slow = segs.filter((s) => s.color === 'slow').length
+  return (
+    <div className="rounded-xl border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-2">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Схема маршрута по геометрии 2ГИС">
+        {segs.map((s, i) => (
+          <polyline
+            key={i}
+            points={s.coords.map(([lon, lat]) => `${px(lon).toFixed(1)},${py(lat).toFixed(1)}`).join(' ')}
+            fill="none"
+            stroke={COLORS[s.color] ?? COLORS['ignore']}
+            strokeWidth={s.color === 'slow' ? 7 : 5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ))}
+      </svg>
+      <div className="text-[11px] text-[#64748B] px-1 pt-1">
+        Схема маршрута по геометрии Routing API 2ГИС · красным — проблемные участки ({slow})
+      </div>
+    </div>
+  )
 }
