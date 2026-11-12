@@ -1,0 +1,8 @@
+# Локальные данные и тяжёлые артефакты стенда — не в git.
+/bin/
+/portal/
+/data/
+/logs/
+/credentials.local.txt
+/build-manifest.json
+*.pid

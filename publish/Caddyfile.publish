@@ -1,0 +1,71 @@
+# Публичный HTTPS-вход экосистемы Vacantrix.
+# Порт 80 у провайдера закрыт, поэтому сертификаты Let's Encrypt получаются
+# по TLS-ALPN-01 на 443. Caddy — единственный процесс, смотрящий в интернет.
+#
+# vacantrix.ru             — восстановленный портал экосистемы (статика + каталог).
+# logistiksite.vacantrix.ru — лендинг LogistikSITE + демо-платформа.
+# www.vacantrix.ru         — редирект на основной домен.
+
+(logistiksite_app) {
+	encode zstd gzip
+
+	request_body {
+		max_size 50MB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	reverse_proxy 127.0.0.1:8080 {
+		header_up Host {host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+}
+
+logistiksite.vacantrix.ru {
+	import logistiksite_app
+}
+
+vacantrix.ru {
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# Старые ссылки на демо с основного домена — на демо-поддомен.
+	redir /demo https://logistiksite.vacantrix.ru/demo/ permanent
+	redir /demo/* https://logistiksite.vacantrix.ru{uri} permanent
+
+	# Локальный сервис входа портала (Node, SQLite) на 127.0.0.1:8090.
+	# Без него работают только старые Supabase-фолбэки, а вход невозможен.
+	handle /api/portal/* {
+		reverse_proxy 127.0.0.1:8090
+	}
+
+	# Установщики: отсутствующий файл должен давать честный 404, а не
+	# SPA-фолбэк на index.html (иначе битая ссылка «скачивает» HTML).
+	handle /dl/* {
+		root * "C:/Users/AUSU/Desktop/AEMZ-Logistika/LogistikSITE/publish/portal"
+		file_server
+	}
+
+	# Портал — SPA с «настоящими» путями: /apps, /pricing, /app/<key>.
+	# Неизвестный путь отдаёт index.html, роутер разбирается на клиенте.
+	handle {
+		root * "C:/Users/AUSU/Desktop/AEMZ-Logistika/LogistikSITE/publish/portal"
+		try_files {path} {path}/ /index.html
+		file_server
+	}
+}
+
+www.vacantrix.ru {
+	redir https://vacantrix.ru{uri} permanent
+}

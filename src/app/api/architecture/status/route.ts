@@ -57,9 +57,11 @@ export async function GET() {
       return { ok: true, detail: 'SELECT 1 выполнен' }
     }),
 
-    // real-time шина: socket.io polling отвечает sid-кадром
+    // real-time шина: socket.io polling отвечает sid-кадром; 403 — служба жива,
+    // но требует сессию (проверка без cookie ожидаемо получает отказ)
     probe('ws', async () => {
       const res = await fetch('http://127.0.0.1:3003/socket.io/?EIO=4&transport=polling', { signal: withTimeout(2500), cache: 'no-store' })
+      if (res.status === 403) return { ok: true, detail: 'socket.io: служба работает, требует сессию' }
       if (!res.ok) return { ok: false, detail: `HTTP ${res.status}` }
       const text = await res.text()
       return { ok: text.includes('sid'), detail: text.includes('sid') ? 'socket.io: сессия выдана' : 'ответ без sid' }
@@ -92,6 +94,24 @@ export async function GET() {
         nnSettings(),
       ])
       const j = (await res.json().catch(() => null)) as { ok?: boolean; ms?: number; engine?: string | null; version?: string | null; error?: string } | null
+      // В этой сборке OCR-шлюз на 3020 не запускается: платформа работает с движком
+      // PaddleOCR напрямую (OCR_SERVICE_URL=…:3031). У прямого движка нет /upstream,
+      // поэтому проверяем его /health и показываем тот же живой статус.
+      if (res.status === 404) {
+        const hres = await fetch(`${OCR_BASE}/health`, {
+          headers: OCR_TOKEN ? { 'X-OCR-Token': OCR_TOKEN } : {},
+          signal: withTimeout(10_000),
+          cache: 'no-store',
+        })
+        const h = (await hres.json().catch(() => null)) as {
+          ok?: boolean; ready?: boolean; engine?: string; activeEngine?: string; version?: string; processed?: number; error?: string
+        } | null
+        if (!hres.ok || !h?.ok) return { ok: false, detail: h?.error ?? `движок ответил HTTP ${hres.status}` }
+        return {
+          ok: true,
+          detail: `движок ${h.activeEngine ?? h.engine ?? 'PaddleOCR'}${h.version ? ` v${h.version}` : ''} · напрямую · документов: ${h.processed ?? 0} · фото: ${queue.active}/${nn.parallel} в обработке, ${queue.waiting} в очереди`,
+        }
+      }
       if (!res.ok || !j?.ok) return { ok: false, detail: j?.error ?? `шлюз ответил HTTP ${res.status}` }
       return {
         ok: true,
