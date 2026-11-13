@@ -43,7 +43,7 @@ uploads/                        фото предрейсового осмотр
 
 ## Демо-данные
 
-Демо-водитель приложения: заголовок `X-Driver-Id: d1111111-1111-4111-8111-111111111111` (Иванов С.П.).
+Демо-водитель приложения: заголовок `X-Driver-Id: 06c075d1-3088-45f2-a7ae-090e8c355447` (Иванов С.П.).
 На стенде заголовок необязателен — подставляется демо-водитель; также допускается id записи водителя.
 
 ## Контракты (curl-примеры)
@@ -52,7 +52,7 @@ uploads/                        фото предрейсового осмотр
 
 ```bash
 # список заявок водителя (формат Order1C, поле-в-поле как в ТЗ 6.1)
-curl -H 'X-Driver-Id: d1111111-1111-4111-8111-111111111111' http://localhost:3000/api/1c/orders
+curl -H 'X-Driver-Id: 06c075d1-3088-45f2-a7ae-090e8c355447' http://localhost:3000/api/1c/orders
 
 # обратный канал: взять заявку / шаг фотофиксации / начать маршрут / завершить рейс
 curl -X POST http://localhost:3000/api/1c/orders -H 'Content-Type: application/json' \
@@ -70,7 +70,7 @@ curl -X POST http://localhost:3000/api/1c/orders -H 'Content-Type: application/j
 
 ```bash
 # дельта личного журнала (план обмена): entries(seq, entity, op, payload), cursor, hasMore
-curl -H 'X-Driver-Id: d1111111-1111-4111-8111-111111111111' \
+curl -H 'X-Driver-Id: 06c075d1-3088-45f2-a7ae-090e8c355447' \
   'http://localhost:3000/api/driver/v1/sync/pull?cursor=0&limit=500'
 
 # push-операции: TRIP_EVENT_CREATE | MARK_PUBLISH | MARK_VOTE | CHAT_SEND | NOTE_READ
@@ -126,6 +126,28 @@ export async function GET(req: Request) {
 ```
 
 Синхро-каналы переключаются на `BASE` тем же способом. Больше в клиенте ничего не меняется.
+
+## Мост план обмена → драйверский сервер (телефон)
+
+Записи `SyncJournal` для водителей с заполненным `appId` автоматически реплицируются
+на драйверский сервер приложения (`:3002`) — телефон видит назначения, чат диспетчера
+и события рейса своим `sync/pull`. Репликатор стартует лениво при первой записи
+в журнал, опрашивает новые записи каждые 2 с; сбой доставки ничего не валит —
+запись останется в журнале 1С и уйдёт следующим циклом (точные дубли отсеиваются).
+
+```bash
+# env (значения по умолчанию для стенда):
+DRIVER_BRIDGE_URL=http://127.0.0.1:3002/api/driver/v1/ingest
+DRIVER_BRIDGE_TOKEN=azmz-stand-bridge-2026
+DRIVER_BRIDGE_DISABLED=1   # выключить мост
+# на стороне драйверского сервера токен: DRIVER_INGEST_TOKEN (тот же по умолчанию)
+
+# приём работает и напрямую:
+curl -X POST http://localhost:3002/api/driver/v1/ingest \
+  -H 'Content-Type: application/json' -H 'x-ingest-token: azmz-stand-bridge-2026' \
+  -d '{"driverId":"06c075d1-3088-45f2-a7ae-090e8c355447","entries":[
+       {"entity":"SYSTEM_NOTE","op":"UPSERT","payload":{"id":"<uuid>","driverId":"06c075d1-3088-45f2-a7ae-090e8c355447","kind":"ORDER_ASSIGNED","body":"...","createdAt":1731400000000}}]}'
+```
 
 ## Переключение демо/контур
 

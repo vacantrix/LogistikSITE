@@ -141,7 +141,7 @@ export async function seedAll(db: PrismaClient) {
 
   // ─── Водители (12, у первого — appId демо-водителя приложения) ───
   const driverRows = [
-    { fullName: 'Иванов Сергей Петрович', phone: '+7 (918) 201-15-32', licenseNo: '5412 889012', appId: 'd1111111-1111-4111-8111-111111111111' },
+    { fullName: 'Иванов Сергей Петрович', phone: '+7 (918) 201-15-32', licenseNo: '5412 889012', appId: '06c075d1-3088-45f2-a7ae-090e8c355447' },
     { fullName: 'Петров Андрей Николаевич', phone: '+7 (918) 345-67-89', licenseNo: '5413 124578' },
     { fullName: 'Сидоров Алексей Викторович', phone: '+7 (903) 442-11-08', licenseNo: '5414 552310' },
     { fullName: 'Кузнецов Дмитрий Олегович', phone: '+7 (918) 677-23-41', licenseNo: '5415 781204' },
@@ -329,5 +329,5 @@ export async function seedAll(db: PrismaClient) {
   })
 
   console.log('Сид готов: 6 заявок (1067 ASSIGNED, 1071/1074 DISPATCH, 3 DONE), нумератор на ЗК-2026/1075')
-  console.log('Демо-водитель приложения: d1111111-1111-4111-8111-111111111111 (Иванов С.П.)')
+  console.log('Демо-водитель приложения: 06c075d1-3088-45f2-a7ae-090e8c355447 (Иванов С.П.) — совпадает с DEFAULT_DRIVER_ID APK')
 }

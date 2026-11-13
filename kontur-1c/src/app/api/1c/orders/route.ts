@@ -18,7 +18,8 @@ async function resolveDriver(req: Request) {
     if (byId) return byId
   }
   // в демо-режиме заголовок необязателен: подставляется демо-водитель
-  return db.driver.findUnique({ where: { appId: 'd1111111-1111-4111-8111-111111111111' } })
+  // (appId приложения водителя — тот же, что зашит в APK: DEFAULT_DRIVER_ID)
+  return db.driver.findUnique({ where: { appId: '06c075d1-3088-45f2-a7ae-090e8c355447' } })
 }
 
 
