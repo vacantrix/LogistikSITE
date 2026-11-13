@@ -1,11 +1,18 @@
-/* Service worker приложения водителя «АЗМЗ Логистика».
+/* Service worker приложения водителя «АЗМЗ Логистика» — v7.
+ *
  * Правила:
- *  - API (/api/*) не перехватываем никогда — синхронизация и гео-каналы идут напрямую в сеть;
- *    офлайн-логика приложения живёт в его собственном сторе, SW тут не нужен.
- *  - Навигация: сеть → кэш главной → offline.html.
- *  - Статика (/_next/static, /icons): cache-first.
+ *  1. Тайлы офлайн-карты /api/maptiles/*: сначала кэш пака «azmz-map-pack-v1»
+ *     (имя НЕ содержит версию — пак переживает релизы), затем сеть. Офлайн и
+ *     нет в паке → 504, MapLibre покажет пустую плитку, приложение живёт.
+ *     Манифест пака /api/maptiles/__pack-manifest — ТОЛЬКО из кэша.
+ *  2. Прочий /api/* (синхронизация, заявки 1С, пробки) — только сеть, не трогаем.
+ *  3. Навигация: сеть → кэш главной → offline.html.
+ *  4. Статика (/_next/static, /icons, воркер MapLibre): NETWORK-FIRST — иначе
+ *     закэшированные навсегда чанки не дают обновиться приложению (урок v5).
  */
-const VERSION = "azmz-driver-v1";
+
+const VERSION = "azmz-driver-v7";
+const MAP_PACK = "azmz-map-pack-v1";
 const PRECACHE = [
   "/",
   "/offline.html",
@@ -17,6 +24,11 @@ const PRECACHE = [
   "/icons/apple-touch-icon.png",
   "/icons/favicon.ico",
 ];
+
+/** Тайл базовой карты? /api/maptiles/osm|esri|2gis/{z}/{x}/{y}.png */
+function isMapTile(pathname) {
+  return /^\/api\/maptiles\/(osm|esri|2gis)\/\d+\/\d+\/\d+\.png$/.test(pathname);
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -31,7 +43,10 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION).map((k) => caches.delete(k))))
+      // пак карты (MAP_PACK) переживает релизы — удаляем только старые версии SW
+      .then((keys) =>
+        Promise.all(keys.filter((k) => k !== VERSION && k !== MAP_PACK).map((k) => caches.delete(k)))
+      )
       .then(() => self.clients.claim())
   );
 });
@@ -42,9 +57,44 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // внешние ресурсы не трогаем
-  if (url.pathname.startsWith("/api/")) return;    // синхронизация — только сеть
 
-  // Навигация: сеть, при обрыве — кэш главной, затем offline-страница
+  // ── тайлы офлайн-карты: пак → сеть ─────────────────────────────────────
+  if (isMapTile(url.pathname)) {
+    event.respondWith(
+      caches.open(MAP_PACK).then((cache) =>
+        cache.match(req).then(
+          (hit) =>
+            hit ||
+            fetch(req).catch(
+              () => new Response("", { status: 504, statusText: "tile offline" })
+            )
+        )
+      )
+    );
+    return;
+  }
+
+  // ── манифест пака: только кэш (офлайн-состояние без сети) ───────────────
+  if (url.pathname === "/api/maptiles/__pack-manifest") {
+    event.respondWith(
+      caches
+        .open(MAP_PACK)
+        .then((cache) => cache.match(req))
+        .then(
+          (hit) =>
+            hit ||
+            new Response(JSON.stringify({ tileCount: 0, bytes: 0, builtAt: 0 }), {
+              headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+            })
+        )
+    );
+    return;
+  }
+
+  // ── прочий API — только сеть (офлайн-логика живёт в сторе приложения) ──
+  if (url.pathname.startsWith("/api/")) return;
+
+  // ── навигация: сеть → кэш главной → offline-страница ────────────────────
   if (req.mode === "navigate") {
     event.respondWith(
       fetch(req)
@@ -57,26 +107,39 @@ self.addEventListener("fetch", (event) => {
           caches
             .match("/")
             .then((cached) => cached || caches.match("/offline.html"))
-            .then((r) => r || new Response("Офлайн", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }))
+            .then(
+              (r) =>
+                r ||
+                new Response("Офлайн", {
+                  status: 503,
+                  headers: { "Content-Type": "text/plain; charset=utf-8" },
+                })
+            )
         )
     );
     return;
   }
 
-  // Статика: cache-first
+  // ── статика и прочее: network-first → кэш ───────────────────────────────
+  // (кэшируем только то, что безопасно: чанки, иконки, воркер, стили)
   event.respondWith(
-    caches.match(req).then(
-      (cached) =>
-        cached ||
-        fetch(req)
-          .then((res) => {
-            const p = url.pathname;
-            if (res.ok && (p.startsWith("/_next/static/") || p.startsWith("/icons/"))) {
-              const copy = res.clone();
-              caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => undefined);
-            }
-            return res;
-          })
-    )
+    fetch(req)
+      .then((res) => {
+        const p = url.pathname;
+        if (
+          res.ok &&
+          (p.startsWith("/_next/static/") ||
+            p.startsWith("/icons/") ||
+            p === "/maplibre-gl-worker.mjs" ||
+            p === "/manifest.webmanifest" ||
+            p === "/offline.html")
+        ) {
+          const copy = res.clone();
+          caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => undefined);
+        }
+        return res;
+      })
+      .catch(() => Promise.resolve(caches.match(req)).then((cached) => cached || undefined))
+      .then((res) => res || new Response("", { status: 504 }))
   );
 });

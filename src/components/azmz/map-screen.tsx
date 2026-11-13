@@ -46,20 +46,25 @@ import {
 } from '@/lib/demo/route-data'
 import { fmtClock, fmtKm } from '@/lib/format'
 import { distToPolylineM, fetchOsrmVariants, pointOnRoute, projectOnRoute } from '@/lib/demo/real-route'
+import { noteDriverPos, setCorridorOverride } from '@/lib/offline-map'
 
 /**
  * Базовая карта: растровые тайлы OpenStreetMap — русские подписи, без API-ключей
- * (2ГИС убран из демо по решению пилота). Стиль инлайновый (не URL): его не может
- * уронить недоступность сервиса стилей; при проблемах с тайлами остаётся
- * резервный растр Esri. Маршрут/пробки/пометки рисуются поверх тем же кодом слоёв.
+ * (2ГИС убран из демо по решению пилота). Тайлы идут ТОЛЬКО через свой origin
+ * (/api/maptiles/osm) — это условие работы офлайн-пака: Service Worker раздаёт
+ * скачанные тайлы из Cache Storage, когда сети нет. Стиль инлайновый (не URL):
+ * его не может уронить недоступность сервиса стилей; при проблемах с тайлами
+ * остаётся резервный растр Esri. Маршрут/пробки/пометки рисуются поверх тем же
+ * кодом слоёв.
  */
 function osmStyle() {
+  const base = typeof window === 'undefined' ? '' : window.location.origin
   return {
     version: 8 as const,
     sources: {
       osm: {
         type: 'raster' as const,
-        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tiles: [`${base}/api/maptiles/osm/{z}/{x}/{y}.png`],
         tileSize: 256,
         maxzoom: 19,
         attribution: '© OpenStreetMap contributors',
@@ -160,11 +165,12 @@ export function MapScreen() {
 
   // --- реальная геопозиция водителя + маршрут от неё --------------------------
   const [gps, setGps] = useState<{ lng: number; lat: number; heading: number | null; speedMps: number | null } | null>(null)
-  const [gpsDenied, setGpsDenied] = useState(false)
+  const [gpsError, setGpsError] = useState<'denied' | 'unavailable' | null>(null)
   const [navRoute, setNavRoute] = useState<NavRouteState | null>(null)
   const meMarkerRef = useRef<MlMarker | null>(null)
   const lastRerouteRef = useRef(0)
   const gpsRef = useRef(gps)
+  const hadFixRef = useRef(false)
   gpsRef.current = gps
   /** Рейс запущен кнопкой «Начать маршрут» — до этого карта чистая (без маршрута/грузовика). */
   const tripActive = orderStage === 'in_progress'
@@ -277,26 +283,54 @@ export function MapScreen() {
 
   // --- слежение за геопозицией водителя (браузер, HTTPS) ---------------------
   // Разрешение запрашивает система при первом watchPosition: пользователь
-  // видит системный диалог и сам решает. Без разрешения точка не появляется
-  // (демо живёт на симуляции грузовика, как раньше).
+  // видит системный диалог и сам решает. Фиксы принимаем «сырыми» — точка «Я»
+  // видна даже при плохой точности, лучше честная позиция, чем никакой.
   useEffect(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setGpsDenied(true)
+      setGpsError('unavailable')
       return
     }
     const id = navigator.geolocation.watchPosition(
-      (pos) =>
+      (pos) => {
+        setGpsError(null)
         setGps({
           lng: pos.coords.longitude,
           lat: pos.coords.latitude,
           heading: Number.isFinite(pos.coords.heading) ? pos.coords.heading : null,
           speedMps: Number.isFinite(pos.coords.speed) ? pos.coords.speed : null,
-        }),
-      () => setGpsDenied(true),
+        })
+        // офлайн-пак: «пузырь» подробных тайлов следует за водителем
+        noteDriverPos(pos.coords.longitude, pos.coords.latitude)
+      },
+      (err) => setGpsError(err.code === 1 ? 'denied' : 'unavailable'),
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
     )
     return () => navigator.geolocation.clearWatch(id)
   }, [])
+
+  // повторный запрос разрешения: кнопка «Разрешить» на плашке — самый частый
+  // кейс «не вижу себя»: пользователь случайно закрыл системный диалог
+  const requestGeoPermission = () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      () => setGpsError(null),
+      (err) => setGpsError(err.code === 1 ? 'denied' : 'unavailable'),
+      { enableHighAccuracy: true, timeout: 12_000 },
+    )
+  }
+
+  // первый фикс: камера сразу к водителю — «где я» видно с первой секунды
+  useEffect(() => {
+    if (!gps || hadFixRef.current) return
+    hadFixRef.current = true
+    const map = mapRef.current
+    if (map) map.easeTo({ center: [gps.lng, gps.lat], zoom: 13.5, pitch: 0, bearing: 0, duration: 900 })
+  }, [gps])
+
+  // офлайн-пак: коридор = активная геометрия (маршрут от геопозиции → заявка → демо)
+  useEffect(() => {
+    setCorridorOverride(navRoute?.coords ?? realRoute?.coords ?? null)
+  }, [navRoute, realRoute])
 
   // --- точка «Я» на карте (геопозиция водителя) --------------------------------
   useEffect(() => {
@@ -352,7 +386,6 @@ export function MapScreen() {
     }
     // gps сознательно не в зависимостях: маршрут строится один раз на старте рейса;
     // дальнейшее перестроение — в эффекте ниже, по отклонению
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripActive])
 
   // --- перестроение: водитель отклонился → маршрут от нового места --------------
@@ -799,10 +832,18 @@ export function MapScreen() {
               Базовая карта в резервном режиме (растр) — маршрут и пробки работают
             </div>
           )}
-          {gpsDenied && (
-            <div className="pointer-events-none self-start inline-flex items-center gap-1.5 bg-[#101E2E]/85 border border-white/15 text-white/85 text-[11px] font-medium rounded-full px-2.5 h-6 shadow w-fit">
-              <span className="h-2 w-2 rounded-full bg-[#EF4444]" />
-              Нет доступа к геопозиции — точка «Я» не видна
+          {gpsError && (
+            <div className="pointer-events-auto self-start inline-flex items-center gap-2 bg-[#7F1D1D]/95 border border-[#EF4444]/40 text-white text-[11px] font-medium rounded-full pl-2.5 pr-1.5 h-7 shadow">
+              <span className="h-2 w-2 rounded-full bg-[#EF4444] shrink-0" />
+              <span className="leading-tight">
+                {gpsError === 'denied' ? 'Нет доступа к геопозиции' : 'Геопозиция недоступна'}
+              </span>
+              <button
+                onClick={requestGeoPermission}
+                className="bg-white text-[#7F1D1D] font-bold rounded-full px-2 h-5 text-[10px] shrink-0"
+              >
+                Разрешить
+              </button>
             </div>
           )}
 

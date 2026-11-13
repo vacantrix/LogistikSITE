@@ -13,7 +13,9 @@ import { ConnectionChip } from '@/components/azmz/connection-chip'
 import { InstallAppButton } from '@/components/pwa/install-button'
 import { syncNow } from '@/lib/sync'
 import { DEVICE_ID, DRIVER_NAME, VEHICLE_LABEL } from '@/lib/demo/route-data'
-import { fmtClock, timeAgo } from '@/lib/format'
+import { timeAgo } from '@/lib/format'
+import { useOfflineMap, offlineMap } from '@/lib/offline-map'
+import { APP_VERSION_LABEL } from '@/lib/version'
 
 export function SettingsScreen({ inSheet = false }: { inSheet?: boolean }) {
   const setView = useAzmz((s) => s.setView)
@@ -75,10 +77,8 @@ export function SettingsScreen({ inSheet = false }: { inSheet?: boolean }) {
           <Row k="В очереди" v={`${outbox.length} опер.`} />
         </Section>
 
-        <Section icon={<MapIcon className="h-4 w-4 text-[#F97316]" />} title="Офлайн-карты и пробки">
-          <Row k="Покрытие" v="коридор маршрута, z14–z17 (PMTiles)" />
-          <Row k="Обновление" v={fmtClock(Date.now() - 3_600_000 * 14)} />
-          <Row k="Профиль дорог" v="грузовой: габариты, оси (OSRM)" />
+        <Section icon={<MapIcon className="h-4 w-4 text-[#F97316]" />} title="Карты и пробки">
+          <OfflineMapControls />
           <Row k="Пробки" v={traffic ? `канал 3 · балл ${traffic.score} · обновлено ${timeAgo(traffic.snapshotAt)}` : 'канал 3 · ждём первый снимок'} />
           <Row k="Источник пробок" v="телеметрия ТС парка · без Yandex API" />
         </Section>
@@ -156,9 +156,9 @@ export function SettingsScreen({ inSheet = false }: { inSheet?: boolean }) {
         </Section>
 
         <Section icon={<Sliders className="h-4 w-4 text-[#F97316]" />} title="О приложении">
-          <Row k="Версия" v="0.5.0 — карта-фон · пробки онлайн" />
+          <Row k="Версия" v={APP_VERSION_LABEL} />
           <Row k="Синхронизация" v="outbox + курсор + 3 канала" />
-          <Row k="Карты" v="MapLibre · OSM/CARTO (без Yandex API)" />
+          <Row k="Карты" v="MapLibre · OSM (без Yandex API) · офлайн-пак по всей РФ" />
           <div className="text-[10px] text-[#94A3B8] pt-1 leading-snug">
             ПДн хранятся на сервере в РФ (152-ФЗ). Этап MVP: JWT по смене, RuStore Push, геозоны.
           </div>
@@ -218,6 +218,87 @@ function ToggleRow({
           className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`}
         />
       </button>
+    </div>
+  )
+}
+
+/** Управление скачанной офлайн-картой «Вся Россия». */
+function OfflineMapControls() {
+  const om = useOfflineMap()
+  const mb = om.bytes > 0 ? `${(om.bytes / 1024 / 1024).toFixed(1)} МБ` : '—'
+
+  return (
+    <div>
+      <ToggleRow
+        label="Офлайн-карта (по всей РФ)"
+        hint="вся Россия z4–8 · маршрут z9–16 · вокруг вас z10–15 · ~15 тыс. плиток"
+        checked={om.enabled}
+        onChange={(v) => offlineMap.setEnabled(v)}
+      />
+
+      {om.enabled && om.phase === 'downloading' && (
+        <div className="py-2">
+          <div className="flex items-baseline justify-between text-[12px] text-[#15202B] font-medium">
+            <span>Скачиваем карту…</span>
+            <span className="tabular-nums text-[#64748B]">
+              {om.total > 0 ? `${om.done} / ${om.total}` : 'подготовка'} · {mb}
+            </span>
+          </div>
+          <div className="mt-1.5 h-2 rounded-full bg-[#E2E8F0] overflow-hidden">
+            <div
+              className="h-full bg-[#F97316] rounded-full transition-all"
+              style={{ width: `${om.total > 0 ? Math.round((om.done / om.total) * 100) : 2}%` }}
+            />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between">
+            <span className="text-[10.5px] text-[#94A3B8]">можно закрыть настройки — загрузка продолжится</span>
+            <button
+              onClick={() => offlineMap.cancel()}
+              className="text-[11px] font-bold text-[#C2410C] bg-[#F97316]/10 rounded-lg px-2.5 h-7"
+            >
+              Остановить
+            </button>
+          </div>
+        </div>
+      )}
+
+      {om.enabled && om.phase === 'ready' && (
+        <Row
+          k="В паке"
+          v={`${om.tileCount.toLocaleString('ru-RU')} плиток · ${mb}${om.builtAt ? ` · обновлена ${timeAgo(om.builtAt)}` : ''}`}
+        />
+      )}
+
+      {om.enabled && om.phase === 'error' && (
+        <div className="my-1.5 rounded-xl bg-[#FEF2F2] border border-[#FECACA] px-3 py-2">
+          <div className="text-[12px] text-[#991B1B] font-medium leading-snug">{om.error ?? 'Ошибка загрузки'}</div>
+          <button
+            onClick={() => offlineMap.refreshNow()}
+            className="mt-1.5 text-[11px] font-bold text-[#C2410C] bg-[#F97316]/10 rounded-lg px-2.5 h-7"
+          >
+            Продолжить загрузку
+          </button>
+        </div>
+      )}
+
+      {om.enabled && (
+        <>
+          <div className="mt-2 grid grid-cols-1 gap-2">
+            <button
+              onClick={() => offlineMap.refreshNow()}
+              className="h-10 rounded-xl bg-[#15202B] text-white font-bold text-[13px]"
+            >
+              Проверить обновления карты
+            </button>
+          </div>
+          <ToggleRow
+            label="Автообновление карты"
+            hint="докачивает недостающее сам: старт, сеть, раз в 3 ч"
+            checked={om.autoUpdate}
+            onChange={(v) => offlineMap.setAutoUpdate(v)}
+          />
+        </>
+      )}
     </div>
   )
 }

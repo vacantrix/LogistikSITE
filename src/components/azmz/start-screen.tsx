@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   FileText,
   IdCard,
+  Link2,
   LoaderCircle,
   MapPin,
   Play,
@@ -27,6 +28,7 @@ import { useAzmz } from '@/lib/store'
 import { PRETRIP_STEPS, type Order1C, type PretripStepDef } from '@/lib/demo/orders-data'
 import { ConnectionChip } from '@/components/azmz/connection-chip'
 import { InstallAppButton } from '@/components/pwa/install-button'
+import { ImportRouteDialog } from '@/components/azmz/import-route-dialog'
 
 const fmtDT = (iso: string) =>
   new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -119,6 +121,7 @@ export function StartScreen() {
   const photoStepRef = useRef<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const fetchOnceRef = useRef(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   // подтягиваем заявки и статусы с «1С» (в офлайне остаётся локальный сид).
   // Это единственный refresh до старта рейса: StartScreen — стартовый экран.
@@ -454,7 +457,20 @@ export function StartScreen() {
       {/* контент поверх тёмной шапки */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 -mt-6 pb-6 relative z-10">
         {body}
+
+        {/* маршрут по ссылке Яндекс.Карт — тест без 1С */}
+        {!activeOrderNumber && orderStage === 'idle' && (
+          <button
+            onClick={() => setImportOpen(true)}
+            className="mt-3 w-full h-11 rounded-xl border border-dashed border-[#F97316]/60 text-[#C2410C] font-semibold text-[13px] flex items-center justify-center gap-2 bg-white"
+          >
+            <Link2 className="h-4 w-4" />
+            Маршрут по ссылке Яндекс.Карт
+          </button>
+        )}
       </div>
+
+      {importOpen && <ImportRouteDialog onClose={() => setImportOpen(false)} />}
     </div>
   )
 }

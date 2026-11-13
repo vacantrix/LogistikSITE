@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ClipboardList, History, MapPin, MessageSquare, Settings, TrafficCone } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { useSimTicker, useSyncEngine } from '@/lib/sync'
+import { initOfflineMap } from '@/lib/offline-map'
 import { MapScreen } from '@/components/azmz/map-screen'
 import { OrdersScreen } from '@/components/azmz/orders-screen'
 import { StartScreen } from '@/components/azmz/start-screen'
@@ -29,6 +30,10 @@ import type { View } from '@/lib/store'
 export default function App() {
   useSyncEngine()
   useSimTicker()
+  // офлайн-карта «Вся Россия»: подтягиваем скачанный пак и автообновление
+  useEffect(() => {
+    initOfflineMap()
+  }, [])
   const view = useAzmz((s) => s.view)
   const setView = useAzmz((s) => s.setView)
   const notes = useAzmz((s) => s.notes)

@@ -10,9 +10,10 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { MapPin, Truck } from 'lucide-react'
+import { Link2, MapPin, Truck } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import type { Order1C } from '@/lib/demo/orders-data'
+import { ImportRouteDialog } from '@/components/azmz/import-route-dialog'
 
 const fmtDT = (iso: string) =>
   new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -28,7 +29,8 @@ export function OrdersScreen() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null)
-  const fetchOnceRef = useRef(false)
+  const [fetchOnceRef] = useState({ current: false })
+  const [importOpen, setImportOpen] = useState(false)
 
   // подтягиваем заявки с «1С» (в офлайне остаётся локальный сид)
   useEffect(() => {
@@ -44,7 +46,6 @@ export function OrdersScreen() {
       })
       .catch(() => {})
   }, [])
-
   const active = orders.find((o) => o.number === activeOrderNumber) ?? null
   const listOrders = orders.filter((o) => o.number !== activeOrderNumber && o.status !== 'DONE')
 
@@ -87,6 +88,12 @@ export function OrdersScreen() {
           {o.vehicle}
           {o.trailer !== '—' ? ` · прицеп ${o.trailer}` : ''}
         </div>
+        {(o.routeWaypoints?.length || o.routeLink) && (
+          <div className="mt-1.5 inline-flex items-center gap-1 text-[10.5px] font-semibold text-[#15803D] bg-[#22C55E]/12 rounded-full px-2 py-0.5">
+            <Link2 className="h-3 w-3" />
+            Маршрут из Яндекс.Карт{o.routeWaypoints?.length ? ` · ${o.routeWaypoints.length} точек` : ''}
+          </div>
+        )}
       </button>
     )
   }
@@ -158,7 +165,20 @@ export function OrdersScreen() {
           </div>
         )}
         {listOrders.map((o) => orderCard(o))}
+
+        {/* маршрут по ссылке — без 1С (тест диспетчерской ссылки на месте) */}
+        {!activeOrderNumber && (
+          <button
+            onClick={() => setImportOpen(true)}
+            className="w-full h-11 rounded-xl border border-dashed border-[#F97316]/60 text-[#C2410C] font-semibold text-[13px] flex items-center justify-center gap-2 bg-[#F97316]/5"
+          >
+            <Link2 className="h-4 w-4" />
+            Маршрут по ссылке Яндекс.Карт
+          </button>
+        )}
       </div>
+
+      {importOpen && <ImportRouteDialog onClose={() => setImportOpen(false)} />}
     </div>
   )
 }

@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
  * зависимостей (и без Yandex API — ограничение лицензии).
  *
  * Маршруты (всё под /api/maptiles/):
+ *   osm/{z}/{x}/{y}.png                  → растровые тайлы OpenStreetMap (базовая карта + офлайн-пак)
  *   fonts/<fontstack>/<range>.pbf        → глифы (SDF-шрифты)
  *   sprites/<set>/<name>[.json|.png|@2x] → спрайты иконок
  *   2gis/{z}/{x}/{y}.png                 → базовая карта 2ГИС (зелёная, с водой)
@@ -27,6 +28,11 @@ import { NextRequest, NextResponse } from 'next/server'
  */
 
 const UPSTREAM = 'https://tiles.openfreemap.org'
+/** Базовая растровая карта: тайлы OpenStreetMap (русские подписи, без ключей).
+ *  Требование политики OSM: валидный User-Agent + уважение 429/Retry-After. */
+const UPSTREAM_OSM = 'https://tile.openstreetmap.org'
+const OSM_MAX_ZOOM = 19
+const OSM_UA = 'AZMZ-Logistics-PWA/0.8 (fleet route corridor proxy; pilot)'
 /** Растровый fallback: светлый Esri World Light Gray (без ключа, z/y/x!). */
 const UPSTREAM_ESRI = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile'
 /** Базовая карта: классический растровый 2ГИС (зелёная с водой, z 0–18).
@@ -91,8 +97,23 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
   const parts = sub.split('/')
   const isGis2 = parts[0] === '2gis' && parts.length === 4
   const isEsri = parts[0] === 'esri' && parts.length === 4
+  const isOsm = parts[0] === 'osm' && parts.length === 4
   let upstreamUrl: string
-  if (isGis2) {
+  let upstreamHeaders: Record<string, string> = { accept: '*/*' }
+  if (isOsm) {
+    const z = Number(parts[1])
+    const x = Number(parts[2])
+    const y = Number(parts[3].replace(/\.png$/i, ''))
+    const n = 1 << z
+    if (
+      !Number.isInteger(z) || !Number.isInteger(x) || !Number.isInteger(y) ||
+      z < 0 || z > OSM_MAX_ZOOM || x < 0 || x >= n || y < 0 || y >= n
+    ) {
+      return NextResponse.json({ error: 'bad tile coords' }, { status: 400 })
+    }
+    upstreamUrl = `${UPSTREAM_OSM}/${z}/${x}/${y}.png`
+    upstreamHeaders = { accept: 'image/png,image/*;q=0.8', 'User-Agent': OSM_UA }
+  } else if (isGis2) {
     const z = Number(parts[1])
     const x = Number(parts[2])
     // шаблон стиля — 2gis/{z}/{x}/{y}.png: срезаем расширение
@@ -136,16 +157,25 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
 
   try {
     // ретрай один раз на 5xx/сети: апстрим-тайлсерверы иногда моргают,
-    // а 502 в браузере роняет плитку (и раньше — весь стиль)
+    // а 502 в браузере роняет плитку (и раньше — весь стиль).
+    // 429 НЕ ретраим здесь: прокси пробрасывает его клиенту вместе с
+    // Retry-After — офлайн-менеджер сам делает паузу и повторяет мягче.
     let res: Response | null = null
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         res = await fetch(upstreamUrl, {
           signal: AbortSignal.timeout(15_000),
-          headers: { accept: '*/*' },
+          headers: upstreamHeaders,
           // Next кэширует fetch сам — нам нужен наш собственный слой кэша
           cache: 'no-store',
         })
+        if (res.status === 429) {
+          const retryAfter = res.headers.get('retry-after') ?? '5'
+          return new NextResponse(null, {
+            status: 429,
+            headers: { 'Retry-After': retryAfter, 'Cache-Control': 'no-store' },
+          })
+        }
         if ((res.ok && res.body) || res.status < 500) break
       } catch (fetchErr) {
         if (attempt === 1) throw fetchErr

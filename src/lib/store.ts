@@ -21,9 +21,10 @@ import type {
   TripPointSnapshot,
   TripSnapshot,
 } from '@/lib/protocol'
-import { START_F, routeLengthM } from '@/lib/demo/route-data'
+import { START_F, routeLengthM, LOADING_POINT } from '@/lib/demo/route-data'
 import { DEMO_HISTORY, DEMO_ORDERS, PRETRIP_STEPS, type HistoryEntry, type Order1C } from '@/lib/demo/orders-data'
-import { fetchRealRoute, type RealRoute } from '@/lib/demo/real-route'
+import { fetchRealRoute, fetchRouteViaWaypoints, type RealRoute } from '@/lib/demo/real-route'
+import { parseYandexRouteLink } from '@/lib/yandex-route'
 
 /** Реальная длина дорожной ломаной, м (63 км А-146) — для пересчёта f. */
 const ROUTE_TOTAL_M = routeLengthM()
@@ -153,6 +154,8 @@ interface AzmzState {
   /** Воркфлоу заявки из 1С. */
   setOrders: (orders: Order1C[]) => void
   acceptOrder: (number: string) => void
+  /** Локальная заявка «Маршрут по ссылке Яндекс.Карт» — тест без 1С. */
+  importRouteFromLink: (link: string) => { ok: boolean; error?: string; number?: string }
   beginPretrip: () => void
   completePretripStep: (stepId: string, photo?: string) => void
   startRoute: () => void
@@ -178,6 +181,50 @@ function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const copy = [...list]
   copy[idx] = item
   return copy
+}
+
+/** Точки маршрута заявки: готовые, из ссылки — или ничего (демо А-146). */
+function orderWaypoints(o: Order1C | undefined): Array<{ lat: number; lng: number }> | null {
+  if (!o) return null
+  if (Array.isArray(o.routeWaypoints) && o.routeWaypoints.length > 0) return o.routeWaypoints
+  if (o.routeLink) {
+    const p = parseYandexRouteLink(o.routeLink)
+    if (p.ok) return p.route.waypoints
+  }
+  return null
+}
+
+/** Текущая геопозиция (до 4 с) — старт маршрута из одной точки; иначе демо-погрузка. */
+async function currentGpsPoint(): Promise<{ lat: number; lng: number }> {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (p: { lat: number; lng: number }) => {
+      if (!settled) {
+        settled = true
+        resolve(p)
+      }
+    }
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      done({ lat: LOADING_POINT.lat, lng: LOADING_POINT.lon })
+      return
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => done({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => done({ lat: LOADING_POINT.lat, lng: LOADING_POINT.lon }),
+      { enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 },
+    )
+  })
+}
+
+/** Маршрут заявки: точки из ссылки Яндекс.Карт → OSRM; иначе демо Абинск→Новороссийск. */
+async function buildRouteForOrder(o: Order1C | undefined): Promise<RealRoute | null> {
+  const wps = orderWaypoints(o)
+  if (wps && wps.length >= 2) return fetchRouteViaWaypoints(wps)
+  if (wps && wps.length === 1) {
+    const from = await currentGpsPoint()
+    return fetchRouteViaWaypoints([from, wps[0]])
+  }
+  return fetchRealRoute()
 }
 
 const emptyWizard: WizardState = { step: 0, category: 'POTHOLE', ttlHours: 6, comment: '' }
@@ -462,10 +509,16 @@ export const useAzmz = create<AzmzState>()(
       acceptOrder: (number) => {
         if (get().activeOrderNumber) return
         set({ activeOrderNumber: number, orderStage: 'routing', realRouteStatus: 'loading' })
-        get().showToast(`Заявка ${number} принята. Запрашиваем маршрут по дорогам…`)
+        const o = get().orders.find((x) => x.number === number)
+        const fromLink = !!(o && orderWaypoints(o))
+        get().showToast(
+          fromLink
+            ? `Заявка ${number} принята. Строим маршрут по точкам из Яндекс.Карт…`
+            : `Заявка ${number} принята. Запрашиваем маршрут по дорогам…`,
+        )
         void (async () => {
           const t0 = Date.now()
-          const rr = await fetchRealRoute()
+          const rr = await buildRouteForOrder(o)
           // пауза «Строим маршрут…» минимум 1.6 с — чтобы запрос был заметен
           const elapsed = Date.now() - t0
           if (elapsed < 1600) await new Promise((r) => setTimeout(r, 1600 - elapsed))
@@ -480,13 +533,44 @@ export const useAzmz = create<AzmzState>()(
           }
         })()
       },
+      importRouteFromLink: (link) => {
+        const parsed = parseYandexRouteLink(link)
+        if (!parsed.ok) return { ok: false, error: parsed.error }
+        const wps = parsed.route.waypoints
+        const d = new Date()
+        const hhmm = `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`
+        const number = `ЯК-${hhmm}`
+        const order: Order1C = {
+          number,
+          externalId: `yandex-route-${Date.now()}`,
+          client: 'Маршрут из ссылки Яндекс.Карт',
+          cargo: `Маршрут, ${wps.length} точек`,
+          weightT: 0,
+          fromLabel: 'Точка А (из ссылки)',
+          toLabel: `Точка ${String.fromCharCode(1040 + Math.min(wps.length - 1, 8))} (из ссылки)`,
+          loadingAt: d.toISOString(),
+          unloadingWindow: '—',
+          vehicle: '—',
+          trailer: '—',
+          docs: [],
+          distanceKm: 0,
+          durationMin: 0,
+          status: 'ASSIGNED',
+          assignedBy: 'Ссылка Яндекс.Карт',
+          routeLink: parsed.route.url,
+          routeWaypoints: wps,
+        }
+        set((s) => ({ orders: [...s.orders.filter((x) => x.number !== number), order] }))
+        get().acceptOrder(number)
+        return { ok: true, number }
+      },
       refetchRealRoute: () => {
         const number = get().activeOrderNumber
         if (!number || get().realRouteStatus === 'loading') return
         set({ orderStage: 'routing', realRouteStatus: 'loading' })
         void (async () => {
           const t0 = Date.now()
-          const rr = await fetchRealRoute()
+          const rr = await buildRouteForOrder(get().orders.find((x) => x.number === number))
           const elapsed = Date.now() - t0
           if (elapsed < 1600) await new Promise((r) => setTimeout(r, 1600 - elapsed))
           const st = get()

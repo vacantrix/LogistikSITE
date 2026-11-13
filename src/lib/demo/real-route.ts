@@ -264,6 +264,81 @@ export async function fetchOsrmVariants(
   }
 }
 
+// ─── маршрут по точкам заявки (ссылка Яндекс.Карт) ──────────────────────────
+
+/** Шаг OSRM: манёвр + улица + длина шага. */
+interface OsrmStep {
+  distance: number
+  name?: string
+  maneuver?: { type?: string; modifier?: string; location?: [number, number] }
+}
+
+type OsrmRoute = {
+  distance: number
+  duration: number
+  geometry: { coordinates: [number, number][] }
+  legs?: Array<{ steps?: OsrmStep[] }>
+}
+
+/** steps OSRM → манёвры баннера (как у демо-маршрута): f по кумулятивной длине. */
+function stepsToManeuvers(steps: OsrmStep[], totalM: number): RealManeuver[] {
+  const out: RealManeuver[] = []
+  let cum = 0
+  for (const s of steps) {
+    const f = totalM > 0 ? Math.min(0.999, cum / totalM) : 0
+    const t = s.maneuver?.type ?? ''
+    const mod = (s.maneuver?.modifier ?? '').toLowerCase()
+    cum += s.distance ?? 0
+    if (t === 'depart') continue
+    if (t === 'arrive') {
+      out.push({ f: 1, type: 'arrive', street: 'точка назначения', comment: 'arrive', distanceM: 0 })
+      continue
+    }
+    const street = (s.name && s.name.trim()) || 'дорогу'
+    let type: RealManeuver['type'] = 'straight'
+    if (t === 'turn' || t === 'roundabout' || t === 'merge' || t === 'fork' || t === 'continue' || t === 'end of road') {
+      if (mod.includes('left') && !mod.includes('slight')) type = 'left'
+      else if (mod.includes('right') && !mod.includes('slight')) type = 'right'
+    }
+    out.push({ f, type, street, comment: `${t} ${mod}`.trim(), distanceM: s.distance ?? 0 })
+  }
+  return out
+}
+
+/**
+ * Маршрут по точкам заявки (например, разобранным из ссылки Яндекс.Карт):
+ * OSRM driving по всем точкам, с манёврами для баннера. Офлайн/сбой → null,
+ * вызывающий остаётся на демо-геометрии.
+ */
+export async function fetchRouteViaWaypoints(
+  waypoints: Array<{ lat: number; lng: number }>,
+  signal?: AbortSignal,
+): Promise<RealRoute | null> {
+  if (waypoints.length < 2) return null
+  try {
+    const coordStr = waypoints.map((w) => `${w.lng},${w.lat}`).join(';')
+    const url = `${OSRM_BASE}${coordStr}?overview=full&geometries=geojson&alternatives=false&steps=true`
+    const res = await fetch(url, { signal })
+    if (!res.ok) return null
+    const data = (await res.json()) as { code?: string; routes?: OsrmRoute[] }
+    const r = data.routes?.[0]
+    if (data.code !== 'Ok' || !r?.geometry?.coordinates?.length) return null
+    const steps = r.legs?.flatMap((l) => l.steps ?? []) ?? []
+    return {
+      coords: r.geometry.coordinates,
+      lengthM: r.distance,
+      roadDistanceM: r.distance,
+      durationS: r.duration,
+      maneuvers: stepsToManeuvers(steps, r.distance),
+      segments: [],
+      fetchedAt: Date.now(),
+      source: 'osrm',
+    }
+  } catch {
+    return null
+  }
+}
+
 /**
  * Расстояние от точки до ближайшего участка ломаной, м.
  * Основа решения «водитель отклонился → перестроить маршрут».

@@ -34,6 +34,10 @@ export interface Order1C {
   status: 'ASSIGNED' | 'DISPATCH' | 'DONE'
   /** Кто и когда назначил (диспетчерская). */
   assignedBy: string
+  /** Ссылка на маршрут из Яндекс.Карт (диспетчер строит и делится). */
+  routeLink?: string | null
+  /** Точки маршрута из ссылки: [{lat,lng}] в порядке следования. */
+  routeWaypoints?: Array<{ lat: number; lng: number }> | null
 }
 
 export const DEMO_ORDERS: Order1C[] = [
