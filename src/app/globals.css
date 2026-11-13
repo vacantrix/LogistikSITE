@@ -120,3 +120,312 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ===== Анимация старта приложения (BootSplash) ===== */
+
+.azmz-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #0a1420;
+  transition:
+    opacity 0.45s ease,
+    visibility 0.45s ease;
+}
+
+.azmz-boot--out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.azmz-boot__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.45s ease;
+}
+
+.azmz-boot--out .azmz-boot__inner {
+  transform: scale(1.06);
+}
+
+/* мягкие световые пятна на фоне */
+.azmz-boot__glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(46px);
+  pointer-events: none;
+}
+
+.azmz-boot__glow--o {
+  width: 260px;
+  height: 260px;
+  right: -70px;
+  top: 10%;
+  background: rgba(249, 115, 22, 0.16);
+}
+
+.azmz-boot__glow--b {
+  width: 230px;
+  height: 230px;
+  left: -70px;
+  bottom: 6%;
+  background: rgba(37, 99, 235, 0.14);
+}
+
+/* бейдж АЭМЗ: пружинистое появление */
+.azmz-boot__badge {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #fb923c, #ea580c);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 18px 44px rgba(249, 115, 22, 0.45);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  animation: azmz-boot-pop 0.6s cubic-bezier(0.18, 0.89, 0.32, 1.28) both;
+}
+
+.azmz-boot__bolt {
+  width: 22px;
+  height: 22px;
+  fill: #fff;
+  animation: azmz-boot-bolt 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.4) 0.28s both;
+}
+
+.azmz-boot__badge-text {
+  color: #fff;
+  font-weight: 900;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  animation: azmz-boot-fade 0.3s ease 0.5s both;
+}
+
+/* вспышка молнии: расходящееся кольцо */
+.azmz-boot__ring {
+  position: absolute;
+  inset: -1px;
+  border-radius: 25px;
+  border: 2px solid rgba(249, 115, 22, 0.75);
+  animation: azmz-boot-ring 0.7s ease-out 0.5s both;
+  pointer-events: none;
+}
+
+.azmz-boot__word {
+  margin-top: 18px;
+  color: #fff;
+  font-weight: 900;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+  animation: azmz-boot-rise 0.5s cubic-bezier(0.2, 0.9, 0.3, 1) 0.42s both;
+}
+
+.azmz-boot__sub {
+  margin-top: 3px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  animation: azmz-boot-rise 0.5s ease 0.58s both;
+}
+
+/* дорога с бегущей разметкой и грузовичком */
+.azmz-boot__road {
+  position: relative;
+  width: 220px;
+  height: 26px;
+  margin-top: 34px;
+  animation: azmz-boot-fade 0.4s ease 0.8s both;
+}
+
+.azmz-boot__road::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 14px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.azmz-boot__road::after {
+  content: '';
+  position: absolute;
+  left: -30px;
+  right: -30px;
+  top: 15.5px;
+  height: 1.5px;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(249, 115, 22, 0.9) 0 12px,
+    transparent 12px 26px
+  );
+  animation: azmz-boot-dash 0.8s linear infinite;
+}
+
+.azmz-boot__truck {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  fill: none;
+  stroke: #f97316;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: azmz-boot-truck 2.8s ease-in-out 0.9s infinite alternate;
+}
+
+/* полоса загрузки */
+.azmz-boot__bar {
+  width: 168px;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  margin-top: 18px;
+  overflow: hidden;
+  animation: azmz-boot-fade 0.4s ease 0.9s both;
+}
+
+.azmz-boot__bar i {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #f97316, #fb923c);
+  animation: azmz-boot-bar 1.1s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+/* версия внизу */
+.azmz-boot__ver {
+  position: absolute;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  animation: azmz-boot-fade 0.4s ease 0.8s both;
+}
+
+/* preload-заглушка (пока грузится чанк): только текст и полоса */
+.azmz-boot--preload .azmz-boot__pre-text {
+  color: #f97316;
+  font-size: 14px;
+  font-weight: 500;
+  animation: azmz-boot-pulse 1.6s ease-in-out infinite;
+}
+
+.azmz-boot--preload .azmz-boot__bar {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes azmz-boot-pop {
+  0% {
+    transform: scale(0.55) translateY(14px);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes azmz-boot-bolt {
+  0% {
+    transform: scale(0) rotate(-18deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes azmz-boot-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes azmz-boot-rise {
+  0% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes azmz-boot-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes azmz-boot-dash {
+  to {
+    transform: translateX(-26px);
+  }
+}
+
+@keyframes azmz-boot-truck {
+  from {
+    transform: translateX(-84px);
+  }
+  to {
+    transform: translateX(84px);
+  }
+}
+
+@keyframes azmz-boot-bar {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes azmz-boot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* доступность: пользователи с отключённой анимацией видят статичный кадр */
+@media (prefers-reduced-motion: reduce) {
+  .azmz-boot,
+  .azmz-boot *,
+  .azmz-boot__road::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

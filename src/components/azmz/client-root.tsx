@@ -1,15 +1,14 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { BootSplash } from '@/components/azmz/boot-splash'
 
-/** Приложение целиком клиентское: MapLibre + localStorage (аналог Room). */
+/** Приложение целиком клиентское: MapLibre + localStorage (аналог Room).
+ *  Пока грузится чанк — тёмная preload-заглушка (без логотипа: бейдж
+ *  «вспыхивает» один раз в интро сразу после загрузки). */
 const App = dynamic(() => import('@/components/azmz/app'), {
   ssr: false,
-  loading: () => (
-    <div className="min-h-screen bg-[#0A1420] flex items-center justify-center">
-      <div className="text-[#F97316] text-sm font-medium animate-pulse">АЗМЗ Логистика — загрузка…</div>
-    </div>
-  ),
+  loading: () => <BootSplash stage="preload" />,
 })
 
 export default function ClientRoot() {

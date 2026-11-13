@@ -25,6 +25,7 @@ import { ChatScreen } from '@/components/azmz/chat-screen'
 import { SettingsScreen } from '@/components/azmz/settings-screen'
 import { TrafficScreen } from '@/components/azmz/traffic-screen'
 import { MarkEventDialog } from '@/components/azmz/event-dialog'
+import { BootSplash } from '@/components/azmz/boot-splash'
 import type { View } from '@/lib/store'
 
 export default function App() {
@@ -45,6 +46,19 @@ export default function App() {
   const orders = useAzmz((s) => s.orders)
   const activeOrderNumber = useAzmz((s) => s.activeOrderNumber)
   const orderStage = useAzmz((s) => s.orderStage)
+
+  // --- анимация старта: сплэш живёт минимум 1,5 с при каждом холодном старте,
+  //     уходит после гидрации стора; страховка от зависшей гидрации — 5 с ---
+  const [splashGone, setSplashGone] = useState(false)
+  const [minBootPassed, setMinBootPassed] = useState(false)
+  useEffect(() => {
+    const t1 = setTimeout(() => setMinBootPassed(true), 1500)
+    const t2 = setTimeout(() => useAzmz.getState().setHydrated(), 5000)
+    return () => {
+      clearTimeout(t1)
+      clearTimeout(t2)
+    }
+  }, [])
 
   const unreadNotes = notes.filter((n) => !n.readAt).length
   const availableOrders = orders.filter((o) => o.status === 'ASSIGNED' && o.number !== activeOrderNumber).length
@@ -73,6 +87,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0A1420] text-[#15202B] flex items-center justify-center gap-8 2xl:px-3 2xl:py-4 xl:gap-12">
+      {/* Анимация старта: бейдж АЭМЗ, вспышка молнии, дорога — поверх всего */}
+      {!splashGone && (
+        <BootSplash
+          stage="intro"
+          ready={hydrated && minBootPassed}
+          onFinished={() => setSplashGone(true)}
+        />
+      )}
+
       <SidePanel className="hidden 2xl:flex" />
 
       {/* Полноэкранный контейнер: на телефоне — весь дисплей без рамки и статус-строки
