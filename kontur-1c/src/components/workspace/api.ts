@@ -1,8 +1,13 @@
 'use client'
 
-// Клиентские хелперы UI рабочих мест
+// Клиентские хелперы UI рабочих мест.
+// BASE — basePath платформы (next.config.ts): страницы и API живут под /kontur,
+// единая точка входа — роутер на :3000 (scripts/router.js).
+const BASE = '/kontur'
+const full = (url: string) => (url.startsWith('/') ? BASE + url : url)
+
 export async function apiGet<T>(url: string, init?: { headers?: Record<string, string> }): Promise<T> {
-  const res = await fetch(url, { cache: 'no-store', headers: init?.headers })
+  const res = await fetch(full(url), { cache: 'no-store', headers: init?.headers })
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: string }
     throw new Error(body.error || `HTTP ${res.status}`)
@@ -11,7 +16,7 @@ export async function apiGet<T>(url: string, init?: { headers?: Record<string, s
 }
 
 export async function apiPost<T>(url: string, body?: unknown, init?: { headers?: Record<string, string> }, method = 'POST'): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(full(url), {
     method,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     body: body === undefined ? undefined : JSON.stringify(body),

@@ -405,7 +405,7 @@ export function RequestsScreen({ onClose }: { onClose?: () => void }) {
             </div>
             <div className="grid gap-1.5">
               <label className="c1-label">Груз (номенклатура)</label>
-              <C1Input name="cargo" required placeholder="Пруток 2ф-МД-12х6700-ОМ1-А800" className="w-full" />
+              <C1Input name="cargo" required placeholder="Металлопрокат листовой, 2 шт." className="w-full" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">

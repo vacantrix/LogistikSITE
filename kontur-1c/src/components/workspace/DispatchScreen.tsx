@@ -3,9 +3,9 @@
 // Рабочее место диспетчерской — форма «Маршрутные листы» (список + панель назначения).
 // Разметка имитирует список документов 1С (скриншот 1С:ERP, интерфейс «Такси»).
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { C1Button, C1Select, C1ToolButton, FormTitleBar } from '@/components/1c/kit'
+import { C1Button, C1Input, C1Select, C1ToolButton, FormTitleBar } from '@/components/1c/kit'
 import { apiPost } from './api'
 import { usePoll } from './usePoll'
 import { cn } from '@/lib/utils'
@@ -21,6 +21,7 @@ type Vehicle = { id: string; plate: string; model: string; kind: string; bodyTyp
 type Trailer = { id: string; plate: string; model: string; type: string; isActive: boolean }
 type Driver = { id: string; fullName: string; isActive: boolean; appId: string | null }
 type TripRow = { number: string; driver: { id: string } | null; trip: { status: string } | null }
+type Catalog = { rows: { id: string; name: string; address?: string }[] }
 
 // зеркала правил 5.3 для бейджей кандидатов (сервер перепроверяет при проведении)
 const BODY_CARGO: Record<string, string[]> = {
@@ -83,6 +84,8 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
   const { data: trailersData } = usePoll<{ rows: Trailer[] }>('/api/office/catalog/trailers')
   const { data: driversData } = usePoll<{ rows: Driver[] }>('/api/office/catalog/drivers')
   const { data: tripsData } = usePoll<{ trips: TripRow[] }>('/api/office/trips')
+  const { data: contractorsData } = usePoll<Catalog>('/api/office/catalog/contractors')
+  const { data: locationsData } = usePoll<Catalog>('/api/office/catalog/locations')
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [vehicleId, setVehicleId] = useState<string>('')
@@ -94,6 +97,9 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
   const [cancelReason, setCancelReason] = useState<string>(CANCEL_REASONS[0])
   const [cancelOpen, setCancelOpen] = useState(false)
   const [filterText, setFilterText] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const searchRef = useRef<HTMLInputElement | null>(null)
 
   const pool = requestsData?.requests ?? []
   const selected = pool.find((r) => r.id === selectedId) ?? null
@@ -161,29 +167,61 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
     }
   }
 
+  async function create(form: FormData) {
+    setCreating(true)
+    try {
+      const docs = String(form.get('docs') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+      const res = await apiPost<{ request: { id: string; number: string } }>('/api/office/requests', {
+        contractorId: form.get('contractorId'),
+        cargo: form.get('cargo'),
+        weightT: Number(form.get('weightT')),
+        fromLocationId: form.get('fromLocationId'),
+        toLocationId: form.get('toLocationId'),
+        loadingAt: new Date(String(form.get('loadingAt'))).toISOString(),
+        unloadingWindow: form.get('unloadingWindow'),
+        docs,
+        actor: 'Диспетчер Е. Крылова',
+      })
+      toast.success(`Заявка ${res.request.number} создана и встала в пул «Маршрутных листов»`)
+      setCreateOpen(false)
+      setSelectedId(res.request.id)
+      setVehicleId('')
+      setTrailerId('')
+      setDriverId('')
+      setServerErrors([])
+      reload()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Ошибка создания')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const notImplemented = (what: string) => toast.info(`${what} — в демо-стенде не реализовано`)
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
       <FormTitleBar title="Маршрутные листы" onClose={onClose} />
 
       {/* Командная панель списка */}
       <div className="flex h-[34px] shrink-0 items-center gap-1 border-b border-[#d4d4d4] bg-[#f2f2f2] px-2">
-        <C1Button className="!h-[24px]">
+        <C1Button className="!h-[24px]" onClick={() => setCreateOpen(true)}>
           <svg width="11" height="11" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="#2f7a36" strokeWidth="1.6" /></svg>
           Создать
           <svg width="8" height="5" viewBox="0 0 9 6"><path d="M0 0h9L4.5 6z" fill="#666" /></svg>
         </C1Button>
-        <C1ToolButton title="Скопировать">
+        <C1ToolButton title="Скопировать" onClick={() => notImplemented('Скопировать')}>
           <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><rect x="4.5" y="4.5" width="7" height="7" rx="1" stroke="#5c5c5c" strokeWidth="1.1" /><path d="M9.5 2.5h-7v7" stroke="#5c5c5c" strokeWidth="1.1" /></svg>
         </C1ToolButton>
-        <C1ToolButton title="Изменить">
+        <C1ToolButton title="Изменить" onClick={() => notImplemented('Изменить')}>
           <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M9.5 2l2.5 2.5L5 11.5l-3 .5.5-3z" stroke="#c98a00" strokeWidth="1.1" strokeLinejoin="round" /></svg>
         </C1ToolButton>
-        <C1Button className="!h-[24px]">
+        <C1Button className="!h-[24px]" onClick={() => notImplemented('Печать')}>
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M3 1h6v3H3zM2 7h8v4H2z" stroke="#5c5c5c" strokeWidth="1.1" /><path d="M4 7V5h4v2" stroke="#5c5c5c" strokeWidth="1.1" /></svg>
           Печать
           <svg width="8" height="5" viewBox="0 0 9 6"><path d="M0 0h9L4.5 6z" fill="#666" /></svg>
         </C1Button>
-        <C1Button className="!h-[24px]">
+        <C1Button className="!h-[24px]" onClick={() => notImplemented('Отчеты')}>
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 10.5c2-4 8-4 10 0M6 6.5a2.6 2.6 0 100-5.2 2.6 2.6 0 000 5.2z" stroke="#5c5c5c" strokeWidth="1.1" /></svg>
           Отчеты
           <svg width="8" height="5" viewBox="0 0 9 6"><path d="M0 0h9L4.5 6z" fill="#666" /></svg>
@@ -191,15 +229,16 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
 
         <div className="ml-auto flex items-center gap-1">
           <input
+            ref={searchRef}
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
             placeholder="Поиск (Ctrl+F)"
             className="c1-input w-[210px]"
           />
-          <C1ToolButton title="Найти">
+          <C1ToolButton title="Найти" onClick={() => searchRef.current?.focus()}>
             <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4" stroke="#5c5c5c" strokeWidth="1.3" /><path d="M9 9l3.5 3.5" stroke="#5c5c5c" strokeWidth="1.3" /></svg>
           </C1ToolButton>
-          <C1Button className="!h-[24px]">
+          <C1Button className="!h-[24px]" onClick={() => notImplemented('Ещё')}>
             Ещё
             <svg width="8" height="5" viewBox="0 0 9 6"><path d="M0 0h9L4.5 6z" fill="#666" /></svg>
           </C1Button>
@@ -398,6 +437,82 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
             <C1Button onClick={() => setCancelOpen(false)}>Не отменять</C1Button>
             <C1Button onClick={() => void cancel()}>Отменить с причиной</C1Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Диалог создания заявки — кнопка «Создать» командной панели */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Новая заявка на перевозку (пул «Маршрутных листов»)</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              void create(new FormData(e.currentTarget))
+            }}
+            className="grid gap-3"
+          >
+            <div className="grid gap-1.5">
+              <label className="c1-label">Заказчик</label>
+              <select name="contractorId" required className="c1-select w-full">
+                <option value="" disabled>Из справочника контрагентов</option>
+                {(contractorsData?.rows ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <label className="c1-label">Груз (номенклатура)</label>
+              <C1Input name="cargo" required placeholder="Металлопрокат листовой, 2 шт." className="w-full" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <label className="c1-label">Вес, т</label>
+                <C1Input name="weightT" type="number" step="0.1" min="0.1" required defaultValue="10" />
+              </div>
+              <div className="grid gap-1.5">
+                <label className="c1-label">Погрузка</label>
+                <input name="loadingAt" type="datetime-local" required className="c1-input w-full" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <label className="c1-label">Погрузка из</label>
+                <select name="fromLocationId" required className="c1-select w-full">
+                  <option value="" disabled>Пункт</option>
+                  {(locationsData?.rows ?? []).map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid gap-1.5">
+                <label className="c1-label">Выгрузка в</label>
+                <select name="toLocationId" required className="c1-select w-full">
+                  <option value="" disabled>Пункт</option>
+                  {(locationsData?.rows ?? []).map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <label className="c1-label">Окно выгрузки</label>
+              <C1Input name="unloadingWindow" placeholder="сегодня 14:00–16:00" defaultValue="по согласованию" className="w-full" />
+            </div>
+            <div className="grid gap-1.5">
+              <label className="c1-label">Документы для фотофиксации (через запятую)</label>
+              <textarea name="docs" rows={2} placeholder="ТТН (2 экз.), Паспорт груза, Пропуск на терминал" className="c1-input h-auto w-full py-1" />
+            </div>
+            <div className="rounded-[3px] border border-[#bcd4ea] bg-[#eef5fc] px-3 py-2 text-[12px] text-[#2f6db0]">
+              Заявка встанет в пул «Маршрутных листов» со статусом «Диспетчеризация» — останется выбрать ТС и водителя
+              и провести документ кнопкой «Назначить — провести документ».
+            </div>
+            <DialogFooter>
+              <C1Button onClick={() => setCreateOpen(false)}>Отмена</C1Button>
+              <C1Button type="submit" accent disabled={creating}>{creating ? 'Проведение…' : 'Создать'}</C1Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

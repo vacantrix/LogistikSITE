@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-// Поллинг экранов офиса: 5 секунд на первой очереди (SSE — вторая очередь по ТЗ)
+// Поллинг экранов офиса: 5 секунд на первой очереди (SSE — вторая очередь по ТЗ).
+// BASE — basePath платформы (next.config.ts): все запросы уходят под /kontur.
+const BASE = '/kontur'
+const full = (url: string) => (url.startsWith('/') ? BASE + url : url)
+
 export function usePoll<T>(url: string, intervalMs = 5000): { data: T | null; error: string | null; reload: () => void } {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -10,7 +14,7 @@ export function usePoll<T>(url: string, intervalMs = 5000): { data: T | null; er
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(url, { cache: 'no-store' })
+      const res = await fetch(full(url), { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setData((await res.json()) as T)
       setError(null)
