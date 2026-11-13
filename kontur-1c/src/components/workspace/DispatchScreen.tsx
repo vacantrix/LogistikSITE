@@ -108,12 +108,14 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
     [pool, filterText],
   )
 
-  const busyDriverIds = useMemo(() => {
-    const s = new Set<string>()
+  // водитель → код незавершённого рейса (для подсказки в выпадающем списке;
+  // сервер перепроверяет правила 5.3 при проведении)
+  const busyDriverTrip = useMemo(() => {
+    const m = new Map<string, string>()
     for (const t of tripsData?.trips ?? []) {
-      if (t.trip && ['assigned', 'in_progress'].includes(t.trip.status) && t.driver) s.add(t.driver.id)
+      if (t.trip && ['assigned', 'in_progress'].includes(t.trip.status) && t.driver) m.set(t.driver.id, t.number)
     }
-    return s
+    return m
   }, [tripsData])
 
   const candidates = useMemo(() => {
@@ -399,8 +401,8 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
               disabled={!selected}
               options={(driversData?.rows ?? []).filter((d) => d.isActive).map((d) => ({
                 value: d.id,
-                label: d.fullName + (busyDriverIds.has(d.id) ? ' · занят в рейсе' : ''),
-                disabled: busyDriverIds.has(d.id),
+                label: d.fullName + (busyDriverTrip.has(d.id) ? ` · занят в рейсе ${busyDriverTrip.get(d.id)}` : ''),
+                disabled: busyDriverTrip.has(d.id),
               }))}
             />
             <span className="text-[11px] text-[#8a8a8a]">

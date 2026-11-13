@@ -12,12 +12,15 @@ import { BAKED_MANEUVERS, BAKED_START_F, ROUTE_LNGLAT, SIDE_STREET_LINES } from 
 
 export { ROUTE_LNGLAT } from './route-geometry'
 
-export const DRIVER_ID = 'a1b2c3d4-1111-4222-8333-444455556666'
+// Канонический демо-водитель стенда: совпадает с DEFAULT_DRIVER_ID APK и appId
+// водителя «Иванов С. П.» в «Контур 1С» — мост плана обмена переписывает записи
+// плана обмена на этот id, поэтому приложение видит назначения диспетчера.
+export const DRIVER_ID = '06c075d1-3088-45f2-a7ae-090e8c355447'
 export const VEHICLE_ID = 'b2c3d4e5-2222-4333-9444-555566667777'
 export const DEVICE_ID = 'c3d4e5f6-3333-4444-a555-666677778888'
 export const TRIP_ID = '7e6a1c2d-8a9b-4c3d-9e0f-112233445566'
 
-export const DRIVER_NAME = 'Смирнов А. В.'
+export const DRIVER_NAME = 'Иванов С. П.'
 export const VEHICLE_LABEL = 'КАМАЗ 65207 • АТ 2147 23'
 export const DISPATCHER_NAME = 'Соколов Д.'
 
