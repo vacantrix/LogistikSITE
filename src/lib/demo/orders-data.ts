@@ -157,19 +157,21 @@ export const DEMO_HISTORY: HistoryEntry[] = [
   },
 ]
 
-/** Шаги предрейсовой фотофиксации (перед кнопкой «Начать маршрут»). */
+/** Шаги предрейсовой фотофиксации (перед кнопкой «Начать маршрут»).
+ *  Ровно три шага по требованиям заказчика; stepId синхронны со справочником
+ *  платформы «Контур 1С» (kontur-1c/src/lib/1c/statuses.ts) — обратный канал
+ *  PRETRIP_STEP принимает их без маппинга. */
 export interface PretripStepDef {
   id: string
   label: string
   hint: string
-  kind: 'vehicle' | 'order_docs' | 'personal'
+  kind: 'vehicle' | 'order_docs' | 'personal' | 'selfie'
+  /** Какую камеру открыть: user — фронтальная (селфи), environment — основная. */
+  camera: 'user' | 'environment'
 }
 
 export const PRETRIP_STEPS: PretripStepDef[] = [
-  { id: 'veh_side', label: 'Фото ТС — бок', hint: 'Правый борт целиком, госномер в кадре', kind: 'vehicle' },
-  { id: 'veh_front', label: 'Фото ТС — голова', hint: 'Спереди, виден госномер тягача', kind: 'vehicle' },
-  { id: 'veh_rear', label: 'Фото ТС — сзади', hint: 'Кузов и полуприцеп сзади', kind: 'vehicle' },
-  { id: 'order_docs', label: 'Документы по заявке', hint: 'ТТН, паспорт груза, пропуск', kind: 'order_docs' },
-  { id: 'lic', label: 'Фото ВУ', hint: 'Водительское удостоверение, обе стороны', kind: 'personal' },
-  { id: 'passport', label: 'Фото паспорта', hint: 'Разворот с фото и регистрацией', kind: 'personal' },
+  { id: 'veh_front', label: 'Автомобиль спереди', hint: 'Кабина целиком, госномер в кадре', kind: 'vehicle', camera: 'environment' },
+  { id: 'trailer_rear', label: 'Прицеп сзади', hint: 'Прицеп и кузов сзади целиком', kind: 'vehicle', camera: 'environment' },
+  { id: 'selfie_docs', label: 'Селфи с документами', hint: 'Вы с документами по заявке в руках', kind: 'selfie', camera: 'user' },
 ]

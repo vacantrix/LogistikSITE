@@ -3,13 +3,13 @@
   "version": "0.2.1",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3001 2>&1 | tee dev.log",
+    "dev": "DATABASE_URL=file:../db/custom.db?connection_limit=1 next dev -p 3001 2>&1 | tee dev.log",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
-    "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+    "start": "NODE_ENV=production DATABASE_URL=file:../db/custom.db?connection_limit=1 PORT=3001 bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
-    "db:push": "prisma db push --accept-data-loss",
-    "db:seed": "bun prisma/seed.ts",
-    "db:generate": "prisma generate",
+    "db:push": "DATABASE_URL=file:../db/custom.db?connection_limit=1 prisma db push --accept-data-loss",
+    "db:seed": "DATABASE_URL=file:../db/custom.db?connection_limit=1 bun prisma/seed.ts",
+    "db:generate": "DATABASE_URL=file:../db/custom.db?connection_limit=1 prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset"
   },

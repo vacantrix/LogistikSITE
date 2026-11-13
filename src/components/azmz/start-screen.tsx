@@ -33,12 +33,18 @@ import { ImportRouteDialog } from '@/components/azmz/import-route-dialog'
 const fmtDT = (iso: string) =>
   new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 
-/** POST в 1С (обратный канал статусов). Демо: журнал в /api/1c/orders. */
-function postTo1C(action: 'ACCEPT' | 'PRETRIP_STEP' | 'START_ROUTE', orderId: string, stepId?: string): void {
+/** POST в 1С (обратный канал статусов). Демо: журнал в /api/1c/orders.
+ *  Фото предрейсовых шагов уходит вместе со статусом (photoDataUrl). */
+function postTo1C(
+  action: 'ACCEPT' | 'PRETRIP_STEP' | 'START_ROUTE',
+  orderId: string,
+  stepId?: string,
+  photoDataUrl?: string,
+): void {
   void fetch('/api/1c/orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orderId, action, stepId }),
+    body: JSON.stringify({ orderId, action, stepId, photoDataUrl: photoDataUrl ?? null }),
   }).catch(() => {
     /* тестовый режим: ответ 1С не блокирует водительский флоу */
   })
@@ -82,6 +88,7 @@ function demoPhoto(label: string): string {
 
 function stepIcon(kind: PretripStepDef['kind'], cls: string) {
   if (kind === 'vehicle') return <Truck className={cls} />
+  if (kind === 'selfie') return <Camera className={cls} />
   if (kind === 'order_docs') return <FileText className={cls} />
   return <IdCard className={cls} />
 }
@@ -120,24 +127,28 @@ export function StartScreen() {
   const fileRef = useRef<HTMLInputElement>(null)
   const photoStepRef = useRef<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const fetchOnceRef = useRef(false)
   const [importOpen, setImportOpen] = useState(false)
+  // селфи с документами — фронтальная камера, фото ТС — основная
+  const [cameraMode, setCameraMode] = useState<'user' | 'environment'>('environment')
 
   // подтягиваем заявки и статусы с «1С» (в офлайне остаётся локальный сид).
-  // Это единственный refresh до старта рейса: StartScreen — стартовый экран.
+  // Опрос каждые 10 с: диспетчер назначает заявку на платформе «Контур 1С» —
+  // она появляется здесь сама, без перезапуска приложения.
   useEffect(() => {
-    if (fetchOnceRef.current) return
-    fetchOnceRef.current = true
-    fetch('/api/1c/orders')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { orders?: Order1C[] } | null) => {
-        if (d?.orders?.length) useAzmz.getState().setOrders(d.orders)
-      })
-      .catch(() => {})
+    const load = () =>
+      fetch('/api/1c/orders')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { orders?: Order1C[] } | null) => {
+          if (d?.orders?.length) useAzmz.getState().setOrders(d.orders)
+        })
+        .catch(() => {})
+    void load()
+    const t = setInterval(load, 10_000)
+    return () => clearInterval(t)
   }, [])
 
   const active = orders.find((o) => o.number === activeOrderNumber) ?? null
-  const assigned = orders.find((o) => o.status === 'ASSIGNED') ?? null
+  const assignedOrders = orders.filter((o) => o.status === 'ASSIGNED' && o.number !== activeOrderNumber)
   const doneCount = pretrip.filter((p) => p.done).length
   const allDone = pretrip.length > 0 && doneCount === pretrip.length
 
@@ -146,13 +157,15 @@ export function StartScreen() {
     scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [orderStage])
 
-  const take = (o: NonNullable<typeof assigned>) => {
+  const take = (o: Order1C) => {
     acceptOrder(o.number)
     postTo1C('ACCEPT', o.number)
   }
 
   const openCamera = (stepId: string) => {
     photoStepRef.current = stepId
+    const def = PRETRIP_STEPS.find((d) => d.id === stepId)
+    setCameraMode(def?.camera ?? 'environment')
     fileRef.current?.click()
   }
 
@@ -164,7 +177,7 @@ export function StartScreen() {
     try {
       const thumb = await fileToThumb(f)
       completePretripStep(stepId, thumb)
-      postTo1C('PRETRIP_STEP', active?.number ?? '', stepId)
+      postTo1C('PRETRIP_STEP', active?.number ?? '', stepId, thumb)
     } catch {
       showToast('Не удалось прочитать снимок — попробуйте ещё раз')
     }
@@ -172,8 +185,9 @@ export function StartScreen() {
 
   const demoShot = (stepId: string) => {
     const def = PRETRIP_STEPS.find((d) => d.id === stepId)
-    completePretripStep(stepId, demoPhoto(def?.label ?? 'шаг'))
-    postTo1C('PRETRIP_STEP', active?.number ?? '', stepId)
+    const thumb = demoPhoto(def?.label ?? 'шаг')
+    completePretripStep(stepId, thumb)
+    postTo1C('PRETRIP_STEP', active?.number ?? '', stepId, thumb)
   }
 
   const start = () => {
@@ -259,7 +273,8 @@ export function StartScreen() {
             </div>
           </div>
           <div className="text-[11.5px] text-[#64748B] mt-1 leading-snug">
-            Фотофиксация перед выездом. Снимки уходят в 1С вместе со статусами заявки.
+            Этап 1 — предрейсовая фотофиксация: автомобиль спереди, прицеп сзади, селфи с документами.
+            Снимки уходят в 1С вместе со статусами заявки.
           </div>
           <div className="mt-3 h-1.5 rounded-full bg-[#E2E8F0] overflow-hidden">
             <div
@@ -329,72 +344,101 @@ export function StartScreen() {
         )}
       </div>
     )
-  } else if (assigned) {
-    // заявка назначена — большая кнопка «Взять заявку»
-    body = (
-      <div>
-        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-[15px] font-black text-[#15202B]">{assigned.number}</div>
-            <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-[#F97316]/15 text-[#C2410C]">
-              Назначена вам
+  } else if (assignedOrders.length > 0) {
+    // окно выбора заявки: одна — большая кнопка «Взять заявку»,
+    // несколько — список карточек с выбором (требование заказчика)
+    const assignedCard = (o: Order1C, big: boolean) => (
+      <div key={o.number} className={big ? '' : 'bg-white rounded-2xl border border-black/5 shadow-sm p-4'}>
+        <div className="flex items-center justify-between">
+          <div className="text-[15px] font-black text-[#15202B]">{o.number}</div>
+          <span className="text-[10px] font-bold rounded-full px-2 py-0.5 bg-[#F97316]/15 text-[#C2410C]">
+            Назначена вам
+          </span>
+        </div>
+        <div className="text-[13px] font-semibold text-[#15202B] mt-1.5">{o.client}</div>
+        <div className="text-[12px] text-[#64748B]">
+          {o.cargo} · {o.weightT.toFixed(1)} т
+        </div>
+
+        <div className="mt-3 rounded-xl bg-[#101E2E]/4 p-3 flex flex-col gap-1.5 text-[12.5px] text-[#15202B]">
+          <div className="flex items-start gap-1.5">
+            <MapPin className="h-3.5 w-3.5 text-[#3B82F6] mt-0.5 shrink-0" />
+            <span>
+              <b>Погрузка:</b> {o.fromLabel}, {fmtDT(o.loadingAt)}
             </span>
           </div>
-          <div className="text-[13px] font-semibold text-[#15202B] mt-1.5">{assigned.client}</div>
-          <div className="text-[12px] text-[#64748B]">
-            {assigned.cargo} · {assigned.weightT.toFixed(1)} т
+          <div className="flex items-start gap-1.5">
+            <MapPin className="h-3.5 w-3.5 text-[#EF4444] mt-0.5 shrink-0" />
+            <span>
+              <b>Выгрузка:</b> {o.toLabel}, {o.unloadingWindow}
+            </span>
           </div>
-
-          <div className="mt-3 rounded-xl bg-[#101E2E]/4 p-3 flex flex-col gap-1.5 text-[12.5px] text-[#15202B]">
-            <div className="flex items-start gap-1.5">
-              <MapPin className="h-3.5 w-3.5 text-[#3B82F6] mt-0.5 shrink-0" />
-              <span>
-                <b>Погрузка:</b> {assigned.fromLabel}, {fmtDT(assigned.loadingAt)}
-              </span>
-            </div>
-            <div className="flex items-start gap-1.5">
-              <MapPin className="h-3.5 w-3.5 text-[#EF4444] mt-0.5 shrink-0" />
-              <span>
-                <b>Выгрузка:</b> {assigned.toLabel}, {assigned.unloadingWindow}
-              </span>
-            </div>
-            <div className="flex items-start gap-1.5">
-              <Truck className="h-3.5 w-3.5 text-[#64748B] mt-0.5 shrink-0" />
-              <span>
-                <b>ТС:</b> {assigned.vehicle}
-                {assigned.trailer !== '—' ? `, прицеп ${assigned.trailer}` : ''}
-              </span>
-            </div>
-          </div>
-
-          <div className="mt-3">
-            <div className="text-[11px] font-bold text-[#64748B] uppercase tracking-wide">Документы по заявке</div>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {assigned.docs.map((d) => (
-                <span key={d} className="text-[11px] font-medium bg-[#101E2E]/5 rounded-lg px-2 py-1 text-[#15202B]">
-                  {d}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-3 text-[11px] text-[#64748B]">
-            Назначил: {assigned.assignedBy} · дистанция ≈ {assigned.distanceKm} км
+          <div className="flex items-start gap-1.5">
+            <Truck className="h-3.5 w-3.5 text-[#64748B] mt-0.5 shrink-0" />
+            <span>
+              <b>ТС:</b> {o.vehicle}
+              {o.trailer !== '—' ? `, прицеп ${o.trailer}` : ''}
+            </span>
           </div>
         </div>
 
-        <button
-          onClick={() => take(assigned)}
-          className="mt-4 w-full h-16 bg-[#F97316] text-white rounded-2xl text-[17px] font-black shadow-[0_14px_36px_rgba(249,115,22,0.45)] flex items-center justify-center gap-2.5 active:scale-[0.99] transition-transform"
-        >
-          <Truck className="h-6 w-6" />
-          Взять заявку
-        </button>
-        <div className="mt-2 text-center text-[10.5px] text-[#64748B]">
-          Далее: построение маршрута → фотофиксация ТС и документов → старт
+        <div className="mt-3">
+          <div className="text-[11px] font-bold text-[#64748B] uppercase tracking-wide">Документы по заявке</div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {o.docs.map((d) => (
+              <span key={d} className="text-[11px] font-medium bg-[#101E2E]/5 rounded-lg px-2 py-1 text-[#15202B]">
+                {d}
+              </span>
+            ))}
+          </div>
         </div>
+
+        {(o.routeWaypoints?.length || o.routeLink) && (
+          <div className="mt-2 inline-flex items-center gap-1 text-[10.5px] font-semibold text-[#15803D] bg-[#22C55E]/12 rounded-full px-2 py-1">
+            <Link2 className="h-3 w-3" />
+            Маршрут из Яндекс.Карт{o.routeWaypoints?.length ? ` · ${o.routeWaypoints.length} точек` : ''}
+          </div>
+        )}
+
+        <div className="mt-3 text-[11px] text-[#64748B]">
+          Назначил: {o.assignedBy} · дистанция ≈ {o.distanceKm} км
+        </div>
+
+        {big ? (
+          <>
+            <button
+              onClick={() => take(o)}
+              className="mt-4 w-full h-16 bg-[#F97316] text-white rounded-2xl text-[17px] font-black shadow-[0_14px_36px_rgba(249,115,22,0.45)] flex items-center justify-center gap-2.5 active:scale-[0.99] transition-transform"
+            >
+              <Truck className="h-6 w-6" />
+              Взять заявку
+            </button>
+            <div className="mt-2 text-center text-[10.5px] text-[#64748B]">
+              Далее: построение маршрута → фото (авто спереди, прицеп сзади, селфи с документами) → старт
+            </div>
+          </>
+        ) : (
+          <button
+            onClick={() => take(o)}
+            className="mt-3 w-full h-12 bg-[#F97316] text-white rounded-xl text-[14px] font-bold shadow-lg flex items-center justify-center gap-2 active:scale-[0.99] transition-transform"
+          >
+            <Truck className="h-5 w-5" />
+            Взять заявку
+          </button>
+        )}
       </div>
     )
+    body =
+      assignedOrders.length === 1 ? (
+        assignedCard(assignedOrders[0], true)
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          <div className="text-[12px] font-bold text-[#64748B] uppercase tracking-wide px-1">
+            Выберите заявку ({assignedOrders.length} назначены)
+          </div>
+          {assignedOrders.map((o) => assignedCard(o, false))}
+        </div>
+      )
   } else {
     // заявки нет: ожидание (или рейс только что завершён)
     const justCompleted = orderStage === 'completed'
@@ -452,7 +496,14 @@ export function StartScreen() {
         )}
       </div>
 
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFilePicked} />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        capture={cameraMode}
+        className="hidden"
+        onChange={onFilePicked}
+      />
 
       {/* контент поверх тёмной шапки */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 -mt-6 pb-6 relative z-10">

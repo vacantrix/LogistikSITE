@@ -61,3 +61,6 @@ kontur-1c/node_modules/
 kontur-1c/.next/
 kontur-1c/dev.log
 kontur-1c/tsconfig.tsbuildinfo
+
+# Фото предрейсового осмотра (платформа) — рантайм-данные
+kontur-1c/uploads/

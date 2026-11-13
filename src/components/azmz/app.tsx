@@ -51,6 +51,7 @@ export default function App() {
   //     уходит после гидрации стора; страховка от зависшей гидрации — 5 с ---
   const [splashGone, setSplashGone] = useState(false)
   const [minBootPassed, setMinBootPassed] = useState(false)
+  const bootMapRef = useRef(false)
   useEffect(() => {
     const t1 = setTimeout(() => setMinBootPassed(true), 1500)
     const t2 = setTimeout(() => useAzmz.getState().setHydrated(), 5000)
@@ -60,11 +61,18 @@ export default function App() {
     }
   }, [])
 
+  // заявка активна (рейс идёт) — после запуска сразу переключаем на карту,
+  // каким бы ни был экран в прошлом сеансе (требование заказчика)
+  useEffect(() => {
+    if (!hydrated || bootMapRef.current) return
+    bootMapRef.current = true
+    if (orderStage === 'in_progress') setView('map')
+  }, [hydrated, orderStage, setView])
+
   const unreadNotes = notes.filter((n) => !n.readAt).length
   const availableOrders = orders.filter((o) => o.status === 'ASSIGNED' && o.number !== activeOrderNumber).length
   // доступы: пока рейс не начат (фото не закрыты), приложение ограничено тремя вкладками
   const unlocked = orderStage === 'in_progress'
-
   // если прошлый сеанс оставил нас в закрытом разделе — возвращаем на «Главную»
   useEffect(() => {
     if (!hydrated || unlocked) return

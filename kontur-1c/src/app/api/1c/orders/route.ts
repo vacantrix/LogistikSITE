@@ -71,6 +71,9 @@ export async function GET(req: Request) {
     durationMin: r.trip?.routeDurationS ? Math.round(r.trip.routeDurationS / 60) : 0,
     status: mapOrderStatus(r.status) ?? 'ASSIGNED',
     assignedBy: r.assignedBy ?? '—',
+    // маршрут из ссылки Яндекс.Карт (диспетчер: «Поделиться» → «Ссылка»)
+    routeLink: r.routeLink ?? null,
+    routeWaypoints: r.routeWaypoints ? (JSON.parse(r.routeWaypoints) as Array<{ lat: number; lng: number }>) : null,
   }))
 
   // eventLog — журнал действий водителя: из регистра статусов и шагов фотофиксации

@@ -319,7 +319,11 @@ export const useAzmz = create<AzmzState>()(
       applyJournal: (entries, cursor) => {
         set((s) => {
           let { trip, points, events, chat, notes } = s
+          // во время рейса по заявке локальный рейс и его точки главнее демо-журнала:
+          // водитель должен видеть точки загрузки/выгрузки ИМЕННО своей заявки
+          const guardOrderTrip = s.orderStage === 'in_progress' && !!s.trip && s.trip.id.startsWith('local-')
           for (const e of entries) {
+            if (guardOrderTrip && (e.entity === 'TRIP' || e.entity === 'TRIP_POINT')) continue
             if (e.entity === 'TRIP' && e.op === 'UPSERT') trip = e.payload as TripSnapshot
             else if (e.entity === 'TRIP_POINT' && e.op === 'UPSERT') points = upsertById(points, e.payload as TripPointSnapshot)
             else if (e.entity === 'TRIP_EVENT' && e.op === 'UPSERT') events = upsertById(events, e.payload as TripEventSnapshot)
@@ -596,14 +600,63 @@ export const useAzmz = create<AzmzState>()(
           ),
         })),
       startRoute: () => {
-        const rr = get().realRoute
+        const s = get()
+        const o = s.orders.find((x) => x.number === s.activeOrderNumber)
+        const rr = s.realRoute
+        // Рейс и точки маршрута — из заявки (1С/ссылка диспетчера): водитель видит
+        // точки загрузки/выгрузки на карте и в дашборде рейса даже без демо-журнала.
+        if (o) {
+          const wps = orderWaypoints(o)
+          if (wps && wps.length >= 2) {
+            const tripId = `local-${o.number}`
+            const now = Date.now()
+            const durS = rr?.durationS ?? o.durationMin * 60
+            const points: TripPointSnapshot[] = wps.map((w, i) => ({
+              id: `${tripId}-p${i + 1}`,
+              tripId,
+              seqNo: i + 1,
+              kind: i === 0 ? 'loading' : i === wps.length - 1 ? 'unloading' : 'waypoint',
+              name: i === 0 ? o.fromLabel : i === wps.length - 1 ? o.toLabel : `Промежуточная точка ${i}`,
+              address: i === 0 ? o.fromLabel : i === wps.length - 1 ? o.toLabel : `Промежуточная точка ${i}`,
+              lat: w.lat,
+              lon: w.lng,
+              geofenceRadiusM: 300,
+              plannedArrivalAt: now + Math.round((durS * 1000 * i) / Math.max(1, wps.length - 1)),
+              ...(i === 0 ? { plannedDepartureAt: now + 20 * 60_000 } : {}),
+            }))
+            let bbox: Pick<TripSnapshot, 'routeMinLat' | 'routeMinLon' | 'routeMaxLat' | 'routeMaxLon'> = {}
+            if (rr && rr.coords.length > 0) {
+              const lats = rr.coords.map((c) => c[1])
+              const lons = rr.coords.map((c) => c[0])
+              bbox = {
+                routeMinLat: Math.min(...lats),
+                routeMinLon: Math.min(...lons),
+                routeMaxLat: Math.max(...lats),
+                routeMaxLon: Math.max(...lons),
+              }
+            }
+            const trip: TripSnapshot = {
+              id: tripId,
+              tripCode: o.number.replace('ЗК', 'Z'),
+              status: 'in_progress',
+              plannedStartAt: now,
+              plannedFinishAt: now + durS * 1000,
+              routeDistanceM: rr ? Math.round(rr.lengthM) : o.distanceKm * 1000,
+              routeDurationS: durS,
+              lastEventType: 'DEPARTURE',
+              lastEventAt: now,
+              ...bbox,
+            }
+            set({ trip, points })
+          }
+        }
         set({ orderStage: 'in_progress', view: 'map' })
         get().setSimRunning(true)
         // старт на реальной геометрии: за ~30 м до первого манёвра (баннер, как в мокапе)
         if (rr && rr.maneuvers[0]) {
           set({ simProgressF: Math.max(0, Math.min(rr.maneuvers[0].f - 30 / rr.lengthM, 0.99)) })
         }
-        get().showToast('Маршрут проложен — вы в пути. Рейс Z-1067')
+        get().showToast(o ? `Маршрут проложен — вы в пути. Рейс ${o.number.replace('ЗК', 'Z')}` : 'Маршрут проложен — вы в пути')
       },
       completeActiveTrip: () => {
         const s = get()
@@ -644,27 +697,8 @@ export const useAzmz = create<AzmzState>()(
         }).catch(() => {
           /* тестовый режим: ответ 1С не блокирует водительский флоу */
         })
-        // имитация потока 1С: через 7 с диспетчерская назначает следующую заявку
-        window.setTimeout(() => {
-          const st = get()
-          if (st.activeOrderNumber || st.orderStage !== 'completed') return
-          const next = st.orders.find((x) => x.status === 'DISPATCH')
-          if (!next) return
-          set({
-            orders: st.orders.map((x) =>
-              x.number === next.number ? { ...x, status: 'ASSIGNED' as const, assignedBy: 'Диспетчер Е. Крылова' } : x,
-            ),
-          })
-          // и фиксируем назначение в демо-1С, чтобы рефреш не сбросил статус
-          void fetch('/api/1c/orders', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orderId: next.number, action: 'ASSIGN' }),
-          }).catch(() => {
-            /* тестовый режим */
-          })
-          get().showToast(`Из 1С: назначена заявка ${next.number} — откройте «Главную»`)
-        }, 7_000)
+        // следующую заявку назначает диспетчер на платформе «Контур 1С» —
+        // StartScreen опрашивает /api/1c/orders и покажет её автоматически
       },
 
       resetDemo: () => {

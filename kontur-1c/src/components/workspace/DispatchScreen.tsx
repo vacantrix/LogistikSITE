@@ -5,17 +5,19 @@
 
 import { useMemo, useState } from 'react'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { C1Button, C1Select, C1ToolButton, FormTitleBar } from '@/components/1c/kit'
+import { C1Button, C1Input, C1Select, C1ToolButton, FormTitleBar } from '@/components/1c/kit'
 import { apiPost } from './api'
 import { usePoll } from './usePoll'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { CANCEL_REASONS, STATUS_LABELS } from '@/lib/1c/statuses'
+import { buildYandexRouteUrl, pointsLabel } from '@/lib/1c/yandexRoute'
 
 type RequestRow = {
   id: string; number: string; status: string; contractor: { name: string }; cargo: string; weightT: number
-  from: { name: string; address: string }; to: { name: string; address: string }
+  from: { name: string; address: string; lat: number; lon: number }; to: { name: string; address: string; lat: number; lon: number }
   loadingAt: string; unloadingWindow: string; docs: string[]
+  routeLink?: string | null; routeWaypoints?: Array<{ lat: number; lng: number }> | null
 }
 type Vehicle = { id: string; plate: string; model: string; kind: string; bodyType: string; capacityT: number; volumeM3: number | null; readiness: string; isActive: boolean }
 type Trailer = { id: string; plate: string; model: string; type: string; isActive: boolean }
@@ -94,6 +96,8 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
   const [cancelReason, setCancelReason] = useState<string>(CANCEL_REASONS[0])
   const [cancelOpen, setCancelOpen] = useState(false)
   const [filterText, setFilterText] = useState('')
+  const [routeLinkInput, setRouteLinkInput] = useState('')
+  const [routeParsing, setRouteParsing] = useState(false)
 
   const pool = requestsData?.requests ?? []
   const selected = pool.find((r) => r.id === selectedId) ?? null
@@ -158,6 +162,37 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
       reload()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Ошибка отмены')
+    }
+  }
+
+  /** Открыть Яндекс.Карты: с сохранённым маршрутом — все его точки (правка), без — пункты заявки. */
+  function openYandexRoute() {
+    if (!selected) return
+    const url =
+      selected.routeLink ??
+      buildYandexRouteUrl([
+        { lat: selected.from.lat, lng: selected.from.lon },
+        { lat: selected.to.lat, lng: selected.to.lon },
+      ])
+    window.open(url, '_blank', 'noopener')
+  }
+
+  /** Разобрать вставленную ссылку → routeLink + routeWaypoints заявки. */
+  async function parseRouteLink() {
+    if (!selected || !routeLinkInput.trim()) return
+    setRouteParsing(true)
+    try {
+      const res = await apiPost<{ number: string; pointsLabel: string }>(`/api/office/requests/${selected.id}/route`, {
+        link: routeLinkInput.trim(),
+        actor: 'Диспетчер Е. Крылова',
+      })
+      toast.success(`Маршрут: ${res.pointsLabel} — сохранён в заявку ${res.number}`)
+      setRouteLinkInput('')
+      reload()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Ссылка не разобрана')
+    } finally {
+      setRouteParsing(false)
     }
   }
 
@@ -250,6 +285,12 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
                   <td className="max-w-[420px]">
                     <span className="text-[#1c1c1c]">{r.cargo}</span>
                     <span className="text-[#8a8a8a]"> · {r.weightT} т · окно: {r.unloadingWindow}{r.docs.length ? ` · ${r.docs.join(', ')}` : ''}</span>
+                    {r.routeWaypoints?.length ? (
+                      <span className="ml-1 inline-flex items-center gap-1 rounded-[3px] bg-[#e3f0e3] px-1.5 py-[1px] text-[11px] text-[#2f7a36]">
+                        <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M1 6c2-4 8-4 10 0" stroke="#2f7a36" strokeWidth="1.4" /><circle cx="1.5" cy="6" r="1.3" fill="#2f7a36" /><circle cx="10.5" cy="6" r="1.3" fill="#2f7a36" /></svg>
+                        маршрут: {pointsLabel(r.routeWaypoints.length)}
+                      </span>
+                    ) : null}
                   </td>
                 </tr>
               )
@@ -269,7 +310,7 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
       <div className="c1-splitter shrink-0" />
 
       {/* Нижняя панель: назначение ТС и водителя (проведение документа) */}
-      <div className="flex min-h-[220px] shrink-0 flex-col overflow-hidden" style={{ height: 300 }}>
+      <div className="flex min-h-[220px] shrink-0 flex-col overflow-hidden" style={{ height: 356 }}>
         <div className="flex h-[34px] shrink-0 items-center gap-2 border-b border-[#d4d4d4] bg-[#f2f2f2] px-2">
           <C1Button accent className="!h-[25px]" disabled={!selected || !vehicleId || !driverId || assigning} onClick={() => void assign()}>
             <svg width="10" height="9" viewBox="0 0 10 9"><path d="M0 4.5L3.5 8 10 0.8" stroke="#4a2f00" strokeWidth="1.8" fill="none" /></svg>
@@ -278,6 +319,10 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
           <C1Button className="!h-[25px]" disabled={!selected} onClick={() => { if (selected) { setCancelTarget(selected); setCancelOpen(true) } }}>
             <svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4.2" stroke="#c43e1c" strokeWidth="1.2" fill="none" /><path d="M1.8 1.8l6.4 6.4" stroke="#c43e1c" strokeWidth="1.2" /></svg>
             Отменить заявку
+          </C1Button>
+          <C1Button className="!h-[25px]" disabled={!selected} onClick={openYandexRoute} title="Открыть Яндекс.Карты с маршрутом заявки">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 8c2-4 8-4 10 0" stroke="#2f6db0" strokeWidth="1.5" /><circle cx="1.5" cy="8" r="1.3" fill="#2f6db0" /><circle cx="10.5" cy="8" r="1.3" fill="#2f6db0" /></svg>
+            {selected?.routeWaypoints?.length ? 'Маршрут — править в Яндекс.Картах' : 'Построить маршрут'}
           </C1Button>
           <span className="ml-2 truncate text-[12px] text-[#5c5c5c]">
             {selected
@@ -291,6 +336,30 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
           <div><span className="text-[#8a8a8a]">Груз: </span>{selected ? `${selected.cargo} · ${selected.weightT} т` : '—'}</div>
           <div><span className="text-[#8a8a8a]">Погрузка: </span>{selected ? fmt1C(selected.loadingAt) : '—'}</div>
           <div><span className="text-[#8a8a8a]">Окно выгрузки: </span>{selected?.unloadingWindow ?? '—'}</div>
+          <div className="col-span-2 lg:col-span-4">
+            <span className="text-[#8a8a8a]">Маршрут: </span>
+            {selected?.routeWaypoints?.length ? (
+              <span className="font-semibold text-[#2f7a36]">{pointsLabel(selected.routeWaypoints.length)} из Яндекс.Карт — уйдут водителю с заявкой</span>
+            ) : (
+              <span className="text-[#8a8a8a]">не задан — постройте в Яндекс.Картах и вставьте ссылку ниже</span>
+            )}
+          </div>
+        </div>
+
+        {/* строка маршрута: вставка ссылки Яндекс.Карт → разбор в заявку */}
+        <div className="flex shrink-0 items-center gap-2 border-b border-[#e5e5e5] bg-[#fafafa] px-3 py-1.5">
+          <span className="c1-label shrink-0">Ссылка на маршрут:</span>
+          <C1Input
+            className="min-w-0 flex-1"
+            value={routeLinkInput}
+            onChange={setRouteLinkInput}
+            placeholder="https://yandex.ru/maps/?rtext=… (Поделиться → Ссылка)"
+            disabled={!selected}
+          />
+          <C1Button className="!h-[25px] shrink-0" disabled={!selected || !routeLinkInput.trim() || routeParsing} onClick={() => void parseRouteLink()}>
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M1 6h10M6 1l-4.5 5L6 11" stroke="#2f6db0" strokeWidth="1.5" /></svg>
+            {routeParsing ? 'Разбор…' : 'Разобрать ссылку'}
+          </C1Button>
         </div>
 
         <div className="c1-scroll min-h-0 flex-1 overflow-auto">

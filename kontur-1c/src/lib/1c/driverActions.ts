@@ -61,7 +61,7 @@ export async function driverAction(
       if (!['ASSIGNED', 'ACCEPTED', 'PRETRIP'].includes(request.status))
         return { ok: false, code: 400, error: `Фотофиксация недоступна: заявка в статусе ${request.status}` }
       if (!input.stepId || !PRETRIP_STEP_IDS.includes(input.stepId as never))
-        return { ok: false, code: 400, error: 'Обязателен корректный stepId (veh_side…passport)' }
+        return { ok: false, code: 400, error: 'Обязателен корректный stepId (veh_front, trailer_rear, selfie_docs)' }
       const photoUrl = input.photoDataUrl ? await savePhotoDataUrl(input.photoDataUrl) : null
       await withWriteLock(() =>
         db.$transaction(async (tx: Prisma.TransactionClient) => {

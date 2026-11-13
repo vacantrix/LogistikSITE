@@ -102,6 +102,8 @@ model TransportRequest {                     // «Заказ на ТС»
   assignedBy      String?                    // «Диспетчер Е. Крылова»
   assignedAt      DateTime?
   closeReason     String?                    // причина закрытия/отмены
+  routeLink       String?                    // исходная ссылка маршрута Яндекс.Карт (rtext/rtt)
+  routeWaypoints  String?                    // JSON [{lat,lng}] — точки маршрута в порядке следования
   tripId          String?   @unique
   contractor      Contractor @relation(fields: [contractorId], references: [id])
   fromLocation    Location   @relation("fromLoc", fields: [fromLocationId], references: [id])

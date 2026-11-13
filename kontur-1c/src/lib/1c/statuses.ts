@@ -50,14 +50,14 @@ export const CANCEL_REASONS = [
   'Дублирование заявки',
 ]
 
-// Справочник шагов предрейсовой фотофиксации (таблица 9 ТЗ)
+// Справочник шагов предрейсовой фотофиксации (таблица 9 ТЗ).
+// Ровно три шага по требованиям заказчика — те же stepId, что в приложении
+// водителя (src/lib/demo/orders-data.ts): согласованы через обратный канал
+// PRETRIP_STEP, без маппинга наименований.
 export const PRETRIP_STEPS = [
-  { stepId: 'veh_side', label: 'ТС сбоку: правый борт целиком, госномер в кадре', group: 'vehicle' },
-  { stepId: 'veh_front', label: 'ТС спереди: виден госномер тягача', group: 'vehicle' },
-  { stepId: 'veh_rear', label: 'ТС сзади: кузов и полуприцеп', group: 'vehicle' },
-  { stepId: 'order_docs', label: 'Документы по заявке: ТТН, паспорт груза, пропуск', group: 'order_docs' },
-  { stepId: 'lic', label: 'Водительское удостоверение, обе стороны', group: 'personal' },
-  { stepId: 'passport', label: 'Паспорт: разворот с фото и регистрацией', group: 'personal' },
+  { stepId: 'veh_front', label: 'Автомобиль спереди: кабина целиком, госномер в кадре', group: 'vehicle' },
+  { stepId: 'trailer_rear', label: 'Прицеп сзади: кузов и прицеп целиком, госномер виден', group: 'vehicle' },
+  { stepId: 'selfie_docs', label: 'Селфи с документами: водитель с документами по заявке', group: 'personal' },
 ] as const
 export type PretripStepId = (typeof PRETRIP_STEPS)[number]['stepId']
 export const PRETRIP_STEP_IDS = PRETRIP_STEPS.map((s) => s.stepId) as PretripStepId[]

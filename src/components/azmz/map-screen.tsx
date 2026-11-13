@@ -138,10 +138,25 @@ export function MapScreen() {
   const setView = useAzmz((s) => s.setView)
   const orderStage = useAzmz((s) => s.orderStage)
   const realRoute = useAzmz((s) => s.realRoute)
+  const orders = useAzmz((s) => s.orders)
+  const activeOrderNumber = useAzmz((s) => s.activeOrderNumber)
   const updateWizard = useAzmz((s) => s.updateWizard)
   const setEventDialog = useAzmz((s) => s.setEventDialog)
   const completeActiveTrip = useAzmz((s) => s.completeActiveTrip)
   const showToast = useAzmz((s) => s.showToast)
+
+  // пункт назначения — из заявки (маршрут диспетчера из Яндекс.Карт/1С),
+  // иначе демо-точка выгрузки А-146 (заявки без маршрута)
+  const activeOrder = orders.find((o) => o.number === activeOrderNumber) ?? null
+  const orderWps = activeOrder?.routeWaypoints
+  const orderHasRoute = !!orderWps?.length
+  const dest = useMemo<LatLng>(
+    () =>
+      orderWps?.length
+        ? { lat: orderWps[orderWps.length - 1].lat, lng: orderWps[orderWps.length - 1].lng }
+        : { lat: UNLOADING_POINT.lat, lng: UNLOADING_POINT.lon },
+    [orderWps],
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MlMap | null>(null)
@@ -364,13 +379,13 @@ export function MapScreen() {
       setNavRoute(null)
       return
     }
+    // у заявки есть маршрут из точек — он и есть линия рейса (realRoute через
+    // все пункты); догоняющий navRoute строим только для заявок без маршрута
+    if (orderHasRoute) return
     let cancelled = false
     void (async () => {
       const from = gps ?? { lat: LOADING_POINT.lat, lng: LOADING_POINT.lon }
-      const variants = await fetchOsrmVariants(
-        { lat: from.lat, lng: from.lng },
-        { lat: UNLOADING_POINT.lat, lng: UNLOADING_POINT.lon },
-      )
+      const variants = await fetchOsrmVariants(from, dest)
       if (cancelled || !variants.length) return
       setNavRoute({
         coords: variants[0].coords,
@@ -386,7 +401,7 @@ export function MapScreen() {
     }
     // gps сознательно не в зависимостях: маршрут строится один раз на старте рейса;
     // дальнейшее перестроение — в эффекте ниже, по отклонению
-  }, [tripActive])
+  }, [tripActive, orderHasRoute, dest])
 
   // --- перестроение: водитель отклонился → маршрут от нового места --------------
   useEffect(() => {
@@ -398,10 +413,7 @@ export function MapScreen() {
     lastRerouteRef.current = now
     let cancelled = false
     void (async () => {
-      const variants = await fetchOsrmVariants(
-        { lat: gps.lat, lng: gps.lng },
-        { lat: UNLOADING_POINT.lat, lng: UNLOADING_POINT.lon },
-      )
+      const variants = await fetchOsrmVariants({ lat: gps.lat, lng: gps.lng }, dest)
       if (cancelled || !variants.length) return
       setNavRoute({
         coords: variants[0].coords,
@@ -415,7 +427,7 @@ export function MapScreen() {
     return () => {
       cancelled = true
     }
-  }, [gps, tripActive, navRoute])
+  }, [gps, tripActive, navRoute, dest, orderHasRoute])
 
   // --- альтернативные варианты поездки → слой ---------------------------------
   useEffect(() => {
@@ -434,7 +446,11 @@ export function MapScreen() {
     const map = mapRef.current
     const ml = mlRef.current
     if (!mapEpoch || !map || !ml || !trip || !tripActive) return
-    const activeCoords = navRoute?.coords ?? realRoute?.coords ?? null
+    // у заявки с маршрутом линия рейса — realRoute (через все пункты заявки);
+    // navRoute не должен её перекрывать прямой до последней точки
+    const activeCoords = orderHasRoute
+      ? (realRoute?.coords ?? navRoute?.coords ?? null)
+      : (navRoute?.coords ?? realRoute?.coords ?? null)
     const routeGeo = activeCoords
       ? { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: activeCoords } }
       : { type: 'Feature' as const, properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') }
@@ -484,7 +500,7 @@ export function MapScreen() {
     map.jumpTo({ center: [p0.lng, p0.lat], bearing: p0.bearing, pitch: 55, zoom: 15.4 })
     // перезапрос маршрута — обновляем геометрию уже созданного источника
     ;(map.getSource('route') as GeoJSONSource | undefined)?.setData(routeGeo as never)
-  }, [mapEpoch, trip, tripActive, realRoute, navRoute])
+  }, [mapEpoch, trip, tripActive, realRoute, navRoute, orderHasRoute])
 
   // после завершения рейса убираем навигационные слои — карта снова «чистая»
   useEffect(() => {

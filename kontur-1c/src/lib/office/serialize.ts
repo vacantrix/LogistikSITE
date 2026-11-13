@@ -1,5 +1,6 @@
 // Сериализация данных для UI рабочих мест
 import type { TransportRequest, Contractor, Location, Vehicle, Trailer, Driver, Trip, TripPoint, TripEvent, PreTripInspection, PreTripStep } from '@prisma/client'
+import { PRETRIP_STEP_IDS } from '@/lib/1c/statuses'
 
 export type RequestRow = {
   id: string
@@ -11,8 +12,8 @@ export type RequestRow = {
   contractor: { id: string; name: string }
   cargo: string
   weightT: number
-  from: { id: string; name: string; address: string }
-  to: { id: string; name: string; address: string }
+  from: { id: string; name: string; address: string; lat: number; lon: number }
+  to: { id: string; name: string; address: string; lat: number; lon: number }
   loadingAt: string
   unloadingWindow: string
   docs: string[]
@@ -22,6 +23,8 @@ export type RequestRow = {
   assignedBy: string | null
   assignedAt: string | null
   closeReason: string | null
+  routeLink: string | null
+  routeWaypoints: Array<{ lat: number; lng: number }> | null
   trip: {
     id: string
     status: string
@@ -57,8 +60,8 @@ export function requestRow(
     contractor: { id: r.contractor.id, name: r.contractor.name },
     cargo: r.cargo,
     weightT: r.weightT,
-    from: { id: r.fromLocation.id, name: r.fromLocation.name, address: r.fromLocation.address },
-    to: { id: r.toLocation.id, name: r.toLocation.name, address: r.toLocation.address },
+    from: { id: r.fromLocation.id, name: r.fromLocation.name, address: r.fromLocation.address, lat: r.fromLocation.lat, lon: r.fromLocation.lon },
+    to: { id: r.toLocation.id, name: r.toLocation.name, address: r.toLocation.address, lat: r.toLocation.lat, lon: r.toLocation.lon },
     loadingAt: r.loadingAt.toISOString(),
     unloadingWindow: r.unloadingWindow,
     docs: JSON.parse(r.docs) as string[],
@@ -68,6 +71,8 @@ export function requestRow(
     assignedBy: r.assignedBy,
     assignedAt: r.assignedAt?.toISOString() ?? null,
     closeReason: r.closeReason,
+    routeLink: r.routeLink ?? null,
+    routeWaypoints: r.routeWaypoints ? (JSON.parse(r.routeWaypoints) as Array<{ lat: number; lng: number }>) : null,
     trip: r.trip
       ? {
           id: r.trip.id,
@@ -87,11 +92,11 @@ export function requestRow(
     pretrip: pretrip
       ? {
           done: pretrip.steps.length,
-          total: 6,
+          total: PRETRIP_STEP_IDS.length,
           steps: pretrip.steps
             .sort((a, b) => a.at.getTime() - b.at.getTime())
             .map((s) => ({ stepId: s.stepId, at: s.at.toISOString(), photoUrl: s.photoUrl })),
         }
-      : { done: 0, total: 6, steps: [] },
+      : { done: 0, total: PRETRIP_STEP_IDS.length, steps: [] },
   }
 }
