@@ -325,6 +325,15 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
               ? `${selected.number} · ${selected.contractor.name} · ${selected.cargo} · ${selected.weightT} т · ${selected.from.name} → ${selected.to.name} · погрузка ${fmt1C(selected.loadingAt)} · окно: ${selected.unloadingWindow}${selected.docs.length ? ` · документы: ${selected.docs.join(', ')}` : ''}`
               : 'Выберите заявку в списке — правила 5.3: готовность · грузоподъёмность · кузов'}
           </span>
+          {/* Подсказка: что не заполнено для проведения (кнопка неактивна) */}
+          {selected && (!vehicleId || !driverId) && (
+            <span className="shrink-0 rounded-[3px] border border-[#e8c88a] bg-[#fdf6e7] px-2 py-[3px] text-[11px] text-[#8a5a00]">
+              Для проведения не хватает:
+              {!vehicleId ? ' выбора ТС (строка с зелёной галочкой в таблице)' : ''}
+              {!vehicleId && !driverId ? ' ·' : ''}
+              {!driverId ? ' выбора водителя в списке' : ''}
+            </span>
+          )}
         </div>
 
         <div className="grid shrink-0 grid-cols-2 gap-x-4 gap-y-1 border-b border-[#e5e5e5] bg-[#fafafa] px-3 py-1.5 text-[12px] lg:grid-cols-4">
