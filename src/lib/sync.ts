@@ -6,6 +6,12 @@
  * GET /sync/pull?cursor (канал 1 — личный журнал), затем GET /sync/marks
  * (канал 2 — снимок пометок по bbox маршрута). Индикатор связи — три состояния:
  * зелёный «На связи», оранжевый «Отправка: N», красный «Офлайн. В очереди: N».
+ *
+ * Заявки из 1С (GET /api/1c/orders) тянем тем же циклом раз в 5 с: назначение
+ * диспетчера должно появляться «по ходу», без перезапуска приложения.
+ * Запрос выполняется и в демо-офлайн-режиме: входящие заявки не зависят от
+ * очереди исходящих операций, а при реальном отсутствии сети fetch просто
+ * завершится ошибкой и повторится следующим циклом.
  */
 
 import { useEffect, useRef } from 'react'
@@ -19,9 +25,12 @@ import type {
   PushResponse,
   TrafficSnapshot,
 } from './protocol'
+import type { Order1C } from './demo/orders-data'
 
 const TICK_MS = 4000
 const PULL_LIMIT = 500
+/** Заявки — раз в 5 с (быстрее диспетчер не назначает, медленнее — заметно человеку). */
+const ORDERS_INTERVAL_MS = 5000
 /** Пробки обновляются раз в минуту — чаще тянуть незачем. */
 const TRAFFIC_INTERVAL_MS = 12_000
 
@@ -118,9 +127,38 @@ async function doTraffic(): Promise<void> {
 }
 
 let lastTrafficAt = 0
+let lastOrdersAt = 0
+
+/** Заявки из «1С»: поллинг каждые 5 с, новые назначения — тост водителю. */
+async function doOrders(): Promise<void> {
+  try {
+    const res = await fetch('/api/1c/orders', {
+      cache: 'no-store',
+      headers: { 'X-Driver-Id': DRIVER_ID },
+    })
+    if (!res.ok) return
+    const d = (await res.json()) as { orders?: Order1C[] }
+    if (!d.orders?.length) return
+    const st = useAzmz.getState()
+    const known = new Set(st.orders.map((o) => o.number))
+    const fresh = d.orders.find((o) => o.status === 'ASSIGNED' && !known.has(o.number))
+    st.setOrders(d.orders)
+    if (fresh && !useAzmz.getState().activeOrderNumber) {
+      useAzmz.getState().showToast(`Из 1С: назначена заявка ${fresh.number} — откройте «Главную»`)
+    }
+  } catch {
+    // сеть недоступна — останемся на локальных данных, повторим следующим циклом
+  }
+}
 
 async function tick(): Promise<void> {
   const s = useAzmz.getState()
+  // заявки тянем до проверки офлайна: входящие не зависят от очереди операций
+  const ordersNow = Date.now()
+  if (ordersNow - lastOrdersAt >= ORDERS_INTERVAL_MS) {
+    lastOrdersAt = ordersNow
+    await doOrders()
+  }
   if (isOffline()) {
     s.setConnection('offline')
     return

@@ -9,7 +9,7 @@
  * просмотр — взять вторую заявку во время рейса нельзя).
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
 import { MapPin, Truck } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import type { Order1C } from '@/lib/demo/orders-data'
@@ -27,23 +27,9 @@ export function OrdersScreen() {
   const offlineMode = useAzmz((s) => s.offlineMode)
 
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [refreshedAt, setRefreshedAt] = useState<number | null>(null)
-  const fetchOnceRef = useRef(false)
 
-  // подтягиваем заявки с «1С» (в офлайне остаётся локальный сид)
-  useEffect(() => {
-    if (fetchOnceRef.current) return
-    fetchOnceRef.current = true
-    fetch('/api/1c/orders')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { orders?: Order1C[] } | null) => {
-        if (d?.orders?.length) {
-          useAzmz.getState().setOrders(d.orders)
-          setRefreshedAt(Date.now())
-        }
-      })
-      .catch(() => {})
-  }, [])
+  // Заявки приходят поллингом движка синхронизации (раз в 5 с):
+  // назначение диспетчера появляется в списке без перезапуска приложения.
 
   const active = orders.find((o) => o.number === activeOrderNumber) ?? null
   const listOrders = orders.filter((o) => o.number !== activeOrderNumber && o.status !== 'DONE')
@@ -99,8 +85,8 @@ export function OrdersScreen() {
           <div className="flex-1 min-w-0">
             <div className="text-[15px] font-black text-[#15202B] leading-tight">Главная</div>
             <div className="text-[10.5px] text-[#64748B] leading-tight">
-              Заявки из 1С: Сбыт → ТС и готовность → Диспетчерская
-              {refreshedAt ? ' · обновлено' : offlineMode ? ' · офлайн: локальные данные' : ''}
+              Заявки из 1С: Сбыт → ТС и готовность → Диспетчерская · автообновление 5 с
+              {offlineMode ? ' · офлайн-режим: новые приходят только при связи' : ''}
             </div>
           </div>
           {activeOrderNumber && (

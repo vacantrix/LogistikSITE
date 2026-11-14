@@ -233,10 +233,21 @@ export interface OsrmVariant {
 
 const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving/'
 
+/** Таймаут запроса маршрута: без него «Строим маршрут…» может висеть вечно. */
+const OSRM_TIMEOUT_MS = 9000
+
+function osrmSignal(signal?: AbortSignal): AbortSignal | undefined {
+  if (signal) return signal
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(OSRM_TIMEOUT_MS)
+  }
+  return undefined
+}
+
 /**
  * Варианты поездки от точки до точки: [0] — рекомендованный, далее альтернативы
- * (alternatives=true). Ничего не вернул (нет сети / офлайн) — пустой список,
- * вызывающий остаётся на демо-геометрии.
+ * (alternatives=true). Ничего не вернул (нет сети / офлайн / таймаут) — пустой
+ * список, вызывающий остаётся на демо-геометрии.
  */
 export async function fetchOsrmVariants(
   from: { lat: number; lng: number },
@@ -247,7 +258,7 @@ export async function fetchOsrmVariants(
     const url =
       `${OSRM_BASE}${from.lng},${from.lat};${to.lng},${to.lat}` +
       '?overview=full&geometries=geojson&alternatives=true&steps=false'
-    const res = await fetch(url, { signal })
+    const res = await fetch(url, { signal: osrmSignal(signal) })
     if (!res.ok) return []
     const data = (await res.json()) as {
       code?: string

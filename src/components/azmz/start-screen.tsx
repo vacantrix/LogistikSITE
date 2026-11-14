@@ -21,10 +21,11 @@ import {
   Play,
   Radar,
   Truck,
+  WifiOff,
   Zap,
 } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
-import { PRETRIP_STEPS, type Order1C, type PretripStepDef } from '@/lib/demo/orders-data'
+import { PRETRIP_STEPS, type PretripStepDef } from '@/lib/demo/orders-data'
 import { ConnectionChip } from '@/components/azmz/connection-chip'
 import { InstallAppButton } from '@/components/pwa/install-button'
 
@@ -114,29 +115,35 @@ export function StartScreen() {
   const realRouteStatus = useAzmz((s) => s.realRouteStatus)
   const showToast = useAzmz((s) => s.showToast)
   const offlineMode = useAzmz((s) => s.offlineMode)
+  const setOfflineMode = useAzmz((s) => s.setOfflineMode)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const photoStepRef = useRef<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const fetchOnceRef = useRef(false)
 
-  // подтягиваем заявки и статусы с «1С» (в офлайне остаётся локальный сид).
-  // Это единственный refresh до старта рейса: StartScreen — стартовый экран.
-  useEffect(() => {
-    if (fetchOnceRef.current) return
-    fetchOnceRef.current = true
-    fetch('/api/1c/orders')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { orders?: Order1C[] } | null) => {
-        if (d?.orders?.length) useAzmz.getState().setOrders(d.orders)
-      })
-      .catch(() => {})
-  }, [])
+  // Заявки приходят поллингом движка синхронизации (раз в 5 с) — локальный
+  // разовый fetch не нужен: назначение диспетчера появляется «по ходу».
 
   const active = orders.find((o) => o.number === activeOrderNumber) ?? null
   const assigned = orders.find((o) => o.status === 'ASSIGNED') ?? null
   const doneCount = pretrip.filter((p) => p.done).length
   const allDone = pretrip.length > 0 && doneCount === pretrip.length
+
+  // Анимация загрузки: новая назначенная заявка сначала показывается кружком
+  // «Загружаем рейс из 1С…» (в это время из журнала доезжают точки и заметки),
+  // затем — карточкой с кнопкой «Взять заявку».
+  const [loadingOrderNumber, setLoadingOrderNumber] = useState<string | null>(null)
+  const prevAssignedRef = useRef<string | null>(null)
+  useEffect(() => {
+    const num = assigned?.number ?? null
+    const prev = prevAssignedRef.current
+    prevAssignedRef.current = num
+    if (num && num !== prev && !activeOrderNumber && orderStage !== 'in_progress') {
+      setLoadingOrderNumber(num)
+      const t = setTimeout(() => setLoadingOrderNumber(null), 1800)
+      return () => clearTimeout(t)
+    }
+  }, [assigned?.number, activeOrderNumber, orderStage])
 
   // смена стадии воркфлоу — показываем новый экран сверху
   useEffect(() => {
@@ -326,6 +333,20 @@ export function StartScreen() {
         )}
       </div>
     )
+  } else if (assigned && loadingOrderNumber === assigned.number) {
+    // новая заявка: кружок загрузки рейса (точки и заметки доезжают по журналу)
+    body = (
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-6 flex flex-col items-center gap-3 text-center">
+        <LoaderCircle className="h-10 w-10 text-[#F97316] animate-spin" />
+        <div>
+          <div className="text-[15px] font-bold text-[#15202B]">Загружаем рейс из 1С…</div>
+          <div className="text-[12px] text-[#64748B] mt-1">
+            {assigned.number} · {assigned.fromLabel} → {assigned.toLabel}
+          </div>
+          <div className="text-[11px] text-[#94A3B8] mt-1">Точки маршрута и уведомления синхронизируются</div>
+        </div>
+      </div>
+    )
   } else if (assigned) {
     // заявка назначена — большая кнопка «Взять заявку»
     body = (
@@ -436,10 +457,16 @@ export function StartScreen() {
           <InstallAppButton />
         </div>
         {offlineMode && (
-          <div className="relative mt-3 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[#FDBA74] bg-[#F97316]/15 rounded-full px-2.5 py-1">
-            <span className="h-2 w-2 rounded-full bg-[#F97316]" />
-            Офлайн-режим: операции уйдут при появлении сети
-          </div>
+          <button
+            onClick={() => {
+              setOfflineMode(false)
+              showToast('Офлайн-режим выключен — связь восстановлена')
+            }}
+            className="relative mt-3 inline-flex items-center gap-2 text-[11.5px] font-bold text-[#FDBA74] bg-[#F97316]/20 border border-[#F97316]/40 rounded-full px-3 py-1.5 active:scale-[0.98] transition-transform"
+          >
+            <WifiOff className="h-3.5 w-3.5" />
+            Офлайн-режим включён — нажмите, чтобы вернуться на связь
+          </button>
         )}
         {activeOrderNumber && (
           <div className="relative mt-3 inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-[#F97316] rounded-full px-2.5 py-1">
