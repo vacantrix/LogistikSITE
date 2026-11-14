@@ -11,11 +11,13 @@ export type RequestRow = {
   contractor: { id: string; name: string }
   cargo: string
   weightT: number
-  from: { id: string; name: string; address: string }
-  to: { id: string; name: string; address: string }
+  from: { id: string; name: string; address: string; lat: number; lon: number }
+  to: { id: string; name: string; address: string; lat: number; lon: number }
   loadingAt: string
   unloadingWindow: string
   docs: string[]
+  routeLink: string | null                     // ссылка на маршрут Яндекс.Карт
+  routeWaypoints: [number, number][] | null     // [[lat,lng],...] из rtext
   vehicle: { id: string; model: string; plate: string } | null
   trailer: { id: string; model: string; plate: string } | null
   driver: { id: string; fullName: string } | null
@@ -57,11 +59,13 @@ export function requestRow(
     contractor: { id: r.contractor.id, name: r.contractor.name },
     cargo: r.cargo,
     weightT: r.weightT,
-    from: { id: r.fromLocation.id, name: r.fromLocation.name, address: r.fromLocation.address },
-    to: { id: r.toLocation.id, name: r.toLocation.name, address: r.toLocation.address },
+    from: { id: r.fromLocation.id, name: r.fromLocation.name, address: r.fromLocation.address, lat: r.fromLocation.lat, lon: r.fromLocation.lon },
+    to: { id: r.toLocation.id, name: r.toLocation.name, address: r.toLocation.address, lat: r.toLocation.lat, lon: r.toLocation.lon },
     loadingAt: r.loadingAt.toISOString(),
     unloadingWindow: r.unloadingWindow,
     docs: JSON.parse(r.docs) as string[],
+    routeLink: r.routeLink ?? null,
+    routeWaypoints: r.routeWaypoints ? (JSON.parse(r.routeWaypoints) as [number, number][]) : null,
     vehicle: r.vehicle ? { id: r.vehicle.id, model: r.vehicle.model, plate: r.vehicle.plate } : null,
     trailer: r.trailer ? { id: r.trailer.id, model: r.trailer.model, plate: r.trailer.plate } : null,
     driver: r.driver ? { id: r.driver.id, fullName: r.driver.fullName } : null,

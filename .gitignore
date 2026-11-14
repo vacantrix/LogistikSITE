@@ -56,7 +56,11 @@ server.log
 /skills/
 # session artifacts
 tool-results/
-upload/
+upload/*
+# ТЗ и проектная документация в upload/ — в репозитории; скриншоты и фото — нет
+!upload/*.md
+!upload/*.pdf
+!upload/*.docx
 
 # Платформа «Контур 1С» (развёрнута из handoff-архива)
 kontur-1c/node_modules/

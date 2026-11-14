@@ -11,11 +11,14 @@ import { usePoll } from './usePoll'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { CANCEL_REASONS, STATUS_LABELS } from '@/lib/1c/statuses'
+import { buildYandexRouteUrl, pointsLabel } from '@/lib/1c/yandexRoute'
 
 type RequestRow = {
   id: string; number: string; status: string; contractor: { name: string }; cargo: string; weightT: number
-  from: { name: string; address: string }; to: { name: string; address: string }
+  from: { name: string; address: string; lat: number; lon: number }
+  to: { name: string; address: string; lat: number; lon: number }
   loadingAt: string; unloadingWindow: string; docs: string[]
+  routeLink: string | null; routeWaypoints: [number, number][] | null
 }
 type Vehicle = { id: string; plate: string; model: string; kind: string; bodyType: string; capacityT: number; volumeM3: number | null; readiness: string; isActive: boolean }
 type Trailer = { id: string; plate: string; model: string; type: string; isActive: boolean }
@@ -101,6 +104,10 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
   const [creating, setCreating] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
 
+  // маршрут через Яндекс.Карты: вставка ссылки и разбор rtext
+  const [routeLinkInput, setRouteLinkInput] = useState('')
+  const [parsingRoute, setParsingRoute] = useState(false)
+
   const pool = requestsData?.requests ?? []
   const selected = pool.find((r) => r.id === selectedId) ?? null
   const rows = useMemo(
@@ -131,6 +138,7 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
     setTrailerId('')
     setDriverId('')
     setServerErrors([])
+    setRouteLinkInput('')
   }
 
   async function assign() {
@@ -166,6 +174,39 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
       reload()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Ошибка отмены')
+    }
+  }
+
+  // «Построить маршрут»: открыть Яндекс.Карты с точками заявки
+  // (если маршрут уже сохранён — со всеми его точками, чтобы править дальше)
+  function openYandexRoute() {
+    if (!selected) return
+    const url =
+      selected.routeLink ??
+      buildYandexRouteUrl([
+        { lat: selected.from.lat, lon: selected.from.lon },
+        { lat: selected.to.lat, lon: selected.to.lon },
+      ])
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  // «Разобрать ссылку»: rtext → routeWaypoints, оба поля сохраняются в заявку
+  async function parseRouteLink() {
+    if (!selected || !routeLinkInput.trim()) return
+    setParsingRoute(true)
+    try {
+      const res = await apiPost<{ number: string; points: number }>(`/api/office/requests/${selected.id}/route`, {
+        link: routeLinkInput.trim(),
+        actor: 'Диспетчер Е. Крылова',
+      })
+      toast.success(`Маршрут: ${pointsLabel(res.points)} — сохранён в заявку ${res.number}`)
+      setRouteLinkInput('')
+      reload()
+    } catch (e) {
+      // кривая ссылка — только ошибка, заявку не блокируем
+      toast.error(e instanceof Error ? e.message : 'Ссылка не разобрана')
+    } finally {
+      setParsingRoute(false)
     }
   }
 
@@ -341,6 +382,47 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
           <div><span className="text-[#8a8a8a]">Груз: </span>{selected ? `${selected.cargo} · ${selected.weightT} т` : '—'}</div>
           <div><span className="text-[#8a8a8a]">Погрузка: </span>{selected ? fmt1C(selected.loadingAt) : '—'}</div>
           <div><span className="text-[#8a8a8a]">Окно выгрузки: </span>{selected?.unloadingWindow ?? '—'}</div>
+        </div>
+
+        {/* Маршрут через Яндекс.Карты: построить → поделиться → вставить ссылку → разобрать */}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[#e5e5e5] bg-[#fafafa] px-3 py-1.5">
+          <C1Button
+            className="!h-[24px]"
+            disabled={!selected}
+            onClick={openYandexRoute}
+            title="Открыть Яндекс.Карты с точками заявки (маршрут правится там, потом «Поделиться» → «Ссылка»)"
+          >
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+              <path d="M1.5 8.5C3.5 4 10.5 4 12.5 8.5" stroke="#2f6db0" strokeWidth="1.3" strokeLinecap="round" />
+              <circle cx="2" cy="10.5" r="1.5" fill="#2f6db0" /><circle cx="12" cy="10.5" r="1.5" fill="#c43e1c" />
+              <path d="M2 10.5h4.5l1.5-2 1.5 2H12" stroke="#5c5c5c" strokeWidth="1.1" fill="none" />
+            </svg>
+            Построить маршрут
+          </C1Button>
+          <span className="c1-label">Ссылка на маршрут (Яндекс.Карты):</span>
+          <C1Input
+            className="w-[340px] max-w-[45%]"
+            value={routeLinkInput}
+            onChange={setRouteLinkInput}
+            placeholder="https://yandex.ru/maps/?rtext=…~…&rtt=auto"
+            disabled={!selected}
+          />
+          <C1Button
+            className="!h-[24px]"
+            disabled={!selected || !routeLinkInput.trim() || parsingRoute}
+            onClick={() => void parseRouteLink()}
+            title="Разобрать rtext: точки маршрута сохраняются в заявку"
+          >
+            {parsingRoute ? 'Разбор…' : 'Разобрать ссылку'}
+          </C1Button>
+          {selected?.routeWaypoints && selected.routeWaypoints.length > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#1c5a3a]">
+              <svg width="11" height="11" viewBox="0 0 12 12"><path d="M1.5 6.5L4.5 9.5 10.5 2.5" stroke="#2f7a36" strokeWidth="1.6" fill="none" /></svg>
+              Маршрут: {pointsLabel(selected.routeWaypoints.length)}
+            </span>
+          ) : (
+            <span className="text-[11px] text-[#8a8a8a]">после назначения водитель получит точки — приложение строит рейс по ним</span>
+          )}
         </div>
 
         <div className="c1-scroll min-h-0 flex-1 overflow-auto">

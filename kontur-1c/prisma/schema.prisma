@@ -96,6 +96,8 @@ model TransportRequest {                     // «Заказ на ТС»
   loadingAt       DateTime                   // плановая погрузка
   unloadingWindow String                     // «сегодня 14:00–16:00»
   docs            String                     // JSON-массив строк (для фотофиксации)
+  routeLink       String?                    // ссылка на маршрут Яндекс.Карт («Поделиться» → «Ссылка»)
+  routeWaypoints  String?                    // JSON [[lat,lng],...] — точки из rtext ссылки
   vehicleId       String?
   trailerId       String?
   driverId        String?

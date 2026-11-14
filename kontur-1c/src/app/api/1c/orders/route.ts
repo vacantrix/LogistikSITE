@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { json, optionsOk } from '@/lib/cors'
 import { mapOrderStatus } from '@/lib/1c/statuses'
 import { driverAction } from '@/lib/1c/driverActions'
+import { waypointsForDriver } from '@/lib/1c/yandexRoute'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,6 +73,9 @@ export async function GET(req: Request) {
     durationMin: r.trip?.routeDurationS ? Math.round(r.trip.routeDurationS / 60) : 0,
     status: mapOrderStatus(r.status) ?? 'ASSIGNED',
     assignedBy: r.assignedBy ?? '—',
+    // маршрут из Яндекс.Карт (вставляет диспетчер): ссылка + точки для рейса в приложении водителя
+    routeLink: r.routeLink ?? null,
+    routeWaypoints: waypointsForDriver(r.routeWaypoints),
   }))
 
   // eventLog — журнал действий водителя: из регистра статусов и шагов фотофиксации
