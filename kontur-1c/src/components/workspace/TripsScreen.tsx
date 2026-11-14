@@ -6,10 +6,10 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { C1Button, C1ToolButton, FormTitleBar } from '@/components/1c/kit'
-import { fmtDateTime, fmtInterval } from './api'
+import { apiPost, fmtDateTime, fmtInterval } from './api'
 import { usePoll } from './usePoll'
 import { cn } from '@/lib/utils'
-import { MapPin } from 'lucide-react'
+import { CheckCircle2, MapPin } from 'lucide-react'
 
 type TripRow = {
   number: string
@@ -58,9 +58,31 @@ const STATUS_DOT: Record<string, string> = {
 }
 
 export function TripsScreen({ onClose }: { onClose?: () => void }) {
-  const { data } = usePoll<{ trips: TripRow[] }>('/api/office/trips')
+  const { data, reload } = usePoll<{ trips: TripRow[] }>('/api/office/trips')
   const [detail, setDetail] = useState<TripRow | null>(null)
+  const [completing, setCompleting] = useState(false)
+  const [completeError, setCompleteError] = useState<string | null>(null)
   const trips = data?.trips ?? []
+
+  // Принудительное завершение «зависшего» рейса: заявка → DONE, событие
+  // TRIP_DONE + SystemNote уходят водителю через план обмена.
+  const forceComplete = async (trip: TripRow) => {
+    if (!window.confirm(
+      `Завершить рейс ${trip.number} принудительно?\nВодитель ${trip.driver?.fullName ?? '—'} освободится и сможет получить новую заявку. Водителю уйдёт уведомление.`,
+    ))
+      return
+    setCompleting(true)
+    setCompleteError(null)
+    try {
+      await apiPost(`/api/office/trips/${encodeURIComponent(trip.number)}/complete`, {})
+      setDetail(null)
+      reload()
+    } catch (e) {
+      setCompleteError(e instanceof Error ? e.message : 'Ошибка завершения')
+    } finally {
+      setCompleting(false)
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
@@ -156,6 +178,25 @@ export function TripsScreen({ onClose }: { onClose?: () => void }) {
                   {detail.trailer ? ` + ${detail.trailer.model} · ${detail.trailer.plate}` : ''}
                 </div>
               </div>
+
+              {detail.status !== 'DONE' && detail.status !== 'completed' && detail.status !== 'done' && detail.status !== 'CANCELLED' && detail.status !== 'cancelled' && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-2.5">
+                  <div className="text-sm text-amber-900">
+                    Рейс не завершён — водитель занят и не может получить новую заявку, пока он открыт.
+                  </div>
+                  <div className="mt-2">
+                    <C1Button
+                      disabled={completing}
+                      onClick={() => void forceComplete(detail)}
+                      className="!h-[26px] gap-1.5"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {completing ? 'Провожу…' : 'Завершить рейс (принудительно)'}
+                    </C1Button>
+                  </div>
+                  {completeError && <div className="mt-1.5 text-sm text-red-700">{completeError}</div>}
+                </div>
+              )}
 
               <div>
                 <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">

@@ -79,9 +79,12 @@ export async function assignRequest(
 
         const busy = await tx.trip.findFirst({
           where: { driverId: driver.id, status: { in: ['assigned', 'in_progress'] } },
-          select: { id: true },
+          select: { id: true, tripCode: true },
         })
-        if (busy) throw new Error(`Водитель занят в другом незавершённом рейсе`)
+        if (busy)
+          throw new Error(
+            `Водитель занят в незавершённом рейсе ${busy.tripCode}. Завершите рейс в реестре «Рейсы» (принудительно) или дождитесь завершения в приложении водителя`,
+          )
 
         await tx.transportRequest.update({
           where: { id: requestId },

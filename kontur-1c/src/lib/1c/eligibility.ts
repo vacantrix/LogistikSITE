@@ -52,7 +52,11 @@ export async function driverIssues(
     where: { driverId: d.id, status: { in: ['assigned', 'in_progress'] } },
     select: { tripCode: true },
   })
-  if (busy) issues.push({ code: 'DRIVER_BUSY', text: `Занят в незавершённом рейсе ${busy.tripCode}` })
+  if (busy)
+    issues.push({
+      code: 'DRIVER_BUSY',
+      text: `Занят в незавершённом рейсе ${busy.tripCode} — завершите его в реестре «Рейсы» или в приложении водителя`,
+    })
   return issues
 }
 
