@@ -118,6 +118,15 @@ export function TripScreen() {
           <span className="bg-[#F97316] text-white text-[11px] font-bold rounded-full px-2.5 py-1">В пути</span>
         </div>
 
+        {/* телеметрия: диспетчер видит машину (фикс каждые 5 с) */}
+        <div className="mt-2 inline-flex items-center gap-1.5 bg-white/8 border border-white/15 rounded-full px-2.5 py-1">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#4ADE80] opacity-70" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-[#4ADE80]" />
+          </span>
+          <span className="text-[10.5px] font-semibold text-white/85">Диспетчер видит вас на карте · GPS каждые 5 с</span>
+        </div>
+
         {/* прогресс-рельс */}
         <div className="mt-4 px-2">
           <div className="relative h-1.5 bg-white/10 rounded-full">

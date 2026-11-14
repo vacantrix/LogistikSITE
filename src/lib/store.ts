@@ -83,6 +83,8 @@ interface AzmzState {
   view: View
   connection: ConnectionState
   offlineMode: boolean
+  /** Идёт ли сетевой цикл прямо сейчас (для спиннера «Синхронизация…»). */
+  syncActive: boolean
   cursor: number
   marksSince: number
   lastSyncAt: number | null
@@ -127,6 +129,7 @@ interface AzmzState {
   setView: (v: View) => void
   setConnection: (c: ConnectionState) => void
   setOfflineMode: (on: boolean) => void
+  setSyncActive: (on: boolean) => void
   setEventDialog: (open: boolean, preselect?: string | null) => void
   showToast: (text: string) => void
 
@@ -189,6 +192,7 @@ export const useAzmz = create<AzmzState>()(
       view: 'orders',
       connection: 'online',
       offlineMode: false,
+      syncActive: false,
       cursor: 0,
       marksSince: 0,
       lastSyncAt: null,
@@ -226,6 +230,7 @@ export const useAzmz = create<AzmzState>()(
       setView: (view) => set({ view }),
       setConnection: (connection) => set({ connection }),
       setOfflineMode: (offlineMode) => set({ offlineMode }),
+      setSyncActive: (syncActive) => set({ syncActive }),
       setEventDialog: (eventDialogOpen, eventDialogPreselect = null) => set({ eventDialogOpen, eventDialogPreselect }),
       showToast: (text) => {
         const id = Date.now()
@@ -595,7 +600,9 @@ export const useAzmz = create<AzmzState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         view: s.view,
-        offlineMode: s.offlineMode,
+        // offlineMode НЕ персистим: демо-тумблер «офлайн» не должен переживать
+        // перезапуск — иначе приложение после старта выглядит «без связи»,
+        // хотя сеть в порядке (опыт пилота: телефон «пишет офлайн» утром).
         cursor: s.cursor,
         marksSince: s.marksSince,
         lastSyncAt: s.lastSyncAt,
@@ -620,6 +627,14 @@ export const useAzmz = create<AzmzState>()(
         realRouteStatus: s.realRouteStatus,
         // превью фото не персистим: dataURL раздувает localStorage (квота 5 МБ)
         pretrip: s.pretrip.map((p) => ({ id: p.id, done: p.done, photoAt: p.photoAt })),
+      }),
+      // в старых сессиях в localStorage мог остаться offlineMode=true —
+      // принудительно стартуем «на связи» (симуляцию включают осознанно)
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted as Partial<AzmzState>),
+        offlineMode: false,
+        syncActive: false,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated()

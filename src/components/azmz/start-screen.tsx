@@ -28,6 +28,7 @@ import { useAzmz } from '@/lib/store'
 import { PRETRIP_STEPS, type PretripStepDef } from '@/lib/demo/orders-data'
 import { ConnectionChip } from '@/components/azmz/connection-chip'
 import { InstallAppButton } from '@/components/pwa/install-button'
+import { timeAgo } from '@/lib/format'
 
 const fmtDT = (iso: string) =>
   new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
@@ -116,6 +117,15 @@ export function StartScreen() {
   const showToast = useAzmz((s) => s.showToast)
   const offlineMode = useAzmz((s) => s.offlineMode)
   const setOfflineMode = useAzmz((s) => s.setOfflineMode)
+  const syncActive = useAzmz((s) => s.syncActive)
+  const lastSyncAt = useAzmz((s) => s.lastSyncAt)
+  // живая полоска «сейчас синхронизируемся»: перерисовка раз в секунду,
+  // чтобы возраст «обновлено N с назад» тикал
+  const [, setSecTick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setSecTick((x) => x + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
 
   const fileRef = useRef<HTMLInputElement>(null)
   const photoStepRef = useRef<string | null>(null)
@@ -432,6 +442,25 @@ export function StartScreen() {
           {justCompleted
             ? 'Заявка сохранена в «Истории». Как только диспетчерская назначит следующую — кнопка «Взять заявку» появится здесь.'
             : 'Доступы откроются, когда придёт заявка: план рейса, маршрут, фотофиксация и навигация.'}
+        </div>
+        {/* живой кружок: видно, что канал связи работает и рейс подгружается */}
+        <div className="mt-1.5 inline-flex items-center gap-2 rounded-full bg-[#101E2E]/5 px-3 py-1.5">
+          {syncActive ? (
+            <>
+              <LoaderCircle className="h-4 w-4 animate-spin text-[#F97316]" />
+              <span className="text-[12px] font-semibold text-[#15202B]">Синхронизация с 1С…</span>
+            </>
+          ) : (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#22C55E] opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#22C55E]" />
+              </span>
+              <span className="text-[12px] font-medium text-[#64748B]">
+                {lastSyncAt ? `Обновлено ${timeAgo(lastSyncAt)} · опрос каждые 5 с` : 'Опрос заявок каждые 5 с'}
+              </span>
+            </>
+          )}
         </div>
       </div>
     )

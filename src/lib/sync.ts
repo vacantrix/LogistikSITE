@@ -16,7 +16,8 @@
 
 import { useEffect, useRef } from 'react'
 import { useAzmz } from './store'
-import { DEVICE_ID, DRIVER_ID } from './demo/route-data'
+import { DEVICE_ID, DRIVER_ID, pointAtFraction } from './demo/route-data'
+import { pointOnRoute } from './demo/real-route'
 import type {
   JournalEntry,
   MarksSnapshot,
@@ -33,6 +34,8 @@ const PULL_LIMIT = 500
 const ORDERS_INTERVAL_MS = 5000
 /** Пробки обновляются раз в минуту — чаще тянуть незачем. */
 const TRAFFIC_INTERVAL_MS = 12_000
+/** Телеметрия для диспетчера: фикс позиции каждые 5 с во время рейса. */
+const POSITION_INTERVAL_MS = 5000
 
 function isOffline(): boolean {
   const s = useAzmz.getState()
@@ -128,6 +131,39 @@ async function doTraffic(): Promise<void> {
 
 let lastTrafficAt = 0
 let lastOrdersAt = 0
+let lastPositionAt = 0
+
+/**
+ * Телеметрия: позиция грузовика → сервер → мониторинг диспетчера.
+ * Отправляем то, что видит водитель на своей карте: навигационный фикс по
+ * геометрии маршрута (OSRM или демо-А-146). Вне рейса не отправляем —
+ * диспетчеру важно видеть машину только в пути.
+ */
+async function doPosition(): Promise<void> {
+  const s = useAzmz.getState()
+  if (s.orderStage !== 'in_progress') return
+  const rr = s.realRoute
+  const f = Math.max(0, Math.min(1, s.simProgressF))
+  const p = rr ? pointOnRoute(rr.coords, f, rr.lengthM) : pointAtFraction(f)
+  const active = s.orders.find((o) => o.number === s.activeOrderNumber)
+  try {
+    await fetch('/api/driver/v1/position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Driver-Id': DRIVER_ID },
+      body: JSON.stringify({
+        lat: p.lat,
+        lon: p.lng,
+        speedKmh: Math.round(s.simSpeedKmh),
+        heading: Math.round(p.bearing),
+        tripCode: active?.number,
+        stage: s.orderStage,
+        ts: Date.now(),
+      }),
+    })
+  } catch {
+    // телеметрия не критична: следующий цикл пришлёт свежий фикс
+  }
+}
 
 /** Заявки из «1С»: поллинг каждые 5 с, новые назначения — тост водителю. */
 async function doOrders(): Promise<void> {
@@ -153,28 +189,38 @@ async function doOrders(): Promise<void> {
 
 async function tick(): Promise<void> {
   const s = useAzmz.getState()
-  // заявки тянем до проверки офлайна: входящие не зависят от очереди операций
-  const ordersNow = Date.now()
-  if (ordersNow - lastOrdersAt >= ORDERS_INTERVAL_MS) {
-    lastOrdersAt = ordersNow
-    await doOrders()
+  useAzmz.getState().setSyncActive(true)
+  try {
+    // заявки тянем до проверки офлайна: входящие не зависят от очереди операций
+    const ordersNow = Date.now()
+    if (ordersNow - lastOrdersAt >= ORDERS_INTERVAL_MS) {
+      lastOrdersAt = ordersNow
+      await doOrders()
+    }
+    if (isOffline()) {
+      s.setConnection('offline')
+      return
+    }
+    const pendingCount = s.outbox.length
+    if (pendingCount > 0) s.setConnection('syncing')
+    await doPush()
+    await doPull()
+    await doMarks()
+    const posNow = Date.now()
+    if (posNow - lastPositionAt >= POSITION_INTERVAL_MS) {
+      lastPositionAt = posNow
+      await doPosition()
+    }
+    const now = Date.now()
+    if (now - lastTrafficAt >= TRAFFIC_INTERVAL_MS) {
+      lastTrafficAt = now
+      await doTraffic()
+    }
+    const after = useAzmz.getState()
+    after.setConnection(after.outbox.length > 0 ? 'syncing' : 'online')
+  } finally {
+    useAzmz.getState().setSyncActive(false)
   }
-  if (isOffline()) {
-    s.setConnection('offline')
-    return
-  }
-  const pendingCount = s.outbox.length
-  if (pendingCount > 0) s.setConnection('syncing')
-  await doPush()
-  await doPull()
-  await doMarks()
-  const now = Date.now()
-  if (now - lastTrafficAt >= TRAFFIC_INTERVAL_MS) {
-    lastTrafficAt = now
-    await doTraffic()
-  }
-  const after = useAzmz.getState()
-  after.setConnection(after.outbox.length > 0 ? 'syncing' : 'online')
 }
 
 /** Хук ставится один раз в корне приложения. */
@@ -188,12 +234,24 @@ export function useSyncEngine(): void {
     const timer = setInterval(() => void tick(), TICK_MS)
     const onOnline = () => void tick()
     const onOffline = () => useAzmz.getState().setConnection('offline')
+    // Возврат на экран: мобильный браузер замораживает таймеры в фоне —
+    // открываем цикл сразу, чтобы заявка/рейс появились «по ходу», без
+    // перезапуска приложения и ожидания следующего тика.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tick()
+    }
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
+    window.addEventListener('focus', onOnline)
+    window.addEventListener('pageshow', onOnline)
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       clearInterval(timer)
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
+      window.removeEventListener('focus', onOnline)
+      window.removeEventListener('pageshow', onOnline)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])
 }

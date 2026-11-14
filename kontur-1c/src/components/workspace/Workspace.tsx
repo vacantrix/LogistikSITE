@@ -6,13 +6,14 @@ import { DashboardScreen } from './DashboardScreen'
 import { RequestsScreen } from './RequestsScreen'
 import { DispatchScreen } from './DispatchScreen'
 import { TripsScreen } from './TripsScreen'
+import { MonitoringScreen } from './MonitoringScreen'
 import { ChatScreen } from './ChatScreen'
 import { CatalogsScreen } from './CatalogsScreen'
 import { JournalScreen } from './JournalScreen'
 import { DemoScreen } from './DemoScreen'
 import { House, ShoppingCart, Package, Truck, MessagesSquare, Settings } from 'lucide-react'
 
-type ScreenId = 'home' | 'orders' | 'route-sheets' | 'trips' | 'chat' | 'catalogs' | 'journal' | 'demo'
+type ScreenId = 'home' | 'orders' | 'route-sheets' | 'trips' | 'monitoring' | 'chat' | 'catalogs' | 'journal' | 'demo'
 
 // Рабочие места: окна открываются из панели разделов, как формы в 1С
 const SCREENS: Record<ScreenId, { title: string; roles: string[] }> = {
@@ -20,6 +21,7 @@ const SCREENS: Record<ScreenId, { title: string; roles: string[] }> = {
   orders: { title: 'Заказы грузоотправителей', roles: ['Логист'] },
   'route-sheets': { title: 'Маршрутные листы', roles: ['Диспетчер'] },
   trips: { title: 'Рейсы', roles: ['Диспетчер'] },
+  monitoring: { title: 'Мониторинг (GPS)', roles: ['Диспетчер'] },
   chat: { title: 'Обсуждение', roles: ['Диспетчер'] },
   catalogs: { title: 'Справочники (НСИ)', roles: ['Админ'] },
   journal: { title: 'Журнал регистрации', roles: ['Админ'] },
@@ -104,7 +106,17 @@ export function Workspace() {
       ? [{ id: 'warehouse', label: 'Склад и доставка', icon: <Package className="h-4 w-4" />, windowId: 'route-sheets' }]
       : []),
     ...(allowed('trips')
-      ? [{ id: 'fleet', label: 'Управление автопарком', icon: <Truck className="h-4 w-4" />, windowId: 'trips' }]
+      ? [
+          {
+            id: 'fleet',
+            label: 'Управление автопарком',
+            icon: <Truck className="h-4 w-4" />,
+            menu: [
+              { windowId: 'trips', label: 'Рейсы' },
+              { windowId: 'monitoring', label: 'Мониторинг (GPS) — позиции машин', disabled: !allowed('monitoring') },
+            ],
+          },
+        ]
       : []),
     ...(allowed('chat')
       ? [{ id: 'talk', label: 'Обсуждение', icon: <MessagesSquare className="h-4 w-4" />, windowId: 'chat' }]
@@ -145,6 +157,7 @@ export function Workspace() {
       {activeId === 'orders' && <RequestsScreen onClose={() => close('orders')} />}
       {activeId === 'route-sheets' && <DispatchScreen onClose={() => close('route-sheets')} />}
       {activeId === 'trips' && <TripsScreen onClose={() => close('trips')} />}
+      {activeId === 'monitoring' && <MonitoringScreen onClose={() => close('monitoring')} />}
       {activeId === 'chat' && <ChatScreen onClose={() => close('chat')} />}
       {activeId === 'catalogs' && <CatalogsScreen onClose={() => close('catalogs')} />}
       {activeId === 'journal' && <JournalScreen onClose={() => close('journal')} />}

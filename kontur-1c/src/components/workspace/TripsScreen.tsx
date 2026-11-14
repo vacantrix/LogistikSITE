@@ -8,8 +8,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { C1Button, C1ToolButton, FormTitleBar } from '@/components/1c/kit'
 import { apiPost, fmtDateTime, fmtInterval } from './api'
 import { usePoll } from './usePoll'
+import { MiniMap, type TrackRow } from './MonitoringScreen'
 import { cn } from '@/lib/utils'
-import { CheckCircle2, MapPin } from 'lucide-react'
+import { CheckCircle2, MapPin, Navigation } from 'lucide-react'
 
 type TripRow = {
   number: string
@@ -55,6 +56,36 @@ const STATUS_DOT: Record<string, string> = {
   assigned: '#2f6db0', ASSIGNED: '#2f6db0', accepted: '#00a0b0', ACCEPTED: '#00a0b0',
   in_progress: '#1c5a3a', IN_PROGRESS: '#1c5a3a', PRETRIP: '#7a4fb0',
   completed: '#2f8a2f', done: '#2f8a2f', DONE: '#2f8a2f', cancelled: '#c43e1c', CANCELLED: '#c43e1c',
+}
+
+/** Живая позиция машины в карточке рейса (телеметрия из приложения водителя). */
+function TripTracking({ tripNumber }: { tripNumber: string }) {
+  const { data } = usePoll<{ rows: TrackRow[] }>('/api/office/tracking', 3000)
+  const row = data?.rows.find((r) => r.tripNumber === tripNumber) ?? null
+  if (!row) {
+    return (
+      <div className="rounded-md border border-slate-200 bg-slate-50 p-2.5 text-sm text-muted-foreground">
+        Телеметрия не поступает: водитель ещё не начал маршрут или приложение закрыто.
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-1.5">
+      <MiniMap row={row} />
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="inline-flex items-center gap-1.5">
+          <Navigation className="h-3.5 w-3.5 text-[#2f6db0]" />
+          <b>{Math.round(row.speedKmh)} км/ч</b>
+        </span>
+        <span className="text-muted-foreground">
+          {row.lat.toFixed(4)}° N · {row.lon.toFixed(4)}° E
+        </span>
+        <span className={cn('ml-auto text-xs', row.stale ? 'text-amber-700' : 'text-emerald-700')}>
+          {row.stale ? `последний фикс ${Math.round(row.ageMs / 1000)} с назад` : 'в эфире · фикс каждые 5 с'}
+        </span>
+      </div>
+    </div>
+  )
 }
 
 export function TripsScreen({ onClose }: { onClose?: () => void }) {
@@ -213,6 +244,15 @@ export function TripsScreen({ onClose }: { onClose?: () => void }) {
                   ))}
                 </div>
               </div>
+
+              {detail.status !== 'DONE' && detail.status !== 'completed' && detail.status !== 'done' && detail.status !== 'CANCELLED' && detail.status !== 'cancelled' && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+                    <Navigation className="h-4 w-4" /> Мониторинг машины (GPS)
+                  </div>
+                  <TripTracking tripNumber={detail.number} />
+                </div>
+              )}
 
               <div>
                 <div className="mb-1.5 text-sm font-medium">События рейса</div>

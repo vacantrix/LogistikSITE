@@ -5,7 +5,7 @@
  *  - Навигация: сеть → кэш главной → offline.html.
  *  - Статика (/_next/static, /icons): cache-first.
  */
-const VERSION = "azmz-driver-v1";
+const VERSION = "azmz-driver-v3";
 const PRECACHE = [
   "/",
   "/offline.html",
