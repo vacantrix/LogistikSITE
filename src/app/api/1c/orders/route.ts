@@ -7,12 +7,13 @@ import { NextRequest, NextResponse } from 'next/server'
  * GET  /api/1c/orders → список заявок водителя (HTTP-сервис «1С» get_driver_orders)
  * POST /api/1c/orders → обратный канал { orderId, action: ACCEPT|PRETRIP_STEP|START_ROUTE|COMPLETE_TRIP, stepId?, at? }
  *
- * Адрес платформы — env KONTUR_1C_URL (по умолчанию http://127.0.0.1:3001).
+ * Адрес платформы — env KONTUR_1C_URL (по умолчанию http://127.0.0.1:3001/kontur —
+ * basePath обязателен: платформа смонтирована под /kontur).
  * При подключении реальной 1С меняется только этот URL: контракты идентичны.
  * Если платформа недоступна — 502; клиент офлайн-first остаётся на локальном сидe.
  */
 
-const BASE = process.env.KONTUR_1C_URL ?? 'http://127.0.0.1:3001'
+const BASE = process.env.KONTUR_1C_URL ?? 'http://127.0.0.1:3001/kontur'
 
 async function proxy(req: NextRequest, method: 'GET' | 'POST') {
   const headers: Record<string, string> = {}
