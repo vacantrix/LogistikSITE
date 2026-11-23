@@ -89,7 +89,7 @@ if ($daOwner -gt 0) {
     $healthy = $false
 }
 try {
-    $pull = Invoke-RestMethod -Uri "http://127.0.0.1:$DriverApiPort/api/driver/v1/sync/pull?cursor=0" -TimeoutSec 15
+    $pull = Invoke-RestMethod -Uri "http://127.0.0.1:$DriverApiPort/driver/api/driver/v1/sync/pull?cursor=0" -TimeoutSec 15
     Write-Output "driver sync pull     : entries=$(@($pull.entries).Count)"
 } catch {
     Write-Output "driver sync pull     : FAIL ($($_.Exception.Message))"
