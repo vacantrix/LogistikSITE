@@ -36,6 +36,18 @@ $env:DATABASE_URL = 'file:' + ($DbPath -replace '\\', '/')
 $env:KONTUR_DATABASE_URL = 'file:' + ($KonturDb -replace '\\', '/')
 $env:CONTOUR_AUDIT_FILE = (Join-Path $LogDir 'contour-audit.jsonl')
 $env:NEXT_TELEMETRY_DISABLED = '1'
+# Маршрут офиса → APK: дорожная линия строится через точки Яндекс.Карт,
+# готовый рейс уходит в журнал сервиса водителя (:3102) для sync/long-poll.
+$env:OSRM_BASE_URL = 'https://vacantrix.ru/osrm/route/v1/driving'
+$env:DRIVER_APP_INGEST_URL = "http://127.0.0.1:$DriverApiPort/driver/api/driver/v1/ingest"
+$env:DRIVER_APP_INGEST_TOKEN = $DriverIngestToken
+$env:DRIVER_APP_DRIVER_ID = '06c075d1-3088-45f2-a7ae-090e8c355447'
+# Пилот: один телефон, поэтому маршрут любого рейса уходит на демо-устройство.
+# В парке поставить 0 — тогда работает точная карта DRIVER_APP_ID_MAP.
+$env:DRIVER_APP_SINGLE_DRIVER = '1'
+$env:DRIVER_APP_TRIP_ID = '7e6a1c2d-8a9b-4c3d-9e0f-112233445566'
+$env:DRIVER_APP_POINT_LOADING_ID = 'p1-loading-0000-4000-8000-000000000001'
+$env:DRIVER_APP_POINT_UNLOADING_ID = 'p2-unloading-0000-4000-8000-000000000002'
 
 $outLog = Join-Path $LogDir 'platform.out.log'
 $errLog = Join-Path $LogDir 'platform.err.log'

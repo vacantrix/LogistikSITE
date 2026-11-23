@@ -39,6 +39,11 @@ export type Leg = {
   // источник груза и связка со сделкой ATI.SU (для сквозной синхронизации разделов)
   cargoSource?: string | null; dealId?: string | null; weightT?: number | null
   loadDateFact?: string | null; unloadDateFact?: string | null
+  // Маршрут офиса из Яндекс.Карт (сохраняется в карточке плеча)
+  routeLink?: string | null; routeWaypoints?: string | null
+  routeGeometry?: string | null; routeSource?: string | null
+  routeDistanceM?: number | null
+  routeDurationS?: number | null; routeUpdatedAt?: string | null
 }
 export type Trip = {
   id: string; driverId: string; vehicleId: string; trailerId?: string | null

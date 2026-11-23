@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
 import { CONTOUR_STATUS_LABELS, toOneCStatus, toPlatformStatus } from '@/lib/kontur/status-map'
+import { coordsFromGeoJson, waypointsFromJson } from '@/lib/kontur/yandex-route'
 
 export const dynamic = 'force-dynamic'
 
@@ -48,12 +49,35 @@ function formatWindow(d: Date | null): string {
  * возвращается пустая лента — клиент остаётся на офлайн-сиде и не ломается.
  * Когда появится карточка водителя с тем же id, лента заработает без правок APK.
  */
+const DEMO_DRIVER_ID = '06c075d1-3088-45f2-a7ae-090e8c355447'
+
 async function driverOrders(driverId: string) {
-  const trips = await db.trip.findMany({
+  let trips = await db.trip.findMany({
     where: { driverId, status: { in: ['active', 'draft'] } },
     orderBy: { createdAt: 'desc' },
     take: 20,
   })
+
+  // Пилот с одним телефоном: водителя приложения ещё нет в справочнике,
+  // поэтому показываем рейс, на который офис только что сохранил маршрут.
+  // В парке DRIVER_APP_SINGLE_DRIVER=0 — работает строгая выборка по driverId.
+  if (
+    trips.length === 0 &&
+    driverId === DEMO_DRIVER_ID &&
+    process.env.DRIVER_APP_SINGLE_DRIVER === '1'
+  ) {
+    const routedLeg = await db.leg.findFirst({
+      where: { routeLink: { not: null } },
+      orderBy: { routeUpdatedAt: 'desc' },
+    })
+    if (routedLeg) {
+      const routedTrip = await db.trip.findFirst({
+        where: { id: routedLeg.tripId, status: { in: ['active', 'draft'] } },
+      })
+      if (routedTrip) trips = [routedTrip]
+    }
+  }
+
   if (trips.length === 0) return []
 
   const legs = await db.leg.findMany({
@@ -87,6 +111,10 @@ async function driverOrders(driverId: string) {
       const unloadingAt = order.unloadDatePlan ?? leg.unloadDatePlan
       const done = trip.status === 'completed' || leg.status === 'completed' || leg.status === 'unloaded'
       const status = done ? 'DONE' as const : trip.ackStatus === 'pending' ? 'DISPATCH' as const : 'ASSIGNED' as const
+      // Маршрут офиса из Яндекс.Карт: ссылка, точки по порядку и готовая
+      // дорожная линия. Приложение строит маршрут именно по этим точкам.
+      const routeWaypoints = waypointsFromJson(leg.routeWaypoints)
+      const routeCoords = coordsFromGeoJson(leg.routeGeometry)
       return [{
         number: order.number,
         externalId: order.externalId,
@@ -100,10 +128,18 @@ async function driverOrders(driverId: string) {
         vehicle: vehicle ? `${vehicle.brand} ${vehicle.plate}` : '—',
         trailer: trailer ? `${trailer.brand} ${trailer.plate}` : '—',
         docs: [] as string[],
-        distanceKm: leg.kmPlan ?? 0,
-        durationMin: 0,
+        distanceKm: leg.kmPlan ?? (leg.routeDistanceM ? Math.round(leg.routeDistanceM / 1000) : 0),
+        durationMin: leg.routeDurationS ? Math.round(leg.routeDurationS / 60) : 0,
         status,
         assignedBy: 'Диспетчер',
+        routeLink: leg.routeLink ?? null,
+        routeWaypoints,
+        routeCoords,
+        routeDistanceM: leg.routeDistanceM ?? null,
+        routeDurationS: leg.routeDurationS ?? null,
+        routeSource: leg.routeLink
+          ? (leg.routeSource === 'yandex' ? 'yandex' as const : 'osrm' as const)
+          : null,
       }]
     })
   })

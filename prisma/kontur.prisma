@@ -156,6 +156,16 @@ model Leg {
   kmFact         Int?
   dealId         String?
   orderId        String?
+  // Маршрут офиса из Яндекс.Карт: ссылка + точки в порядке маршрута.
+  // routeGeometry — дорожная линия через эти точки (OSRM), чтобы водитель
+  // получил готовый маршрут сразу и без обращения к внешнему сервису.
+  routeLink      String?
+  routeWaypoints String? // JSON [[lat,lng],…]
+  routeGeometry  String? // GeoJSON LineString
+  routeSource    String? // yandex — точная линия Яндекса; osrm — линия по точкам
+  routeDistanceM Int?
+  routeDurationS Int?
+  routeUpdatedAt DateTime?
   version        Int       @default(1)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/kontur/ui/card'
 import { Button } from '@/components/kontur/ui/button'
+import { Input } from '@/components/kontur/ui/input'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/kontur/ui/dialog'
 import { Label } from '@/components/kontur/ui/label'
 import { Textarea } from '@/components/kontur/ui/textarea'
@@ -13,7 +14,7 @@ import type { StateResponse, TripDetail } from '@/lib/kontur/client-types'
 import { fmtDateTime } from '@/lib/kontur/client-types'
 import { StatusChip, TimelineItem, DotWord, Pill } from './bits'
 import { CallButton } from './CallButton'
-import { Camera, CameraOff, CheckCircle2, FileWarning, TriangleAlert, Undo2, ArrowLeftRight, ArrowLeft, Wrench } from 'lucide-react'
+import { Camera, CameraOff, CheckCircle2, FileWarning, TriangleAlert, Undo2, ArrowLeftRight, ArrowLeft, Wrench, ExternalLink, Loader2, MapPinned, Trash2, Route } from 'lucide-react'
 import { apiFetch as fetch } from '@/lib/kontur/base-path'
 
 export function TripView({
@@ -230,6 +231,12 @@ export function TripView({
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              <RouteEditor
+                key={`${leg.id}-${leg.routeLink ?? ''}-${leg.routeWaypoints ?? ''}`}
+                tripId={trip.id}
+                leg={leg}
+                onSaved={() => { load(); onChanged() }}
+              />
               <div className="text-xs font-medium text-slate-500 uppercase">Таймлайн событий (status_events + метки B5)</div>
               <div className="max-h-96 overflow-y-auto pr-2">
                 {(eventsByLeg.get(leg.id) || []).slice().reverse().map((ev) => (
@@ -396,6 +403,154 @@ export function TripView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+/**
+ * Маршрут рейса из Яндекс.Карт. Офис строит маршрут в Яндексе, копирует
+ * ссылку «Поделиться» → «Ссылка» и вставляет сюда. Платформа сохраняет все
+ * точки по порядку и дорожную линию; водитель получает готовый маршрут
+ * автоматически — вручную точки в приложении не вводятся.
+ */
+function RouteEditor({
+  tripId, leg, onSaved,
+}: {
+  tripId: string
+  leg: TripDetail['legs'][number]
+  onSaved: () => void
+}) {
+  const { toast } = useToast()
+  const [link, setLink] = useState(leg.routeLink ?? '')
+  const [busy, setBusy] = useState(false)
+
+  let points = 0
+  try {
+    const arr = JSON.parse(leg.routeWaypoints ?? '[]') as unknown
+    if (Array.isArray(arr)) points = arr.length
+  } catch {
+    points = 0
+  }
+  const km = leg.routeDistanceM ? Math.round(leg.routeDistanceM / 1000) : leg.kmPlan
+  const duration = leg.routeDurationS ? Math.round(leg.routeDurationS / 60) : 0
+
+  async function save() {
+    if (!link.trim()) {
+      toast({ title: 'Вставьте ссылку на маршрут', description: 'Яндекс.Карты → «Поделиться» → «Ссылка»', variant: 'destructive' })
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/trip/${tripId}/route-link`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ legId: leg.id, link }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error?.message ?? `HTTP ${res.status}`)
+      const bridge = data?.driverApp
+      toast({
+        title: 'Маршрут сохранён',
+        description:
+          `${data.route.points} точек · ${data.route.distanceM ? `${Math.round(data.route.distanceM / 1000)} км` : 'линия будет построена в приложении'}` +
+          (data.route.source === 'yandex' ? ' · геометрия Яндекса' : data.route.source === 'osrm' ? ' · линия по точкам' : '') +
+          (bridge?.sent ? ' · отправлен водителю' : ''),
+      })
+      onSaved()
+    } catch (e) {
+      toast({
+        title: 'Маршрут не сохранён',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function clear() {
+    setBusy(true)
+    try {
+      const res = await fetch(`/api/trip/${tripId}/route-link?legId=${encodeURIComponent(leg.id)}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error?.message ?? `HTTP ${res.status}`)
+      setLink('')
+      toast({ title: 'Маршрут удалён', description: 'Водитель останется на прежней геометрии до нового назначения' })
+      onSaved()
+    } catch (e) {
+      toast({ title: 'Не удалось удалить маршрут', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+          <MapPinned className="h-4 w-4 text-blue-600" aria-hidden />
+          Маршрут Яндекс.Карт
+        </div>
+        {points > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700">
+            <Route className="h-3 w-3" aria-hidden />
+            {points} точек{km ? ` · ${km} км` : ''}{duration ? ` · ${duration} мин` : ''}
+          </span>
+        )}
+      </div>
+      <p className="mt-1 text-xs text-slate-500">
+        Постройте маршрут в Яндекс.Картах → «Поделиться» → «Ссылка» и вставьте сюда.
+        Приложение водителя проложит маршрут через все точки в том же порядке автоматически.
+      </p>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <Input
+          value={link}
+          onChange={(e) => setLink(e.target.value)}
+          placeholder="https://yandex.ru/maps/?rtext=…"
+          className="h-9 flex-1 bg-white font-mono text-xs"
+          aria-label="Ссылка на маршрут Яндекс.Карт"
+        />
+        <Button size="sm" className="h-9 shrink-0" onClick={save} disabled={busy}>
+          {busy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden /> : <CheckCircle2 className="mr-1 h-4 w-4" aria-hidden />}
+          Сохранить маршрут
+        </Button>
+      </div>
+      {leg.routeLink && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-2 text-xs">
+          <span className="inline-flex items-center gap-1 font-medium text-emerald-700">
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+            Маршрут привязан к плечу
+          </span>
+          <a
+            href={leg.routeLink}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-blue-700 underline-offset-2 hover:underline"
+          >
+            <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+            Открыть в Яндекс.Картах
+          </a>
+          {leg.routeGeometry ? (
+            <span className="text-slate-500">
+              {leg.routeSource === 'yandex'
+                ? 'точная геометрия Яндекса'
+                : 'линия по точкам (OSRM)'}
+            </span>
+          ) : (
+            <span className="text-amber-700">линия не построена — приложение построит её по точкам</span>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto h-7 px-2 text-xs text-red-700"
+            onClick={clear}
+            disabled={busy}
+          >
+            <Trash2 className="mr-1 h-3.5 w-3.5" aria-hidden />
+            Удалить
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
