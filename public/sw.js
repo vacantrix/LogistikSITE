@@ -6,7 +6,7 @@
  *  - Навигация: сеть → кэш приложения → offline.html.
  *  - Статика (/driver/_next/static, /driver/icons): cache-first.
  */
-const VERSION = "aemz-driver-v7";
+const VERSION = "aemz-driver-v10";
 const BASE = new URL(".", self.location).pathname;      // "/driver/"
 const APP = BASE.replace(/\/+$/, "");                    // "/driver"
 const PRECACHE = [

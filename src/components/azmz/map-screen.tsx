@@ -44,7 +44,7 @@ import {
   pointAtFraction,
   routeLengthM,
 } from '@/lib/demo/route-data'
-import { fmtClock, fmtKm } from '@/lib/format'
+import { fmtClock, fmtDuration, fmtKm } from '@/lib/format'
 import { distToPolylineM, fetchOsrmVariants, pointOnRoute, projectOnRoute } from '@/lib/demo/real-route'
 
 /**
@@ -122,6 +122,7 @@ type NavRouteState = {
 export function MapScreen() {
   const trip = useAzmz((s) => s.trip)
   const points = useAzmz((s) => s.points)
+  const activeOrderNumber = useAzmz((s) => s.activeOrderNumber)
   const marks = useAzmz((s) => s.marks)
   const pendingMarks = useAzmz((s) => s.pendingMarks)
   const traffic = useAzmz((s) => s.traffic)
@@ -172,13 +173,15 @@ export function MapScreen() {
   const navPoint = (f: number) =>
     realRoute ? pointOnRoute(realRoute.coords, f, realRoute.lengthM) : pointAtFraction(f)
 
-  /** Живая навигация: есть и фикс GPS, и построенный маршрут — позиция/ETA по факту. */
-  const gpsMode = !!(tripActive && gps && navRoute)
+  /** Живая навигация: есть и фикс GPS, и построенный маршрут — позиция/ETA по факту.
+   *  Офисная линия Яндекса тоже считается активным маршрутом, даже когда OSRM
+   *  не строится (navRoute === null). */
+  const gpsMode = !!(tripActive && gps && (realRoute || navRoute))
   /** Проекция текущего фикса на активный маршрут: «сколько прошли / сколько осталось». */
-  const navProj = useMemo(
-    () => (gpsMode && navRoute && gps ? projectOnRoute(navRoute.coords, { lat: gps.lat, lng: gps.lng }) : null),
-    [gpsMode, navRoute, gps],
-  )
+  const navProj = useMemo(() => {
+    const coords = realRoute?.coords ?? navRoute?.coords
+    return gpsMode && gps && coords ? projectOnRoute(coords, { lat: gps.lat, lng: gps.lng }) : null
+  }, [gpsMode, realRoute, navRoute, gps])
 
   /** Переключение режима сопровождения: ref и state меняются синхронно. */
   const setFollowMode = (v: boolean) => {
@@ -194,7 +197,11 @@ export function MapScreen() {
       // Turbopack ломает относительный URL воркера — берём из public/ (same-origin)
       try {
         const cfg = (ml as { config?: { WORKER_URL?: string } }).config
-        if (cfg) cfg.WORKER_URL = '/maplibre-gl-worker.mjs'
+        // PWA смонтирована под basePath /driver: файл воркера лежит там же.
+        // Без basePath MapLibre запрашивает /maplibre-gl-worker.mjs → 404,
+        // и GeoJSON-слои (маршрут, пробки) вообще не отрисовываются.
+        const base = window.location.pathname.startsWith('/driver') ? '/driver' : ''
+        if (cfg) cfg.WORKER_URL = `${base}/maplibre-gl-worker.mjs`
       } catch {}
       if (cancelled || !containerRef.current || mapRef.current) return
       // без WebGL MapLibre молча остаётся пустым — проверяем и сообщаем честно
@@ -326,7 +333,9 @@ export function MapScreen() {
 
   // --- маршрут от геопозиции: строим при старте рейса -------------------------
   useEffect(() => {
-    if (!tripActive) {
+    // Маршрут офиса из Яндекс.Карт — главный: не заменяем его OSRM-линией
+    // от текущей точки. OSRM остаётся только для заявок без офисной линии.
+    if (!tripActive || realRoute?.source === 'yandex') {
       setNavRoute(null)
       return
     }
@@ -353,7 +362,7 @@ export function MapScreen() {
     // gps сознательно не в зависимостях: маршрут строится один раз на старте рейса;
     // дальнейшее перестроение — в эффекте ниже, по отклонению
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripActive])
+  }, [tripActive, realRoute?.source])
 
   // --- перестроение: водитель отклонился → маршрут от нового места --------------
   useEffect(() => {
@@ -401,7 +410,12 @@ export function MapScreen() {
     const map = mapRef.current
     const ml = mlRef.current
     if (!mapEpoch || !map || !ml || !trip || !tripActive) return
-    const activeCoords = navRoute?.coords ?? realRoute?.coords ?? null
+    // Офисная линия Яндекса приоритетнее OSRM: водитель видит ровно тот
+    // маршрут, который построил офис. OSRM — только если линии офиса нет.
+    const activeCoords =
+      realRoute?.source === 'yandex'
+        ? realRoute.coords
+        : (navRoute?.coords ?? realRoute?.coords ?? null)
     const routeGeo = activeCoords
       ? { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: activeCoords } }
       : { type: 'Feature' as const, properties: {}, geometry: JSON.parse(trip.routeGeoJson ?? '{"type":"LineString","coordinates":[]}') }
@@ -582,7 +596,10 @@ export function MapScreen() {
     if (!mapEpoch || !map || !ml) return
     stopMarkersRef.current.forEach((m) => m.remove())
     stopMarkersRef.current = []
-    for (const pt of points) {
+    // В журнале живут точки прошлых демо-рейсов: на карте показываем только
+    // точки активного рейса, иначе на линии появляются чужие «Погрузка/Выгрузка».
+    const tripPoints = trip ? points.filter((p) => p.tripId === trip.id) : []
+    for (const pt of tripPoints) {
       const el = document.createElement('div')
       const color = pt.kind === 'loading' ? '#3B82F6' : pt.kind === 'unloading' ? '#EF4444' : '#64748B'
       const label = pt.kind === 'loading' ? 'Погрузка' : pt.kind === 'unloading' ? 'Выгрузка' : 'Точка'
@@ -592,7 +609,7 @@ export function MapScreen() {
         <div class="azmz-stop-pin" style="background:${color}"></div>`
       stopMarkersRef.current.push(new ml.Marker({ element: el }).setLngLat([pt.lon, pt.lat]).addTo(map))
     }
-  }, [points, mapEpoch])
+  }, [points, trip, mapEpoch])
 
   // мастер пометок: маркеры A/B + предпросмотр участка
   useEffect(() => {
@@ -640,7 +657,13 @@ export function MapScreen() {
   const totalM = useMemo(() => (realRoute ? realRoute.lengthM : routeLengthM()), [realRoute])
 
   const delayMin = traffic?.routeDelayMin ?? 0
-  const etaMs = (trip?.plannedFinishAt ?? Date.now()) + delayMin * 60_000
+  // Прогресс вдоль активной линии: живой GPS, иначе демо-симуляция.
+  const activeF = navProj?.f ?? simF
+  const activeDurationS = realRoute?.durationS ?? trip?.routeDurationS ?? 0
+  const remainingS = Math.max(0, activeDurationS * (1 - activeF))
+  // ETA считаем от «сейчас», а не от планового времени рейса: офисная заявка
+  // могла быть создана раньше, и старое plannedFinishAt уже в прошлом.
+  const etaMs = Date.now() + (remainingS + delayMin * 60) * 1000
 
   // следующий манёвр — по активной геометрии (2ГИС или демо)
   const nextManeuver = useMemo(() => {
@@ -652,12 +675,13 @@ export function MapScreen() {
   const arrived = simF >= (realRoute ? 0.999 : MANEUVERS[MANEUVERS.length - 1].f)
 
   const remainingM = realRoute
-    ? realRoute.lengthM * (1 - simF)
+    ? realRoute.lengthM * (1 - activeF)
     : trip
-      ? (trip.routeDistanceM ?? 200_000) * (1 - simF)
+      ? (trip.routeDistanceM ?? 200_000) * (1 - activeF)
       : 123_000
   const etaClock = trip ? fmtClock(etaMs) : '—'
-  const tripCode = trip?.tripCode ?? 'Z-1067'
+  const travelTime = fmtDuration((remainingS + delayMin * 60) * 1000)
+  const tripCode = trip?.tripCode ?? activeOrderNumber?.replace('ЗК', 'Z') ?? '—'
 
   const maneuverIcon = (type: string, cls: string) => {
     if (type === 'left') return <CornerUpLeft className={cls} />
@@ -905,7 +929,7 @@ export function MapScreen() {
             active={follow}
             onClick={() => {
               setFollowMode(true)
-              const p = pointAtFraction(simFRef.current)
+              const p = navPoint(simFRef.current)
               mapRef.current?.easeTo({ center: [p.lng, p.lat], bearing: p.bearing, pitch: 55, zoom: 15.4, duration: 750 })
             }}
           >
@@ -963,7 +987,7 @@ export function MapScreen() {
             <div className="text-[10px] text-white/50 mt-1">Прибытие{delayMin > 0 ? ' · пробки' : ''}</div>
           </div>
           <div>
-            <div className="text-xl font-bold leading-none tabular-nums">2 ч 30 мин</div>
+            <div className="text-xl font-bold leading-none tabular-nums">{travelTime}</div>
             <div className="text-[10px] text-white/50 mt-1">В пути</div>
           </div>
           <div className="ml-auto flex items-center gap-1 text-[#F97316] font-bold text-sm">
@@ -977,7 +1001,7 @@ export function MapScreen() {
       {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} />}
 
       {/* --- легенда карты -------------------------------------------------------- */}
-      {legendOpen && <MapLegend onClose={() => setLegendOpen(false)} />}
+      {legendOpen && <MapLegend onClose={() => setLegendOpen(false)} tripCode={tripCode} />}
 
       {/* --- шаг 3 мастера: форма публикации (мокап 2) --------------------------- */}
       {wizard.step === 3 && <WizardSheet />}
@@ -1014,7 +1038,7 @@ function MapBtn({
  * Легенда карты (открывается кнопкой «Слои»): маршрут, точки рейса,
  * уровни пробок, категории пометок и назначение кнопок управления.
  */
-function MapLegend({ onClose }: { onClose: () => void }) {
+function MapLegend({ onClose, tripCode }: { onClose: () => void; tripCode: string }) {
   return (
     <div className="absolute right-14 top-28 z-30 w-[254px] max-h-[58%] overflow-y-auto rounded-2xl bg-white border border-black/10 shadow-2xl p-3.5 pointer-events-auto azmz-legend-enter">
       <div className="flex items-center justify-between mb-2.5">
@@ -1025,7 +1049,7 @@ function MapLegend({ onClose }: { onClose: () => void }) {
       </div>
 
       <LegendBlock title="Маршрут рейса">
-        <LegendLine swatch={<span className="h-[3px] w-6 rounded-full bg-[#F97316] inline-block" />} text="Маршрут Z-1067 (по дорогам)" />
+        <LegendLine swatch={<span className="h-[3px] w-6 rounded-full bg-[#F97316] inline-block" />} text={`Маршрут ${tripCode} (по дорогам)`} />
         <LegendLine swatch={<span className="h-3.5 w-3.5 rounded-md bg-[#F97316] border-2 border-white inline-block" />} text="Ваш грузовик" />
         <LegendLine swatch={<span className="h-3 w-3 rounded-full bg-[#3B82F6] border-2 border-white inline-block" />} text="Погрузка" />
         <LegendLine swatch={<span className="h-3 w-3 rounded-full bg-[#EF4444] border-2 border-white inline-block" />} text="Выгрузка" />

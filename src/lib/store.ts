@@ -438,8 +438,9 @@ export const useAzmz = create<AzmzState>()(
         set((s) => ({
           simRunning: on,
           simSpeedKmh: on ? 58 : 0,
-          // повторный запуск — сначала маршрута, чтобы демо было повторяемым
-          simProgressF: on ? START_F : s.simProgressF,
+          // Демо-А-146 начинается сначала при повторном запуске. Реальный
+          // маршрут (офисная линия Яндекса или OSRM) не откатываем назад.
+          simProgressF: on && !s.realRoute ? START_F : s.simProgressF,
         })),
       advanceSim: (dtSec) => {
         const s = get()
@@ -590,7 +591,8 @@ export const useAzmz = create<AzmzState>()(
           // Офисная линия Яндекса: едем с её начала, а не с доли демо-А-146.
           set({ simProgressF: 0 })
         }
-        get().showToast('Маршрут проложен — вы в пути. Рейс Z-1067')
+        const code = get().activeOrderNumber?.replace('ЗК', 'Z') ?? get().trip?.tripCode ?? '—'
+        get().showToast(`Маршрут проложен — вы в пути. Рейс ${code}`)
       },
       completeActiveTrip: () => {
         const s = get()

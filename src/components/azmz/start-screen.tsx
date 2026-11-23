@@ -143,7 +143,9 @@ export function StartScreen() {
   // разовый fetch не нужен: назначение диспетчера появляется «по ходу».
 
   const active = orders.find((o) => o.number === activeOrderNumber) ?? null
-  const assigned = orders.find((o) => o.status === 'ASSIGNED') ?? null
+  // DISPATCH — рейс уже назначен этому водителю, но ещё ждёт его подтверждения.
+  // Именно его водитель и «берёт» кнопкой: ACCEPT снимает pending-ack в контуре.
+  const assigned = orders.find((o) => o.status === 'ASSIGNED' || o.status === 'DISPATCH') ?? null
   const doneCount = pretrip.filter((p) => p.done).length
   const allDone = pretrip.length > 0 && doneCount === pretrip.length
 

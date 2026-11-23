@@ -55,6 +55,7 @@ export function TripScreen() {
   const points = useAzmz((s) => s.points)
   const outbox = useAzmz((s) => s.outbox)
   const traffic = useAzmz((s) => s.traffic)
+  const realRoute = useAzmz((s) => s.realRoute)
   const setView = useAzmz((s) => s.setView)
   const setEventDialog = useAzmz((s) => s.setEventDialog)
   const simF = useAzmz((s) => s.simProgressF)
@@ -66,24 +67,36 @@ export function TripScreen() {
     return () => clearInterval(t)
   }, [])
 
-  const sorted = useMemo(() => [...events].sort((a, b) => a.occurredAt - b.occurredAt), [events])
+  // Журнал хранит события и точки всех демо-рейсов — на дашборде только текущий.
+  const tripEvents = useMemo(
+    () => (trip ? events.filter((e) => e.tripId === trip.id) : []),
+    [events, trip],
+  )
+  const tripPoints = useMemo(
+    () => (trip ? points.filter((p) => p.tripId === trip.id) : []),
+    [points, trip],
+  )
+  const sorted = useMemo(() => [...tripEvents].sort((a, b) => a.occurredAt - b.occurredAt), [tripEvents])
   const pendingEventIds = useMemo(
     () => new Set(outbox.filter((o) => o.type === 'TRIP_EVENT_CREATE').map((o) => (o.payload as { id: string }).id)),
     [outbox],
   )
-  const unloading = points.find((p) => p.kind === 'unloading')
-  const loading = points.find((p) => p.kind === 'loading')
+  const unloading = tripPoints.find((p) => p.kind === 'unloading')
+  const loading = tripPoints.find((p) => p.kind === 'loading')
 
-  // прогресс: от выезда до планового прибытия (хуки — до раннего выхода)
+  // прогресс: живой маршрут — по фактической доле линии; без линии — по времени
   const progressT = useMemo(() => {
     const arrTimes = sorted.filter((e) => e.type === 'ARRIVAL_LOADING' || e.type === 'ARRIVAL_UNLOADING')
     const tLoad =
       arrTimes.find((e) => e.type === 'ARRIVAL_LOADING')?.occurredAt ?? trip?.plannedStartAt ?? Date.now()
     const tUn = unloading?.plannedArrivalAt ?? trip?.plannedFinishAt ?? Date.now()
+    if (realRoute) {
+      return { pct: Math.max(6, Math.min(96, simF * 100)), tLoad, tUn }
+    }
     const now = Date.now()
     const pct = Math.max(6, Math.min(96, ((now - tLoad) / Math.max(1, tUn - tLoad)) * 100))
     return { pct, tLoad, tUn }
-  }, [sorted, trip, unloading])
+  }, [sorted, trip, unloading, realRoute, simF])
 
   if (!trip) {
     return (
@@ -96,10 +109,14 @@ export function TripScreen() {
   const stage = stageLabel(trip.lastEventType)
   const lastEventAt = trip.lastEventAt ?? Date.now()
   const stageMs = Date.now() - lastEventAt
-  const remainingM = (trip.routeDistanceM ?? 200_000) * (1 - simF)
-  const passedM = (trip.routeDistanceM ?? 200_000) * simF
+  const totalM = realRoute?.lengthM ?? trip.routeDistanceM ?? 200_000
+  const remainingM = totalM * (1 - simF)
+  const passedM = totalM * simF
   const delayMin = traffic?.routeDelayMin ?? 0
-  const arrivalMs = (unloading?.plannedArrivalAt ?? trip.plannedFinishAt ?? Date.now()) + delayMin * 60_000
+  // Плановое время из 1С может быть в прошлом — для офисной заявки ETA
+  // считаем от текущего момента и реальной длительности линии.
+  const routeDurationS = realRoute?.durationS ?? trip.routeDurationS ?? 0
+  const arrivalMs = Date.now() + (routeDurationS * (1 - simF) + delayMin * 60) * 1000
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -147,7 +164,7 @@ export function TripScreen() {
               Погрузка <span className="text-white/45 tabular-nums">{fmtClock(progressT.tLoad)}</span>
             </div>
             <div className="flex items-center gap-1 text-white/85">
-              Разгрузка <span className="text-white/45 tabular-nums">{fmtClock(unloading?.plannedArrivalAt ?? trip.plannedFinishAt)}</span>
+              Разгрузка <span className="text-white/45 tabular-nums">{fmtClock(arrivalMs)}</span>
             </div>
           </div>
         </div>

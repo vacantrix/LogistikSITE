@@ -29,7 +29,7 @@ export function MarkEventDialog({ onClose }: { onClose: () => void }) {
 
   const meta = EVENT_TYPES.find((t) => t.code === selected)
   const needsPoint = !!meta?.wantsKind
-  const candidates = points.filter((p) => p.kind === meta?.wantsKind)
+  const candidates = points.filter((p) => p.tripId === trip?.id && p.kind === meta?.wantsKind)
   const effectivePoint = needsPoint ? (candidates.find((c) => c.id === pointId) ?? candidates[0]) : undefined
 
   const submit = () => {
