@@ -205,7 +205,17 @@ function bearingDeg(a: [number, number], b: [number, number]): number {
  * карта, ETA и баннеры живут без изменений. В проде OSRM поднимается
  * рядом с бэкендом каркаса (своя выгрузка OSM РФ) — адрес в одной переменной.
  */
-export async function fetchRealRoute(signal?: AbortSignal): Promise<RealRoute | null> {
+export async function fetchRealRoute(
+  signal?: AbortSignal,
+  waypoints?: { lat: number; lng: number }[],
+): Promise<RealRoute | null> {
+  // Офисный маршрут: строим линию через ВСЕ точки Яндекс.Карт по порядку,
+  // а не от фиксированных демо-точек. Так маршрут в приложении повторяет
+  // маршрут, который диспетчер построил в Яндексе.
+  if (waypoints && waypoints.length >= 2) {
+    const through = await fetchOsrmThrough(waypoints, signal)
+    if (through) return through
+  }
   const variants = await fetchOsrmVariants(
     { lat: LOADING_POINT.lat, lng: LOADING_POINT.lon },
     { lat: UNLOADING_POINT.lat, lng: UNLOADING_POINT.lon },
@@ -225,13 +235,95 @@ export async function fetchRealRoute(signal?: AbortSignal): Promise<RealRoute | 
   }
 }
 
+/** RealRoute из готовой линии офиса ([[lon,lat],…]) — без запроса к сети. */
+export function routeFromCoords(
+  coords: [number, number][],
+  distanceM?: number | null,
+  durationS?: number | null,
+): RealRoute | null {
+  if (!Array.isArray(coords) || coords.length < 2) return null
+  const lengthM = polylineLengthM(coords)
+  return {
+    coords,
+    lengthM,
+    roadDistanceM: distanceM && distanceM > 0 ? distanceM : lengthM,
+    durationS: durationS && durationS > 0 ? durationS : lengthM / (55_000 / 3600),
+    maneuvers: [],
+    segments: [],
+    fetchedAt: Date.now(),
+    source: 'osrm',
+  }
+}
+
+/**
+ * Маршрут по заявке: сначала готовая линия офиса (мгновенно, работает даже
+ * при недоступном OSRM), затем построение через точки офиса, затем демо.
+ */
+export async function fetchRouteForOrder(
+  order: {
+    routeCoords?: [number, number][]
+    routeWaypoints?: { lat: number; lng: number }[]
+    routeDistanceM?: number | null
+    routeDurationS?: number | null
+  },
+  signal?: AbortSignal,
+): Promise<RealRoute | null> {
+  const direct = routeFromCoords(order.routeCoords ?? [], order.routeDistanceM, order.routeDurationS)
+  if (direct) return direct
+  return fetchRealRoute(signal, order.routeWaypoints)
+}
+
+/**
+ * OSRM через все точки по порядку. alternatives=false: с промежуточными
+ * точками сервер не гарантирует варианты, а офисный маршрут должен быть
+ * один — ровно тот, что построил диспетчер.
+ */
+export async function fetchOsrmThrough(
+  waypoints: { lat: number; lng: number }[],
+  signal?: AbortSignal,
+): Promise<RealRoute | null> {
+  if (waypoints.length < 2) return null
+  const path =
+    waypoints.map((p) => `${p.lng},${p.lat}`).join(';') +
+    '?overview=full&geometries=geojson&alternatives=false&steps=false'
+  for (const base of OSRM_BASES) {
+    if (signal?.aborted) return null
+    try {
+      const res = await fetch(`${base}${path}`, { signal: osrmSignal(signal) })
+      if (!res.ok) continue
+      const data = (await res.json()) as {
+        code?: string
+        routes?: Array<{
+          distance: number
+          duration: number
+          geometry: { coordinates: [number, number][] }
+        }>
+      }
+      const r = data.code === 'Ok' ? data.routes?.[0] : undefined
+      if (!r?.geometry?.coordinates?.length) continue
+      return routeFromCoords(r.geometry.coordinates, r.distance, r.duration)
+    } catch {
+      // следующий адрес OSRM
+    }
+  }
+  return null
+}
+
 export interface OsrmVariant {
   coords: [number, number][]
   lengthM: number
   durationS: number
 }
 
-const OSRM_BASE = 'https://router.project-osrm.org/route/v1/driving/'
+/**
+ * Сначала свой origin: Caddy на vacantrix.ru проксирует /osrm/* на OSRM.
+ * С мобильных сетей РФ публичный router.project-osrm.org часто недоступен,
+ * поэтому он оставлен вторым адресом для стендов без прокси.
+ */
+const OSRM_BASES = [
+  '/osrm/route/v1/driving/',
+  'https://router.project-osrm.org/route/v1/driving/',
+]
 
 /** Таймаут запроса маршрута: без него «Строим маршрут…» может висеть вечно. */
 const OSRM_TIMEOUT_MS = 9000
@@ -254,25 +346,33 @@ export async function fetchOsrmVariants(
   to: { lat: number; lng: number },
   signal?: AbortSignal,
 ): Promise<OsrmVariant[]> {
-  try {
-    const url =
-      `${OSRM_BASE}${from.lng},${from.lat};${to.lng},${to.lat}` +
-      '?overview=full&geometries=geojson&alternatives=true&steps=false'
-    const res = await fetch(url, { signal: osrmSignal(signal) })
-    if (!res.ok) return []
-    const data = (await res.json()) as {
-      code?: string
-      routes?: Array<{ distance: number; duration: number; geometry: { coordinates: [number, number][] } }>
+  const path =
+    `${from.lng},${from.lat};${to.lng},${to.lat}` +
+    '?overview=full&geometries=geojson&alternatives=true&steps=false'
+  for (const base of OSRM_BASES) {
+    if (signal?.aborted) return []
+    try {
+      const res = await fetch(`${base}${path}`, { signal: osrmSignal(signal) })
+      if (!res.ok) continue
+      const data = (await res.json()) as {
+        code?: string
+        routes?: Array<{
+          distance: number
+          duration: number
+          geometry: { coordinates: [number, number][] }
+        }>
+      }
+      if (data.code !== 'Ok' || !data.routes?.length) continue
+      return data.routes.map((r) => ({
+        coords: r.geometry.coordinates,
+        lengthM: r.distance,
+        durationS: r.duration,
+      }))
+    } catch {
+      // пробуем следующий адрес: прокси мог не ответить, публичный — ответит
     }
-    if (data.code !== 'Ok' || !data.routes?.length) return []
-    return data.routes.map((r) => ({
-      coords: r.geometry.coordinates,
-      lengthM: r.distance,
-      durationS: r.duration,
-    }))
-  } catch {
-    return []
   }
+  return []
 }
 
 /**

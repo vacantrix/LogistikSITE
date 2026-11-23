@@ -28,8 +28,17 @@ import type {
 } from './protocol'
 import type { Order1C } from './demo/orders-data'
 
-const TICK_MS = 4000
+/**
+ * Резервный polling. Основной канал входящих — длинный запрос /sync/wait:
+ * сервер отвечает сразу, как только в журнале появилась запись для водителя.
+ * 15 секунд — страховка на случай, если long-poll недоступен (старый прокси,
+ * сбой шлюза): приложение всё равно обновится само.
+ */
+const TICK_MS = 15000
 const PULL_LIMIT = 500
+/** Длинный запрос ждёт изменение до 25 с; таймаут клиента — с запасом. */
+const WAIT_TIMEOUT_S = 25
+const WAIT_RETRY_MS = 3000
 /** Заявки — раз в 5 с (быстрее диспетчер не назначает, медленнее — заметно человеку). */
 const ORDERS_INTERVAL_MS = 5000
 /** Пробки обновляются раз в минуту — чаще тянуть незачем. */
@@ -37,10 +46,47 @@ const TRAFFIC_INTERVAL_MS = 12_000
 /** Телеметрия для диспетчера: фикс позиции каждые 5 с во время рейса. */
 const POSITION_INTERVAL_MS = 5000
 
-function isOffline(): boolean {
+/** Один цикл синхронизации в полёте: wait/push/tick не наслаиваются друг на друга. */
+let tickInFlight: Promise<void> | null = null
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Последний результат проверки: не дёргаем сеть на каждом 4-секундном тике. */
+let lastProbeAt = 0
+let lastProbeOk = false
+
+/**
+ * navigator.onLine в Android WebView/PWA иногда остаётся false, хотя
+ * интернет работает. Поэтому «браузер говорит офлайн» — ещё не приговор:
+ * проверяем реальную доступность нашего API лёгким запросом.
+ */
+async function probeReachable(): Promise<boolean> {
+  const now = Date.now()
+  if (now - lastProbeAt < 10_000) return lastProbeOk
+  lastProbeAt = now
+  try {
+    const res = await fetch(`/api/driver/v1/sync/pull?cursor=0&limit=1`, {
+      headers: { 'X-Driver-Id': DRIVER_ID },
+      cache: 'no-store',
+      signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(3500)
+        : undefined,
+    })
+    lastProbeOk = res.ok
+  } catch {
+    lastProbeOk = false
+  }
+  return lastProbeOk
+}
+
+async function isOffline(): Promise<boolean> {
   const s = useAzmz.getState()
   if (s.offlineMode) return true
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return !(await probeReachable())
+  }
   return false
 }
 
@@ -187,7 +233,7 @@ async function doOrders(): Promise<void> {
   }
 }
 
-async function tick(): Promise<void> {
+async function tickOnce(): Promise<void> {
   const s = useAzmz.getState()
   useAzmz.getState().setSyncActive(true)
   try {
@@ -197,7 +243,7 @@ async function tick(): Promise<void> {
       lastOrdersAt = ordersNow
       await doOrders()
     }
-    if (isOffline()) {
+    if (await isOffline()) {
       s.setConnection('offline')
       return
     }
@@ -223,6 +269,65 @@ async function tick(): Promise<void> {
   }
 }
 
+/** Один цикл на всех: события outbox/online и long-poll не дублируют работу. */
+function tick(): Promise<void> {
+  if (!tickInFlight) {
+    tickInFlight = tickOnce().finally(() => {
+      tickInFlight = null
+    })
+  }
+  return tickInFlight
+}
+
+/**
+ * Мгновенный канал входящих: long-poll /sync/wait. Сервер держит запрос до
+ * появления записи в личном журнале (назначение рейса, ответ офиса, пометка)
+ * и отвечает сразу — приложение делает pull в ту же секунду.
+ * При обрыве/недоступности канала — короткая пауза и повтор; обычный 15-секундный
+ * polling остаётся страховкой, поэтому данные не теряются.
+ */
+function startWaitLoop(): () => void {
+  let stopped = false
+  let controller: AbortController | null = null
+
+  const run = async () => {
+    while (!stopped) {
+      if (useAzmz.getState().offlineMode) {
+        await sleep(WAIT_RETRY_MS)
+        continue
+      }
+      const cursor = useAzmz.getState().cursor
+      controller = new AbortController()
+      const timer = setTimeout(() => controller?.abort(), (WAIT_TIMEOUT_S + 10) * 1000)
+      try {
+        const res = await fetch(`/api/driver/v1/sync/wait?cursor=${cursor}&timeout=${WAIT_TIMEOUT_S}`, {
+          headers: { 'X-Driver-Id': DRIVER_ID },
+          cache: 'no-store',
+          signal: controller.signal,
+        })
+        if (res.ok) {
+          const data = (await res.json()) as { changed?: boolean }
+          if (data.changed) await tick()
+          // сразу открываем следующее ожидание — канал не должен «спать»
+        } else {
+          // эндпоинт недоступен (старый шлюз/деплой) — не долбим его каждую секунду
+          await sleep(15000)
+        }
+      } catch {
+        if (!stopped) await sleep(WAIT_RETRY_MS)
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+  }
+
+  void run()
+  return () => {
+    stopped = true
+    controller?.abort()
+  }
+}
+
 /** Хук ставится один раз в корне приложения. */
 export function useSyncEngine(): void {
   const started = useRef(false)
@@ -231,9 +336,12 @@ export function useSyncEngine(): void {
     started.current = true
 
     void tick()
+    const stopWait = startWaitLoop()
     const timer = setInterval(() => void tick(), TICK_MS)
     const onOnline = () => void tick()
     const onOffline = () => useAzmz.getState().setConnection('offline')
+    // действие водителя (событие/пометка/чат) — push сразу, без ожидания тика
+    const onOutbox = () => void tick()
     // Возврат на экран: мобильный браузер замораживает таймеры в фоне —
     // открываем цикл сразу, чтобы заявка/рейс появились «по ходу», без
     // перезапуска приложения и ожидания следующего тика.
@@ -244,13 +352,16 @@ export function useSyncEngine(): void {
     window.addEventListener('offline', onOffline)
     window.addEventListener('focus', onOnline)
     window.addEventListener('pageshow', onOnline)
+    window.addEventListener('azmz:outbox', onOutbox)
     document.addEventListener('visibilitychange', onVisible)
     return () => {
       clearInterval(timer)
+      stopWait()
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
       window.removeEventListener('focus', onOnline)
       window.removeEventListener('pageshow', onOnline)
+      window.removeEventListener('azmz:outbox', onOutbox)
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])

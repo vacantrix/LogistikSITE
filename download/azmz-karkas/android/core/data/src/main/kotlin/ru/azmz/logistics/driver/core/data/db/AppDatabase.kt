@@ -14,7 +14,9 @@ import androidx.room.RoomDatabase
         OutboxOpEntity::class,
         SyncStateEntity::class,
     ],
-    version = 1,
+    // v2: у рейса появились точки офисного маршрута (routeWaypointsJson),
+    // чтобы навигатор вёл через все точки Яндекс.Карт по порядку.
+    version = 2,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {

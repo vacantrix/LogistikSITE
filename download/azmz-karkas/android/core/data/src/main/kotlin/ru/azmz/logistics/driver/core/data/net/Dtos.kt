@@ -45,6 +45,28 @@ data class JournalEntry(val seq: Long, val entity: String, val op: String, val p
 @Serializable
 data class IdOnly(val id: String)
 
+// --- мгновенный канал входящих --------------------------------------------
+
+/**
+ * Long-poll: сервер держит запрос до появления записи в личном журнале
+ * с seq > cursor и отвечает сразу. false — тишина по таймауту, клиент
+ * открывает следующее ожидание.
+ */
+@Serializable
+data class SyncWaitResponse(val changed: Boolean = false, val cursor: Long = 0)
+
+// --- телеметрия для диспетчера --------------------------------------------
+
+@Serializable
+data class PositionRequest(
+    val lat: Double,
+    val lon: Double,
+    val speedKmh: Double = 0.0,
+    val heading: Double = 0.0,
+    val tripCode: String? = null,
+    val ts: Long = 0,
+)
+
 // --- marks (канал 2: снимок активных по bbox) ------------------------------
 
 @Serializable
@@ -146,6 +168,17 @@ interface DriverApi {
         @Query("cursor") cursor: Long,
         @Query("limit") limit: Int = 500,
     ): PullResponse
+
+    /** Мгновенный канал: ждёт новую запись журнала после курсора. */
+    @GET("sync/wait")
+    suspend fun wait(
+        @Query("cursor") cursor: Long,
+        @Query("timeout") timeoutSeconds: Int = 20,
+    ): SyncWaitResponse
+
+    /** Телеметрия: текущий GPS-фикс для мониторинга диспетчером. */
+    @POST("position")
+    suspend fun position(@Body body: PositionRequest): Unit
 
     /** Снимок активных пометок по bbox коридора (+ since-оптимизация). */
     @GET("sync/marks")

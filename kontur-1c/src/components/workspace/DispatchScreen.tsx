@@ -36,6 +36,11 @@ const BODY_CARGO: Record<string, string[]> = {
 const BODY_RU: Record<string, string> = { tarp: 'штора', fridge: 'реф', flatbed: 'борт', tank: 'цистерна' }
 const KIND_RU: Record<string, string> = { tractor: 'тягач', tipper: 'самосвал', van: 'фургон' }
 
+// Если груз не распознан ни одной строкой матрицы, совместимость кузова
+// проверить нечем — не красим все ТС в красный (см. сервер eligibility.ts).
+const isCargoClassified = (cargo: string): boolean =>
+  Object.values(BODY_CARGO).some((keys) => keys.some((k) => cargo.toLowerCase().includes(k)))
+
 const STATUS_DOT: Record<string, string> = {
   NEW: '#8a8a8a', DISPATCH: '#e8a000', ASSIGNED: '#2f6db0', ACCEPTED: '#00a0b0',
   PRETRIP: '#7a4fb0', IN_PROGRESS: '#1c5a3a', DONE: '#2f8a2f', CANCELLED: '#c43e1c',
@@ -56,7 +61,8 @@ function vehicleIssues(v: Vehicle, r: RequestRow): string[] {
   if (v.readiness !== 'ready') issues.push(v.readiness === 'repair' ? 'в ремонте' : 'на обслуживании')
   if (r.weightT > v.capacityT) issues.push(`грузоподъёмность ${v.capacityT} т < ${r.weightT} т`)
   const keys = BODY_CARGO[v.bodyType] ?? []
-  if (!keys.some((k) => r.cargo.toLowerCase().includes(k))) issues.push(`кузов «${BODY_RU[v.bodyType]}» не под груз`)
+  if (isCargoClassified(r.cargo) && !keys.some((k) => r.cargo.toLowerCase().includes(k)))
+    issues.push(`кузов «${BODY_RU[v.bodyType]}» не под груз`)
   return issues
 }
 
@@ -425,6 +431,13 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
           )}
         </div>
 
+        {selected && !isCargoClassified(selected.cargo) && (
+          <div className="shrink-0 border-b border-[#e8c88a] bg-[#fdf6e7] px-3 py-1.5 text-[11px] text-[#8a5a00]">
+            Груз «{selected.cargo}» не распознан матрицей 5.3 — совместимость кузова не проверяется.
+            Доступны ТС по грузоподъёмности и готовности; вид груза можно уточнить в заявке.
+          </div>
+        )}
+
         <div className="c1-scroll min-h-0 flex-1 overflow-auto">
           <table className="c1-table">
             <thead>
@@ -558,6 +571,9 @@ export function DispatchScreen({ onClose }: { onClose?: () => void }) {
             <div className="grid gap-1.5">
               <label className="c1-label">Груз (номенклатура)</label>
               <C1Input name="cargo" required placeholder="Металлопрокат листовой, 2 шт." className="w-full" />
+              <div className="text-[11px] text-[#8a8a8a]">
+                Вид груза: металлопрокат, трубы, мука, пиломатериалы… ТТН и другие документы укажите ниже.
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">

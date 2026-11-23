@@ -11,8 +11,6 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import ru.azmz.logistics.driver.core.data.net.PushOp
-import ru.azmz.logistics.driver.core.data.net.PushRequest
 import java.util.concurrent.TimeUnit
 
 /** Периодика и внеочередные циклы синхронизации. */
@@ -64,39 +62,16 @@ object SyncScheduler {
 
 /**
  * Сброс outbox-очереди: батч до 100 PENDING-операций.
- * APPLIED/DUPLICATE → DONE; REJECTED — финален (причина показывается
- * пользователю, повторов нет); сеть/5xx → Result.retry с backoff.
+ * Логика — в SyncRunner, общая с foreground-циклом.
  */
 class PushWorker(appContext: Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
         if (!AppGraph.isInitialized) return Result.failure()
-        val outbox = AppGraph.db.outboxDao()
-
-        val batch = outbox.pendingBatch(limit = 100)
-        if (batch.isEmpty()) return Result.success()
-
         return try {
-            val response = AppGraph.api.push(
-                PushRequest(
-                    deviceId = AppGraph.deviceId,
-                    operations = batch.map { PushOp(it.opId, it.type, AppGraph.json.parseToJsonElement(it.payload)) },
-                )
-            )
-            val byOpId = response.results.associateBy { it.opId }
-            val now = System.currentTimeMillis()
-            batch.forEach { op ->
-                when (byOpId[op.opId]?.status) {
-                    "APPLIED", "DUPLICATE" -> outbox.finish(op.opId, "DONE", null, now)
-                    "REJECTED" -> outbox.finish(
-                        op.opId, "REJECTED", byOpId[op.opId]?.rejectReason ?: "REJECTED", now,
-                    )
-                    else -> outbox.bumpAttempts(op.opId)
-                }
-            }
-            if (outbox.pendingCountOnce() > 0) Result.retry() else Result.success()
-        } catch (e: Exception) {
+            if (SyncRunner.push()) Result.success() else Result.retry()
+        } catch (_: Exception) {
             Result.retry()
         }
     }

@@ -16,7 +16,7 @@ retrofit = "2.11.0"
 okhttp = "4.12.0"
 kotlinxSerialization = "1.7.3"
 coroutines = "1.9.0"
-maplibre = "11.0.0"
+maplibre = "11.13.5"
 junit = "4.13.2"
 
 [libraries]

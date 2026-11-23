@@ -74,6 +74,7 @@ import kotlinx.serialization.json.double
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -97,6 +98,7 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import ru.azmz.logistics.driver.core.common.Geo
 import ru.azmz.logistics.driver.core.data.db.RoadMarkEntity
 import ru.azmz.logistics.driver.core.data.db.TripEntity
+import ru.azmz.logistics.driver.core.data.net.PositionRequest
 import ru.azmz.logistics.driver.core.data.net.RouteStepDto
 import ru.azmz.logistics.driver.core.sync.AppGraph
 import ru.azmz.logistics.driver.core.ui.AzmzGray
@@ -199,10 +201,44 @@ fun MapScreen() {
     }
     DisposableEffect(Unit) { onDispose { navigator.stop(); tracker.stop() } }
 
-    // назначение — конец маршрута рейса (последняя точка LineString)
+    // Телеметрия для диспетчера: фикс уходит в «АЭМЗ Поток» раз в 5 секунд,
+    // пока открыт экран карты. Без сети запрос тихо пропускается — следующий
+    // фикс уйдёт, как только связь вернётся; история GPS не нужна.
+    var lastTelemetryAt by remember { mutableStateOf(0L) }
+    LaunchedEffect(fix, trip?.id) {
+        val f = fix ?: return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        if (now - lastTelemetryAt < 5_000) return@LaunchedEffect
+        lastTelemetryAt = now
+        runCatching {
+            AppGraph.api.position(
+                PositionRequest(
+                    lat = f.lat,
+                    lon = f.lon,
+                    speedKmh = (f.speedMps * 3.6).toDouble(),
+                    heading = f.bearingDeg.toDouble(),
+                    tripCode = trip?.tripCode,
+                    ts = f.at,
+                ),
+            )
+        }
+    }
+
+    // назначение — конец маршрута рейса (последняя точка LineString);
+    // сохранённую геометрию отдаём как страховку на случай, если OSRM
+    // с телефона недоступен
     LaunchedEffect(trip?.id) {
-        val dest = trip?.routeDestination() ?: return@LaunchedEffect
-        navigator.setDestination(dest.first, dest.second)
+        val t = trip ?: return@LaunchedEffect
+        val dest = t.routeDestination() ?: return@LaunchedEffect
+        navigator.setDestination(
+            lat = dest.first,
+            lon = dest.second,
+            fallbackGeoJson = t.routeGeoJson,
+            routeDistanceM = t.routeDistanceM,
+            routeDurationS = t.routeDurationS,
+            // Точки офиса из Яндекс.Карт: маршрут строится через них по порядку.
+            routeWaypointsJson = t.routeWaypointsJson,
+        )
     }
 
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
@@ -219,14 +255,30 @@ fun MapScreen() {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                MapView(ctx).apply {
-                    onCreate(null)
-                    mapViewRef = this
-                    getMapAsync { map ->
-                        mapRef = map
-                        map.setStyle(Style.Builder().fromJson(osmStyleJson()))
-                        map.addOnMapClickListener { point -> onMapClick(point); true }
-                        // Атрибуция обязательна: «© OpenStreetMap contributors» — в стиле
+                // MapLibre инициализируем явно до создания MapView. Если нативная
+                // библиотека несовместима с устройством, показываем заглушку —
+                // остальные вкладки приложения продолжают работать.
+                runCatching {
+                    MapLibre.getInstance(ctx)
+                    MapView(ctx).apply {
+                        onCreate(null)
+                        mapViewRef = this
+                        getMapAsync { map ->
+                            mapRef = map
+                            map.setStyle(Style.Builder().fromJson(osmStyleJson()))
+                            map.addOnMapClickListener { point -> onMapClick(point); true }
+                            // Атрибуция обязательна: «© OpenStreetMap contributors» — в стиле
+                        }
+                    }
+                }.getOrElse { error ->
+                    android.widget.TextView(ctx).apply {
+                        text = "Карта недоступна на этом устройстве.\n" +
+                            "Рейс, чат и офис работают во вкладках ниже.\n\n" +
+                            (error.message ?: error.javaClass.simpleName)
+                        setTextColor(android.graphics.Color.parseColor("#334155"))
+                        textSize = 15f
+                        gravity = android.view.Gravity.CENTER
+                        setPadding(32, 32, 32, 32)
                     }
                 }
             },
@@ -383,14 +435,22 @@ fun MapScreen() {
                                 System.currentTimeMillis() + (navActive.durationS * 1000).toLong(),
                             )
                             fix == null -> "Ждём сигнал GPS…"
-                            else -> "Маршрут недоступен офлайн"
+                            else -> "Маршрут не построен"
                         }
                         val navSub = if (navActive != null) {
                             val km = navActive.distanceM / 1000
                             val dur = TimeFmt.duration((navActive.durationS * 1000).toLong())
-                            "От текущей позиции · " + String.format("%.1f км · %s", km, dur)
+                            if (nav.exact) {
+                                "Маршрут офиса (Яндекс.Карты) · " +
+                                    String.format("%.1f км · %s", km, dur)
+                            } else if (nav.fallback) {
+                                "Сохранённая геометрия рейса · " +
+                                    String.format("%.1f км · %s", km, dur)
+                            } else {
+                                "От текущей позиции · " + String.format("%.1f км · %s", km, dur)
+                            }
                         } else {
-                            "Маршрут от вашей геопозиции до точки выгрузки"
+                            "Проверьте связь — маршрут построится автоматически"
                         }
                         Text(navTitle, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                         Text(navSub, color = Color(0xFF64748B), fontSize = 12.sp)
@@ -567,15 +627,27 @@ fun MapScreen() {
     }
 }
 
-/** Конец маршрута рейса = последняя точка LineString (lat, lon). */
+/**
+ * Конец маршрута рейса: последняя точка LineString, а если геометрии ещё
+ * нет (офис только сохранил ссылку) — последняя точка офисных waypoints.
+ */
 private fun TripEntity.routeDestination(): Pair<Double, Double>? {
-    val geo = routeGeoJson ?: return null
+    routeGeoJson?.let { geo ->
+        val fromLine = runCatching {
+            val obj = Json.parseToJsonElement(geo).jsonObject
+            val coords = obj["coordinates"]?.jsonArray ?: return@runCatching null
+            val last = coords.lastOrNull()?.jsonArray ?: return@runCatching null
+            val lon = last[0].jsonPrimitive.double
+            val lat = last[1].jsonPrimitive.double
+            lat to lon
+        }.getOrNull()
+        if (fromLine != null) return fromLine
+    }
     return runCatching {
-        val obj = Json.parseToJsonElement(geo).jsonObject
-        val coords = obj["coordinates"]?.jsonArray ?: return@runCatching null
-        val last = coords.lastOrNull()?.jsonArray ?: return@runCatching null
-        val lon = last[0].jsonPrimitive.double
-        val lat = last[1].jsonPrimitive.double
+        val arr = Json.parseToJsonElement(routeWaypointsJson ?: return null).jsonArray
+        val last = arr.lastOrNull()?.jsonArray ?: return null
+        val lat = last[0].jsonPrimitive.double
+        val lon = last[1].jsonPrimitive.double
         lat to lon
     }.getOrNull()
 }

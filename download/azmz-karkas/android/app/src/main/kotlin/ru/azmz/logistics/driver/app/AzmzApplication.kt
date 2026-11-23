@@ -15,6 +15,7 @@ class AzmzApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashHandler.install(this)
         // Room — источник правды; сеть только из воркеров (офлайн-first)
         AppGraph.init(this)
         SyncScheduler.schedulePeriodic(this)
@@ -22,7 +23,7 @@ class AzmzApplication : Application() {
 
         // связь вернулась — немедленный сброс очереди и дельта
         appScope.launch {
-            var wasOffline = true
+            var wasOffline = false
             AppGraph.connectivity.state.collect { state ->
                 if (state !is ConnectionState.Offline && wasOffline) {
                     SyncScheduler.kick(this@AzmzApplication)

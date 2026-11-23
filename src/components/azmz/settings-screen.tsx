@@ -156,8 +156,8 @@ export function SettingsScreen({ inSheet = false }: { inSheet?: boolean }) {
         </Section>
 
         <Section icon={<Sliders className="h-4 w-4 text-[#F97316]" />} title="О приложении">
-          <Row k="Версия" v="0.5.0 — карта-фон · пробки онлайн" />
-          <Row k="Синхронизация" v="outbox + курсор + 3 канала" />
+          <Row k="Версия" v="0.6.0 — модуль «АЭМЗ Поток» · пробки онлайн" />
+          <Row k="Синхронизация" v="мгновенный канал + outbox + курсор" />
           <Row k="Карты" v="MapLibre · OSM/CARTO (без Yandex API)" />
           <div className="text-[10px] text-[#94A3B8] pt-1 leading-snug">
             ПДн хранятся на сервере в РФ (152-ФЗ). Этап MVP: JWT по смене, RuStore Push, геозоны.

@@ -7,6 +7,8 @@ package ru.azmz.logistics.driver.core.common
  *  * красный «Офлайн. В очереди: N».
  */
 sealed interface ConnectionState {
+    /** Первый кадр до ответа ConnectivityManager — не врём красным «Офлайн». */
+    data object Checking : ConnectionState
     data object Online : ConnectionState
     data class Sending(val queued: Int) : ConnectionState
     data class Offline(val queued: Int) : ConnectionState

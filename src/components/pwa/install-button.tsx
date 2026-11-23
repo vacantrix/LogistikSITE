@@ -12,7 +12,7 @@ export function InstallAppButton({ variant = 'pill' }: { variant?: 'pill' | 'blo
   if (variant === 'block') {
     return (
       <a
-        href="/azmz-driver.apk"
+        href="/dl/Drivemobile.apk"
         download
         className="w-full h-12 bg-[#F97316] text-white rounded-xl text-[14px] font-bold flex items-center justify-center gap-2 shadow-lg active:scale-[0.99] transition-transform"
       >
@@ -23,7 +23,7 @@ export function InstallAppButton({ variant = 'pill' }: { variant?: 'pill' | 'blo
   }
   return (
     <a
-      href="/azmz-driver.apk"
+      href="/dl/Drivemobile.apk"
       download
       aria-label="Установить приложение на телефон"
       className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-[#F97316] rounded-full px-2.5 py-1.5 shadow-[0_6px_18px_rgba(249,115,22,0.4)] active:scale-[0.97] transition-transform"

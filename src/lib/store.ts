@@ -23,7 +23,7 @@ import type {
 } from '@/lib/protocol'
 import { START_F, routeLengthM } from '@/lib/demo/route-data'
 import { DEMO_HISTORY, DEMO_ORDERS, PRETRIP_STEPS, type HistoryEntry, type Order1C } from '@/lib/demo/orders-data'
-import { fetchRealRoute, type RealRoute } from '@/lib/demo/real-route'
+import { fetchRouteForOrder, routeFromCoords, type RealRoute } from '@/lib/demo/real-route'
 
 /** Реальная длина дорожной ломаной, м (63 км А-146) — для пересчёта f. */
 const ROUTE_TOTAL_M = routeLengthM()
@@ -245,6 +245,9 @@ export const useAzmz = create<AzmzState>()(
         set((s) => ({
           outbox: [...s.outbox, { opId, type, payload, state: 'PENDING', attempts: 0, createdAt: Date.now() }],
         }))
+        // Действие водителя уходит сразу, не дожидаясь следующего тика:
+        // движок синхронизации слушает это событие и делает push → pull.
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('azmz:outbox'))
         return opId
       },
 
@@ -457,28 +460,71 @@ export const useAzmz = create<AzmzState>()(
       // --- воркфлоу заявки из 1С ------------------------------------------------
       // merge, а не замена: локальный статус «выполнена» главнее демо-сида 1С,
       // иначе после рефреша выполненная заявка вернётся в список назначенных
-      setOrders: (incoming) =>
+      setOrders: (incoming) => {
+        const activeNumber = get().activeOrderNumber
+        const prev = incoming.length ? get().orders.find((o) => o.number === activeNumber) : undefined
+        const prevSig = routeSignature(prev)
         set((s) => ({
           orders: incoming.map((o) => {
             const local = s.orders.find((x) => x.number === o.number)
             return local?.status === 'DONE' ? { ...o, status: 'DONE' as const } : o
           }),
-        })),
+        }))
+        // Офис поменял маршрут уже назначенного рейса — подхватываем сразу,
+        // без перезапуска приложения и без ручного «Обновить маршрут».
+        if (!activeNumber || get().orderStage === 'in_progress') return
+        const next = incoming.find((o) => o.number === activeNumber)
+        if (!next || routeSignature(next) === prevSig) return
+        const direct = next.routeCoords?.length
+          ? routeFromCoords(next.routeCoords, next.routeDistanceM, next.routeDurationS)
+          : null
+        if (direct) {
+          set({ realRoute: direct, realRouteStatus: 'ready' })
+          get().showToast('Офис обновил маршрут — линия на карте обновлена')
+        } else if (next.routeWaypoints?.length) {
+          void get().refetchRealRoute()
+        }
+      },
       acceptOrder: (number) => {
         if (get().activeOrderNumber) return
+        const order = get().orders.find((o) => o.number === number)
+        // Готовая линия офиса уже в заявке — маршрут появляется мгновенно,
+        // без ожидания OSRM. Точки и порядок — ровно как в Яндекс.Картах.
+        const office = order?.routeCoords?.length
+          ? routeFromCoords(order.routeCoords, order.routeDistanceM, order.routeDurationS)
+          : null
+        if (office) {
+          set({
+            activeOrderNumber: number,
+            orderStage: 'route_ready',
+            realRoute: office,
+            realRouteStatus: 'ready',
+          })
+          get().showToast(
+            `Заявка ${number} принята. Маршрут офиса: ${(office.lengthM / 1000).toFixed(0)} км · ~${Math.round(office.durationS / 60)} мин`,
+          )
+          return
+        }
         set({ activeOrderNumber: number, orderStage: 'routing', realRouteStatus: 'loading' })
-        get().showToast(`Заявка ${number} принята. Запрашиваем маршрут по дорогам…`)
+        get().showToast(
+          order?.routeWaypoints?.length
+            ? `Заявка ${number} принята. Строим маршрут по точкам офиса…`
+            : `Заявка ${number} принята. Запрашиваем маршрут по дорогам…`,
+        )
         void (async () => {
           const t0 = Date.now()
-          const rr = await fetchRealRoute()
-          // пауза «Строим маршрут…» минимум 1.6 с — чтобы запрос был заметен
+          const rr = await fetchRouteForOrder(order ?? {})
           const elapsed = Date.now() - t0
-          if (elapsed < 1600) await new Promise((r) => setTimeout(r, 1600 - elapsed))
+          if (!order?.routeWaypoints?.length && elapsed < 1600) {
+            await new Promise((r) => setTimeout(r, 1600 - elapsed))
+          }
           const st = get()
           if (st.activeOrderNumber !== number || st.orderStage !== 'routing') return
           if (rr) {
             set({ realRoute: rr, realRouteStatus: 'ready', orderStage: 'route_ready' })
-            get().showToast(`Маршрут по дорогам: ${(rr.lengthM / 1000).toFixed(0)} км · ~${Math.round(rr.durationS / 60)} мин`)
+            get().showToast(
+              `${order?.routeWaypoints?.length ? 'Маршрут по точкам офиса' : 'Маршрут по дорогам'}: ${(rr.lengthM / 1000).toFixed(0)} км · ~${Math.round(rr.durationS / 60)} мин`,
+            )
           } else {
             set({ realRouteStatus: 'failed', orderStage: 'route_ready' })
             get().showToast('Сервис маршрутов недоступен — работаем по демо-геометрии А-146')
@@ -488,12 +534,25 @@ export const useAzmz = create<AzmzState>()(
       refetchRealRoute: () => {
         const number = get().activeOrderNumber
         if (!number || get().realRouteStatus === 'loading') return
+        const order = get().orders.find((o) => o.number === number)
+        const office = order?.routeCoords?.length
+          ? routeFromCoords(order.routeCoords, order.routeDistanceM, order.routeDurationS)
+          : null
+        if (office) {
+          set({ realRoute: office, realRouteStatus: 'ready', orderStage: 'route_ready' })
+          get().showToast(
+            `Маршрут офиса: ${(office.lengthM / 1000).toFixed(0)} км · ~${Math.round(office.durationS / 60)} мин`,
+          )
+          return
+        }
         set({ orderStage: 'routing', realRouteStatus: 'loading' })
         void (async () => {
           const t0 = Date.now()
-          const rr = await fetchRealRoute()
+          const rr = await fetchRouteForOrder(order ?? {})
           const elapsed = Date.now() - t0
-          if (elapsed < 1600) await new Promise((r) => setTimeout(r, 1600 - elapsed))
+          if (!order?.routeWaypoints?.length && elapsed < 1600) {
+            await new Promise((r) => setTimeout(r, 1600 - elapsed))
+          }
           const st = get()
           if (st.activeOrderNumber !== number || st.orderStage !== 'routing') return
           if (rr) {
@@ -642,6 +701,25 @@ export const useAzmz = create<AzmzState>()(
     },
   ),
 )
+
+/** Отпечаток офисного маршрута заявки: меняется — перестраиваем линию. */
+function routeSignature(o?: Order1C): string {
+  if (!o) return ''
+  const first = o.routeCoords?.[0]
+  const last = o.routeCoords?.[o.routeCoords.length - 1]
+  const wFirst = o.routeWaypoints?.[0]
+  const wLast = o.routeWaypoints?.[o.routeWaypoints.length - 1]
+  return [
+    o.routeLink ?? '',
+    o.routeDistanceM ?? '',
+    o.routeCoords?.length ?? 0,
+    first?.join(',') ?? '',
+    last?.join(',') ?? '',
+    o.routeWaypoints?.length ?? 0,
+    wFirst ? `${wFirst.lat},${wFirst.lng}` : '',
+    wLast ? `${wLast.lat},${wLast.lng}` : '',
+  ].join('|')
+}
 
 /** payload TRIP_EVENT_CREATE — та же структура, что TripEventOpPayload каркаса. */
 function eventToPayload(e: TripEventSnapshot) {

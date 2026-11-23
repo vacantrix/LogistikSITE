@@ -38,11 +38,13 @@ import ru.azmz.logistics.driver.core.common.ConnectionState
 @Composable
 fun ConnectionBadge(state: ConnectionState, modifier: Modifier = Modifier) {
     val color = when (state) {
+        is ConnectionState.Checking -> AzmzGray
         is ConnectionState.Online -> AzmzGreen
         is ConnectionState.Sending -> AzmzOrange
         is ConnectionState.Offline -> AzmzRed
     }
     val text = when (state) {
+        is ConnectionState.Checking -> "Проверка связи…"
         is ConnectionState.Online -> "На связи"
         is ConnectionState.Sending -> "Отправка: ${state.queued}"
         is ConnectionState.Offline -> "Офлайн. В очереди: ${state.queued}"

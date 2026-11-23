@@ -243,7 +243,7 @@ function SidePanel({ className = '' }: { className?: string }) {
       <div className="flex items-center gap-3">
         <div className="h-10 w-10 rounded-xl bg-[#F97316] flex items-center justify-center text-white font-black text-lg">✓</div>
         <div>
-          <div className="text-white font-bold">АЗМЗ Логистика</div>
+          <div className="text-white font-bold">АЭМЗ Поток · Водитель</div>
           <div className="text-xs text-slate-400">Карта — фон · пробки онлайн</div>
         </div>
       </div>

@@ -7,7 +7,7 @@ const App = dynamic(() => import('@/components/azmz/app'), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen bg-[#0A1420] flex items-center justify-center">
-      <div className="text-[#F97316] text-sm font-medium animate-pulse">АЗМЗ Логистика — загрузка…</div>
+      <div className="text-[#F97316] text-sm font-medium animate-pulse">АЭМЗ Поток · Водитель — загрузка…</div>
     </div>
   ),
 })

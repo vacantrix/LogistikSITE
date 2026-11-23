@@ -3,6 +3,8 @@ package ru.azmz.logistics.driver.core.sync
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import ru.azmz.logistics.driver.core.common.Clock
@@ -29,13 +31,23 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
 object AppGraph {
 
     /**
+     * v1 → v2: точки офисного маршрута в снимке рейса. Добавляем nullable-
+     * колонку — существующие данные рейса, outbox и GPS остаются на месте.
+     */
+    private val MIGRATION_1_2 = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE trip ADD COLUMN routeWaypointsJson TEXT")
+        }
+    }
+
+    /**
      * Базовый адрес драйверского API. По умолчанию — демо-сервер этой сессии
      * (Next.js API, зеркало Spring-каркаса): APK с телефона сразу видит данные.
      * Для стенда/прода переопределить: AppGraph.init(context, "https://…/api/driver/v1/")
      * или через BuildConfig на этапе MVP.
      */
     const val DEFAULT_BASE_URL =
-        "https://preview-chat-4f5cd358-4b1b-4e7a-a3bd-5f6d18b2cb9a.space-z.ai/api/driver/v1/"
+        "https://logistiksite.vacantrix.ru/api/driver/v1/"
 
     /**
      * Демо-водитель демо-сервера (Иванов С.П., рейс ЗК-2026/1067 Абинск →
@@ -93,14 +105,16 @@ object AppGraph {
         json = Json { ignoreUnknownKeys = true }
 
         db = Room.databaseBuilder(appContext, AppDatabase::class.java, "azmz-driver.db")
-            // Каркас: быстрые итерации по схеме. Перед п.2 — убрать и включить
-            // миграции Room; история схем уже коммитится (core/data/schemas)
+            // Миграция 1→2 сохраняет неотправленную очередь и историю рейса:
+            // destructive fallback допустим только для совсем старых схем.
+            .addMigrations(MIGRATION_1_2)
             .fallbackToDestructiveMigration()
             .build()
 
         val http = OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            // long-poll /sync/wait держит запрос до 25 с — клиент ждёт с запасом
+            .readTimeout(45, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .header("X-Device-Id", deviceId)

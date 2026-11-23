@@ -1,32 +1,26 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { RegisterSW } from "@/components/pwa/register-sw";
 
-const inter = Inter({
-  variable: "--font-geist-sans",
-  subsets: ["latin", "cyrillic"],
-});
-
 export const metadata: Metadata = {
-  title: "АЗМЗ Логистика — приложение водителя",
+  title: "АЭМЗ Поток — приложение водителя",
   description:
-    "Сборка приложения водителя из каркаса АЗМЗ: карта, рейс, пометки, офис. Офлайн-первый, outbox-синхронизация, MapLibre (без Yandex API).",
-  applicationName: "АЗМЗ Логистика",
-  manifest: "/manifest.webmanifest",
+    "Модуль водителя платформы «АЭМЗ Поток»: карта, рейс, пометки, офис. Офлайн-первый, outbox-синхронизация, MapLibre (без Yandex API).",
+  applicationName: "АЭМЗ Поток",
+  manifest: "/driver/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "АЗМЗ Логистика",
+    title: "АЭМЗ Поток",
   },
   icons: {
     icon: [
-      { url: "/icons/favicon.ico", sizes: "48x48", type: "image/x-icon" },
-      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/driver/icons/favicon.ico", sizes: "48x48", type: "image/x-icon" },
+      { url: "/driver/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/driver/icons/icon-192.png", sizes: "192x192", type: "image/png" },
     ],
-    apple: "/icons/apple-touch-icon.png",
+    apple: "/driver/icons/apple-touch-icon.png",
   },
 };
 
@@ -47,7 +41,7 @@ export default function RootLayout({
   return (
     <html lang="ru" suppressHydrationWarning>
       <body
-        className={`${inter.variable} antialiased bg-background text-foreground`}
+        className="antialiased bg-background text-foreground"
       >
         {children}
         <Toaster />

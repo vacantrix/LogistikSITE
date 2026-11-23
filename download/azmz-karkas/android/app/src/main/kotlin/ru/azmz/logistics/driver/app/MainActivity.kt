@@ -36,6 +36,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import ru.azmz.logistics.driver.core.common.ConnectionState
 import ru.azmz.logistics.driver.core.sync.AppGraph
+import ru.azmz.logistics.driver.core.sync.SyncEngine
 import ru.azmz.logistics.driver.core.ui.AzmzBg
 import ru.azmz.logistics.driver.core.ui.AzmzNavy
 import ru.azmz.logistics.driver.core.ui.AzmzTheme
@@ -76,6 +77,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Пока приложение открыто — непрерывный обмен с «АЭМЗ Поток»:
+     * действия уходят сразу, назначения и сообщения приходят мгновенно.
+     * В фоне остаётся WorkManager, поэтому батарея не страдает.
+     */
+    override fun onStart() {
+        super.onStart()
+        if (AppGraph.isInitialized) SyncEngine.start(this)
+    }
+
+    override fun onStop() {
+        SyncEngine.stop()
+        super.onStop()
+    }
+
     /** Повторно прячем бары после выхода из полноэкранных системных окон. */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
@@ -99,8 +115,10 @@ private val tabs = listOf(
 private fun AppRoot() {
     val nav = rememberNavController()
     // зелёный «На связи» / оранжевый анимированный «Отправка: N» / красный «Офлайн. В очереди: N»
+    // Первый кадр — «Проверка связи…», а не красный «Офлайн»: иначе
+    // приложение успевает соврать до первого ответа ConnectivityManager.
     val connection by AppGraph.connectivity.state
-        .collectAsStateWithLifecycle(initialValue = ConnectionState.Offline(0))
+        .collectAsStateWithLifecycle(initialValue = ConnectionState.Checking)
 
     Scaffold(
         containerColor = AzmzBg,

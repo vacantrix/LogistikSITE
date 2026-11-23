@@ -34,6 +34,18 @@ export interface Order1C {
   status: 'ASSIGNED' | 'DISPATCH' | 'DONE'
   /** Кто и когда назначил (диспетчерская). */
   assignedBy: string
+  /**
+   * Маршрут офиса из Яндекс.Карт. Офис строит маршрут в Яндексе и вставляет
+   * ссылку; платформа присылает точки по порядку и готовую дорожную линию.
+   * Приложение не подменяет их фиксированными точками демо-рейса.
+   */
+  routeLink?: string | null
+  routeWaypoints?: { lat: number; lng: number }[]
+  /** Готовая линия через точки офиса: [[lon,lat],…] (порядок GeoJSON). */
+  routeCoords?: [number, number][]
+  routeDistanceM?: number | null
+  routeDurationS?: number | null
+  routeSource?: 'yandex' | 'osrm' | null
 }
 
 export const DEMO_ORDERS: Order1C[] = [

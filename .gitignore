@@ -52,6 +52,13 @@ test
 prompt
 
 server.log
+
+# Android: служебные файлы компилятора и готовые APK (публикуются отдельно)
+.kotlin/
+download/Drivemobile.apk
+download/azmz-driver.apk
+public/azmz-driver.apk
+
 # Skills directory
 /skills/
 # session artifacts

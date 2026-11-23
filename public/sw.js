@@ -1,21 +1,24 @@
-/* Service worker приложения водителя «АЗМЗ Логистика».
- * Правила:
+/* Service worker модуля водителя «АЭМЗ Поток».
+ * Модуль смонтирован в /driver (basePath), поэтому область — /driver,
+ * а все внутренние пути считаются от неё. Правила:
  *  - API (/api/*) не перехватываем никогда — синхронизация и гео-каналы идут напрямую в сеть;
  *    офлайн-логика приложения живёт в его собственном сторе, SW тут не нужен.
- *  - Навигация: сеть → кэш главной → offline.html.
- *  - Статика (/_next/static, /icons): cache-first.
+ *  - Навигация: сеть → кэш приложения → offline.html.
+ *  - Статика (/driver/_next/static, /driver/icons): cache-first.
  */
-const VERSION = "azmz-driver-v3";
+const VERSION = "aemz-driver-v6";
+const BASE = new URL(".", self.location).pathname;      // "/driver/"
+const APP = BASE.replace(/\/+$/, "");                    // "/driver"
 const PRECACHE = [
-  "/",
-  "/offline.html",
-  "/manifest.webmanifest",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/icons/icon-maskable-192.png",
-  "/icons/icon-maskable-512.png",
-  "/icons/apple-touch-icon.png",
-  "/icons/favicon.ico",
+  APP,
+  BASE + "offline.html",
+  BASE + "manifest.webmanifest",
+  BASE + "icons/icon-192.png",
+  BASE + "icons/icon-512.png",
+  BASE + "icons/icon-maskable-192.png",
+  BASE + "icons/icon-maskable-512.png",
+  BASE + "icons/apple-touch-icon.png",
+  BASE + "icons/favicon.ico",
 ];
 
 self.addEventListener("install", (event) => {
@@ -36,6 +39,10 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data === "skip-waiting") void self.skipWaiting();
+});
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
@@ -44,19 +51,21 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return; // внешние ресурсы не трогаем
   if (url.pathname.startsWith("/api/")) return;    // синхронизация — только сеть
 
-  // Навигация: сеть, при обрыве — кэш главной, затем offline-страница
+  // Навигация: сеть, при обрыве — кэш приложения, затем offline-страница
   if (req.mode === "navigate") {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(VERSION).then((c) => c.put("/", copy)).catch(() => undefined);
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(VERSION).then((c) => c.put(APP, copy)).catch(() => undefined);
+          }
           return res;
         })
         .catch(() =>
           caches
-            .match("/")
-            .then((cached) => cached || caches.match("/offline.html"))
+            .match(APP)
+            .then((cached) => cached || caches.match(BASE + "offline.html"))
             .then((r) => r || new Response("Офлайн", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }))
         )
     );
@@ -71,7 +80,7 @@ self.addEventListener("fetch", (event) => {
         fetch(req)
           .then((res) => {
             const p = url.pathname;
-            if (res.ok && (p.startsWith("/_next/static/") || p.startsWith("/icons/"))) {
+            if (res.ok && (p.includes("/_next/static/") || p.startsWith(BASE + "icons/"))) {
               const copy = res.clone();
               caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => undefined);
             }

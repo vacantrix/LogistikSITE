@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="АЭМЗ">
+  <rect width="64" height="64" rx="14.5" fill="#101C28"/>
+  <g transform="translate(32 32) scale(0.5) translate(-64 -64)">
+    <g fill="none" stroke="#8DCACF" stroke-width="4.4" stroke-linecap="round">
+      <ellipse cx="64" cy="64" rx="52" ry="29"/>
+      <ellipse cx="64" cy="64" rx="32" ry="29"/>
+      <ellipse cx="64" cy="64" rx="48" ry="16"/>
+      <path d="M12 64 H116"/>
+    </g>
+    <g fill="none" stroke="#FFFFFF" stroke-width="4.2" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M64 35 L71.5 56.5 L93 64 L71.5 71.5 L64 93 L56.5 71.5 L35 64 L56.5 56.5 Z"/>
+      <path d="M64 54 L74 64 L64 74 L54 64 Z"/>
+    </g>
+  </g>
+</svg>

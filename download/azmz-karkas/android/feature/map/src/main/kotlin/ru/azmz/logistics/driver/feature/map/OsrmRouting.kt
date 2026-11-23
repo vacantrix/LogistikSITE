@@ -22,7 +22,17 @@ import java.net.URLEncoder
  */
 object OsrmRouting {
 
-    private const val BASE = "https://router.project-osrm.org/route/v1/driving/"
+    /**
+     * Сначала наш домен: Caddy проксирует префикс /osrm/ на публичный OSRM.
+     * С мобильных сетей РФ router.project-osrm.org часто недоступен, а
+     * vacantrix.ru доступен всегда. Публичный OSRM оставлен запасным
+     * адресом — если прокси когда-нибудь отключат, маршрут всё равно
+     * построится там, где прямой доступ работает.
+     */
+    private val BASES = listOf(
+        "https://vacantrix.ru/osrm/route/v1/driving/",
+        "https://router.project-osrm.org/route/v1/driving/",
+    )
     private val json = Json { ignoreUnknownKeys = true }
 
     @Serializable
@@ -46,22 +56,61 @@ object OsrmRouting {
         fromLat: Double, fromLon: Double,
         toLat: Double, toLon: Double,
     ): List<Variant> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        val url = BASE + "${lon(fromLon)},${fromLat};" + "${lon(toLon)},${toLat}" +
+        val path = "${lon(fromLon)},${fromLat};" + "${lon(toLon)},${toLat}" +
             "?overview=full&geometries=geojson&alternatives=true&steps=false"
-        val conn = URL(url).openConnection() as HttpURLConnection
-        try {
-            conn.connectTimeout = 8_000
-            conn.readTimeout = 12_000
-            conn.setRequestProperty("User-Agent", "azmz-driver/0.2")
-            if (conn.responseCode != 200) return@withContext emptyList()
-            val body = conn.inputStream.bufferedReader().readText()
-            val parsed = runCatching { json.decodeFromString<OsrmResponse>(body) }.getOrNull()
-                ?: return@withContext emptyList()
-            parsed.routes.map { r ->
-                Variant(r.geometry.coordinates, r.distance, r.duration)
+        // Перебираем адреса по очереди: наш прокси, затем публичный OSRM.
+        // Первый успешный ответ и есть маршрут; пустой/ошибочный — следующий.
+        for (base in BASES) {
+            val parsed = request(base + path) ?: continue
+            if (parsed.routes.isNotEmpty()) {
+                return@withContext parsed.routes.map { r ->
+                    Variant(r.geometry.coordinates, r.distance, r.duration)
+                }
             }
+        }
+        emptyList()
+    }
+
+    /**
+     * Маршрут от текущей позиции через все точки офиса по порядку.
+     *
+     * Офис строит маршрут в Яндекс.Картах и присылает точки (`rtext`).
+     * Строим дорожную линию через них, поэтому приложение ведёт водителя
+     * тем же путём, а не только до последней точки. alternatives=false:
+     * с промежуточными точками нужен ровно один маршрут — офисный.
+     */
+    suspend fun through(
+        fromLat: Double, fromLon: Double,
+        waypoints: List<Pair<Double, Double>>,
+    ): List<Variant> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val points = buildList {
+            add("${lon(fromLon)},${fromLat}")
+            waypoints.forEach { (lat, lng) -> add("${lon(lng)},${lat}") }
+        }.joinToString(";")
+        val path = "$points?overview=full&geometries=geojson&alternatives=false&steps=false"
+        for (base in BASES) {
+            val parsed = request(base + path) ?: continue
+            if (parsed.routes.isNotEmpty()) {
+                return@withContext parsed.routes.map { r ->
+                    Variant(r.geometry.coordinates, r.distance, r.duration)
+                }
+            }
+        }
+        emptyList()
+    }
+
+    /** Один запрос к OSRM; null — сеть/HTTP/JSON подвели. */
+    private fun request(url: String): OsrmResponse? {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        return try {
+            conn.connectTimeout = 6_000
+            conn.readTimeout = 10_000
+            conn.setRequestProperty("User-Agent", "azmz-driver/0.2")
+            if (conn.responseCode != 200) return null
+            val body = conn.inputStream.bufferedReader().readText()
+            runCatching { json.decodeFromString<OsrmResponse>(body) }.getOrNull()
         } catch (_: Exception) {
-            emptyList()
+            null
         } finally {
             conn.disconnect()
         }

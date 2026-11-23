@@ -24,6 +24,9 @@ data class TripEntity(
     val plannedStartAt: Long? = null,
     val plannedFinishAt: Long? = null,
     val routeGeoJson: String? = null,        // LineString — отрисовка маршрута
+    // Точки офиса из Яндекс.Карт: [[lat,lng],…] по порядку. Живой OSRM
+    // перестраивает маршрут через них, а не только до конечной точки.
+    val routeWaypointsJson: String? = null,
     val routeStepsJson: String? = null,      // манёвры OSRM — офлайн-навигация
     val routeDistanceM: Int? = null,
     val routeDurationS: Long? = null,

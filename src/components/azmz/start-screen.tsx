@@ -22,7 +22,6 @@ import {
   Radar,
   Truck,
   WifiOff,
-  Zap,
 } from 'lucide-react'
 import { useAzmz } from '@/lib/store'
 import { PRETRIP_STEPS, type PretripStepDef } from '@/lib/demo/orders-data'
@@ -86,17 +85,26 @@ function stepIcon(kind: PretripStepDef['kind'], cls: string) {
   return <IdCard className={cls} />
 }
 
-/** Логотип АЭМЗ: оранжевый бейдж с молнией (электрометаллургия) + словесный знак. */
+/** Логотип АЭМЗ: официальный знак — бирюзовый «орбитальный глобус» с белой звездой. */
 function AemzLogo() {
   return (
-    <div className="flex items-center gap-3.5">
-      <div className="h-[68px] w-[68px] rounded-[20px] bg-gradient-to-b from-[#FB923C] to-[#EA580C] border border-white/25 shadow-[0_14px_36px_rgba(249,115,22,0.45)] flex flex-col items-center justify-center gap-0.5 shrink-0">
-        <Zap className="h-[18px] w-[18px] text-white" fill="currentColor" strokeWidth={1} />
-        <span className="text-white font-black text-[16px] leading-none tracking-tight">АЭМЗ</span>
-      </div>
+    <div className="flex items-center gap-3">
+      <svg viewBox="4 15 56 34" className="h-11 w-auto shrink-0" role="img" aria-label="АЭМЗ">
+        <g fill="none" stroke="#8DCACF" strokeWidth="2.2" strokeLinecap="round">
+          <ellipse cx="32" cy="32" rx="26" ry="14.5" />
+          <ellipse cx="32" cy="32" rx="16" ry="14.5" />
+          <line x1="32" y1="17.5" x2="32" y2="46.5" />
+          <ellipse cx="32" cy="32" rx="24" ry="8" />
+          <line x1="6" y1="32" x2="58" y2="32" />
+        </g>
+        <g fill="none" stroke="#FFFFFF" strokeWidth="2.1" strokeLinejoin="round" strokeLinecap="round">
+          <path d="M32 17.5 L35.75 28.25 L46.5 32 L35.75 35.75 L32 46.5 L28.25 35.75 L17.5 32 L28.25 28.25 Z" />
+          <path d="M32 27 L37 32 L32 37 L27 32 Z" />
+        </g>
+      </svg>
       <div>
-        <div className="text-white font-black text-[21px] leading-tight">АЭМЗ Логистика</div>
-        <div className="text-white/55 text-[12px] leading-tight mt-0.5">Приложение водителя · заявки из 1С</div>
+        <div className="text-white font-black text-[21px] leading-tight">АЭМЗ Поток</div>
+        <div className="text-white/55 text-[12px] leading-tight mt-0.5">Модуль водителя · заявки из 1С</div>
       </div>
     </div>
   )
@@ -409,6 +417,23 @@ export function StartScreen() {
           <div className="mt-3 text-[11px] text-[#64748B]">
             Назначил: {assigned.assignedBy} · дистанция ≈ {assigned.distanceKm} км
           </div>
+          {assigned.routeLink && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-[#3B82F6]/8 px-2.5 py-1.5 text-[11px] font-semibold text-[#1D4ED8]">
+              <span>
+                Маршрут офиса · {assigned.routeWaypoints?.length ?? 0} точек
+                {assigned.routeDistanceM ? ` · ${Math.round(assigned.routeDistanceM / 1000)} км` : ''}
+              </span>
+              <a
+                href={assigned.routeLink}
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                Яндекс.Карты
+              </a>
+            </div>
+          )}
         </div>
 
         <button

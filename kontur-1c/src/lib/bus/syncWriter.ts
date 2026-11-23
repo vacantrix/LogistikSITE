@@ -15,12 +15,25 @@ export async function journalWrite(
   op: SyncOp,
   payload: unknown,
 ): Promise<void> {
+  // Приложение водителя представляется appId (заголовок X-Driver-Id), а в БД
+  // владелец журнала — Driver.id. В payload'ах отдаём appId: иначе клиент
+  // фильтрует рейсы/заметки по своему идентификатору и не находит их.
+  let wirePayload = payload
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && 'driverId' in payload) {
+    const driver = await tx.driver.findUnique({
+      where: { id: driverId },
+      select: { appId: true },
+    })
+    if (driver?.appId) {
+      wirePayload = { ...(payload as Record<string, unknown>), driverId: driver.appId }
+    }
+  }
   const row = await tx.syncJournal.create({
     data: {
       driverId,
       entity,
       op,
-      payload: JSON.stringify(payload),
+      payload: JSON.stringify(wirePayload),
     },
     select: { seq: true },
   })

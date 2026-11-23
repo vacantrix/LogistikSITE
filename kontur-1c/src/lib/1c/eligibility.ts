@@ -21,9 +21,18 @@ const BODY_CARGO: Record<string, string[]> = {
   tank: ['наливн', 'топлив', 'молок наливн', 'битум'],
 }
 
+// Груз распознан хотя бы одной строкой матрицы? Если нет — совместимость
+// кузова проверить нечем, поэтому не блокируем все ТС подряд (иначе любой
+// произвольный текст, например «ТТН», делает таблицу полностью красной).
+export function isCargoClassified(cargo: string): boolean {
+  const c = cargo.toLowerCase()
+  return Object.values(BODY_CARGO).some((keys) => keys.some((k) => c.includes(k)))
+}
+
 export function bodyCompatible(bodyType: string, cargo: string): boolean {
   const keys = BODY_CARGO[bodyType]
   if (!keys) return false
+  if (!isCargoClassified(cargo)) return true
   const c = cargo.toLowerCase()
   return keys.some((k) => c.includes(k))
 }
