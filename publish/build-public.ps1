@@ -59,12 +59,20 @@ try {
     Write-Output "Generating dispatcher Prisma client ..."
     $prismaCode = 1
     $prevPrismaEap = $ErrorActionPreference
+    # Локальный Prisma, а не npx: из чужого cwd npx скачивает Prisma 8,
+    # где команды generate уже нет. Скрипт может запускаться из любого каталога.
+    $prismaBin = Join-Path $RepoRoot 'node_modules\.bin\prisma.cmd'
     try {
         # Prisma пишет служебные строки в stderr; при ErrorActionPreference=Stop
         # PowerShell 5.1 считает это ошибкой, хотя генерация успешна.
         $ErrorActionPreference = 'Continue'
-        & npx prisma generate --schema prisma/kontur.prisma *> (Join-Path $LogDir 'build-kontur-prisma.log')
-        $prismaCode = $LASTEXITCODE
+        Push-Location $RepoRoot
+        try {
+            & $prismaBin generate --schema prisma/kontur.prisma *> (Join-Path $LogDir 'build-kontur-prisma.log')
+            $prismaCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
     } finally {
         $ErrorActionPreference = $prevPrismaEap
     }
