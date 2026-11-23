@@ -2364,3 +2364,97 @@ Stage Summary:
 - Инфраструктура описана как есть: платформа и файлы — на серверах АЭМЗ, нейросеть — на выделенном GPU-ПК завода; пропуск документов = «максимум фото в обработке» под VRAM + честная общая очередь на всех пользователей.
 - Разовая подача перевозчика ограничена 20 фото, дальше — следующий заход в очереди; «Автозаполнение» раскладывает пачку фото по недостающим документам автоматически.
 - Карта «Архитектуры» стала наглядной схемой с живыми статусами и очередью.
+
+---
+Task ID: 122
+Agent: DeepSeek V4.1 Flash (main)
+Task: Единая платформа «АЭМЗ Поток»: объединение баз LogistikSITE и LogistikSITEnow2 — перенос диспетчерских таблиц в combat.db под префиксом Dispatch, без потери данных и с возможностью отката
+
+Work Log:
+- Мигратор publish/migrate-kontur-db.py: ATTACH custom.db к combat.db, CREATE TABLE с переименованием в Dispatch*, INSERT ... SELECT, пересоздание 12 индексов с префиксом; --replace для идемпотентного повторного прогона; сверка количества строк по каждой таблице, PRAGMA integrity_check и foreign_key_check.
+- Схема prisma/kontur.prisma: во все 19 моделей добавлен @@map("Dispatch...") — DispatchUser, DispatchTrip, DispatchOrder, DispatchVehicle, DispatchTrailer, DispatchDriver, DispatchLeg, DispatchStatusEvent, DispatchTripEvent, DispatchDriverOnline, DispatchDriverGeoPoint, DispatchDevice, DispatchFileRec, DispatchOutbox1c, DispatchCallTask, DispatchVehicleBinding, DispatchAtiDeal, DispatchPlanEntry, DispatchAuditLog; клиент перегенерирован в src/generated/kontur-client.
+- Безопасный прогон: сначала на снимке combat.db (snapshot через sqlite3 backup API) — 19 таблиц, 724 строки, 12 индексов, чтение и запись обоими Prisma-клиентами; затем production: платформа остановлена, снят db/combat.backup-20261122-before-merge.db, миграция применена к db/combat.db. Итог: 45 таблиц, 5640 строк, integrity ok; платформенные User 8, Request 170, Bid 400, Trailer 35 не изменены.
+- publish/config.ps1: $KonturDb = $DbPath (combat.db); start-platform.ps1 передаёт KONTUR_DATABASE_URL на общую базу; LogistikSITEnow2/db/custom.db остаётся резервом (не изменялся).
+- publish/build-manifest.ps1: prisma/kontur.prisma добавлен в config-подпись — правка схемы Контура теперь невозможна без пересборки (config files 9 → 10).
+- Сборка BUILD_ID=ufU2MTelFwWUsSeyHPLsE, source=378, artifacts=1033; стенд поднят, status.ps1 RESULT: OK.
+- Функциональная проверка: SSO admin → /kontur/api/auth/me; state 14 рейсов / 30 заказов / 150 водителей / 160 машин; вход logist1 demo2026; единый выход гасит aemz_session и aemz_dispatch_session; 1С-обмен 1C-2026-0045 → quarantine; журнал Контура, симулятор 1С и мост телефона отвечают 200.
+- Доказательство записи в объединённую базу: POST и DELETE /kontur/api/plan-entries (заметка на 2026-12-31) — DispatchAuditLog в combat.db 24 → 26, PlanEntry вернулся к 5; в LogistikSITEnow2/db/custom.db AuditLog остался 24, PlanEntry 5. Работающий процесс пишет именно в combat.db.
+- Права и специализация после слияния: logist1 (tent) — 60 тентовых заявок и 45 уведомлений, logist2 (board) — 100 бортовых и 15 уведомлений; admin 22 права, logist2 6 прав и 403 на /api/admin/access.
+
+Stage Summary:
+- Одна платформа «АЭМЗ Поток», один процесс :3000, один вход и один выход; диспетчерская «Контур» на /kontur.
+- Одна база db/combat.db: платформенные таблицы без изменений, диспетчерские — с префиксом Dispatch; исходный custom.db сохранён как резерв.
+- Полный откат на две базы: убрать @@map из prisma/kontur.prisma, вернуть $KonturDb в publish/config.ps1 на LogistikSITEnow2/db/custom.db, пересобрать; custom.db не изменялся. Откат только данных: восстановить db/combat.backup-20261122-before-merge.db и повторить миграцию.
+
+---
+
+Task ID: 123
+Agent: DeepSeek V4.1 Flash (main)
+Task: Полное объединение интерфейса «АЭМЗ Поток»: отказ от отдельной «Диспетчерской», двухуровневая навигация (привлечённый транспорт сверху, собственный — снизу), права видимости разделов и действий собственного парка
+
+Work Log:
+- Каталог прав (src/lib/perm-catalog.ts): добавлены 27 прав видимости `section:*` (по одному на каждый раздел обеих групп) и действия собственного парка `own:process`, `own:assign`, `own:plan`, `own:atisu`, `own:directory`. Права сгруппированы: «Собственный транспорт», «Разделы: привлечённый транспорт», «Разделы: кабинет перевозчика», «Разделы: общие», «Разделы: собственный транспорт», «Разделы: управление». Стартовые должности переписаны: ведущий логист получает все разделы и действия, линейный — рабочий минимум (без назначения состава, ATI.SU, монитора и аудита), наблюдатель — все разделы без действий, администратор — всё.
+- permissions.ts: `allOf('logist'|'admin')` дополнен правами собственного парка; добавлены идемпотентные backfill-функции `backfillSectionPerms` и `backfillOwnTransportPerms` — существующие должности при первом старте получают права видимости и действия по прежнему объёму, без ручной перенастройки; cache и seed не менялись.
+- Оболочка (src/components/platform/shell.tsx): NAV_ALL получил group = attracted | own | admin; верхняя строка — «Привлечённый транспорт», нижняя — «Собственный транспорт»; служебные разделы администрации вынесены в меню «Управление» (профили, база, настройки, архитектура, нейросеть). Мобильный вариант: верхняя прокручиваемая строка привлечённых, нижний Tab Bar — собственные разделы (до 4 + «Ещё»). Ссылки «Диспетчерская ↗» и мобильная «Контур» удалены. `SECTION_PERM` закрывает каждый раздел правом `section:*`; `firstAllowedTab` уводит с раздела, закрытого после смены должности.
+- Единая страница (src/app/page.tsx): TabKey расширен разделами own-*; выбранный раздел хранится в `?tab=`, старые ссылки и `/kontur` ведут на «Заявки 1С»; при загрузке прав закрытый раздел заменяется первым доступным; для own-* рендерится новое рабочее пространство.
+- Рабочее пространство (src/components/platform/kontur-workspace.tsx): загружает `/kontur/api/state`, показывает «Требует внимания», алерты (фильтруются правами), поиск, панели «Заявки 1С», ATI.SU, «Занятость», «Планирование», «Мониторинг», «Справочники парка», «Аудит контура»; кнопка пересоздания демо-данных только при `admin:db`.
+- Старый кабинет: src/app/kontur/page.tsx отдаёт редирект на `/?tab=own-requests`; с основного домена vacantrix.ru — на `https://logistiksite.vacantrix.ru/demo/?tab=own-requests`, иначе редирект попадал в статический портал, а не в платформу. kontur.css импортирован в корневой layout, metadata отдельного кабинета убрана. API остаётся под `/kontur/api/*`.
+- Серверные проверки (src/lib/kontur/access.ts): Kontur-сессия сопоставляется с платформенным пользователем по логину, права считаются через `allowedFor`; 401/403 в едином формате. Закрыты маршруты: orders (own:process / own:assign для plan и append), plan-entries (own:plan), bindings (own:assign), directory (own:directory), atisu/deals (own:atisu, чтение — по видимости разделов), review (own:process), outbox и contour-audit (section:ownAudit), monitor (section:ownMonitor; reset — admin:db), call (любой доступный раздел собственного транспорта), demo/reset (admin:db), state (любой section:own*).
+- Уведомления (notification-bell.tsx): колокольчик получает список видимых разделов; события, ведущие в закрытый правами раздел, не показываются и не считаются в бейдже; «Прочитать все» отмечает только видимые.
+- Единый вход в API Контура (src/lib/kontur/auth.ts, session-token.ts, base-path.ts): если в `Authorization` пришёл подписанный токен платформы, он проверяется платформенной сессией и связывается по логину; старая кука кабинета больше не перебивает активную учётку вкладки. `authFetch` и `apiFetch` берут токен текущей вкладки из sessionStorage, поэтому панели работают и без cookie — на локальном HTTP и во встроенном превью. Заголовок важнее куки: администратор в своей вкладке не получит 403 из-за чужой старой сессии. Для сотрудника платформы без записи в `DispatchUser` зеркало создаётся при первом обращении, имя и роль синхронизируются с платформой (пароль зеркала случайный — отдельный вход в Контур не нужен). `contour-audit` больше не требует роль admin: доступ даёт только право `section:ownAudit`.
+- status.ps1: проверка `/kontur` следует редиректу (`curl -L`), поэтому 401 без пароля и 200 с паролем; строки переименованы в `platform API` / `platform access`, потому что Контур — часть платформы.
+- Сборка BUILD_ID=q0pzkYZ8e_RX3NwAYD0A_, source=380, artifacts=1025; status.ps1 RESULT: OK.
+- Проверки: tsc 0; admin — 49 прав, все 7 section:own* и 5 own:*, state/audit 200; logist1 — 40 прав (все разделы привлечённых, 6 собственных без аудита, все действия), state 200, audit 403; logist2 — 19 прав (привлечённые: площадка/черновики/проверка/реестр заявок/справочники/обращения; собственные: заявки 1С/занятость/планирование/справочники парка; действия own:process/plan/directory), state 200, audit 403. API-запреты logist2: bindings 403, atisu create 403, orders plan 403; разрешённые маршруты logist1 проходят проверку прав и отвечают 400 на пустое тело (plan-entries, atisu, bindings, directory).
+- Браузер (мобильная ширина 320): logist2 видит верхнюю строку «Привлечённый транспорт» (6 разделов) и нижнюю «Собственный транспорт» (4), без «Диспетчерской»; «Заявки 1С» открывает панель с 7 новыми / 6 к планированию / 3 в рейсе / 3 карантин; admin видит 11 верхних разделов, меню «Управление платформой», нижние Заявки 1С / ATI.SU / Занятость / Планирование / Все разделы, 23 непрочитанных против 15 у logist2. «Аудит контура» у admin загружается (200, платформа + собственный транспорт), у logist2 — 403; мониторинг и планирование открываются без ошибок консоли; «Управление платформой → Профили и доступы» показывает специализации «Тент» и «Борт (Камаз)» и группы прав разделов/собственного парка.
+- Публичный `/kontur` на основном домене уходит в `https://logistiksite.vacantrix.ru/demo/?tab=own-requests`, на поддомене/локально — в `/?tab=own-requests`; публичный вход `/demo/` работает, state и audit отвечают 200 после входа; Caddy, OCR, WS, driver API, портал и APK не затронуты.
+
+Stage Summary:
+- Отдельной «Диспетчерской» больше нет: её разделы — нижний уровень единой платформы, /kontur — старый адрес-редирект в платформу.
+- Администратор строит объём логиста правами `section:*` и `own:*`: логист видит только выданные разделы, действия вне прав закрыты и в интерфейсе, и на сервере. Специализация «Тент» / «Борт (Камаз)» фильтрует заявки и уведомления на уровне сервера.
+- Навигация двухуровневая: сверху всё по привлечённому транспорту, снизу — собственный парк; на мобильном верхняя строка прокручивается, собственные разделы живут в нижнем Tab Bar.
+- Вход в Контур — та же сессия платформы: API принимает токен вкладки и cookie, роль и права считаются по платформенному пользователю, а не по отдельной учётке кабинета. Новый сотрудник платформы получает зеркало в Контуре автоматически, а аудит открывается правом, а не «ролью admin».
+
+---
+
+Task ID: 124
+Agent: DeepSeek V4.1 Flash (main)
+Task: Модуль водителя внутри «АЭМЗ Поток»: PWA `/driver`, мгновенная синхронизация long-poll, офлайн-очередь, лента заявок из платформы, APK 0.3.0
+
+Work Log:
+- Архитектура: приложение водителя больше не отдельный сервис. Next.js из `Drivemobile` слушает 127.0.0.1:3102 с `basePath: '/driver'`; gateway `logistiksite.vacantrix.ru` проксирует `/driver/*`, `/api/driver/*`, `/api/1c/*`, `/api/2gis/*`, `/api/mapstyle`, `/api/maptiles/*`, `/api/demo/*`, `/api/stand/*` на :3102, а `/dl/*` отдаёт из `publish/portal/dl`. На `vacantrix.ru` Caddy делает `rewrite * /driver{uri}`. Водитель видит только свой модуль, платформа остаётся точкой входа.
+- `Drivemobile/next.config.ts`: `basePath: '/driver'`; для `/driver/sw.js` отдаётся `Service-Worker-Allowed: /driver`, gateway дублирует заголовок. SW обновлён до v6, scope `/driver`, офлайн-оболочка и `public/offline.html`; регистрация SW переведена на `/driver/sw.js`. Канонический адрес PWA — `/driver` без завершающего слэша (со слэшем 308).
+- Сервер синхронизации: `/api/driver/v1/sync/wait` — long-poll до 25 с, просыпается по триггеру записи в журнал (задержка ~0,5 с); `/sync/pull`, `/sync/push`, `/sync/marks`, `/position`, `/traffic`, `/status` и `/ingest` работают на :3102. Внутри Next из-за basePath адреса имеют вид `/driver/api/driver/v1/*`, снаружи gateway сохраняет корневой контракт `/api/driver/v1/*` — APK и PWA не меняют адресов.
+- Клиент `Drivemobile/src/lib/sync.ts`: foreground-цикл push → pull → `sync/wait`; резервный polling каждые 15 с на случай недоступного long-poll; реакция на `online`, `focus`, `visibilitychange` и событие `azmz:outbox`; outbox персистентен, при обрыве действия копятся и досылаются после восстановления; заявки обновляются раз в 5 с, пробки — 12 с, GPS-фикс — раз в 5 с с экрана карты.
+- Android: добавлен foreground-цикл `SyncEngine` (push → pull → `sync/wait` 20 с), WorkManager оставлен фоновой страховкой; OkHttp readTimeout 45 с; `PositionRequest`/`SyncWaitResponse` в `Dtos.kt`. APK: package `ru.azmz.logistics.driver`, versionName `0.3.0-pilot`, versionCode 4, label «АЭМЗ Поток · Водитель», API внутри `https://logistiksite.vacantrix.ru/api/driver/v1/`.
+- Платформа: добавлено право `section:driverApp` (admin — 50 прав) и идемпотентный backfill для всех admin-шаблонов; вкладка `driver-app` с панелью «Приложение водителя»: веб-ссылка, APK, статус сервиса, журнал, GPS. Статус и метаданные APK отдаёт `/api/driver-app/status` (200 с Bearer, `service: online`, APK 57,2 МБ).
+- Лента заявок: `/kontur/api/1c/orders` с `X-Driver-Id` собирает заявки из `DispatchTrip → DispatchLeg → DispatchOrder` и без `external_id` возвращает `{ok:true,orders:[…]}`. Для неизвестного демо-водителя возвращается `{ok:true,orders:[]}`, чтобы сохранить офлайн-сид и согласованную демо-карту. Строгий запрос 1С без заголовка по-прежнему отвечает 400.
+- APK пересобран `C:\Users\AUSU\android-build\build-apk.ps1` (debug-подпись, 59 942 608 байт / 57,2 МБ) и опубликован в `LogistikSITE/publish/portal/dl/Drivemobile.apk`; `publish-apk.ps1` обновлён под актуальный путь сборки и новые цели публикации.
+- Платформа пересобрана: `BUILD_ID=oXihWavBEFJVjQ64OmdIZ`, source=382, artifacts=1034; `start-all.ps1` — `RESULT: OK`; gateway, платформа и модуль водителя перезапущены. `start-drivemobile.ps1` всегда обновляет `.next/static` и `public`, health-check переведён на `/driver/api/...`.
+- Публичные проверки: `/driver` — 200, manifest и `sw.js` — 200 (`Service-Worker-Allowed: /driver`), `/api/driver/v1/status` и pull — 200, APK HEAD — 200 `application/vnd.android.package-archive`; long-poll вернул `{"changed":false}` после 5 с тишины и `{"changed":true,"cursor":110}` примерно через 0,35–0,85 с после push.
+- Браузер после пересборки: SW `activated`, scope `https://logistiksite.vacantrix.ru/driver`, `controller:true`, ошибок консоли 0; карточка `ЗК-1067` отображается из офлайн-сида.
+- Ограничения стенда: демо-драйвер `06c075d1-3088-45f2-a7ae-090e8c355447` отсутствует в `DispatchDriver`, поэтому реальная лента пуста и приложение остаётся на офлайн-сиде; телефон не подключён к ADB (`adb devices` пуст) — установка APK на устройстве не проверена; `platform-src.zip` не создан, `Compress-Archive` упирается в занятый `publish/data/portal.db`.
+
+Stage Summary:
+- Приложение водителя — модуль «АЭМЗ Поток»: PWA `/driver` и APK `/dl/Drivemobile.apk` живут на домене платформы, наружу смотрят только через её gateway.
+- Входящие приходят мгновенно long-poll-каналом, исходящие уходят сразу; при обрыве интернета очередь сохраняется на устройстве и досылается после восстановления, резервный polling не даёт данным потеряться.
+- Водитель видит только свои заявки, маршрут, отметки и GPS; доступ к панели модуля в платформе закрыт правом `section:driverApp`.
+
+---
+
+Task ID: 125
+Agent: DeepSeek V4.1 Flash (main)
+Task: Исправление мгновенного закрытия APK 0.3.0 на современных Android: 16 КБ страницы памяти, MapLibre, аварийный экран
+
+Work Log:
+- Воспроизведение без телефона: `adb devices` пуст, эмулятора в SDK нет. Причина найдена статически по APK: `lib/arm64-v8a/libmaplibre.so` из MapLibre 11.0.0 имел `p_align = 0x1000` (4 КБ). На Android 15/16 с 16 КБ страницами памяти загрузчик не может загрузить такую библиотеку, и приложение падает в первые кадры при создании карты — это совпадает с симптомом «мгновенно закрывается».
+- MapLibre обновлён `11.0.0 → 11.13.5` (`gradle/libs.versions.toml`). Проверка AAR и нового APK: `libmaplibre.so` для arm64-v8a и x86_64 теперь `p_align = 0x4000` (16 КБ), для armeabi-v7a остаётся 4 КБ — 32-битные устройства не используют 16 КБ страницы. `libandroidx.graphics.path.so` уже был 16 КБ.
+- В манифест добавлено `android:extractNativeLibs="true"`: нативные библиотеки распаковываются при установке, поэтому ZIP-выравнивание APK больше не влияет на загрузку. APK стал компактнее: 38 204 410 байт (36,4 МБ) вместо 59,9 МБ.
+- В `MapScreen` добавлена явная инициализация `MapLibre.getInstance(ctx)` и защитная обёртка `runCatching`: если нативная карта всё же не загрузится, вместо падения показывается заглушка «Карта недоступна», а вкладки «Рейс», «История» и «Офис» продолжают работать.
+- Добавлен аварийный экран `CrashActivity` и `CrashHandler`: при необработанном исключении приложение показывает текст ошибки крупным шрифтом (можно скопировать), а трейс пишется в `Android/data/ru.azmz.logistics.driver/files/last-crash.txt`. Это позволит получить точную причину, если на конкретном устройстве останется другой сбой.
+- Версия APK: `versionCode 5`, `versionName 0.3.1-pilot`; package `ru.azmz.logistics.driver` не менялся. Сборка `build-apk.ps1` — `BUILD_OK`; APK опубликован в `publish/portal/dl/Drivemobile.apk`, standalone-копию и `Drivemobile/download`.
+- Публичная проверка: `HEAD https://logistiksite.vacantrix.ru/dl/Drivemobile.apk` → 200, `application/vnd.android.package-archive`, 38 204 410 байт; SHA-256 `F2CAACDAD0D0EA58317A46F4D9E9CF8E891BC5540D6FF7580F3257868450F859`.
+
+Stage Summary:
+- Причина мгновенного закрытия — несовместимость MapLibre 11.0.0 с 16 КБ страницами памяти новых Android; библиотека обновлена до 16 КБ-совместимой 11.13.5.
+- Карта больше не может уронить всё приложение: при ошибке нативной библиотеки показывается заглушка, остальные разделы доступны; любой другой сбой показывается на аварийном экране с текстом для диагностики.
+- Для установки нужна версия 0.3.1 (versionCode 5); старую 0.3.0 лучше удалить перед установкой.

@@ -372,7 +372,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
       await api.action(r.id, 'confirm', { comment })
       toast({
         title: 'Заявка утверждена — рейс выполняется',
-        description: `№${r.number} в реестре рейсов; транспортная накладная ждёт отправки в Диадок в разделе «Подписать ЭДО»`,
+        description: `№${r.number} в реестре рейсов; документы приняты, можно готовить пропуск и выпуск на погрузку`,
         action: (
           <ToastAction altText="Открыть реестр рейсов" onClick={() => onNavigate('registry')}>
             Открыть реестр
@@ -931,7 +931,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                           {/* кнопки решения */}
                           <div className="space-y-1.5">
                             {/* что произойдёт — по наведению на кнопку */}
-                            <WithTip tip="Рейс уйдёт в работу: подготовим пропуск, ЭТрН — к отправке в Диадок">
+                            <WithTip tip="Рейс уйдёт в работу: подготовим пропуск и документы к выпуску">
                               <Button
                                 className="h-11 w-full bg-emerald-600 text-white shadow-sm hover:bg-emerald-700"
                                 disabled={busy === selected.id}
@@ -967,7 +967,7 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
                             <span className="font-medium">Комментарий логиста:</span> {selected.verifyComment}
                           </div>
                         ) : (
-                          <div className="mt-0.5 text-xs text-slate-500">Пропуск подготовлен, ЭТрН — в разделе «Подписать ЭДО»</div>
+                          <div className="mt-0.5 text-xs text-slate-500">Пропуск подготовлен, документы переданы к выпуску</div>
                         )}
                       </NoticeLine>
                     ) : selected.status === 'AT_LOGIST' && !can('verify:decide') ? (

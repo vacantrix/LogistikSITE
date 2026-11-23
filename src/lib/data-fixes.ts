@@ -54,11 +54,11 @@ export async function normalizeLegacyData(): Promise<void> {
   })
   const etrn = await db.event.updateMany({
     where: { type: 'ETRN_SENT', message: { contains: 'Логистика.Про' } },
-    data: { message: 'Транспортная накладная подготовлена — отправка в Диадок в разделе «Подписать ЭДО»' },
+    data: { message: 'Транспортная накладная подготовлена — ждёт подписания сторонами' },
   })
   const notes = await db.notification.updateMany({
     where: { type: 'DOCS_CONFIRMED', body: { contains: '1С' } },
-    data: { body: 'Логист сверил пакет — рейс выполняется: пропуск готовится, ЭТрН придёт на подпись в Диадок' },
+    data: { body: 'Логист сверил пакет — рейс выполняется: пропуск готовится, документы ждут подписания' },
   })
   const org = await db.$executeRaw`UPDATE "EdoDocument" SET payload = REPLACE(payload, 'АО «АЭМЗ»', 'ООО «АЭМЗ»') WHERE payload LIKE '%АО «АЭМЗ»%'`
     // профили сотрудников — та же организационно-правовая форма, что в документах

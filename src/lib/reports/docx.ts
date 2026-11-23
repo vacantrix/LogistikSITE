@@ -104,7 +104,7 @@ function signatures(doc: ReportDoc): (Paragraph | Table)[] {
       borders: NO_BORDERS,
       rows: [new TableRow({ cantSplit: true, children: doc.signers.map(cell) })],
     }),
-    para([run(`Сформировано платформой «АЭМЗ Логистика» ${doc.generatedAt} (МСК). Данные — на момент формирования.`, { size: 15, color: FAINT })], { before: 240, after: 0 }),
+    para([run(`Сформировано платформой «АЭМЗ Поток» ${doc.generatedAt} (МСК). Данные — на момент формирования.`, { size: 15, color: FAINT })], { before: 240, after: 0 }),
   ]
 }
 
@@ -248,7 +248,7 @@ export async function renderReportDocx(doc: ReportDoc): Promise<Buffer> {
     children,
   }
   const document = new Document({
-    creator: 'АЭМЗ Логистика',
+    creator: 'АЭМЗ Поток',
     title: doc.title,
     description: doc.period,
     styles: { default: { document: { run: { font: FONT, size: 20 } } } },

@@ -9,9 +9,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { io, type Socket } from 'socket.io-client'
 import { Loader2, RefreshCw } from 'lucide-react'
-import { Shell, firstTabFor, navFor, sectionAllowed, type RoleSelection } from '@/components/platform/shell'
+import { Shell, firstTabFor, firstAllowedTab, isOwnTab, navFor, sectionAllowed, type RoleSelection } from '@/components/platform/shell'
 import { RoleNotice, type TabKey } from '@/components/platform/common'
 import { LoginScreen } from '@/components/platform/login-screen'
+import { DriverAppTab } from '@/components/platform/driver-app'
 import { api, beginAddAccount, getSessionToken, UNAUTHORIZED_EVENT } from '@/lib/api'
 import type { SessionUserDTO } from '@/lib/types'
 
@@ -33,7 +34,8 @@ import AdminDbTab from '@/components/platform/admin-db'
 import ArchitectureTab from '@/components/platform/architecture'
 import NeuralTab from '@/components/platform/neural'
 import SettingsTab from '@/components/platform/settings'
-import { PermProvider, useCan } from '@/components/platform/perms'
+import { PermProvider, useCan, usePerms } from '@/components/platform/perms'
+import { KonturWorkspace } from '@/components/platform/kontur-workspace'
 
 /** Роль интерфейса из пользователя сессии */
 function roleOf(user: SessionUserDTO): RoleSelection {
@@ -41,6 +43,13 @@ function roleOf(user: SessionUserDTO): RoleSelection {
   return user.role === 'logist'
     ? { kind: 'logist', logistName: user.name }
     : { kind: 'carrier', carrierId: user.carrierId }
+}
+
+/** Раздел из адресной строки: /?tab=own-planning или редирект с /kontur */
+function tabFromLocation(): TabKey | null {
+  if (typeof window === 'undefined') return null
+  const raw = new URLSearchParams(window.location.search).get('tab')
+  return raw && navFor('admin').some((n) => n.key === raw) ? (raw as TabKey) : null
 }
 
 export default function Page() {
@@ -61,7 +70,12 @@ export default function Page() {
     try {
       const { user: u } = await api.me()
       setUser(u)
-      setTab((cur) => (navFor(roleOf(u).kind).some((n) => n.key === cur) ? cur : firstTabFor(roleOf(u).kind)))
+      setTab((cur) => {
+        const fromUrl = tabFromLocation()
+        const nav = navFor(roleOf(u).kind)
+        if (fromUrl && nav.some((n) => n.key === fromUrl)) return fromUrl
+        return nav.some((n) => n.key === cur) ? cur : firstTabFor(roleOf(u).kind)
+      })
     } catch {
       setUser(null)
     }
@@ -76,6 +90,15 @@ export default function Page() {
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [])
+
+  // выбранный раздел живёт в адресе: ссылку можно сохранить, /kontur ведёт на «Заявки 1С»
+  useEffect(() => {
+    if (!user) return
+    const url = new URL(window.location.href)
+    if (tab === firstTabFor(roleOf(user).kind)) url.searchParams.delete('tab')
+    else url.searchParams.set('tab', tab)
+    window.history.replaceState(null, '', url)
+  }, [tab, user])
 
   // журнал платформы (Task 76): неперехваченные ошибки интерфейса уходят в
   // «Журнал событий» (троттлинг — не чаще раза в 5 секунд, без спама)
@@ -216,9 +239,16 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
   onAddAccount: () => void
 }) {
   const can = useCan()
+  const { ready: permsReady } = usePerms()
   const role = roleOf(user)
   const activeCarrierId = role.kind === 'carrier' ? role.carrierId ?? null : null
   const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab, liveTick }
+  // права загрузились, а текущий раздел закрыт — уводим на первый доступный:
+  // так после смены должности логист не остаётся на «пустом» экране
+  useEffect(() => {
+    if (!permsReady) return
+    if (!sectionAllowed(tab, can)) setTab(firstAllowedTab(role.kind, can))
+  }, [permsReady, tab, can, role.kind, setTab])
   // долгий обрыв (аудит №3): первые секунды — блокирующий оверлей (штатный рестарт шины
   // занимает 1–3 с), дальше — неблокирующий баннер: шина real-time — только ускорение,
   // HTTP-автообновление (15–30 с) продолжает работать, блокировать работу нечестно
@@ -245,6 +275,8 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
     <Shell tab={tab} onNavigate={setTab} role={role} user={user} onLogout={onLogout} onAddAccount={onAddAccount} liveTick={liveTick}>
       {!allowed ? (
         <RoleNotice role={role.kind} />
+      ) : isOwnTab(tab) ? (
+        <KonturWorkspace tab={tab} onNavigate={setTab} liveTick={liveTick} />
       ) : (
         <>
           {tab === 'board' && <BoardTab {...tabProps} />}
@@ -265,6 +297,7 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
           {tab === 'admin-users' && <AdminUsersTab {...tabProps} />}
           {tab === 'admin-db' && <AdminDbTab {...tabProps} />}
           {tab === 'arch' && <ArchitectureTab {...tabProps} />}
+          {tab === 'driver-app' && <DriverAppTab liveTick={liveTick} />}
         </>
       )}
 

@@ -69,7 +69,8 @@ import { useCan } from '@/components/platform/perms'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
-import { formatKm, haversineKm, pointCoords, routeDistanceKm } from '@/lib/geo'
+import { formatKm, haversineKm, pointCoords, straightLineKm } from '@/lib/geo'
+import { useRoadKm } from '@/lib/use-road-distance'
 import type { MapPoint } from '@/components/platform/delivery-map'
 import { DOC_TYPE_LABEL, fmtDateTime, MODE_META, num, rate, DELETABLE_STATUSES, timeLeft } from '@/lib/status'
 import type { BidDTO, CarrierDTO, EventFeedItem, RequestDTO, RequestMode } from '@/lib/types'
@@ -162,9 +163,9 @@ function loadDateTs(s: string): number {
 }
 
 /** Значение колонки для сортировки: число или строка; «нет данных» = Infinity */
-function sortValue(r: RequestDTO, key: SortKey): string | number {
+function sortValue(r: RequestDTO, key: SortKey, kmOf: (r: RequestDTO) => number | null): string | number {
   switch (key) {
-    case 'km': return routeDistanceKm(r.fromPoint, r.toPoint) ?? Number.POSITIVE_INFINITY
+    case 'km': return kmOf(r) ?? Number.POSITIVE_INFINITY
     case 'cargo': return r.cargo.toLowerCase()
     case 'load': return loadDateTs(r.loadDate)
     case 'truck': return r.truckType.toLowerCase()
@@ -573,14 +574,26 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
     })
   }, [requests, q, mode, myBidOf, isStaff])
 
+  /** дорожные расстояния для всех заявок — один общий батч OSRM на страницу */
+  const roadPairs = useMemo(
+    () => (requests ?? []).map((r) => ({ from: r.fromPoint, to: r.toPoint })),
+    [requests],
+  )
+  const roadKm = useRoadKm(roadPairs)
+  /** км для сортировки/выгрузки: дорожное; пока не посчитано — по прямой */
+  const kmOf = useCallback(
+    (r: RequestDTO) => roadKm(r.fromPoint, r.toPoint) ?? straightLineKm(r.fromPoint, r.toPoint),
+    [roadKm],
+  )
+
   /** выборка после сортировки (Task 49): пустые значения всегда в конце, вне зависимости от направления */
   const sorted = useMemo(() => {
     if (!sort) return filtered
     const dir = sort.dir === 'asc' ? 1 : -1
     const key = sort.key
     return [...filtered].sort((a, b) => {
-      const va = sortValue(a, key)
-      const vb = sortValue(b, key)
+      const va = sortValue(a, key, kmOf)
+      const vb = sortValue(b, key, kmOf)
       if (typeof va === 'number' && typeof vb === 'number') {
         const infA = !Number.isFinite(va)
         const infB = !Number.isFinite(vb)
@@ -589,7 +602,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       }
       return String(va).localeCompare(String(vb), 'ru') * dir
     })
-  }, [filtered, sort])
+  }, [filtered, sort, kmOf])
 
   /** Точки для карты доставки — ТОЛЬКО по активным заявкам: открыты для ставок и срок не вышел.
    *  Завершённые и ушедшие в работу заявки карту не захламляют. Перевозчик откликается прямо с карты:
@@ -619,7 +632,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
       return [
         r.number,
         `${r.fromPoint} → ${r.toPoint}`,
-        routeDistanceKm(r.fromPoint, r.toPoint) ?? '—',
+        kmOf(r) ?? '—',
         r.cargo,
         r.tonnage,
         r.truckType,
@@ -949,7 +962,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                       <tr className="whitespace-nowrap text-left text-xs text-slate-500">
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">№ заявки</th>
                         <th scope="col" className="border-b border-slate-200 pb-2.5 pr-3 font-semibold">Маршрут</th>
-                        <SortableTh k="km" label="Км" sort={sort} onSort={toggleSort} title="Расстояние от погрузки до назначения, по прямой" />
+                        <SortableTh k="km" label="Км" sort={sort} onSort={toggleSort} title="Расстояние по автомобильному маршруту от погрузки до назначения (OSRM); пока маршрут считается — по прямой" />
                         <SortableTh k="cargo" label="Груз" sort={sort} onSort={toggleSort} />
                         <SortableTh k="load" label="Погрузка" sort={sort} onSort={toggleSort} />
                         <SortableTh k="truck" label="Тип ТС" sort={sort} onSort={toggleSort} />
@@ -962,7 +975,8 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                     <tbody>
                       {sorted.map((r) => {
                         const my = myBidOf(r)
-                        const km = routeDistanceKm(r.fromPoint, r.toPoint)
+                        const road = roadKm(r.fromPoint, r.toPoint)
+                        const km = road ?? straightLineKm(r.fromPoint, r.toPoint)
                         const expanded = isStaff && expandedId === r.id
                         return (
                           <Fragment key={r.id}>
@@ -995,7 +1009,9 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
                           </td>
                           <td className="whitespace-nowrap border-b border-slate-100 py-3 pr-3 tabular-nums text-slate-700">
                             {km !== null ? (
-                              <span title="Расстояние по прямой">{formatKm(km)}</span>
+                              <span title={road != null ? 'Расстояние по автомобильному маршруту (OSRM)' : 'По прямой — маршрут ещё рассчитывается'}>
+                                {road == null && '≈ '}{formatKm(km)}
+                              </span>
                             ) : (
                               <span className="text-slate-400">—</span>
                             )}

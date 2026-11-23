@@ -96,6 +96,10 @@ export function toRequestDTO(r: RequestFull, viewer: Viewer): RequestDTO {
     bestRate,
     bidsCount: sealed ? null : activeBids.length,
     status: r.status as RequestDTO['status'],
+    // карантин — служебная информация персонала, перевозчику не отдаётся
+    quarantineReason: isLogist ? r.quarantineReason ?? null : null,
+    quarantinedAt: isLogist && r.quarantinedAt ? r.quarantinedAt.toISOString() : null,
+    quarantinedBy: isLogist ? r.quarantinedBy ?? null : null,
     loadDate: r.loadDate,
     loadWindow: r.loadWindow,
     deadline: r.deadline ? r.deadline.toISOString() : null,

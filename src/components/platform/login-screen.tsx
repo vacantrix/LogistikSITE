@@ -46,7 +46,7 @@ const ROLE_LABEL: Record<'admin' | 'logist' | 'carrier', string> = {
 const PLATFORM_DOCS: { title: string; sub: string; formats: { label: string; href: string }[] }[] = [
   {
     title: 'Проектный отчёт платформы',
-    sub: 'Система · MVP · архитектура · OCR · ЭДО · риски и план',
+    sub: 'Система · MVP · архитектура · OCR · документы · риски и план',
     formats: [
       { label: 'Word', href: '/downloads/Проектный_отчет_Веб-платформа_АЭМЗ_Логистика.docx' },
       { label: 'PDF', href: '/downloads/Проектный_отчет_Веб-платформа_АЭМЗ_Логистика.pdf' },
@@ -54,7 +54,7 @@ const PLATFORM_DOCS: { title: string; sub: string; formats: { label: string; hre
   },
   {
     title: 'Руководство пользователя',
-    sub: 'Роли, заявки, торги, документы, ЭТрН · 17 стр.',
+    sub: 'Роли, заявки, торги, документы, рейсы · 17 стр.',
     formats: [
       { label: 'Word', href: '/downloads/aemz-logistika-rukovodstvo-polzovatelya.docx' },
       { label: 'PDF', href: '/downloads/aemz-logistika-rukovodstvo-polzovatelya.pdf' },
@@ -119,8 +119,8 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
           {/* логотип */}
           <div className="mb-6 flex flex-col items-center text-center">
             <LogoMark className="h-14 w-14 drop-shadow-lg" />
-            <h1 className="mt-4 text-2xl font-bold text-slate-900">АЭМЗ Логистика</h1>
-            <p className="mt-1 text-sm text-slate-500">Платформа работы с привлечённым транспортом</p>
+            <h1 className="mt-4 text-2xl font-bold text-slate-900">АЭМЗ Поток</h1>
+            <p className="mt-1 text-sm text-slate-500">Заявки, торги, собственный парк и рейсы — в одном контуре</p>
           </div>
 
           {/* Мультиаккаунт (Task 74): быстрый вход в сохранённые аккаунты этого браузера */}

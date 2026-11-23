@@ -27,6 +27,8 @@ export interface SessionUser {
   name: string
   role: Role
   carrierId: string | null
+  /** Специализация логиста: all | tent | board. Администрацию и перевозчика не ограничивает. */
+  transportScope?: string
 }
 
 /**
@@ -86,7 +88,11 @@ function readToken(token: string | undefined | null): (SessionUser & { sv: numbe
   const [body, sig] = token.split('.')
   if (!body || !sig) return null
   const expected = sign(body)
-  if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
+  // подпись сравниваем в байтах: длина в символах у не-ASCII строки меньше байтовой,
+  // а timingSafeEqual требует одинаковую длину буферов (иначе RangeError)
+  const sigBuf = Buffer.from(sig, 'utf8')
+  const expectedBuf = Buffer.from(expected, 'utf8')
+  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return null
   try {
     const data = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as SessionUser & { exp: number; sv?: number }
     if (!data.exp || data.exp < Date.now()) return null
@@ -113,10 +119,10 @@ async function sessionFromToken(token: string | undefined | null): Promise<Sessi
   if (!t) return null
   const u = await db.user.findUnique({
     where: { id: t.id },
-    select: { login: true, name: true, role: true, carrierId: true, sessionVersion: true },
+    select: { login: true, name: true, role: true, carrierId: true, sessionVersion: true, transportScope: true },
   })
   if (!u || u.sessionVersion !== t.sv || !isRole(u.role)) return null
-  return { id: t.id, login: u.login, name: u.name, role: u.role, carrierId: u.carrierId }
+  return { id: t.id, login: u.login, name: u.name, role: u.role, carrierId: u.carrierId, transportScope: u.transportScope }
 }
 
 /**
@@ -188,9 +194,15 @@ export async function requireUserViaRequest(req: NextRequest, ...roles: Role[]):
 export interface Viewer {
   role: Role
   carrierId: string | null
+  /** Специализация логиста по типу транспорта (см. lib/transport-scope) */
+  transportScope?: string
 }
 
-export const viewerOf = (u: SessionUser): Viewer => ({ role: u.role, carrierId: u.carrierId })
+export const viewerOf = (u: SessionUser): Viewer => ({
+  role: u.role,
+  carrierId: u.carrierId,
+  transportScope: u.transportScope ?? 'all',
+})
 
 export const sessionCookieOptions = {
   httpOnly: true,

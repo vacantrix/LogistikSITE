@@ -12,6 +12,7 @@ import { plogError } from '@/lib/platform-log'
 import { isStaff, type Viewer } from '@/lib/auth'
 import { BUSY_STATUSES, busyReason } from '@/lib/busy'
 import { REQUEST_INCLUDE, type RequestFull } from '@/lib/serialize'
+import { requestScopeWhere } from '@/lib/transport-scope'
 import type { RequestDTO } from '@/lib/types'
 
 /** Типы ТС площадки (Task 109: только борт и тент) */
@@ -22,15 +23,20 @@ export const money = (v: number) => `${new Intl.NumberFormat('ru-RU').format(Mat
 type Tx = Prisma.TransactionClient
 
 /**
- * Какие заявки видит пользователь. Логист — все.
+ * Какие заявки видит пользователь.
+ * Логист — только заявки своей специализации (тент / борт); универсальный — все.
+ * Администрация — все.
  * Перевозчик — открытые на площадке, свои выигранные и те, где он делал ставку.
  * Черновики (в том числе торги, закончившиеся без ставок) перевозчику не видны.
  */
 export function requestWhereFor(viewer: Viewer): Prisma.RequestWhereInput {
-  if (isStaff(viewer.role)) return {}
+  if (isStaff(viewer.role)) {
+    // ограничение по типу транспорта действует только на логистов; админ видит весь парк
+    return viewer.role === 'logist' ? requestScopeWhere(viewer.transportScope) : {}
+  }
   const me = viewer.carrierId ?? '__none__'
   return {
-    status: { not: 'DRAFT' },
+    status: { notIn: ['DRAFT', 'DELETED'] },
     OR: [
       { status: 'PUBLISHED' },
       { winnerId: me },

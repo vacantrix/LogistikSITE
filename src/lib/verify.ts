@@ -257,8 +257,13 @@ export class OcrUnavailableError extends Error {
  * 'unsupported' — у движка нет шаблона этого вида документа (проверка вручную);
  * OcrUnavailableError — сервис не ответил: проверку нужно повторить.
  */
-export async function recognize(dataUri: string, type: DocType, intake: boolean): Promise<OcrOutput | 'unsupported'> {
-  const local = await ocrServiceOcr(dataUri, type, intake)
+export async function recognize(
+  dataUri: string,
+  type: DocType,
+  intake: boolean,
+  minQuality = 0,
+): Promise<OcrOutput | 'unsupported'> {
+  const local = await ocrServiceOcr(dataUri, type, intake, { minQuality })
   if (local.kind === 'ok') return local.ocr
   if (local.kind === 'unsupported') return 'unsupported'
   throw new OcrUnavailableError()
@@ -320,8 +325,13 @@ export function applyRules(
 
   // 2. Вид документа: движок распознал другой документ → это не тот файл
   if (ocr.detectedType && ocr.detectedType !== type) {
-    const what = ocr.detectedType === 'UNKNOWN' ? 'не удалось распознать документ' : `распознан «${DOC_TYPE_LABEL[ocr.detectedType]}»`
-    const msg = `Ожидался «${DOC_TYPE_LABEL[type]}», но ${what} — загрузите правильный документ`
+    // UNKNOWN — не «не тот файл», а «не смогли классифицировать»: чистое фото
+    // не должно гонять перевозчика по кругу, спорное решает человек
+    if (ocr.detectedType === 'UNKNOWN') {
+      issues.push('Вид документа автоматически не определён — нужна ручная проверка сотрудником')
+      return verdict('MANUAL', 'Не удалось распознать вид документа — документ проверит сотрудник')
+    }
+    const msg = `Ожидался «${DOC_TYPE_LABEL[type]}», но распознан «${DOC_TYPE_LABEL[ocr.detectedType]}» — загрузите правильный документ`
     issues.push(msg)
     return verdict('REUPLOAD', msg)
   }
@@ -467,11 +477,19 @@ export async function verifyDocument(
     if (!demoSamplesEnabled()) return reuploadVerdict('Нужна фотография документа (JPG, PNG или WebP) — демо-образцы на этом стенде отключены')
     return applyRules(simulateOcr(`${fileName}:${docId}`, type, expected), type, expected, settings)
   }
-  const ocr = await recognize(dataUri, type, false) // OcrUnavailableError — наверх, документ остаётся на проверке
+  const ocr = await recognize(dataUri, type, false, settings.minQuality) // OcrUnavailableError — наверх, документ остаётся на проверке
   if (ocr === 'unsupported') {
     return manualVerdict(
       'Этот вид документа автоматически не распознаётся — его проверит сотрудник',
       'Автоматического шаблона для этого документа нет — сверка вручную',
+    )
+  }
+  // В слоте «СТС, лицевая сторона» оборот не даёт сверить госномер и VIN:
+  // пропускать его как PASSED нельзя — отправляем человеку
+  if (type === 'STS' && ocr.side === 'back') {
+    return manualVerdict(
+      'На фото — оборот СТС; для проверки рейса нужна лицевая сторона с госномером и VIN',
+      'Оборот СТС не содержит госномер и VIN — автоматическая сверка с заявкой невозможна, решает человек',
     )
   }
   return applyRules(ocr, type, expected, settings)
@@ -638,6 +656,8 @@ export async function analyzeIntakeDoc(
   dataUri: string,
   settings: VerifySettings,
   retype?: DocType[],
+  /** оборот СТС разрешён: карточка ТС проверяет его отдельно (номер + собственник) */
+  allowStsBack = false,
 ): Promise<VerifyVerdict> {
   if (dataUri.startsWith('data:image/svg')) {
     if (!demoSamplesEnabled()) return reuploadVerdict('Нужна фотография документа (JPG, PNG или WebP) — демо-образцы на этом стенде отключены')
@@ -655,7 +675,7 @@ export async function analyzeIntakeDoc(
 
   let ocr: OcrOutput | 'unsupported'
   try {
-    ocr = await recognize(dataUri, type, true)
+    ocr = await recognize(dataUri, type, true, settings.minQuality)
   } catch (e) {
     if (!(e instanceof OcrUnavailableError)) throw e
     return {
@@ -676,6 +696,13 @@ export async function analyzeIntakeDoc(
       return { ...applyRules(ocr, ocr.detectedType, {}, settings), detectedType: ocr.detectedType, movedFrom: type }
     }
     return mismatchVerdict(type, ocr.detectedType, ocr.engine, ocr.quality)
+  }
+  // в обычном слоте СТС оборот не даёт сверить госномер и VIN — только ручная проверка
+  if (type === 'STS' && ocr.side === 'back' && !allowStsBack) {
+    return manualVerdict(
+      'На фото — оборот СТС: в этом слоте нужна лицевая сторона с госномером и VIN',
+      'Оборот СТС не позволяет сверить госномер и VIN — документ проверит сотрудник',
+    )
   }
   return { ...applyRules(ocr, type, {}, settings), detectedType: ocr.detectedType ?? null }
 }

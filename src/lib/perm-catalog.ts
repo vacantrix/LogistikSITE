@@ -24,6 +24,7 @@ export type PermKey =
   | 'request:raise'
   | 'request:offer'
   | 'request:delete'
+  | 'request:quarantine'
   // — Торги (перевозчик) —
   | 'bid:submit'
   // — Документы, экипажи, рейсы —
@@ -40,9 +41,42 @@ export type PermKey =
   | 'directory:addManual'
   | 'directory:edit'
   | 'notify:agent'
+  // — Собственный транспорт (диспетчерский контур) —
+  | 'own:process'
+  | 'own:assign'
+  | 'own:plan'
+  | 'own:atisu'
+  | 'own:directory'
   // — Разделы и профиль —
   | 'reports:view'
   | 'profile:edit'
+  // — Видимость разделов (двухуровневая навигация) —
+  | 'section:board'
+  | 'section:drafts'
+  | 'section:my'
+  | 'section:apply'
+  | 'section:crew'
+  | 'section:verify'
+  | 'section:requests'
+  | 'section:registry'
+  | 'section:edo'
+  | 'section:directory'
+  | 'section:reports'
+  | 'section:journal'
+  | 'section:support'
+  | 'section:settings'
+  | 'section:adminUsers'
+  | 'section:adminDb'
+  | 'section:arch'
+  | 'section:neural'
+  | 'section:ownRequests'
+  | 'section:ownAtisu'
+  | 'section:ownOccupancy'
+  | 'section:ownPlanning'
+  | 'section:ownMonitor'
+  | 'section:ownDirectory'
+  | 'section:ownAudit'
+  | 'section:driverApp'
   // — Управление платформой (администрация) —
   | 'admin:users'
   | 'admin:db'
@@ -98,18 +132,55 @@ export const PERMS: PermItem[] = [
   { key: 'request:raise', group: 'Заявки и торги', contours: L, risk: 'important', label: 'Повышение стартовой ставки', hint: '«Повысить ставку» на площадке' },
   { key: 'request:offer', group: 'Заявки и торги', contours: L, risk: 'critical', label: 'Прямое предложение без торгов', hint: '«Предложить напрямую» — заявка уходит перевозчику без торгов' },
   { key: 'request:delete', group: 'Заявки и торги', contours: L, risk: 'critical', label: 'Удаление заявок', hint: 'Снятие заявок с площадки и из реестра' },
+  { key: 'request:quarantine', group: 'Заявки и торги', contours: L, risk: 'important', label: 'Карантин заявки', hint: 'Поместить заявку в карантин с причиной и вернуть в работу после исправления' },
   { key: 'bid:submit', group: 'Торги и экипажи', contours: C, risk: 'important', label: 'Ставки', hint: '«Сделать ставку», отзыв ставки' },
   { key: 'crew:assign', group: 'Торги и экипажи', contours: C, risk: 'normal', label: 'Назначение экипажа', hint: 'Водитель, тягач и прицеп по выигранной заявке' },
   { key: 'verify:decide', group: 'Документы и рейсы', contours: L, risk: 'important', label: 'Решения сверки', hint: '«Передать дальше», «Вернуть», «Отказ» по документам' },
   { key: 'docs:upload', group: 'Документы и рейсы', contours: L, risk: 'normal', label: 'Документы перевозчику', hint: 'Загрузка документов для перевозчика в карточке заявки' },
-  { key: 'docs:request', group: 'Документы и ЭДО', contours: C, risk: 'normal', label: 'Доверенность и заявка логисту', hint: 'Загрузка документов по заявке в «Моих заявках»' },
+  { key: 'docs:request', group: 'Документы и подписи', contours: C, risk: 'normal', label: 'Доверенность и заявка логисту', hint: 'Загрузка документов по заявке в «Моих заявках»' },
   { key: 'trip:close', group: 'Документы и рейсы', contours: L, risk: 'critical', label: 'Закрытие рейсов', hint: '«Закрыть рейс» в реестре рейсов' },
-  { key: 'edo:sync', group: 'ЭДО', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Обновление статусов Диадока', hint: '«Обновить статусы» в разделе ЭДО' },
-  { key: 'edo:send', group: 'ЭДО', contours: L, risk: 'important', label: 'Отправка ЭТрН в Диадок', hint: '«Отправить ЭТрН» в разделе ЭДО' },
-  { key: 'edo:sign', group: 'ЭДО', contours: ['logist', 'carrier', 'admin'], risk: 'critical', label: 'Подпись документов КЭП', hint: '«Подписать» в разделе ЭДО', labelBy: { logist: 'Подпись КЭП от АЭМЗ', admin: 'Подпись КЭП от АЭМЗ', carrier: 'Подпись КЭП от компании' } },
+  { key: 'edo:sync', group: 'Документы рейса', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Обновление статусов документов', hint: '«Обновить статусы» в разделе документов' },
+  { key: 'edo:send', group: 'Документы рейса', contours: L, risk: 'important', label: 'Отправка накладной', hint: '«Отправить накладную» в разделе документов' },
+  { key: 'edo:sign', group: 'Документы рейса', contours: ['logist', 'carrier', 'admin'], risk: 'critical', label: 'Подпись документов КЭП', hint: '«Подписать» в разделе документов', labelBy: { logist: 'Подпись КЭП от АЭМЗ', admin: 'Подпись КЭП от АЭМЗ', carrier: 'Подпись КЭП от компании' } },
   { key: 'directory:addManual', group: 'Справочники', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Добавление вручную', hint: '«Добавить вручную» в справочниках', labelBy: { carrier: 'Добавление водителей и техники вручную' } },
   { key: 'directory:edit', group: 'Справочники', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Правка справочников', hint: 'Редактирование карточек в справочниках', labelBy: { carrier: 'Правка карточек своей компании' } },
   { key: 'notify:agent', group: 'Справочники', contours: L, risk: 'normal', label: 'Уведомить агента', hint: 'Рассылка перевозчикам об истекающих документах' },
+
+  // ——— собственный транспорт (диспетчерский контур) ———
+  { key: 'own:process', group: 'Собственный транспорт', contours: L, risk: 'important', label: 'Обработка заявок 1С', hint: 'Перевод заявки в план, карантин и коррекции в «Заявках» собственного транспорта' },
+  { key: 'own:assign', group: 'Собственный транспорт', contours: L, risk: 'critical', label: 'Назначение собственного состава', hint: 'Подбор и назначение тягача, прицепа и водителя на заявку, привязка состава' },
+  { key: 'own:plan', group: 'Собственный транспорт', contours: L, risk: 'normal', label: 'Планирование собственного парка', hint: 'Ручной план, закрытие и снятие событий в «Планировании»' },
+  { key: 'own:atisu', group: 'Собственный транспорт', contours: L, risk: 'important', label: 'Сделки ATI.SU', hint: 'Согласование и назначение грузов ATI.SU на собственный состав' },
+  { key: 'own:directory', group: 'Собственный транспорт', contours: L, risk: 'important', label: 'Справочники парка', hint: 'Добавление и правка водителей, тягачей и прицепов собственного парка' },
+
+  // ——— видимость разделов: двухуровневая навигация ———
+  { key: 'section:board', group: 'Разделы: привлечённый транспорт', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Площадка заявок', hint: 'Вкладка «Площадка заявок»: торги и предложения перевозчиков' },
+  { key: 'section:drafts', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Черновики заявок', hint: 'Вкладка «Черновики заявок»' },
+  { key: 'section:verify', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Проверка документов', hint: 'Вкладка «Проверка документов»' },
+  { key: 'section:requests', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Реестр заявок', hint: 'Вкладка «Реестр заявок»' },
+  { key: 'section:registry', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Реестр рейсов', hint: 'Вкладка «Реестр рейсов»' },
+  { key: 'section:reports', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Отчёты', hint: 'Вкладка «Отчёты»' },
+  { key: 'section:journal', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Журнал событий', hint: 'Вкладка «Журнал событий»' },
+  { key: 'section:my', group: 'Разделы: кабинет перевозчика', contours: C, risk: 'normal', label: 'Мои заявки', hint: 'Вкладка «Мои заявки» в кабинете перевозчика' },
+  { key: 'section:apply', group: 'Разделы: кабинет перевозчика', contours: C, risk: 'normal', label: 'Подать документы', hint: 'Вкладка «Подать документы»' },
+  { key: 'section:crew', group: 'Разделы: кабинет перевозчика', contours: C, risk: 'normal', label: 'Назначение экипажей', hint: 'Вкладка «Назначение экипажей»' },
+  { key: 'section:edo', group: 'Разделы: общие', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'ЭДО', hint: 'Вкладка «Подписать ЭДО»' },
+  { key: 'section:directory', group: 'Разделы: общие', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Справочники', hint: 'Вкладка «Справочники» платформы' },
+  { key: 'section:support', group: 'Разделы: общие', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Обращения', hint: 'Вкладка «Обращения»' },
+  { key: 'section:ownRequests', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Заявки 1С', hint: 'Вкладка «Заявки» собственного транспорта: реестр 1С и карточка рейса' },
+  { key: 'section:ownAtisu', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'ATI.SU', hint: 'Вкладка «ATI.SU»: биржа и согласованные грузы' },
+  { key: 'section:ownOccupancy', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Занятость', hint: 'Вкладка «Занятость»: кто чем занят' },
+  { key: 'section:ownPlanning', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Планирование', hint: 'Вкладка «Планирование»: календарь погрузок, выгрузок и возвратов' },
+  { key: 'section:ownMonitor', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Мониторинг', hint: 'Вкладка «Мониторинг»: статусы, геолокация и устройства' },
+  { key: 'section:ownDirectory', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Справочники парка', hint: 'Вкладка «Справочники парка»: водители, тягачи, прицепы' },
+  { key: 'section:ownAudit', group: 'Разделы: собственный транспорт', contours: A, risk: 'important', label: 'Аудит контура', hint: 'Сквозной журнал действий платформы и диспетчерской' },
+  { key: 'section:driverApp', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Приложение водителя', hint: 'Вкладка «Приложение водителя»: веб-версия, APK, состояние сервиса и GPS' },
+  { key: 'section:settings', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Настройки платформы', hint: 'Вкладка «Настройки»' },
+  { key: 'section:adminUsers', group: 'Разделы: управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Вкладка «Профили и доступы»: учётные записи, должности и исключения' },
+  { key: 'section:adminDb', group: 'Разделы: управление', contours: A, risk: 'critical', label: 'База данных', hint: 'Вкладка «База данных»' },
+  { key: 'section:arch', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Архитектура', hint: 'Вкладка «Архитектура»' },
+  { key: 'section:neural', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Нейросеть', hint: 'Вкладка «Нейросеть»' },
+
   { key: 'admin:users', group: 'Управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Учётные записи, должности и исключения' },
   { key: 'admin:db', group: 'Управление', contours: A, risk: 'critical', label: 'Редактор базы данных', hint: 'Раздел «База данных»: прямая правка записей' },
   { key: 'reports:view', group: 'Разделы и профиль', contours: ['logist', 'admin'], risk: 'normal', label: 'Отчёты', hint: 'Раздел «Отчёты» и выгрузка' },
@@ -170,19 +241,46 @@ const allOf = (contour: Contour, except: PermKey[] = []): PermKey[] =>
  * прежний логист по умолчанию, «Логист» — урезанный набор линейного сотрудника (logist2),
  * «Руководитель компании» — прежние права перевозчика, «Администратор» — прежняя администрация.
  * Правка своего профиля по умолчанию только у администрации (Task 112).
+ *
+ * Видимость вкладок — отдельные права `section:*`: администратор включает и выключает
+ * целые разделы двухуровневой навигации, не меняя операционные права. Так логист видит
+ * только тот объём привлечённого и собственного транспорта, который ему выдан должностью.
  */
+export const LOGIST_VIEW_SECTIONS: PermKey[] = [
+  'section:board', 'section:drafts', 'section:verify', 'section:requests', 'section:registry',
+  'section:reports', 'section:journal', 'section:edo', 'section:directory', 'section:support',
+]
+export const OWN_VIEW_SECTIONS: PermKey[] = [
+  'section:ownRequests', 'section:ownAtisu', 'section:ownOccupancy',
+  'section:ownPlanning', 'section:ownMonitor', 'section:ownDirectory',
+]
+export const ADMIN_VIEW_SECTIONS: PermKey[] = [
+  'section:settings', 'section:adminUsers', 'section:adminDb', 'section:arch', 'section:neural',
+  'section:ownAudit', 'section:driverApp',
+]
+export const CARRIER_VIEW_SECTIONS: PermKey[] = [
+  'section:board', 'section:my', 'section:apply', 'section:crew',
+  'section:edo', 'section:directory', 'section:support',
+]
+
 export const TEMPLATE_SEEDS: TemplateSeed[] = [
-  { contour: 'logist', name: 'Ведущий логист', description: 'Весь операционный контур: торги, сверка, рейсы, ЭДО, отчёты.', perms: allOf('logist', ['profile:edit']) },
-  { contour: 'logist', name: 'Логист', description: 'Черновики заявок, документы перевозчику, справочники. Публикует, сверяет и закрывает ведущий логист.', isDefault: true,
-    perms: ['draft:create', 'draft:edit', 'draft:delete', 'docs:upload', 'directory:addManual', 'directory:edit'] },
-  { contour: 'logist', name: 'Наблюдатель', description: 'Видит разделы логиста, ничего не меняет. Для стажёров и руководства.', perms: [] },
-  { contour: 'carrier', name: 'Руководитель компании', description: 'Торги, экипажи, документы и подпись ЭДО от компании.', isDefault: true,
-    perms: ['bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'directory:edit'] },
-  { contour: 'carrier', name: 'Диспетчер', description: 'Ставки, экипажи и документы. Без подписи ЭДО.', perms: ['bid:submit', 'crew:assign', 'docs:request', 'directory:edit'] },
-  { contour: 'carrier', name: 'Подписант ЭДО', description: 'Подпись ЭТрН и актов КЭП, на которого она оформлена, и документы по заявкам.', perms: ['edo:sign', 'docs:request'] },
-  { contour: 'admin', name: 'Администратор', description: 'Максимум прав: весь операционный контур логиста, учётные записи и доступы, база данных.', isDefault: true,
+  { contour: 'logist', name: 'Ведущий логист', description: 'Весь операционный контур: торги, сверка, рейсы, документы, отчёты и собственный парк.', perms: allOf('logist', ['profile:edit']) },
+  { contour: 'logist', name: 'Логист', description: 'Черновики заявок, документы перевозчику, справочники и планирование собственного парка. Назначение состава и ATI.SU — у ведущего логиста.', isDefault: true,
+    perms: [
+      'draft:create', 'draft:edit', 'draft:delete', 'docs:upload',
+      'directory:addManual', 'directory:edit',
+      ...LOGIST_VIEW_SECTIONS.filter((k) => k !== 'section:reports' && k !== 'section:journal'),
+      'section:ownRequests', 'section:ownPlanning', 'section:ownOccupancy', 'section:ownDirectory',
+      'own:process', 'own:plan', 'own:directory',
+    ] },
+  { contour: 'logist', name: 'Наблюдатель', description: 'Видит все разделы привлечённого и собственного транспорта, ничего не меняет. Для стажёров и руководства.', perms: [...LOGIST_VIEW_SECTIONS, ...OWN_VIEW_SECTIONS] },
+  { contour: 'carrier', name: 'Руководитель компании', description: 'Торги, экипажи, документы и подпись от компании.', isDefault: true,
+    perms: ['bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'directory:edit', ...CARRIER_VIEW_SECTIONS] },
+  { contour: 'carrier', name: 'Диспетчер', description: 'Ставки, экипажи и документы. Без права подписи.', perms: ['bid:submit', 'crew:assign', 'docs:request', 'directory:edit', ...CARRIER_VIEW_SECTIONS] },
+  { contour: 'carrier', name: 'Подписант', description: 'Подпись накладных и актов КЭП, на которого она оформлена, и документы по заявкам.', perms: ['edo:sign', 'docs:request', 'section:my', 'section:apply', 'section:edo', 'section:directory', 'section:support'] },
+  { contour: 'admin', name: 'Администратор', description: 'Максимум прав: весь операционный контур логиста и собственного парка, учётные записи и доступы, база данных.', isDefault: true,
     perms: allOf('admin') },
   { contour: 'admin', name: 'Администратор доступа', description: 'Учётные записи, доступы и база данных — без операций с заявками.',
-    perms: ['admin:users', 'admin:db', 'reports:view', 'profile:edit'] },
-  { contour: 'admin', name: 'Аудитор', description: 'Видит все разделы и отчёты, ничего не меняет.', perms: ['reports:view'] },
+    perms: ['admin:users', 'admin:db', 'reports:view', 'profile:edit', 'section:adminUsers', 'section:adminDb', 'section:reports', 'section:support'] },
+  { contour: 'admin', name: 'Аудитор', description: 'Видит разделы, журналы и отчёты, ничего не меняет.', perms: ['reports:view', ...LOGIST_VIEW_SECTIONS, ...OWN_VIEW_SECTIONS] },
 ]

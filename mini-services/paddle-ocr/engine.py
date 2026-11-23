@@ -1629,22 +1629,32 @@ def _needs_upscale(out):
     return False
 
 
-def analyze(path, upscale_retry=True):
+def analyze(path, upscale_retry=True, min_quality=0):
     """Фото → {quality, sharpness, docType, side, fields, confidences, confirmations}.
     Поля называются так же, как в DOC_FIELDS (src/lib/verify.ts).
 
     Task 86 — одна сильная модель на все операции платформы («Проверить» единственная
     кнопка). Недочитанные места добирают повторные проходы по кадру, все — той же моделью:
     целый лист (если документ вырезан с полей), штамп прописки крупным планом (stamp_pass),
-    кадр ×1,5 и разворот на 180°."""
+    кадр ×1,5 и разворот на 180°.
+
+    min_quality — порог платформы (Setting.minQuality): фото ниже порога всё равно получит
+    REUPLOAD, поэтому OCR не запускаем — возвращаем quality и пустой UNKNOWN."""
     from pathlib import Path
     path = Path(path)
     sharp = sharpness(path)
     quality = int(round(min(100.0, 60.0 * sharp / SHARPNESS_MIN)))
+    if min_quality > 0 and quality < min_quality:
+        return {"quality": quality, "sharpness": round(sharp, 1), "docType": "UNKNOWN", "side": "front",
+                "fields": {}, "confidences": {}, "confirmations": {}}
     work, cropped = prepare(path)
     try:
         lines, work, turns = read_upright(work, path)
         out = _analyze_lines(work, lines, quality, sharp)
+        # вырезка не узнана с первого прохода: масштабировать её же бессмысленно — повтор ×1,5
+        # на всех боевых фото возвращал тот же UNKNOWN (9,8 с впустую). Целый лист ниже читаем:
+        # он единственный, который на плохой вырезке действительно находит документ.
+        first_unknown = out["docType"] == "UNKNOWN"
         # документ вырезан с листа, но не узнан или главные поля не дочитаны: читаем и исходный кадр
         # и добираем пустое — результат по вырезке чувствителен к масштабу (×2,39 и ×2,392 — разное)
         if cropped and _incomplete(out):
@@ -1673,7 +1683,7 @@ def analyze(path, upscale_retry=True):
         # фото с телефона: документ занимает часть кадра, шрифт мелкий, защитный фон —
         # документ не узнан или поля не дочитаны → проход по кадру, увеличенному в 1,5 раза
         # (на странице регистрации ошибок в адресе стало 5 из 52 знаков вместо 20)
-        if upscale_retry and _needs_upscale(out):
+        if upscale_retry and _needs_upscale(out) and not (cropped and first_unknown):
             big = scaled(work, 1.5, "_x15")
             if big:
                 try:
@@ -1964,21 +1974,24 @@ def _analyze_lines(path, lines, quality, sharp):
     return out
 
 
-def analyze_subprocess(path):
+def analyze_subprocess(path, min_quality=0):
     """Распознавание в отдельном короткоживущем процессе (мало памяти, Task 83): модель
     загружается с нуля, распознаёт ОДИН документ и возвращает память системе.
     Документ дочитан не до конца или не узнан — второй процесс на ступень ниже: на другом
     лимите детекции строки находятся другие (Task 86), пустое добирается слиянием."""
-    out = _run_isolated(path)
+    out = _run_isolated(path, min_quality=min_quality)
+    # ниже порога платформы документ всё равно вернут на перезагрузку — второй проход не нужен
+    if min_quality > 0 and out["quality"] < min_quality:
+        return out
     if out["docType"] == "UNKNOWN" or _incomplete(out):
         try:
-            out = _fill_gaps(out, _run_isolated(path, step=1))
+            out = _fill_gaps(out, _run_isolated(path, step=1, min_quality=min_quality))
         except RuntimeError:
             pass
     return out
 
 
-def _run_isolated(path, step=0):
+def _run_isolated(path, step=0, min_quality=0):
     """analyze() в отдельном короткоживущем процессе (Task 83, стенд 4 ГБ).
 
     Детекция server_det на большом кадре требует больше памяти, чем есть свободной:
@@ -1997,6 +2010,7 @@ def _run_isolated(path, step=0):
         if limit:
             env["OCR_DET_MAX_SIDE"] = str(limit)
         env["OCR_DET_AREA"] = str(area)
+        env["OCR_MIN_QUALITY"] = str(int(min_quality))
         # __file__ — сам engine.py (sys.argv[0] у сервера — server.py, он займет порт)
         args = [_sys.executable, _os.path.abspath(__file__), str(path)]
         # вывод ребёнка — UTF-8 с обеих сторон: на Windows по умолчанию cp1251, и кириллица
@@ -2046,6 +2060,6 @@ if __name__ == "__main__":
             _fh.write("800")
     except OSError:
         pass
-    _res = analyze(_sys.argv[1])
+    _res = analyze(_sys.argv[1], min_quality=int(_os.environ.get("OCR_MIN_QUALITY", "0")))
     _out = {k: _res.get(k) for k in ("quality", "sharpness", "docType", "side", "fields", "confidences", "confirmations")}
     print("###JSON###" + _json.dumps(_out, ensure_ascii=False))

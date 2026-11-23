@@ -235,7 +235,7 @@ async function tripsPayable({ s, p, reqs, carrierName }: Ctx): Promise<Built> {
     { id: 'tonnage', label: 'Тоннаж, т', weight: 7, align: 'right', value: (r) => nfT.format(r.tonnage) },
     { id: 'rate', label: 'Ставка, ₽/т', weight: 8, align: 'right', value: (r) => nf0.format(rateOf(r)) },
     ...money,
-    { id: 'etrn', label: 'ЭТрН', weight: 9, value: etrnText },
+    { id: 'etrn', label: 'Накладная', weight: 9, value: etrnText },
     { id: 'contract', label: 'Договор', weight: 10, value: (r) => (r.winner?.contractNo ? `№ ${r.winner.contractNo} от ${r.winner.contractDate}` : '—') },
     { id: 'crew', label: 'Водитель и ТС', weight: 16, value: (r) => crew.get(r.id) ?? '—' },
   ]
@@ -291,9 +291,9 @@ async function tripsPayable({ s, p, reqs, carrierName }: Ctx): Promise<Built> {
   }
 }
 
-/** Реестр ЭТрН и актов (бухгалтерия) */
+/** Реестр документов рейсов (бухгалтерия) */
 function edoRegistry({ s, p, reqs, carrierName }: Ctx): Built {
-  const KIND: Record<string, string> = { ETRN: 'ЭТрН', ACT: 'Акт', POA: 'Доверенность', ORDER: 'Поручение' }
+  const KIND: Record<string, string> = { ETRN: 'Накладная', ACT: 'Акт', POA: 'Доверенность', ORDER: 'Поручение' }
   const signedOn = (ok: boolean, at: Date | null): string => (!ok ? 'ждёт' : at ? `подписано ${ruDay(mskDay(at))}` : 'подписано')
   interface Line { r: Req; doc: Req['edoDocuments'][number] | null }
   const lines: Line[] = []
@@ -315,7 +315,7 @@ function edoRegistry({ s, p, reqs, carrierName }: Ctx): Built {
     { id: 'route', label: 'Маршрут', weight: 15, value: (l) => routeOf(l.r) },
     { id: 'aemz', label: 'Подпись АЭМЗ', weight: 11, value: (l) => (l.doc ? signedOn(l.doc.aemzSigned, l.doc.aemzSignedAt) : '—') },
     { id: 'party', label: 'Подпись перевозчика', weight: 11, value: (l) => (l.doc ? signedOn(l.doc.partySigned, l.doc.partySignedAt) : '—') },
-    { id: 'stage', label: 'Этап в Диадоке', weight: 16, value: (l) => (!l.doc ? '—' : l.doc.diadocMessageId ? etrnStageLabel(l.doc.diadocStage) : 'подписание в платформе') },
+    { id: 'stage', label: 'Этап документа', weight: 16, value: (l) => (!l.doc ? '—' : l.doc.diadocMessageId ? etrnStageLabel(l.doc.diadocStage) : 'подписание в платформе') },
     { id: 'uid', label: 'УИД ГИС ЭПД', weight: 14, value: (l) => l.doc?.etrnUid ?? '—' },
   ]
   const cols = pick(all, s.columns, ['n', 'doc', 'number', 'loadDate'])
@@ -429,7 +429,7 @@ function managementSummary({ s, p, reqs }: Ctx): Built {
       lines.push(`Крупнейший перевозчик по обороту — ${topName}: ${trips(top.trips)}, ${pct(cur.turnover ? (top.turnover / cur.turnover) * 100 : 0)} оборота.`)
       const [dirName, dir] = directionsSorted[0]
       lines.push(`Основное направление — ${dirName}: ${trips(dir.trips)}, средняя ставка ${rateTxt(dir.tonnage ? dir.turnover / dir.tonnage : 0)}.`)
-      lines.push(`ЭТрН подписаны обеими сторонами по ${cur.etrnSigned} из ${trips(cur.trips)}.`)
+      lines.push(`Накладные подписаны обеими сторонами по ${cur.etrnSigned} из ${trips(cur.trips)}.`)
       if (cur.published > 0) lines.push(`Опубликовано заявок: ${cur.published}, в среднем ${cur.avgBids.toFixed(1).replace('.', ',')} ставки на заявку с откликами.`)
     }
     blocks.push({ type: 'heading', text: 'Выводы' }, { type: 'paragraphs', items: lines })

@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { endOfMonth, startOfMonth, subDays, subMonths } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { CalendarRange, Download, Loader2, RotateCcw } from 'lucide-react'
+import { CalendarRange, Download, FileSpreadsheet, Loader2, RotateCcw } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusDot, type TabProps } from '@/components/platform/common'
 import { useToast } from '@/hooks/use-toast'
@@ -150,6 +150,7 @@ export default function ReportsTab({ liveTick }: TabProps) {
   const [previewing, setPreviewing] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [genStep, setGenStep] = useState(0)
+  const [exportingExcel, setExportingExcel] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   /** незавершённый выбор в календаре (первый клик); полный период живёт в настройках отчёта */
   const [picking, setPicking] = useState<DateRange | undefined>(undefined)
@@ -275,6 +276,28 @@ export default function ReportsTab({ liveTick }: TabProps) {
     }
   }
 
+  /** многолистовая Excel-книга: исходные данные + расчёты + методика */
+  const downloadExcel = async () => {
+    if (!s || exportingExcel) return
+    setExportingExcel(true)
+    try {
+      const { blob, fileName } = await api.reportExcel({ from: s.from, to: s.to })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 4000)
+      toast({ title: 'Excel-книга сформирована', description: fileName })
+    } catch (e) {
+      toast({ title: 'Не удалось скачать Excel', description: e instanceof Error ? e.message : 'Повторите', variant: 'destructive' })
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   const resetSettings = () => {
     const stored = readStore()
     if (stored.settings) delete stored.settings[reportId]
@@ -296,7 +319,12 @@ export default function ReportsTab({ liveTick }: TabProps) {
 
   return (
     <div>
-      <SectionHeader title="Отчёты" desc="Выберите отчёт, настройте, что в него попадёт, и сформируйте документ DOCX. Настройки каждого отчёта запоминаются." />
+      <SectionHeader title="Отчёты" desc="Выберите отчёт, настройте, что в него попадёт, и сформируйте документ DOCX. Excel-книга показывает исходные данные и методику расчёта всех отчётов.">
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void downloadExcel()} disabled={exportingExcel || !s}>
+          {exportingExcel ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileSpreadsheet className="h-4 w-4 text-emerald-600" aria-hidden />}
+          {exportingExcel ? 'Собираем книгу…' : 'Скачать Excel'}
+        </Button>
+      </SectionHeader>
 
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
         {/* ── каталог ── */}

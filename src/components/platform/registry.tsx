@@ -2,22 +2,20 @@
 
 /**
  * «Реестр рейсов» — одна запись = один рейс: заявки, ставки, документы, затраты.
- * Вид синхронизирован с «Реестром заявок» (Task 75): верхние табы по статусам со
+ * Вид синхронизирован с «Реестром заявок»: верхние табы по статусам со
  * счётчиками (В работе / Завершён), поиск по номеру/грузу/маршруту/перевозчику,
- * сортировка, яркие насыщенные пузыри статусов с подписью точного статуса,
- * sticky-шапка таблицы под шапкой сайта (md+) и список, уходящий вниз без
- * внутреннего скролл-окна. Действия — иконками (просмотр, подписать ЭДО, закрыть рейс).
- * Карточка рейса — этапы (Pipeline) и журнал событий.
- * Task 76: служебные упоминания 1С из статусов убраны — названия синхронизированы
- * с реестром заявок («В работе»/«Завершён»); колонка документов ведёт в «Подписать ЭДО».
- * Кнопка «Авто в порт» — Excel в форме порта (19 колонок) по рейсам в работе: экипажи для пропуска.
+ * сортировка, статусы из общей системы платформы, sticky-шапка таблицы под шапкой
+ * сайта (md+) и список, уходящий вниз без внутреннего скролл-окна.
+ * Действия — иконками (просмотр, закрыть рейс). Карточка рейса — этапы (Pipeline)
+ * и журнал событий. В реестр попадают заявки с выбранным перевозчиком:
+ * «Перевозчик выбран» → «Документы проверяются» → «У логиста — сверка» →
+ * «Рейс выполняется» → «Рейс закрыт».
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  ChevronRight, CircleCheck, Download, Eye, FileSpreadsheet, FileText, Files,
+  ChevronRight, CircleCheck, Download, Eye, FileText, Files,
   Image as ImageIcon, ScrollText, Search,
 } from 'lucide-react'
-import * as XLSX from 'xlsx'
 import {
   EmptyState, ErrorBlock, InfoTip, LoadingBlock, SectionHeader, StatusDot, WithTip, type TabProps,
 } from '@/components/platform/common'
@@ -40,12 +38,12 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api, secureFileUrl } from '@/lib/api'
 import { pointInfo } from '@/lib/points'
-import { formatKm, routeDistanceKm } from '@/lib/geo'
+import { formatKm, straightLineKm } from '@/lib/geo'
+import { useRoadDistance } from '@/lib/use-road-distance'
 import { RouteButton } from '@/components/platform/route-dialog'
 import { useCan } from '@/components/platform/perms'
-import { PORT_COL_WIDTHS, buildPortRows, type PortExportEntry } from '@/lib/port-excel'
 import {
-  REGISTRY_STEPS, fmtDateTime, num, rate, registryStepIndex,
+  REGISTRY_STEPS, REQUEST_STATUS_META, fmtDateTime, num, rate, registryStepIndex,
 } from '@/lib/status'
 import {
   REQUEST_FILE_META, TRANSPORT_OWNERSHIP_META,
@@ -68,11 +66,13 @@ const pointAddress = (raw: string): string => {
 
 /**
  * Панель маршрута в карточке рейса (Task 110-c): полные названия и адреса точек
- * погрузки/выгрузки, расстояние по прямой и переход к автомобильному маршруту
- * в Яндекс.Картах. Точка, которой нет в справочнике, показывается «по данным заявки».
+ * погрузки/выгрузки, расстояние по автомобильному маршруту (OSRM; пока не
+ * посчитано — по прямой) и переход к автомобильному маршруту в Яндекс.Картах.
+ * Точка, которой нет в справочнике, показывается «по данным заявки».
  */
 function RoutePanel({ from, to, number }: { from: string; to: string; number: string }) {
-  const km = routeDistanceKm(from, to)
+  const { km: roadKm, road } = useRoadDistance(from, to)
+  const km = roadKm ?? straightLineKm(from, to)
   const points = [
     { label: 'Погрузка', raw: from, info: pointInfo(from) },
     { label: 'Выгрузка', raw: to, info: pointInfo(to) },
@@ -82,10 +82,10 @@ function RoutePanel({ from, to, number }: { from: string; to: string; number: st
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs font-medium text-slate-500">Маршрут</div>
         <div className="flex flex-wrap items-center gap-2">
-          <WithTip tip="Расстояние по прямой между точками погрузки и выгрузки (по справочнику точек платформы)">
+          <WithTip tip={road ? 'Расстояние по автомобильным дорогам между точками погрузки и выгрузки (OSRM)' : 'Пока маршрут рассчитывается — расстояние по прямой; дорожное подставится автоматически'}>
             <span tabIndex={0} className="flex items-baseline gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1">
-              <span className="text-[11px] text-slate-500">по прямой</span>
-              <span className="text-sm font-semibold text-slate-900">{km != null ? formatKm(km) : '—'}</span>
+              <span className="text-[11px] text-slate-500">{road ? 'по маршруту' : 'по прямой'}</span>
+              <span className="text-sm font-semibold text-slate-900">{km != null ? `${road ? '' : '≈ '}${formatKm(km)}` : '—'}</span>
             </span>
           </WithTip>
           <RouteButton from={from} to={to} number={number} />
@@ -151,11 +151,20 @@ function RequestFilesList({ files }: { files: RequestDTO['files'] }) {
 type TripGroup = 'work' | 'closed'
 type SortOrder = 'desc' | 'asc'
 
+/** Рейс в реестре — заявка, по которой уже выбран перевозчик. Статусы рейса
+ *  берутся из общей системы платформы (REQUEST_STATUS_META), поэтому подписи
+ *  совпадают с «Реестром заявок»: «Перевозчик выбран» → «Документы проверяются»
+ *  → «У логиста — сверка» → «Рейс выполняется» → «Рейс закрыт». */
+const TRIP_STATUSES = ['AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED'] as const
+const isTrip = (status: string): boolean => (TRIP_STATUSES as readonly string[]).includes(status)
+const tripStatusMeta = (status: string) =>
+  REQUEST_STATUS_META[status as keyof typeof REQUEST_STATUS_META] ?? REQUEST_STATUS_META.PUBLISHED
+
 /**
  * Группы рейсов в стиле «Реестра заявок» (Task 75→76): цвета и названия согласованы —
- * фиолетовый «В работе» = рейс выполняется (как «В работе» у заявок),
- * изумрудный «Завершён» = рейс закрыт (как «Завершена»). Служебное «В 1С» из
- * статусов убрано (Task 76) — этапы 1С остаются в событиях, а не в статусах.
+ * фиолетовый «В работе» = рейс готовится или выполняется (как «В работе» у заявок),
+ * изумрудный «Завершён» = рейс закрыт (как «Завершена»). Точный статус внутри группы
+ * показывается общей подписью REQUEST_STATUS_META.
  */
 const TRIP_GROUP_META: Record<TripGroup, { label: string; badge: string; dot: string }> = {
   work: { label: 'В работе', badge: 'bg-violet-500 text-white border-violet-600 shadow-sm', dot: 'bg-violet-500' },
@@ -163,12 +172,6 @@ const TRIP_GROUP_META: Record<TripGroup, { label: string; badge: string; dot: st
 }
 
 const tripGroupOf = (status: string): TripGroup => (status === 'CLOSED' ? 'closed' : 'work')
-
-/** Подпись точного статуса рейса без служебных процессов АЭМЗ (Task 76) */
-const TRIP_STATUS_SUB: Record<string, string> = {
-  CONFIRMED: 'Рейс выполняется',
-  CLOSED: 'Рейс закрыт',
-}
 
 /** Пайплайн из 8 статусов записи реестра */
 function Pipeline({ status, passPackage, etrnStatus }: { status: string; passPackage: boolean; etrnStatus: string }) {
@@ -198,25 +201,31 @@ function Pipeline({ status, passPackage, etrnStatus }: { status: string; passPac
 }
 
 function DocBadges({ r, stacked }: { r: RequestDTO; stacked?: boolean }) {
+  const docsChecked = ['AT_LOGIST', 'CONFIRMED', 'CLOSED'].includes(r.status)
+  const docsReview = r.status === 'DOCS_REVIEW'
+  const docsLoading = r.status === 'AWARDED'
   return (
     <div className={stacked ? 'flex flex-col items-start gap-1' : 'flex flex-wrap gap-1'}>
-      {r.passPackage && (
-        <StatusDot dot="bg-emerald-500" className="text-xs">Пропуск</StatusDot>
-      )}
-      {r.etrnStatus === 'SENT' && (
-        <StatusDot dot="bg-blue-500" className="text-xs">ЭТрН отправлена</StatusDot>
-      )}
-      {r.etrnStatus === 'SIGNED' && (
-        <StatusDot dot="bg-emerald-500" className="text-xs">ЭТрН подписана</StatusDot>
-      )}
-      {r.etrnStatus !== 'SENT' && r.etrnStatus !== 'SIGNED' && (
-        <span className="text-xs text-slate-400">ЭТрН —</span>
-      )}
+      <StatusDot
+        dot={docsChecked ? 'bg-emerald-500' : docsReview || docsLoading ? 'bg-amber-500' : 'bg-slate-300'}
+        className="text-xs"
+      >
+        {docsChecked
+          ? 'Документы проверены'
+          : docsReview
+            ? 'Документы на проверке'
+            : docsLoading
+              ? 'Документы загружаются'
+              : 'Документы не загружены'}
+      </StatusDot>
+      <StatusDot dot={r.passPackage ? 'bg-emerald-500' : 'bg-slate-300'} className="text-xs">
+        {r.passPackage ? 'Пропуск оформлен' : 'Пропуск не оформлен'}
+      </StatusDot>
     </div>
   )
 }
 
-export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavigate, liveTick }: TabProps) {
+export default function RegistryTab({ activeCarrierId: _activeCarrierId, liveTick }: TabProps) {
   const { toast } = useToast()
   // права платформы (Task 111): закрытие рейсов — trip:close; нет права — кнопки
   // «Закрыть рейс» не отображаются (сервер проверяет то же самое)
@@ -265,9 +274,10 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
     if (liveTick > 0) void load()
   }, [liveTick, load])
 
-  // записи реестра: подтверждённые (в 1С) и закрытые рейсы
+  // записи реестра: заявки, по которым уже выбран перевозчик, — от «Перевозчик выбран»
+  // до «Рейс закрыт»; черновики и заявки на площадке живут в «Реестре заявок»
   const base = useMemo(
-    () => (requests ?? []).filter((r) => r.status === 'CONFIRMED' || r.status === 'CLOSED'),
+    () => (requests ?? []).filter((r) => isTrip(r.status)),
     [requests],
   )
 
@@ -293,36 +303,6 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   const detail = base.find((r) => r.id === detailId) ?? null
   const closeTarget = base.find((r) => r.id === closeId) ?? null
 
-  // ——— Excel «Авто в порт»: рейсы в работе из текущего списка (с учётом поиска) → форма порта ———
-  const exportPort = () => {
-    const trips = filtered.filter((r) => r.status === 'CONFIRMED')
-    const known = (v: string | undefined) => (v && v !== '—' ? v : '')
-    const entries: PortExportEntry[] = trips.flatMap((r) => {
-      const driver = r.driverId ? drivers.get(r.driverId) : undefined
-      if (!driver) return []
-      const truck = r.truckId ? trucks.get(r.truckId) : undefined
-      const trailer = r.trailerId ? trailers.get(r.trailerId) : undefined
-      const carrier = r.winnerName ?? ''
-      return [{
-        driver,
-        truck: truck ? { brand: truck.brand, plate: truck.plate, color: truck.color, owner: known(truck.owner) || carrier } : null,
-        trailer: trailer ? { plate: trailer.plate, owner: known(trailer.owner) || carrier } : null,
-      }]
-    })
-    if (entries.length === 0) {
-      toast({ title: 'Нет экипажей для пропуска', description: 'В списке нет рейсов в работе с назначенным водителем' })
-      return
-    }
-    const ws = XLSX.utils.aoa_to_sheet(buildPortRows(entries))
-    ws['!cols'] = PORT_COL_WIDTHS.map((wch) => ({ wch }))
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Лист1')
-    const d = new Date()
-    const day = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
-    XLSX.writeFile(wb, `Авто в порт ${day}.xls`, { bookType: 'xls' })
-    toast({ title: 'Файл «Авто в порт» сформирован', description: `Экипажей: ${entries.length}` })
-  }
-
   const closeTrip = async () => {
     if (!closeTarget) return
     setBusy(closeTarget.id)
@@ -330,7 +310,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
       await api.action(closeTarget.id, 'close')
       toast({
         title: 'Рейс закрыт',
-        description: `№${closeTarget.number}: данные в реестре, ЭТрН подписана, отчёты сходятся с бухгалтерией`,
+        description: `№${closeTarget.number}: данные в реестре и отчётах обновлены`,
       })
       setCloseId(null)
       await load()
@@ -348,15 +328,9 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
   return (
     <div>
       <SectionHeader title="Реестр рейсов">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
-            Рейсов: {filtered.length}{filtered.length !== base.length ? ` из ${base.length}` : ''}
-          </Badge>
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={exportPort} disabled={requests === null}>
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600" aria-hidden />
-            Авто в порт
-          </Button>
-        </div>
+        <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
+          Рейсов: {filtered.length}{filtered.length !== base.length ? ` из ${base.length}` : ''}
+        </Badge>
       </SectionHeader>
 
       {requests === null && !error && <LoadingBlock label="Загрузка реестра рейсов…" />}
@@ -461,7 +435,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                               <div className="flex flex-col items-start gap-0.5">
                                 <StatusDot dot={g.dot}>{g.label}</StatusDot>
                                 <span className="text-xs leading-tight text-slate-500">
-                                  {TRIP_STATUS_SUB[r.status] ?? r.status}
+                                  {tripStatusMeta(r.status).label}
                                 </span>
                               </div>
                             </TableCell>
@@ -509,8 +483,8 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                             <TableCell className={`whitespace-nowrap font-semibold ${(r.savings ?? 0) > 0 ? 'text-slate-900' : 'text-slate-500'}`}>
                               {rate(r.savings)}
                             </TableCell>
-                            <TableCell onClick={(e) => { e.stopPropagation(); onNavigate('edo') }} className="cursor-pointer">
-                              <span title="Открыть «Подписать ЭДО»"><DocBadges r={r} stacked /></span>
+                            <TableCell>
+                              <DocBadges r={r} stacked />
                             </TableCell>
                             <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-1">
@@ -564,7 +538,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                     {TRIP_GROUP_META[tripGroupOf(detail.status)].label}
                   </StatusDot>
                   <span className="text-sm font-normal text-slate-500">
-                    · {TRIP_STATUS_SUB[detail.status] ?? detail.status}
+                    · {tripStatusMeta(detail.status).label}
                   </span>
                 </DialogTitle>
                 <DialogDescription className="sr-only">
@@ -720,7 +694,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, onNavig
                   <>
                     Запись №{closeTarget.number} · {closeTarget.fromPoint} → {closeTarget.toPoint} ·{' '}
                     {closeTarget.winnerName ?? '—'} — {rate(closeTarget.bestRate)}. Рейс будет помечен закрытым
-                    в реестре, ЭТрН — подписанной. Отчёты для бухгалтерии пересчитаются автоматически.
+                    в реестре, документы — принятыми. Отчёты для бухгалтерии пересчитаются автоматически.
                     <span className="mt-2 block font-medium text-slate-900">
                       Связанная заявка №{closeTarget.number} автоматически станет «Завершена» — статус синхронно
                       обновится в реестре заявок и кабинетах без ручного обновления страницы.

@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>АЭМЗ · Телефон логиста — мост для звонков</title>
+<style>
+  /* Веб-демо лёгкого приложения-моста: клик «Позвонить» в кабинете на ПК
+     передаёт заявку на телефон логиста — здесь кнопка вызова без ввода номера.
+     Нативное приложение подключится к тому же API (/api/call). */
+  :root {
+    --navy: #0E1B2C;
+    --navy-2: #16304f;
+    --green: #059669;
+    --green-2: #047857;
+    --line: #e2e8f0;
+    --muted: #64748b;
+    --text: #0f172a;
+    --amber: #d97706;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; justify-content: center; align-items: flex-start;
+    padding: 24px 12px; background: linear-gradient(160deg, #0b1626 0%, #0E1B2C 55%, #16304f 100%);
+    font: 14px/1.45 -apple-system, 'Segoe UI', Roboto, Arial, sans-serif; color: var(--text);
+  }
+  .phone { width: 100%; max-width: 420px; background: #f8fafc; border-radius: 28px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.06); }
+  .hdr { background: var(--navy); color: #fff; padding: 16px 18px 14px; }
+  .hdr-top { display: flex; align-items: center; gap: 10px; }
+  .hdr-title { font-weight: 700; font-size: 15px; letter-spacing: .2px; }
+  .hdr-sub { font-size: 11.5px; color: #cbd5e1; margin-top: 2px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; margin-left: auto; flex: none; }
+  .dot.on { background: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,.18); }
+  .dot.err { background: #f87171; }
+  .body { padding: 16px 16px 18px; }
+
+  /* состояние ожидания */
+  .wait { text-align: center; padding: 34px 10px 26px; color: var(--muted); }
+  .wait .ring { width: 84px; height: 84px; margin: 0 auto 16px; border-radius: 50%;
+    background: #ecfdf5; display: flex; align-items: center; justify-content: center;
+    animation: pulse 2.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(5,150,105,.25);} 50% { box-shadow: 0 0 0 14px rgba(5,150,105,0);} }
+  .wait b { color: #334155; display: block; margin-bottom: 4px; font-size: 15px; }
+
+  /* карточка звонка */
+  .task { border: 1px solid var(--line); background: #fff; border-radius: 16px; padding: 16px;
+    box-shadow: 0 4px 16px rgba(15,23,42,.06); animation: drop .25s ease-out; }
+  @keyframes drop { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .task .who { font-size: 17px; font-weight: 700; }
+  .task .tel { font-size: 15px; color: #1d4ed8; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .task .ord { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; font-size: 12.5px; color: var(--muted); }
+  .task .ord .num { color: #334155; font-weight: 700; }
+  .task .ord div { margin-top: 3px; }
+  .btn-call { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+    margin-top: 14px; padding: 14px; border: 0; border-radius: 14px; background: var(--green); color: #fff;
+    font-size: 16px; font-weight: 700; cursor: pointer; }
+  .btn-call:hover { background: var(--green-2); }
+  .btn-call:active { transform: translateY(1px); }
+  .btn-skip { display: block; width: 100%; margin-top: 8px; padding: 9px; border: 1px solid var(--line);
+    border-radius: 12px; background: #fff; color: var(--muted); font-size: 13px; cursor: pointer; }
+  .btn-skip:hover { background: #f1f5f9; }
+
+  /* история */
+  .hist { margin-top: 18px; }
+  .hist h3 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 8px; }
+  .hist ul { list-style: none; margin: 0; padding: 0; }
+  .hist li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--line);
+    background: #fff; border-radius: 10px; margin-bottom: 6px; font-size: 12.5px; }
+  .hist .st { margin-left: auto; flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; }
+  .st.called { background: #ecfdf5; color: #047857; }
+  .st.dismissed { background: #f1f5f9; color: #64748b; }
+  .st.delivered { background: #fef3c7; color: #92400e; }
+  .st.pending { background: #e0e7ff; color: #4338ca; }
+
+  .note { margin-top: 14px; font-size: 11px; color: #94a3b8; text-align: center; }
+  .err { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #fef2f2; border: 1px solid #fecaca;
+    color: #b91c1c; font-size: 12.5px; display: none; }
+  svg { display: inline-block; vertical-align: middle; }
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="hdr">
+    <div class="hdr-top">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#7dd3fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+      </svg>
+      <div>
+        <div class="hdr-title">Телефон логиста</div>
+        <div class="hdr-sub">АЭМЗ · мост звонков из кабинета</div>
+      </div>
+      <span class="dot" id="dot" title="Соединение с кабинетом"></span>
+    </div>
+  </div>
+  <div class="body">
+    <div class="err" id="err"></div>
+
+    <div class="wait" id="wait">
+      <div class="ring">
+        <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+        </svg>
+      </div>
+      <b>Жду заявку с ПК</b>
+      Нажмите «Позвонить» в кабинете — заявка<br>и номер водителя появятся здесь
+    </div>
+
+    <div class="task" id="task" style="display:none">
+      <div class="who" id="t-who">—</div>
+      <div class="tel" id="t-tel">—</div>
+      <div class="ord">
+        <div><span class="num" id="t-num">—</span></div>
+        <div id="t-route">—</div>
+        <div id="t-info">—</div>
+      </div>
+      <button class="btn-call" id="btn-call" type="button">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+        </svg>
+        Позвонить
+      </button>
+      <button class="btn-skip" id="btn-skip" type="button">Скрыть без звонка</button>
+    </div>
+
+    <div class="hist" id="hist" style="display:none">
+      <h3>Последние звонки</h3>
+      <ul id="hist-list"></ul>
+    </div>
+
+    <div class="note">
+      Веб-демо лёгкого приложения-моста. Нативное приложение подключится к тому же API
+      (GET /api/call?poll=1 · POST /api/call ack) — номер набирать вручную не придётся.
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict'
+  var POLL_MS = 3000
+  var dot = document.getElementById('dot')
+  var errBox = document.getElementById('err')
+  var wait = document.getElementById('wait')
+  var taskBox = document.getElementById('task')
+  var histBox = document.getElementById('hist')
+  var histList = document.getElementById('hist-list')
+  var current = null
+
+  function authHeaders() {
+    var h = { 'Content-Type': 'application/json' }
+    try {
+      var t = window.localStorage.getItem('aemz_session_token')
+      if (t) h['Authorization'] = 'Bearer ' + t
+    } catch (e) { /* приватный режим — остаёмся на cookie */ }
+    return h
+  }
+
+  function showErr(msg) {
+    errBox.textContent = msg
+    errBox.style.display = msg ? 'block' : 'none'
+    dot.className = msg ? 'dot err' : 'dot on'
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    })
+  }
+
+  function renderTask(t) {
+    current = t
+    wait.style.display = 'none'
+    taskBox.style.display = 'block'
+    document.getElementById('t-who').textContent = t.driverName || 'Водитель'
+    document.getElementById('t-tel').textContent = t.driverPhone || ''
+    document.getElementById('t-num').textContent = t.orderNumber ? 'Заявка ' + t.orderNumber : 'Звонок без заявки'
+    document.getElementById('t-route').textContent = t.orderRoute || ''
+    document.getElementById('t-info').textContent = (t.orderInfo || '').split(' · ').slice(1).join(' · ')
+  }
+
+  function clearTask() {
+    current = null
+    taskBox.style.display = 'none'
+    wait.style.display = 'block'
+  }
+
+  function ack(result) {
+    if (!current) return
+    fetch('/kontur/api/call', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ action: 'ack', taskId: current.id, result: result })
+    }).catch(function () {})
+    clearTask()
+    loadHistory()
+  }
+
+  document.getElementById('btn-call').addEventListener('click', function () {
+    if (!current) return
+    var tel = current.tel || ('tel:' + String(current.driverPhone || '').replace(/[^\d+]/g, ''))
+    ack('called')
+    window.location.href = tel
+  })
+  document.getElementById('btn-skip').addEventListener('click', function () { ack('dismissed') })
+
+  function loadHistory() {
+    fetch('/kontur/api/call', { headers: authHeaders() })
+      .then(function (r) { return r.ok ? r.json() : null })
+      .then(function (d) {
+        if (!d || !d.tasks || !d.tasks.length) { histBox.style.display = 'none'; return }
+        histBox.style.display = 'block'
+        histList.innerHTML = d.tasks.slice(0, 5).map(function (t) {
+          var st = { called: 'позвонил', dismissed: 'скрыто', delivered: 'на экране', pending: 'ждёт' }[t.status] || t.status
+          return '<li><span>' + esc(t.driverName || t.driverPhone) + '</span>' +
+            (t.orderNumber ? '<span style="color:#94a3b8">· ' + esc(t.orderNumber) + '</span>' : '') +
+            '<span class="st ' + esc(t.status) + '">' + st + '</span></li>'
+        }).join('')
+      })
+      .catch(function () {})
+  }
+
+  function poll() {
+    fetch('/kontur/api/call?poll=1&deviceId=web-bridge', { headers: authHeaders() })
+      .then(function (r) {
+        if (r.status === 401) {
+          showErr('Нет входа в кабинет. Откройте кабинет АЭМЗ в этой же вкладке браузера и войдите — мост подхватит сессию.')
+          return null
+        }
+        showErr('')
+        return r.ok ? r.json() : null
+      })
+      .then(function (d) {
+        if (d && d.task) {
+          renderTask(d.task)
+          if (navigator.vibrate) navigator.vibrate([120, 60, 120])
+        }
+      })
+      .catch(function () {
+        dot.className = 'dot err'
+      })
+  }
+
+  dot.className = 'dot on'
+  poll()
+  loadHistory()
+  setInterval(poll, POLL_MS)
+  setInterval(loadHistory, 15000)
+})()
+</script>
+</body>
+</html>

@@ -33,6 +33,7 @@ $BuildManifestConfigFiles = @(
     'tailwind.config.ts',
     'components.json',
     'prisma/schema.prisma',
+    'prisma/kontur.prisma',
     '.env.local'
 )
 

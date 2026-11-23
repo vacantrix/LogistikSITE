@@ -93,7 +93,8 @@ function Test-StackArchitecture {
         @{ Port = $PlatformPort; Name = 'platform' },
         @{ Port = $OcrPort; Name = 'OCR' },
         @{ Port = $GatewayPort; Name = 'gateway' },
-        @{ Port = $PortalAuthPort; Name = 'portal-auth' }
+        @{ Port = $PortalAuthPort; Name = 'portal-auth' },
+        @{ Port = $DriverApiPort; Name = 'driver-api' }
     )
     foreach ($item in $loopback) {
         $listener = Get-StackListener -Port $item.Port
@@ -163,6 +164,10 @@ function Test-StackArchitecture {
             @{ Name = 'portal-auth 8090'; Pattern = 'reverse_proxy\s+127\.0\.0\.1:8090' },
             @{ Name = 'portal API handler'; Pattern = 'handle\s+/api/portal/\*' },
             @{ Name = 'installers handler'; Pattern = 'handle\s+/dl/\*' },
+            @{ Name = 'dispatcher (monolith)'; Pattern = '@kontur[\s\S]{0,400}reverse_proxy\s+127\.0\.0\.1:3000' },
+            @{ Name = '1C bridge (monolith)'; Pattern = 'handle\s+/api/1c/\*[\s\S]{0,400}reverse_proxy\s+127\.0\.0\.1:3000' },
+            @{ Name = 'driver API handler'; Pattern = 'handle\s+/api/driver/\*' },
+            @{ Name = 'driver API upstream'; Pattern = 'handle\s+/api/driver/\*[\s\S]{0,200}reverse_proxy\s+127\.0\.0\.1:3102' },
             @{ Name = 'portal file_server'; Pattern = 'file_server' },
             @{ Name = 'portal root'; Pattern = [regex]::Escape($portalRoot) }
         )

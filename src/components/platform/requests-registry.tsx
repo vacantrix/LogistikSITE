@@ -21,6 +21,8 @@ import {
   Pencil,
   ScrollText,
   Search,
+  ShieldAlert,
+  ShieldCheck,
   Trash2,
 } from 'lucide-react'
 import {
@@ -38,14 +40,14 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { useCan } from '@/components/platform/perms'
 import { api, secureFileUrl } from '@/lib/api'
-import { formatKm, routeDistanceKm } from '@/lib/geo'
+import { formatKm, straightLineKm } from '@/lib/geo'
+import { useRoadDistance } from '@/lib/use-road-distance'
 import { pointInfo } from '@/lib/points'
 import { RouteButton } from '@/components/platform/route-dialog'
 import { RequestFormDialog } from '@/components/platform/request-form'
@@ -77,11 +79,13 @@ const pointAddress = (raw: string): string => {
 
 /**
  * Панель маршрута в карточке заявки (Task 110-c): полные названия и адреса точек
- * погрузки/выгрузки, расстояние по прямой и переход к автомобильному маршруту
- * в Яндекс.Картах. Точка, которой нет в справочнике, показывается «по данным заявки».
+ * погрузки/выгрузки, расстояние по автомобильному маршруту (OSRM; пока не
+ * посчитано — по прямой) и переход к автомобильному маршруту в Яндекс.Картах.
+ * Точка, которой нет в справочнике, показывается «по данным заявки».
  */
 function RoutePanel({ from, to, number }: { from: string; to: string; number: string }) {
-  const km = routeDistanceKm(from, to)
+  const { km: roadKm, road } = useRoadDistance(from, to)
+  const km = roadKm ?? straightLineKm(from, to)
   const points = [
     { label: 'Погрузка', raw: from, info: pointInfo(from) },
     { label: 'Выгрузка', raw: to, info: pointInfo(to) },
@@ -91,10 +95,10 @@ function RoutePanel({ from, to, number }: { from: string; to: string; number: st
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs font-medium text-slate-500">Маршрут</div>
         <div className="flex flex-wrap items-center gap-2">
-          <WithTip tip="Расстояние по прямой между точками погрузки и выгрузки (по справочнику точек платформы)">
+          <WithTip tip={road ? 'Расстояние по автомобильным дорогам между точками погрузки и выгрузки (OSRM)' : 'Пока маршрут рассчитывается — расстояние по прямой; дорожное подставится автоматически'}>
             <span tabIndex={0} className="flex items-baseline gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1">
-              <span className="text-[11px] text-slate-500">по прямой</span>
-              <span className="text-sm font-semibold text-slate-900">{km != null ? formatKm(km) : '—'}</span>
+              <span className="text-[11px] text-slate-500">{road ? 'по маршруту' : 'по прямой'}</span>
+              <span className="text-sm font-semibold text-slate-900">{km != null ? `${road ? '' : '≈ '}${formatKm(km)}` : '—'}</span>
             </span>
           </WithTip>
           <RouteButton from={from} to={to} number={number} />
@@ -232,6 +236,8 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
   const [detailId, setDetailId] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
+  const [quarantineId, setQuarantineId] = useState<string | null>(null)
+  const [quarantineReason, setQuarantineReason] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -275,6 +281,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
   const detail = (requests ?? []).find((r) => r.id === detailId) ?? null
   const deleteTarget = (requests ?? []).find((r) => r.id === deleteId) ?? null
   const editTarget = (requests ?? []).find((r) => r.id === editId) ?? null
+  const quarantineTarget = (requests ?? []).find((r) => r.id === quarantineId) ?? null
 
   // ——— удаление (Task 65): только текущие заявки, с подтверждением ———
   const doDelete = async () => {
@@ -287,6 +294,42 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
       await load()
     } catch (e) {
       toast({ title: 'Не удалось удалить заявку', description: e instanceof Error ? e.message : 'Попробуйте ещё раз', variant: 'destructive' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // ——— карантин: приостановка заявки с причиной, возврат в прежний статус ———
+  const doQuarantine = async () => {
+    if (!quarantineTarget) return
+    const reason = quarantineReason.trim()
+    if (reason.length < 3) {
+      toast({ title: 'Укажите причину карантина', description: 'Причина попадёт в журнал и уведомление перевозчику', variant: 'destructive' })
+      return
+    }
+    setBusy(quarantineTarget.id)
+    try {
+      await api.action(quarantineTarget.id, 'quarantine', { reason })
+      toast({ title: 'Заявка в карантине', description: `№${quarantineTarget.number}: работа приостановлена. Причина: ${reason}` })
+      setQuarantineId(null)
+      setQuarantineReason('')
+      await load()
+    } catch (e) {
+      toast({ title: 'Не удалось поместить заявку в карантин', description: e instanceof Error ? e.message : 'Попробуйте ещё раз', variant: 'destructive' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const doUnquarantine = async (id: string) => {
+    const target = (requests ?? []).find((r) => r.id === id)
+    setBusy(id)
+    try {
+      await api.action(id, 'unquarantine')
+      toast({ title: 'Карантин снят', description: `№${target?.number ?? ''}: заявка возвращена в работу` })
+      await load()
+    } catch (e) {
+      toast({ title: 'Не удалось вернуть заявку из карантина', description: e instanceof Error ? e.message : 'Попробуйте ещё раз', variant: 'destructive' })
     } finally {
       setBusy(null)
     }
@@ -442,6 +485,31 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                                     <Pencil className="h-4 w-4" aria-hidden />
                                   </Button>
                                 )}
+                                {can('request:quarantine') && r.status !== 'QUARANTINE' && r.status !== 'CLOSED' && r.status !== 'DELETED' && (
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-slate-400 hover:bg-orange-50 hover:text-orange-600"
+                                    onClick={() => { setQuarantineReason(''); setQuarantineId(r.id) }}
+                                    aria-label={`Поместить заявку ${r.number} в карантин`}
+                                    title="Карантин — приостановить работу"
+                                  >
+                                    <ShieldAlert className="h-4 w-4" aria-hidden />
+                                  </Button>
+                                )}
+                                {can('request:quarantine') && r.status === 'QUARANTINE' && (
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-orange-600 hover:bg-emerald-50 hover:text-emerald-700"
+                                    disabled={busy === r.id}
+                                    onClick={() => void doUnquarantine(r.id)}
+                                    aria-label={`Вернуть заявку ${r.number} из карантина`}
+                                    title="Снять карантин и вернуть в работу"
+                                  >
+                                    <ShieldCheck className="h-4 w-4" aria-hidden />
+                                  </Button>
+                                )}
                                 {deletable && (
                                   <Button
                                     size="icon"
@@ -561,6 +629,19 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
                   <p className="mt-1 whitespace-pre-line text-sm text-slate-800">{detail.verifyComment}</p>
                 </div>
               )}
+              {detail.status === 'QUARANTINE' && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+                  <div className="flex items-center gap-1.5 text-[11px] font-medium text-orange-700">
+                    <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
+                    Карантин: работа приостановлена
+                  </div>
+                  <p className="mt-1 whitespace-pre-line text-sm text-orange-900">{detail.quarantineReason ?? 'Причина не указана'}</p>
+                  <div className="mt-1 text-[11px] text-orange-700/80">
+                    {detail.quarantinedBy ? `${detail.quarantinedBy} · ` : ''}
+                    {detail.quarantinedAt ? fmtDateTime(detail.quarantinedAt) : ''}
+                  </div>
+                </div>
+              )}
 
               {/* вложения (Task 64) */}
               {detail.documents.length > 0 && (
@@ -583,6 +664,51 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
               )}
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Карантин заявки: причина обязательна, статус сохраняется для возврата */}
+      <Dialog open={!!quarantineTarget} onOpenChange={(o) => { if (!o) { setQuarantineId(null); setQuarantineReason('') } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5 text-orange-600" aria-hidden />
+              Поместить заявку в карантин
+            </DialogTitle>
+            <DialogDescription>
+              {quarantineTarget && (
+                <>Заявка <span className="font-semibold text-slate-900">№{quarantineTarget.number}</span> будет приостановлена.
+                  Работа по ней остановится, перевозчик получит уведомление. Вернуть заявку можно в прежний статус.</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="quarantine-reason" className="text-sm font-medium text-slate-700">
+              Причина карантина <span className="text-red-600">*</span>
+            </label>
+            <Textarea
+              id="quarantine-reason"
+              value={quarantineReason}
+              onChange={(e) => setQuarantineReason(e.target.value)}
+              placeholder="Например: перевозчик не подтвердил экипаж, нужна проверка документов"
+              maxLength={500}
+              rows={4}
+              className="resize-none"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Причина сохраняется в журнале контура и в карточке заявки. {quarantineReason.length}/500
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setQuarantineId(null); setQuarantineReason('') }}>Отмена</Button>
+            <Button
+              className="bg-orange-600 text-white hover:bg-orange-700 focus-visible:ring-orange-600"
+              disabled={busy !== null || quarantineReason.trim().length < 3}
+              onClick={() => void doQuarantine()}
+            >
+              {busy === quarantineTarget?.id ? 'Приостанавливаем…' : 'В карантин'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

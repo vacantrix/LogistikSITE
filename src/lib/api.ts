@@ -169,6 +169,13 @@ export const api = {
     return fetch(`/api/requests${qs.toString() ? `?${qs}` : ''}`, withAuth({ cache: 'no-store' })).then(json<{ requests: RequestDTO[] }>)
   },
   getRequest: (id: string) => fetch(`/api/requests/${id}`, withAuth({ cache: 'no-store' })).then(json<{ request: RequestDTO }>),
+  /** Расстояние по автомобильным дорогам (OSRM) для пар точек — батчем, с кэшем на сервере */
+  routeDistance: (pairs: { from: string; to: string }[]) =>
+    fetch('/api/route-distance', withAuth({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairs }),
+    })).then(json<{ distances: (number | null)[] }>),
   createRequest: (body: Partial<RequestDTO> & { deadlineHours?: number; draft?: boolean }) =>
     fetch('/api/requests', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<{ request: RequestDTO }>),
   action: (id: string, action: string, payload: Record<string, unknown> = {}) =>
@@ -262,6 +269,31 @@ export const api = {
     }
     return { blob: await res.blob(), fileName }
   },
+  /**
+   * «Скачать Excel» в «Отчётах»: многолистовая книга с исходными данными и методикой.
+   * Период — текущие даты формы; имя файла приходит из Content-Disposition.
+   */
+  reportExcel: async (params: { from: string; to: string }): Promise<{ blob: Blob; fileName: string }> => {
+    const res = await fetch(`/api/reports/excel?${new URLSearchParams(params).toString()}`, withAuth({ cache: 'no-store' }))
+    if (res.status === 401 && typeof window !== 'undefined') {
+      try {
+        const token = sessionStorage.getItem(ACTIVE_TOKEN_KEY)
+        if (token) removeAccountByToken(token)
+        sessionStorage.removeItem(ACTIVE_TOKEN_KEY)
+      } catch { /* приватный режим */ }
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+      throw new Error('Требуется вход в систему')
+    }
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(data.error || `Ошибка запроса (${res.status})`)
+    }
+    const cd = res.headers.get('Content-Disposition') ?? ''
+    let fileName = `aemz-otchety_${params.from}_${params.to}.xlsx`
+    const utf8 = /filename\*=UTF-8''([^;\s]+)/i.exec(cd)
+    if (utf8?.[1]) fileName = decodeURIComponent(utf8[1].replace(/^["']|["']$/g, ''))
+    return { blob: await res.blob(), fileName }
+  },
   events: (limit = 30) => fetch(`/api/events?limit=${limit}`, withAuth({ cache: 'no-store' })).then(json<{ events: EventFeedItem[] }>),
 
   /** Уведомления колокольчика (Task 69): список + число непрочитанных */
@@ -296,9 +328,9 @@ export const api = {
     fetch('/api/admin/access', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'user-access', ...data }) })).then(json<AccessDataDTO>),
   adminUsers: () =>
     fetch('/api/admin/users', withAuth({ cache: 'no-store' })).then(json<{ users: AdminUserDTO[] }>),
-  adminUserCreate: (data: { login: string; name: string; password: string; role: string; carrierId?: string | null; templateId?: string | null; profile?: Partial<ProfileDTO> }) =>
+  adminUserCreate: (data: { login: string; name: string; password: string; role: string; carrierId?: string | null; templateId?: string | null; transportScope?: string; profile?: Partial<ProfileDTO> }) =>
     fetch('/api/admin/users', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
-  adminUserUpdate: (data: { id: string; name?: string; role?: string; carrierId?: string | null; password?: string; profile?: Partial<ProfileDTO> }) =>
+  adminUserUpdate: (data: { id: string; name?: string; role?: string; carrierId?: string | null; transportScope?: string; password?: string; profile?: Partial<ProfileDTO> }) =>
     fetch('/api/admin/users', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })).then(json<{ user: AdminUserDTO }>),
   adminUserDelete: (id: string) =>
     fetch(`/api/admin/users?id=${encodeURIComponent(id)}`, withAuth({ method: 'DELETE' })).then(json<{ ok: boolean }>),

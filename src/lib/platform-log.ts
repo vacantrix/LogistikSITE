@@ -1,35 +1,65 @@
 /**
- * Журнал событий платформы (Task 76) — серверная сторона.
+ * Журнал событий платформы (Task 76) — человек читает журнал, машина хранит историю.
  *
- * Единая точка записи в таблицу PlatformLog: бизнес-события (вход, заявки,
- * ставки, документы, ЭДО, интеграция с 1С), предупреждения и ошибки.
- * Пишем fire-and-forget: сбой журналирования никогда не ломает основной
- * сценарий — ошибка записи уходит только в консоль сервера.
+ * Пишем две копии одного события:
+ *  1) PlatformLog в базе платформы — для экрана «Журнал событий», фильтров и статистики;
+ *  2) publish/logs/contour-audit.jsonl — единый сквозной журнал контура: платформа
+ *     и диспетчерская пишут туда в одном формате (кто, что, объект, до/после, IP).
  *
- * Необработанные ошибки маршрутов дополнительно ловит instrumentation.ts
- * (onRequestError), клиентские — эндпоинт /api/platform-log/client.
- * Лентой журнал показывает раздел «Журнал событий» (только логист).
+ * Запись fire-and-forget: бизнес-операция не должна падать из-за журнала.
  */
+import { randomUUID } from 'crypto'
+import { headers } from 'next/headers'
 import { db } from '@/lib/db'
+import { writeContourAudit } from '@/lib/contour-audit'
 
 export type PlatformLogLevel = 'INFO' | 'WARN' | 'ERROR'
 
 export interface PlatformLogEntry {
   level?: PlatformLogLevel
-  /** вид события: LOGIN, REQUEST_CREATED, BID_PLACED, EDO_SIGNED, SERVER_ERROR… */
+  /** Тип события: LOGIN, REQUEST_CREATED, BID_PLACED, EDO_SIGNED, SERVER_ERROR… */
   type: string
-  /** источник: auth/login, api/requests/action, 1c/etrn, browser… */
+  /** Источник: auth/login, api/requests/action, 1c/etrn, browser… */
   source?: string
   actor?: { login?: string; name?: string; role?: string } | null
   requestId?: string | null
   requestNumber?: string | null
   carrierName?: string | null
   message: string
-  /** произвольные подробности — сериализуются в JSON-колонку meta */
+  /** Произвольные подробности — сохраняются в JSON-поле meta */
   meta?: unknown
+  /** Сквозной идентификатор операции (если не задан — генерируется) */
+  correlationId?: string | null
+  /** Объект действия: request, user, document, trip… */
+  objectType?: string | null
+  objectId?: string | null
+  /** Состояние до и после действия */
+  before?: string | null
+  after?: string | null
+}
+
+interface RequestMeta {
+  ip: string | null
+  userAgent: string | null
+}
+
+/** IP и User-Agent текущего запроса; вне запроса (cron, старт) — пусто */
+async function requestMeta(): Promise<RequestMeta> {
+  try {
+    const h = await headers()
+    const forwarded = h.get('x-forwarded-for')
+    return {
+      ip: forwarded?.split(',')[0]?.trim() || h.get('x-real-ip') || null,
+      userAgent: h.get('user-agent')?.slice(0, 500) ?? null,
+    }
+  } catch {
+    return { ip: null, userAgent: null }
+  }
 }
 
 export async function plog(entry: PlatformLogEntry): Promise<void> {
+  const correlationId = entry.correlationId ?? randomUUID()
+  const { ip, userAgent } = await requestMeta()
   try {
     await db.platformLog.create({
       data: {
@@ -44,14 +74,41 @@ export async function plog(entry: PlatformLogEntry): Promise<void> {
         carrierName: entry.carrierName ?? null,
         message: entry.message.slice(0, 2000),
         meta: entry.meta === undefined ? null : safeJson(entry.meta),
+        contour: 'platform',
+        correlationId,
+        objectType: entry.objectType ?? (entry.requestId ? 'request' : null),
+        objectId: entry.objectId ?? entry.requestId ?? null,
+        before: entry.before ?? null,
+        after: entry.after ?? null,
+        ip,
+        userAgent,
       },
     })
   } catch (e) {
     console.error('[platform-log] write failed', e)
   }
+
+  // сквозной журнал контура — даже если запись в БД не удалась
+  await writeContourAudit({
+    contour: 'platform',
+    action: entry.type,
+    actorLogin: entry.actor?.login ?? null,
+    actorName: entry.actor?.name ?? null,
+    actorRole: entry.actor?.role ?? null,
+    objectType: entry.objectType ?? (entry.requestId ? 'request' : null),
+    objectId: entry.objectId ?? entry.requestId ?? null,
+    requestNumber: entry.requestNumber ?? null,
+    before: entry.before ?? null,
+    after: entry.after ?? null,
+    message: entry.message.slice(0, 2000),
+    ip,
+    userAgent,
+    correlationId,
+    meta: entry.meta,
+  })
 }
 
-/** Ошибка: уровень ERROR + стек и подробности в meta. Поля ctx при желании переопределяют значения */
+/** Ошибка: уровень ERROR + текст и стек в подробностях meta. */
 export async function plogError(source: string, err: unknown, ctx: Partial<PlatformLogEntry> = {}): Promise<void> {
   const message = err instanceof Error ? err.message : String(err)
   const stack = err instanceof Error ? (err.stack ?? null) : null

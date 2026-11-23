@@ -2,7 +2,7 @@
 
 /** Статусы заявки. DELETED (Task 65) — мягкое удаление: запись остаётся в реестре
  *  заявок со статусом «Удалена», но исчезает с площадки и из кабинетов перевозчиков */
-export type RequestStatus = 'DRAFT' | 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'CONFIRMED' | 'CLOSED' | 'DELETED'
+export type RequestStatus = 'DRAFT' | 'PUBLISHED' | 'AWARDED' | 'DOCS_REVIEW' | 'AT_LOGIST' | 'QUARANTINE' | 'CONFIRMED' | 'CLOSED' | 'DELETED'
 export type RequestMode = 'AUCTION' | 'CLOSED'
 export type DocStatus = 'PENDING' | 'PASSED' | 'REUPLOAD' | 'REJECTED' | 'MANUAL'
 export type DocType = 'PASSPORT_PHOTO' | 'PASSPORT_REG' | 'STS' | 'REQUEST_DOC' | 'POA' | 'ATTACHMENT'
@@ -202,6 +202,10 @@ export interface RequestDTO {
   /** число активных ставок; перевозчику в закрытых торгах не передаётся до итогов (null) */
   bidsCount: number | null
   status: RequestStatus
+  /** Карантин: причина, когда и кто поставил (видно только персоналу) */
+  quarantineReason: string | null
+  quarantinedAt: string | null
+  quarantinedBy: string | null
   loadDate: string
   loadWindow: string
   deadline: string | null
@@ -486,6 +490,8 @@ export interface AdminUserDTO {
   carrierName: string | null
   /** должность (набор прав внутри контура роли) */
   templateId: string | null
+  /** специализация логиста: all | tent | board (см. lib/transport-scope) */
+  transportScope: string
   createdAt: string
   profile: ProfileDTO | null
 }
@@ -594,7 +600,7 @@ export const TICKET_CATEGORY_META: Record<TicketCategory, string> = {
   docs: 'Документы по заявке',
   auction: 'Торги и заявки',
   payment: 'Оплата и закрывающие документы',
-  edo: 'ЭДО и подписи',
+  edo: 'Документы и подписи',
   tech: 'Проблемы с платформой',
   other: 'Другое',
 }

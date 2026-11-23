@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
-import { requireUser } from '@/lib/auth'
+import { requireUser, type SessionUser } from '@/lib/auth'
+import { allowedFor } from '@/lib/permissions'
+import { NOTIFY_PERM } from '@/lib/notify-users'
+import { requestScopeWhere } from '@/lib/transport-scope'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,26 +12,60 @@ export const dynamic = 'force-dynamic'
 const TAKE = 50
 
 /**
+ * Уведомление доступно пользователю, если он видит заявку и может выполнить
+ * действие, к которому уведомление призывает. Проверка повторяется при чтении:
+ * права и специализация могли измениться уже после доставки.
+ */
+async function notificationAllowed(auth: SessionUser, type: string, requestId: string | null): Promise<boolean> {
+  if (auth.role !== 'logist') return true
+  const need = NOTIFY_PERM[type as keyof typeof NOTIFY_PERM]
+  if (!need) return true
+  return allowedFor(auth, need)
+}
+
+/**
  * GET /api/notifications — уведомления текущего пользователя (колокольчик в шапке).
- * Возвращает свежие 50 штук и число непрочитанных (считается по всем).
+ * Возвращает свежие 50 штук и число непрочитанных (считается по всем доступным).
+ * Для логиста список ограничен его специализацией по транспорту.
  */
 export async function GET() {
   const auth = await requireUser()
   if (auth instanceof NextResponse) return auth
 
-  const [items, unread] = await Promise.all([
+  const where: Prisma.NotificationWhereInput = { userId: auth.id }
+  if (auth.role === 'logist') {
+    const scope = requestScopeWhere(auth.transportScope)
+    if (Object.keys(scope).length > 0) {
+      // уведомления без заявки (обращения, служебные) не ограничиваем
+      where.OR = [{ requestId: null }, { request: { is: scope } }]
+    }
+  }
+
+  const [items, unreadItems] = await Promise.all([
     db.notification.findMany({
-      where: { userId: auth.id },
+      where,
       orderBy: { createdAt: 'desc' },
       take: TAKE,
       include: { request: { select: { number: true } } },
     }),
-    db.notification.count({ where: { userId: auth.id, read: false } }),
+    db.notification.findMany({
+      where: { ...where, read: false },
+      select: { id: true, type: true, requestId: true },
+    }),
   ])
+
+  const shown: (typeof items)[number][] = []
+  for (const n of items) {
+    if (await notificationAllowed(auth, n.type, n.requestId)) shown.push(n)
+  }
+  let unread = 0
+  for (const n of unreadItems) {
+    if (await notificationAllowed(auth, n.type, n.requestId)) unread += 1
+  }
 
   return NextResponse.json({
     unread,
-    notifications: items.map((n) => ({
+    notifications: shown.map((n) => ({
       id: n.id,
       type: n.type,
       title: n.title,

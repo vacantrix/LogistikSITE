@@ -1,6 +1,6 @@
 # src/ — код платформы
 
-Весь код веб-платформы «АЭМЗ Логистика» (Next.js 16, App Router, TypeScript).
+Весь код веб-платформы «АЭМЗ Поток» (Next.js 16, App Router, TypeScript).
 
 ```
 src/

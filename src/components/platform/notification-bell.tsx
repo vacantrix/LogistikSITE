@@ -80,15 +80,23 @@ function relTime(iso: string): string {
   return new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 
-export function NotificationBell({ role, onNavigate, liveTick }: {
+export function NotificationBell({ role, onNavigate, liveTick, tabs }: {
   role: RoleKind
   onNavigate: (t: TabKey) => void
   liveTick: number
+  /** разделы, видимые пользователю по правам: уведомления о закрытых разделах не показываем */
+  tabs?: TabKey[]
 }) {
   const [items, setItems] = useState<NotificationDTO[]>([])
   const [unread, setUnread] = useState(0)
   const [open, setOpen] = useState(false)
   const [loadedOnce, setLoadedOnce] = useState(false)
+
+  // доступность раздела, куда ведёт уведомление: закрытые правами события не показываем
+  const targetOf = (n: NotificationDTO): TabKey =>
+    NAV_TARGET[n.type]?.[role] ?? (role === 'carrier' ? 'my' : 'requests')
+  const visible = tabs ? items.filter((n) => tabs.includes(targetOf(n))) : items
+  const visibleUnread = visible.filter((n) => !n.read)
 
   const load = useCallback(() => {
     return api.listNotifications()
@@ -109,10 +117,10 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
   }, [load])
 
   // вкладка браузера: счётчик — только бейдж на иконке (синий кружок, белая цифра),
-  // заголовок вкладки без цифр (Task 104)
+  // заголовок вкладки без цифр (Task 104); считаем только доступные разделы
   useEffect(() => {
-    setFaviconBadge(unread)
-  }, [unread])
+    setFaviconBadge(tabs ? visibleUnread.length : unread)
+  }, [tabs, visibleUnread.length, unread])
 
   const openPanel = (o: boolean) => {
     setOpen(o)
@@ -121,8 +129,10 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
 
   const markAll = async () => {
     try {
-      await api.markNotifications({ all: true })
-      setItems((list) => list.map((n) => ({ ...n, read: true })))
+      const ids = tabs ? visibleUnread.map((n) => n.id) : undefined
+      await api.markNotifications(ids ? { ids } : { all: true })
+      const marked = new Set(ids ?? items.map((n) => n.id))
+      setItems((list) => list.map((n) => (marked.has(n.id) ? { ...n, read: true } : n)))
       setUnread(0)
     } catch { /* повторим при следующем открытии */ }
   }
@@ -143,7 +153,7 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label={unread > 0 ? `Уведомления: ${unread} непрочитанных` : 'Уведомления'}
+          aria-label={visibleUnread.length > 0 ? `Уведомления: ${visibleUnread.length} непрочитанных` : 'Уведомления'}
           className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
             open
               ? 'bg-white/20 text-white'
@@ -151,12 +161,12 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
           }`}
         >
           <Bell className="h-4 w-4" aria-hidden />
-          {unread > 0 && (
+          {visibleUnread.length > 0 && (
             <span
               aria-hidden
               className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full border border-[#0E1B2C] bg-red-500 px-0.5 text-[9px] font-bold leading-none text-white"
             >
-              {unread > 99 ? '99+' : unread}
+              {visibleUnread.length > 99 ? '99+' : visibleUnread.length}
             </span>
           )}
         </button>
@@ -170,11 +180,11 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-900">Уведомления</span>
-            {unread > 0 && (
-              <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{unread}</span>
+            {visibleUnread.length > 0 && (
+              <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{visibleUnread.length}</span>
             )}
           </div>
-          {unread > 0 && (
+          {visibleUnread.length > 0 && (
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-blue-700 hover:bg-blue-50" onClick={() => void markAll()}>
               Прочитать все
             </Button>
@@ -182,7 +192,7 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
         </div>
 
         <div className={`max-h-96 overflow-y-auto ${THIN_SCROLL}`}>
-          {items.length === 0 ? (
+          {visible.length === 0 ? (
             <div className="flex flex-col items-center gap-1.5 px-6 py-10 text-center">
               <Bell className="h-7 w-7 text-slate-300" aria-hidden />
               <div className="text-sm font-medium text-slate-600">
@@ -196,7 +206,7 @@ export function NotificationBell({ role, onNavigate, liveTick }: {
             </div>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {items.map((n) => {
+              {visible.map((n) => {
                 const meta = NOTIF_META[n.type] ?? { Icon: Bell, cls: 'bg-slate-100 text-slate-600' }
                 const { Icon } = meta
                 return (

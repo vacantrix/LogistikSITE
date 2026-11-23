@@ -27,6 +27,18 @@ if (Test-Path $pidFile) {
     Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 
+# Caddy мог быть запущен вручную (без pid-файла). Тогда второй экземпляр
+# не сможет занять 443 и admin-порт 2019 — подхватываем живой процесс.
+$edgeOwner = Get-PortOwner 443
+if ($edgeOwner -gt 0) {
+    $edgeProc = Get-Process -Id $edgeOwner -ErrorAction SilentlyContinue
+    if ($edgeProc -and $edgeProc.ProcessName -eq 'caddy') {
+        Set-Content -Path $pidFile -Value $edgeOwner -Encoding ascii
+        Write-Output "caddy already running: pid=$edgeOwner $PublicUrl"
+        exit 0
+    }
+}
+
 if (-not (Test-Path $CaddyExe)) {
     Write-Output "ERROR: caddy not found: $CaddyExe"
     exit 1

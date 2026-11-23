@@ -21,6 +21,17 @@ const PLATFORM_HOST = '127.0.0.1'
 const PLATFORM_PORT = Number(process.env.PLATFORM_PORT || 3000)
 const LANDING_FILE = path.join(__dirname, 'landing', 'index.html')
 const DEMO_PREFIX = '/demo'
+/** Модуль водителя: PWA /driver/* и API /api/driver/* живут на :3102. */
+const DRIVER_PORT = Number(process.env.DRIVER_API_PORT || 3102)
+const DRIVER_WEB_PREFIX = '/driver'
+const DRIVER_API_PREFIXES = [
+  '/api/driver', '/api/1c',
+  // карта и служебные каналы PWA: платформа таких маршрутов не имеет,
+  // поэтому отдаём их модулю водителя, а не в Next платформы
+  '/api/2gis', '/api/mapstyle', '/api/maptiles', '/api/demo', '/api/stand',
+]
+/** APK и установщики отдаём с того же домена, что и платформа. */
+const DL_DIR = path.join(__dirname, 'portal', 'dl')
 // Порты, доступные браузеру через query XTransformPort (real-time шина).
 // Всё остальное проксируется только на платформу :3000.
 const TRANSFORM_PORTS = new Set([3003])
@@ -39,11 +50,64 @@ function transformPort (search) {
   return Number.isInteger(port) && TRANSFORM_PORTS.has(port) ? port : null
 }
 
-/** Куда проксировать запрос: шина (?XTransformPort) или платформа. */
+/** Куда проксировать запрос: шина (?XTransformPort), модуль водителя или платформа. */
 function proxyTarget (pathname, search) {
   const wsPort = transformPort(search)
   if (wsPort) return { host: '127.0.0.1', port: wsPort, path: pathname + search, isWs: true }
+  if (isDriverPath(pathname)) {
+    // Next с basePath /driver обслуживает и страницы, и route handlers под
+    // префиксом. Наружу API остаётся корневым (/api/driver/...): APK и PWA
+    // не меняют адреса, а шлюз добавляет /driver при проксировании.
+    return { host: '127.0.0.1', port: DRIVER_PORT, path: driverUpstreamPath(pathname) + search, isWs: false }
+  }
   return { host: PLATFORM_HOST, port: PLATFORM_PORT, path: upstreamPath(pathname) + search, isWs: false }
+}
+
+/** Внутренний путь Next-модуля водителя с учётом basePath. */
+function driverUpstreamPath (pathname) {
+  const isApi = DRIVER_API_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))
+  return isApi ? DRIVER_WEB_PREFIX + pathname : pathname
+}
+
+/** Модуль водителя: веб-версия и его API. */
+function isDriverPath (pathname) {
+  return pathname === DRIVER_WEB_PREFIX || pathname.startsWith(DRIVER_WEB_PREFIX + '/') ||
+    DRIVER_API_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + '/'))
+}
+
+/** APK: только чтение файлов из portal/dl, без выхода за каталог. */
+async function serveDownload (req, res, pathname) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'text/plain; charset=utf-8', Allow: 'GET, HEAD' })
+    return res.end('Method Not Allowed')
+  }
+  const rel = pathname.slice('/dl/'.length)
+  const file = path.resolve(DL_DIR, rel)
+  if (!file.startsWith(path.resolve(DL_DIR) + path.sep)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
+    return res.end('Forbidden')
+  }
+  try {
+    const info = await stat(file)
+    if (!info.isFile()) throw new Error('not a file')
+    const ext = path.extname(file).toLowerCase()
+    const type = ext === '.apk'
+      ? 'application/vnd.android.package-archive'
+      : ext === '.zip'
+        ? 'application/zip'
+        : 'application/octet-stream'
+    res.writeHead(200, {
+      'Content-Type': type,
+      'Content-Length': info.size,
+      'Content-Disposition': `attachment; filename="${path.basename(file)}"`,
+      'Cache-Control': 'no-cache, must-revalidate',
+    })
+    if (req.method === 'HEAD') return res.end()
+    createReadStream(file).pipe(res)
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('Not Found')
+  }
 }
 
 function isLandingPath (pathname) {
@@ -105,8 +169,15 @@ function proxyToPlatform (req, res, pathname, search) {
     { host: target.host, port: target.port, method: req.method, path: target.path, headers },
     (up) => {
       const outHeaders = { ...up.headers }
-      // Редиректы платформы держим внутри /demo; ответы шины не трогаем.
-      if (!target.isWs) {
+      // sw.js модуля водителя должен управлять и корнем /driver (без слэша),
+      // иначе браузер ограничивает scope каталогом /driver/ и офлайн-оболочка
+      // не перехватывает главный экран установленной PWA.
+      if (!target.isWs && pathname === DRIVER_WEB_PREFIX + '/sw.js') {
+        outHeaders['service-worker-allowed'] = DRIVER_WEB_PREFIX
+      }
+      // Редиректы платформы держим внутри /demo; ответы шины и модуля водителя не трогаем:
+      // /driver — самостоятельный раздел, его Location уже верный.
+      if (!target.isWs && !isDriverPath(pathname)) {
         const location = keepRedirectInsideDemo(outHeaders.location)
         if (location !== outHeaders.location) outHeaders.location = location
       }
@@ -161,6 +232,14 @@ function proxyUpgrade (req, clientSocket, head) {
 
 const server = http.createServer((req, res) => {
   const { pathname, search } = splitUrl(req.url || '/')
+  if (pathname === '/dl') {
+    res.writeHead(301, { Location: '/dl/' })
+    return res.end()
+  }
+  if (pathname.startsWith('/dl/')) {
+    void serveDownload(req, res, pathname)
+    return
+  }
   if ((req.method === 'GET' || req.method === 'HEAD') && isLandingPath(pathname)) {
     return serveLanding(req, res)
   }
@@ -182,6 +261,9 @@ server.listen(PORT, HOST, () => {
   console.log(`LogistikSITE gateway on http://${HOST}:${PORT}`)
   console.log(`  /         -> ${LANDING_FILE}`)
   console.log(`  /demo/*   -> http://${PLATFORM_HOST}:${PLATFORM_PORT}/*`)
+  console.log(`  /driver/* -> http://127.0.0.1:${DRIVER_PORT}${DRIVER_WEB_PREFIX}/*`)
+  console.log(`  /api/driver/*, /api/1c/* -> http://127.0.0.1:${DRIVER_PORT}`)
+  console.log(`  /dl/*     -> ${DL_DIR}`)
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {

@@ -166,13 +166,21 @@ class Handler(BaseHTTPRequestHandler):
         path = decode_image(data_uri)
         if not path:
             return self.send_json({"ok": False, "error": "нужно изображение JPG, PNG, WebP или PDF"}, 400)
+        # порог качества платформы (Setting.minQuality): ниже него фото всё равно вернут
+        # на перезагрузку, поэтому движок не тратит время на OCR (0 — не проверять)
+        try:
+            min_quality = int(body.get("minQuality") or 0)
+        except (TypeError, ValueError):
+            min_quality = 0
+        min_quality = max(0, min(100, min_quality))
         # Task 86 — одна сильная модель: mode кнопок платформы больше не существует
         t0 = time.time()
         try:
             with LOCK:
                 # Task 83: при нехватке памяти — короткоживущий процесс на документ
                 # (на стенде 4 ГБ иначе OOM-killer), иначе тёплая модель этого процесса
-                res = engine.analyze_subprocess(path) if engine.LOW_MEMORY else engine.analyze(path)
+                res = engine.analyze_subprocess(path, min_quality) if engine.LOW_MEMORY \
+                    else engine.analyze(path, min_quality=min_quality)
             STATE["ready"] = True
         except Exception as e:  # noqa: BLE001
             print(f"[paddle-ocr] ошибка распознавания: {type(e).__name__}: {e}", flush=True)

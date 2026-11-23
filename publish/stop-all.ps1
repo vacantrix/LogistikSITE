@@ -2,6 +2,11 @@
 
 Write-Output "=== LogistikSITE demo stop ==="
 
+# Сначала гасим внутренние сервисы Drivemobile, затем публичный Caddy:
+# так посетители не увидят 502 на /kontur и /api/driver.
+if (Test-Path (Join-Path $PublishDir 'stop-drivemobile.ps1')) {
+    & (Join-Path $PublishDir 'stop-drivemobile.ps1') | Out-Null
+}
 if (Test-Path (Join-Path $PublishDir 'stop-caddy.ps1')) {
     & (Join-Path $PublishDir 'stop-caddy.ps1')
 }

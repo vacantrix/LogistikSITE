@@ -169,12 +169,13 @@ export function clearNnCache(): void {
  * Распознавание через локальный сервис (изображение или PDF — сервис читает первую страницу).
  * Одна сильная модель (Task 86), параметр mode прежних кнопок убран.
  * opts.freshCache — игнорировать кэш (кнопка «Проверить нейросеть» в админке).
+ * opts.minQuality — порог платформы: фото ниже порога сервис не распознаёт (сразу REUPLOAD).
  */
 export async function ocrServiceOcr(
   dataUri: string,
   type: DocType,
   intake: boolean,
-  opts: { freshCache?: boolean } = {},
+  opts: { freshCache?: boolean; minQuality?: number } = {},
 ): Promise<OcrServiceResult> {
   if (!ocrServiceEnabled()) return { kind: 'unavailable' }
 
@@ -193,7 +194,12 @@ export async function ocrServiceOcr(
     const res = await fetch(`${BASE}/ocr`, {
       method: 'POST',
       headers: headers(),
-      body: JSON.stringify({ type, dataUri: payload, intake }),
+      body: JSON.stringify({
+        type,
+        dataUri: payload,
+        intake,
+        ...(opts.minQuality && opts.minQuality > 0 ? { minQuality: opts.minQuality } : {}),
+      }),
       signal: AbortSignal.timeout(settings.timeoutSec * 1000),
     })
     if (res.status === 422) return { kind: 'unsupported' }
@@ -228,7 +234,9 @@ export async function ocrServiceOcr(
         ...(ocr.confirmations ? { confirmations: ocr.confirmations } : {}),
       },
     }
-    cachePut(key, result, startedAt)
+    // пустой результат раннего выхода зависит от порога: в кэш его не кладём, иначе
+    // после снижения minQuality старый ответ «ниже порога» перекрывал бы распознавание
+    if (!(opts.minQuality && result.ocr.quality < opts.minQuality)) cachePut(key, result, startedAt)
     return result
   } catch {
     return { kind: 'unavailable' }

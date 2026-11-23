@@ -2,8 +2,8 @@
 
 /**
  * Выбор точки «Точка А / Точка Б» (Task 64, переработан в 110-a и в подсказках адресов):
- *  — быстрый выбор «АЭМЗ» одной кнопкой;
- *  — точки справочника платформы (src/lib/points.ts) с поиском по введённому тексту;
+ *  — быстрый выбор «АЭМЗ» одной кнопкой; при открытии списка других точек нет;
+ *  — точки справочника платформы (src/lib/points.ts) — только по введённому тексту;
  *  — живые подсказки адресов России с сервера (/api/suggest → DaData ФИАС, без ключа —
  *    карта OSM): выпадают плавно под полем, debounce 300 мс — лимиты API не тратятся на
  *    быстрый набор; клик по подсказке подставляет полный адрес и закрывает список;
@@ -79,9 +79,10 @@ export function PointSelect({ id, value, onChange, placeholder, ariaLabel }: {
   const q = value.trim().toLowerCase()
   // короткий запрос: серверные подсказки прячем сразу, не дожидаясь сброса по таймеру
   const shortQuery = q.length < SUGGEST_MIN_Q
-  // точки справочника, отфильтрованные по введённому тексту (город, название, адрес)
+  // точки справочника — только результаты поиска по введённому тексту (город, название, адрес):
+  // пустое поле показывает лишь быстрый выбор «АЭМЗ», без списка остальных точек
   const list = q === ''
-    ? POINT_SUGGESTIONS
+    ? []
     : POINT_SUGGESTIONS.filter((p) => `${p.value}\n${p.label}\n${p.sub}`.toLowerCase().includes(q))
   // свободный адрес: текст есть и он не совпадает (без регистра) ни с одним значением справочника
   const knownValue = POINT_SUGGESTIONS.some((p) => p.value.toLowerCase() === q)
@@ -197,7 +198,7 @@ export function PointSelect({ id, value, onChange, placeholder, ariaLabel }: {
               </button>
             ))}
 
-            {list.length === 0 && remoteItems.length === 0 && remoteState !== 'loading' && !showCustom && (
+            {q !== '' && list.length === 0 && remoteItems.length === 0 && remoteState !== 'loading' && !showCustom && (
               <div className="px-3 py-4 text-sm text-slate-500">Ничего не найдено</div>
             )}
             {showCustom && (

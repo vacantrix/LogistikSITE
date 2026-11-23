@@ -26,6 +26,26 @@ $PortalDataDir = Join-Path $PublishDir 'data'
 $PortalAuthScript = Join-Path $PublishDir 'portal-auth.mjs'
 $TunaExe = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\tuna.exe'
 
+# Диспетчерская «Контур» работает внутри платформы (маршрут /kontur на порту
+# $PlatformPort). С этапа объединения баз её таблицы живут в общей базе
+# платформы с префиксом Dispatch (см. prisma/kontur.prisma), поэтому отдельный
+# файл базы не нужен. Исходный LogistikSITEnow2/db/custom.db остаётся резервом
+# для отката: вернуть $KonturDb на него можно одной строкой.
+$DrivemobileRoot = Join-Path (Split-Path -Parent $RepoRoot) 'Drivemobile'
+$DispatcherRoot = Join-Path (Split-Path -Parent $RepoRoot) 'LogistikSITEnow2'
+$DriverApiPort = 3102
+$KonturUrl = "$MainUrl/kontur"
+$DriverApiUrl = "$MainUrl/api/driver/v1/"
+$KonturAuthUser = 'admin'
+$KonturAuthPass = 'aemz2024'
+$KonturDb = $DbPath
+$DriverStandalone = Join-Path $DrivemobileRoot '.next\standalone'
+$DriverDb = Join-Path $DrivemobileRoot 'db\custom.db'
+$DriverPositionsFile = Join-Path $DrivemobileRoot 'db\positions.json'
+$DriverIngestToken = 'azmz-stand-bridge-2026'
+# appId водителя из демо-базы (таблица Driver); APK передаёт его в X-Driver-Id.
+$DriverDemoAppId = '06c075d1-3088-45f2-a7ae-090e8c355447'
+
 $NodeExe = 'C:\Program Files\nodejs\node.exe'
 if (-not (Test-Path $NodeExe)) {
     $node = Get-Command node -ErrorAction SilentlyContinue

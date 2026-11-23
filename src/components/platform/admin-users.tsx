@@ -21,6 +21,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -36,6 +37,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { api } from '@/lib/api'
+import { TRANSPORT_SCOPE_LABELS, transportScopeLabel } from '@/lib/transport-scope'
 import type { AccessDataDTO, AdminUserDTO } from '@/lib/types'
 
 /** Черновик окна создания/редактирования: учётка + поля проформы */
@@ -47,6 +49,8 @@ interface UserDraft {
   role: RoleKind
   carrierId: string
   templateId: string
+  /** Специализация логиста: all | tent | board | tent,board */
+  transportScope: string
   fullName: string
   position: string
   phone: string
@@ -54,12 +58,13 @@ interface UserDraft {
 }
 
 const emptyDraft = (): UserDraft => ({
-  id: null, login: '', name: '', password: '', role: 'carrier', carrierId: '', templateId: '',
+  id: null, login: '', name: '', password: '', role: 'carrier', carrierId: '', templateId: '', transportScope: 'all',
   fullName: '', position: '', phone: '', email: '',
 })
 
 const toDraft = (u: AdminUserDTO): UserDraft => ({
   id: u.id, login: u.login, name: u.name, password: '', role: u.role, carrierId: u.carrierId ?? '', templateId: u.templateId ?? '',
+  transportScope: u.transportScope ?? 'all',
   fullName: u.profile?.fullName ?? '', position: u.profile?.position ?? '',
   phone: u.profile?.phone ?? '', email: u.profile?.email ?? '',
 })
@@ -133,15 +138,19 @@ export default function AdminUsersTab({ liveTick }: TabProps) {
     try {
       const profile = { fullName: draft.fullName, position: draft.position, phone: draft.phone, email: draft.email }
       const carrierId = draft.role === 'carrier' ? draft.carrierId : null
+      const transportScope = draft.role === 'logist' ? draft.transportScope : 'all'
       if (draft.id === null) {
         await api.adminUserCreate({
           login: draft.login, name: draft.name, password: draft.password, role: draft.role, carrierId,
-          templateId: draft.templateId || null, profile,
+          templateId: draft.templateId || null, transportScope, profile,
         })
-        toast({ title: 'Профиль создан', description: `${draft.name}: должность «${templatesOf(draft.role).find((t) => t.id === draft.templateId)?.name ?? 'по умолчанию'}»` })
+        toast({
+          title: 'Профиль создан',
+          description: `${draft.name}: должность «${templatesOf(draft.role).find((t) => t.id === draft.templateId)?.name ?? 'по умолчанию'}»${draft.role === 'logist' ? `, транспорт: ${transportScopeLabel(transportScope)}` : ''}`,
+        })
       } else {
         await api.adminUserUpdate({
-          id: draft.id, name: draft.name, role: draft.role, carrierId,
+          id: draft.id, name: draft.name, role: draft.role, carrierId, transportScope,
           ...(draft.password ? { password: draft.password } : {}), profile,
         })
         toast({ title: 'Профиль сохранён' })
@@ -244,13 +253,14 @@ export default function AdminUsersTab({ liveTick }: TabProps) {
                       <TableHead>Пользователь</TableHead>
                       <TableHead>Роль</TableHead>
                       <TableHead>Должность</TableHead>
+                      <TableHead>Транспорт</TableHead>
                       <TableHead>Исключения</TableHead>
                       <TableHead className="text-right">Действия</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.length === 0 && (
-                      <TableRow><TableCell colSpan={5} className="py-8 text-center text-sm text-slate-500">Никого не нашлось по фильтру</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-slate-500">Никого не нашлось по фильтру</TableCell></TableRow>
                     )}
                     {rows.map((u) => {
                       const a = accessById.get(u.id)
@@ -269,6 +279,11 @@ export default function AdminUsersTab({ liveTick }: TabProps) {
                             <button type="button" className="rounded-full focus-visible:outline-2 focus-visible:outline-violet-500" onClick={() => setAccessUserId(u.id)} aria-label={`Доступ: ${u.name}`}>
                               <TemplateChip name={a?.templateName ?? '—'} />
                             </button>
+                          </TableCell>
+                          <TableCell>
+                            {u.role === 'logist'
+                              ? <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-800">{transportScopeLabel(u.transportScope)}</Badge>
+                              : <span className="text-sm text-slate-400">—</span>}
                           </TableCell>
                           <TableCell>
                             {active.length === 0
@@ -354,7 +369,8 @@ export default function AdminUsersTab({ liveTick }: TabProps) {
                   <Select
                     value={draft.role}
                     onValueChange={(v) => setDraft((d) => (d ? {
-                      ...d, role: v as RoleKind, carrierId: v === 'carrier' ? d.carrierId : '', templateId: defaultTemplate(v as RoleKind),
+                      ...d, role: v as RoleKind, carrierId: v === 'carrier' ? d.carrierId : '',
+                      templateId: defaultTemplate(v as RoleKind), transportScope: v === 'logist' ? d.transportScope : 'all',
                     } : d))}
                   >
                     <SelectTrigger id="user-role" aria-label="Роль пользователя">
@@ -381,6 +397,25 @@ export default function AdminUsersTab({ liveTick }: TabProps) {
                     Смена роли переводит на основную должность нового контура и снимает личные исключения.
                   </p>
                 ) : null}
+
+                {draft.role === 'logist' && (
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="user-transport">Специализация по транспорту</Label>
+                    <Select value={draft.transportScope || 'all'} onValueChange={(v) => setDraft((d) => (d ? { ...d, transportScope: v } : d))}>
+                      <SelectTrigger id="user-transport" aria-label="Специализация логиста по транспорту">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все типы — тент и борт</SelectItem>
+                        <SelectItem value="tent">{TRANSPORT_SCOPE_LABELS.tent}</SelectItem>
+                        <SelectItem value="board">{TRANSPORT_SCOPE_LABELS.board}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Логист видит и берёт в работу только заявки своей группы. Администрация видит весь контур.
+                    </p>
+                  </div>
+                )}
 
                 {draft.role === 'carrier' && (
                   <div className="space-y-1.5 sm:col-span-2">

@@ -1,9 +1,11 @@
-﻿# LogistikSITE — боевой запуск одним кликом.
-# Поднимает OCR, платформу, локальный шлюз и Caddy, проверяет публичный HTTPS
-# и открывает сайт в браузере. Запускается ярлыком с рабочего стола.
+﻿# АЭМЗ Поток — единый боевой запуск (монолит: платформа + Контур).
+# Поднимает OCR, платформу с диспетчерской, локальный шлюз, Caddy
+# и API приложения Drivemobile, проверяет публичный HTTPS и открывает сайт
+# в браузере. Запускается ярлыком с рабочего стола.
 
 param(
-    [switch]$NoPause
+    [switch]$NoPause,
+    [switch]$NoOpen
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,10 +17,11 @@ try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $OutputEncoding = [System.Text.Encoding]::UTF8
 } catch { }
-try { $Host.UI.RawUI.WindowTitle = 'LogistikSITE — боевой запуск' } catch { }
+try { $Host.UI.RawUI.WindowTitle = 'АЭМЗ Поток — боевой запуск (платформа + Drivemobile)' } catch { }
 
 $startAll = Join-Path $PublishDir 'start-all.ps1'
 $statusScript = Join-Path $PublishDir 'status.ps1'
+$drvStart = Join-Path $PublishDir 'start-drivemobile.ps1'
 $launcherLog = Join-Path $LogDir 'launcher.log'
 $startOut = Join-Path $LogDir 'launcher-start.out.log'
 $startErr = Join-Path $LogDir 'launcher-start.err.log'
@@ -62,13 +65,15 @@ function Show-Tail([string]$path, [int]$lines = 25) {
 Clear-Host
 Write-Host ""
 Write-Host "  ==============================================" -ForegroundColor DarkYellow
-Write-Host "     Vacantrix + LogistikSITE — запуск" -ForegroundColor White
-Write-Host "     Портал + демо + OCR + HTTPS" -ForegroundColor DarkGray
+Write-Host "     Vacantrix + АЭМЗ Поток — запуск" -ForegroundColor White
+Write-Host "     Портал + платформа + OCR + HTTPS + Drivemobile" -ForegroundColor DarkGray
 Write-Host "  ==============================================" -ForegroundColor DarkYellow
 Write-Host ""
 Write-Host "  Портал Vacantrix: $MainUrl" -ForegroundColor White
 Write-Host "  Каталог:          $PortalCatalogUrl" -ForegroundColor White
 Write-Host "  Демо LogistikSITE: $DemoUrl" -ForegroundColor White
+Write-Host "  Платформа:        $DemoUrl" -ForegroundColor White
+Write-Host "  Drivemobile APK:  $MainUrl/dl/Drivemobile.apk" -ForegroundColor White
 Write-Host "  Локальный вход:  http://127.0.0.1:$GatewayPort/" -ForegroundColor DarkGray
 Add-LauncherLog "=== launch ==="
 
@@ -85,6 +90,10 @@ $portalIndex = Join-Path $PublishDir 'portal\index.html'
 $portalHh = Join-Path $PublishDir 'portal\dl\VacantrixHH.exe'
 if (-not (Test-Path $portalIndex)) { $missing += $portalIndex }
 if (-not (Test-Path $portalHh)) { $missing += $portalHh }
+if (-not (Test-Path $drvStart)) { $missing += $drvStart }
+if (-not (Test-Path (Join-Path $DriverStandalone 'server.js'))) { $missing += (Join-Path $DriverStandalone 'server.js') }
+if (-not (Test-Path $DriverDb)) { $missing += $DriverDb }
+if (-not (Test-Path $KonturDb)) { $missing += $KonturDb }
 if (-not (Test-Path (Join-Path $RepoRoot '.next\standalone\server.js'))) { $missing += (Join-Path $RepoRoot '.next\standalone\server.js') }
 $ocrStart = Join-Path $RepoRoot 'mini-services\paddle-ocr\bench-v6\start-service.ps1'
 if (-not (Test-Path $ocrStart)) { $missing += $ocrStart }
@@ -95,6 +104,7 @@ if ($missing.Count -gt 0) {
     $missing | ForEach-Object { Write-Host "      $_" -ForegroundColor Red }
     Write-Host ""
     Write-Host "  Если отсутствует сборка .next — выполните build-public.ps1." -ForegroundColor Yellow
+    Write-Host "  Для Drivemobile нужна сборка Drivemobile\.next\standalone." -ForegroundColor Yellow
     Add-LauncherLog "missing: $($missing -join '; ')"
     Write-Host ""
     if (-not $NoPause) { Read-Host "  Нажмите Enter, чтобы закрыть" }
@@ -110,7 +120,7 @@ if (-not $firewallOk) {
 }
 
 # --- 2. Запуск стека --------------------------------------------------------
-Write-Step "Запускаю портал, платформу, шлюз, OCR и Caddy..."
+Write-Step "Запускаю портал, платформу с Контуром, шлюз, OCR, Drivemobile и Caddy..."
 Write-Host "  Первый запуск OCR занимает до 3 минут. Не закрывайте окно." -ForegroundColor DarkGray
 
 $started = Get-Date
@@ -135,13 +145,37 @@ $startText -split "`r?`n" | Where-Object { $_.Trim() } | ForEach-Object { Write-
 Add-LauncherLog $startText
 
 $startExit = $proc.ExitCode
-$startLooksOk = ($startText -match 'Portal: https://') -and ($startText -match 'Catalog: https://') -and ($startText -notmatch 'ERROR:')
+$startLooksOk = ($startText -match 'Portal: https://') -and ($startText -match 'Catalog: https://') -and ($startText -match 'Dispatcher:') -and ($startText -match 'Driver API:') -and ($startText -notmatch 'ERROR:')
 if (($null -ne $startExit -and $startExit -ne 0) -or -not $startLooksOk) {
     $exitText = if ($null -eq $startExit) { 'нет кода' } else { $startExit }
     Write-Fail "Стек завершился с ошибкой (код $exitText)."
     Show-Tail $startErr 30
     Show-Tail (Join-Path $LogDir 'caddy.err.log') 20
+    Show-Tail (Join-Path $LogDir 'driver-api.err.log') 20
+    Show-Tail (Join-Path $LogDir 'platform.err.log') 20
     Show-Tail (Join-Path $RepoRoot 'mini-services\paddle-ocr\bench-v6\logs\service-3031.err.log') 20
+    Write-Host ""
+    if (-not $NoPause) { Read-Host "  Нажмите Enter, чтобы закрыть" }
+    exit 1
+}
+
+# --- 2.1. Платформа «АЭМЗ Поток» и Drivemobile ------------------------------
+Write-Step "Проверяю платформу и Drivemobile..."
+
+$konturPid = Get-PortOwner $PlatformPort
+$driverPid = Get-PortOwner $DriverApiPort
+$konturApiOk = ($konturPid -gt 0) -and (Wait-HttpOk -Url "http://127.0.0.1:$PlatformPort/kontur/api/auth/accounts" -TimeoutSec 20)
+$driverApiOk = ($driverPid -gt 0) -and (Wait-HttpOk -Url "http://127.0.0.1:$DriverApiPort/api/driver/v1/sync/pull?cursor=0" -TimeoutSec 20)
+if ($konturApiOk -and $driverApiOk) {
+    Write-Ok "Платформа: pid=$konturPid, Drivemobile API: pid=$driverPid"
+    Add-LauncherLog "drivemobile: platform pid=$konturPid, driver-api pid=$driverPid"
+} else {
+    Write-Fail "Платформа или Drivemobile API не отвечает."
+    Write-Host "      Платформа:     порт $PlatformPort, pid=$konturPid, API=$konturApiOk" -ForegroundColor Red
+    Write-Host "      Drivemobile:   порт $DriverApiPort, pid=$driverPid, API=$driverApiOk" -ForegroundColor Red
+    Show-Tail (Join-Path $LogDir 'platform.err.log') 30
+    Show-Tail (Join-Path $LogDir 'driver-api.err.log') 30
+    Add-LauncherLog "drivemobile: FAIL kontur=$konturApiOk driver=$driverApiOk"
     Write-Host ""
     if (-not $NoPause) { Read-Host "  Нажмите Enter, чтобы закрыть" }
     exit 1
@@ -177,11 +211,16 @@ if ($allOk) {
     Write-Host "  Портал:   $MainUrl" -ForegroundColor White
     Write-Host "  Каталог:  $PortalCatalogUrl" -ForegroundColor White
     Write-Host "  Демо:     $DemoUrl" -ForegroundColor White
+    Write-Host "  Платформа: $DemoUrl (вход: $KonturAuthUser)" -ForegroundColor White
+    Write-Host "  Старый /kontur: $KonturUrl — редирект в платформу" -ForegroundColor DarkGray
+    Write-Host "  Drivemobile APK: $MainUrl/dl/Drivemobile.apk" -ForegroundColor White
     Write-Host "  Платформа локально: http://127.0.0.1:$PlatformPort/" -ForegroundColor DarkGray
     Write-Host "  OCR:      локально, 127.0.0.1:$OcrPort" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Открываю портал Vacantrix в браузере..." -ForegroundColor Cyan
-    try { Start-Process $MainUrl } catch { Write-Warn "не удалось открыть браузер: $($_.Exception.Message)" }
+    if (-not $NoOpen) {
+        Write-Host "  Открываю портал Vacantrix в браузере..." -ForegroundColor Cyan
+        try { Start-Process $MainUrl } catch { Write-Warn "не удалось открыть браузер: $($_.Exception.Message)" }
+    }
     Add-LauncherLog "result: OK"
 } elseif ($ipMismatch) {
     Write-Host ""
@@ -190,14 +229,18 @@ if ($allOk) {
     Write-Host "  ==============================================" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Локально всё работает: http://127.0.0.1:$GatewayPort/" -ForegroundColor White
+    Write-Host "  Платформа локально: http://127.0.0.1:$PlatformPort/" -ForegroundColor White
+    Write-Host "  Drivemobile локально: http://127.0.0.1:$DriverApiPort/api/driver/v1/" -ForegroundColor White
     Write-Host "  Но домен $PublicHost указывает на старый IP." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Обновите A-записи в reg.ru:" -ForegroundColor White
     Write-Host "    Домен → DNS-серверы и управление зоной → A logistiksite и A @ (vacantrix.ru)" -ForegroundColor Gray
     Write-Host ""
     Add-LauncherLog "result: IP MISMATCH"
-    try { Start-Process 'https://www.reg.ru/user/account/card/120565341/nss/' } catch { }
-    try { Start-Process "http://127.0.0.1:$GatewayPort/" } catch { }
+    if (-not $NoOpen) {
+        try { Start-Process 'https://www.reg.ru/user/account/card/120565341/nss/' } catch { }
+        try { Start-Process "http://127.0.0.1:$GatewayPort/" } catch { }
+    }
 } else {
     Write-Host ""
     Write-Host "  ==============================================" -ForegroundColor Red
@@ -205,6 +248,8 @@ if ($allOk) {
     Write-Host "  ==============================================" -ForegroundColor Red
     Write-Host ""
     Show-Tail (Join-Path $LogDir 'caddy.err.log') 25
+    Show-Tail (Join-Path $LogDir 'platform.err.log') 20
+    Show-Tail (Join-Path $LogDir 'driver-api.err.log') 20
     Show-Tail (Join-Path $LogDir 'platform.err.log') 20
     Show-Tail (Join-Path $RepoRoot 'mini-services\paddle-ocr\bench-v6\logs\service-3031.err.log') 20
     Write-Host ""

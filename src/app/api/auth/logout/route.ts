@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readSessionToken, SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth'
+import { SESSION_COOKIE as DISPATCH_SESSION_COOKIE, SESSION_COOKIE_PATH as DISPATCH_SESSION_COOKIE_PATH } from '@/lib/kontur/session-constants'
 import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
@@ -20,6 +21,14 @@ export async function POST(req: NextRequest) {
   const res = NextResponse.json({ ok: true })
   if (!headerToken || headerToken === cookieToken) {
     res.cookies.set(SESSION_COOKIE, '', { ...sessionCookieOptions, maxAge: 0 })
+    // Единый выход: платформа и Контур используют разные cookie, поэтому
+    // гасим обе. Иначе после выхода из платформы /kontur остался бы открыт.
+    res.cookies.set(DISPATCH_SESSION_COOKIE, '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: DISPATCH_SESSION_COOKIE_PATH,
+      maxAge: 0,
+    })
   }
   // журнал платформы (Task 76): выход — кто вышел, разбираем из подписанного токена
   const session = readSessionToken(headerToken ?? cookieToken)

@@ -5,6 +5,7 @@ import { ONEC_ETRN_RU, ONEC_STATUS_RU, onecAuthorized, onecBadRequest, onecMeta,
 import { notifyLive } from '@/lib/notify'
 import { plog, plogError } from '@/lib/platform-log'
 import { finalizeExpired, inTx, money, parseRuDate } from '@/lib/requests'
+import { toDispatcherStatus, toOneCStatus } from '@/lib/status-map'
 import type { RequestStatus } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -101,6 +102,9 @@ async function listRequests(req: NextRequest): Promise<NextResponse> {
       rates: { start: r.startRate, best: r.bestRate },
       status: r.status,
       statusRu: ONEC_STATUS_RU[r.status as RequestStatus] ?? r.status,
+      // словарь контура: как заявка выглядит в 1С и в диспетчерской
+      oneCStatus: toOneCStatus(r.status),
+      dispatcherStatus: toDispatcherStatus(r.status),
       loadDate: r.loadDate,
       loadWindow: r.loadWindow,
       winner: r.winner ? { id: r.winner.id, name: r.winner.name, inn: r.winner.inn } : null,
@@ -174,6 +178,9 @@ function draftResponse(r: DraftRow, extra: { duplicate: boolean; cargoCreated: b
       onecRef: r.onecRef,
       status: r.status,
       statusRu: ONEC_STATUS_RU[r.status as RequestStatus] ?? r.status,
+      // словарь контура: как заявка выглядит в 1С и в диспетчерской
+      oneCStatus: toOneCStatus(r.status),
+      dispatcherStatus: toDispatcherStatus(r.status),
       cargo: r.cargo,
       createdAt: r.createdAt,
       ...extra,

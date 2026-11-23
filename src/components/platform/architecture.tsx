@@ -430,12 +430,12 @@ function SchematicMap({ status }: { status: StatusItem[] | null }) {
         down={[
           'заявки, ставки, фото и сканы документов (до 20 фото за подачу)',
           'обращения и чаты: перевозчик ↔ логист/администрация',
-          '1С: заказы на перевозку → черновики заявок, подтверждения ЭТрН',
+          '1С: заказы на перевозку → черновики заявок, подтверждения накладных',
         ]}
         up={[
           'статусы, уведомления и события в реальном времени',
           'вердикты проверок, документы и печатные формы',
-          '1С: реестр рейсов, статусы, ЭТрН',
+          '1С: реестр рейсов, статусы, документы',
         ]}
       />
 
@@ -451,7 +451,7 @@ function SchematicMap({ status }: { status: StatusItem[] | null }) {
           <SchemeBox status={status} statusId="ws" icon={Waypoints} label="Real-time шина" sub="socket.io · порт 3003" tone="emerald" />
           <SchemeBox status={status} icon={MessagesSquare} label="Обращения и чаты" sub="перевозчик ↔ логист/админ · вложения до 10 МБ" tone="emerald" />
           <SchemeBox status={status} statusId="ocr-gateway" icon={Server} label="OCR-шлюз" sub="bun · порт 3020 · общая очередь фото" tone="emerald" />
-          <SchemeBox status={status} icon={FileSignature} label="Диадок — мок-стенд ЭДО" sub="node · порт 3040 · этапы ЭТрН" tone="emerald" />
+          <SchemeBox status={status} icon={FileSignature} label="Документы — демо-стенд" sub="node · порт 3040 · этапы документов" tone="emerald" />
         </div>
       </div>
 

@@ -101,6 +101,7 @@ const STATUS_ORDER: Record<RequestDTO['status'], number> = {
   AWARDED: 1,
   DOCS_REVIEW: 1,
   AT_LOGIST: 2,
+  QUARANTINE: 2,
   CONFIRMED: 3,
   CLOSED: 4,
   DELETED: 5, // удалённые заявки в кабинет агента не попадают (фильтр выше), но тип требует полноты

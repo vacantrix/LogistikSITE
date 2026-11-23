@@ -46,7 +46,10 @@ function tokenValid(raw: string | null | undefined): boolean {
   const [body, sig] = raw.split('.')
   if (!body || !sig) return false
   const expected = createHmac('sha256', AUTH_SECRET).update(body).digest('base64url')
-  if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false
+  // байтовая длина, а не символьная: timingSafeEqual падает на буферах разной длины
+  const sigBuf = Buffer.from(sig, 'utf8')
+  const expectedBuf = Buffer.from(expected, 'utf8')
+  if (sigBuf.length !== expectedBuf.length || !timingSafeEqual(sigBuf, expectedBuf)) return false
   try {
     const data = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as { exp?: number }
     return typeof data.exp === 'number' && data.exp > Date.now()
@@ -60,7 +63,12 @@ function sessionValid(cookieHeader: string | undefined): boolean {
   if (!AUTH_SECRET) return true
   const raw = (cookieHeader ?? '').split(';').map((c) => c.trim()).find((c) => c.startsWith(`${SESSION_COOKIE}=`))
   if (!raw) return false
-  return tokenValid(decodeURIComponent(raw.slice(SESSION_COOKIE.length + 1)))
+  try {
+    return tokenValid(decodeURIComponent(raw.slice(SESSION_COOKIE.length + 1)))
+  } catch {
+    // битая %-последовательность в куке — это не повод ронять проверку подключения
+    return false
+  }
 }
 
 const httpServer = createServer()

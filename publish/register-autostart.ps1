@@ -1,6 +1,8 @@
 . "$PSScriptRoot\config.ps1"
 
 $taskName = 'LogistikSITE-Demo'
+# Историческое имя задачи сохранено для совместимости с уже зарегистрированным
+# автозапуском; действие указывает на актуальный монолит start-all.ps1.
 $argument = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PublishDir\start-all.ps1`""
 
 Write-Output "=== Register autostart ==="
@@ -29,7 +31,7 @@ try {
         -Action $action `
         -Trigger @($logon, $repeat) `
         -Settings $settings `
-        -Description 'LogistikSITE demo: OCR, Next.js and Tuna tunnel at logon, checked every 10 minutes' `
+        -Description 'AEMZ Potok: OCR, Next.js platform and Contour at logon, checked every 10 minutes' `
         -Force | Out-Null
     Write-Output "Scheduled task registered: $taskName"
 } catch {

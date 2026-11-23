@@ -257,8 +257,9 @@ export function RequestFormDialog({ open, onOpenChange, request, onDone }: {
                 <Label htmlFor="rf-from" className="flex items-center gap-1.5">
                   Точка А — погрузка {req}
                   <InfoTip label="Точки маршрута">
-                    АЭМЗ — быстрый выбор из списка. Можно вписать и любой другой адрес вручную —
-                    он сохранится в заявке как есть; расстояние КМ считается по точкам справочника.
+                    АЭМЗ — быстрый выбор. Чтобы найти другую точку, начните вводить город или адрес —
+                    появятся подсказки. Любой адрес можно вписать вручную — он сохранится в заявке как есть;
+                    расстояние КМ считается по точкам справочника.
                   </InfoTip>
                 </Label>
                 <PointSelect id="rf-from" value={form.fromPoint} onChange={(v) => set('fromPoint', v)} ariaLabel="Точка А — погрузка" />

@@ -3,8 +3,9 @@
  *
  * Пункты заявок — строки («Абинск, АЭМЗ», «Порт СПб», «Воронеж»…),
  * координаты берутся из справочника точек (lib/points.ts).
- * Расстояние считается по большому кругу (формула гаверсинуса) —
- * в демо-контуре этого достаточно для столбца «КМ» на площадке.
+ * Основное расстояние — по автомобильным дорогам (OSRM, см.
+ * /api/route-distance и use-road-distance). Здесь остаётся геометрия
+ * прямых: запасное значение, пока маршрут считается, и карта доставки.
  */
 
 import { pointInfo } from '@/lib/points'
@@ -42,10 +43,12 @@ export function haversineKm(a: LatLng, b: LatLng): number {
 }
 
 /**
- * Расстояние от пункта погрузки до пункта назначения, км (по прямой).
+ * Запасное расстояние по прямой (большой круг), км.
+ * Основное значение — по дорогам через use-road-distance; это нужно,
+ * чтобы таблица не пустовала, пока маршрут ещё считается.
  * Возвращает null, если хотя бы у одной точки нет координат в справочнике.
  */
-export function routeDistanceKm(from: string, to: string): number | null {
+export function straightLineKm(from: string, to: string): number | null {
   const a = pointCoords(from)
   const b = pointCoords(to)
   if (!a || !b) return null

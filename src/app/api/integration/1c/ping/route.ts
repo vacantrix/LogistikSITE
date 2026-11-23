@@ -16,7 +16,7 @@ function ping(req: NextRequest): NextResponse {
   if (!onecAuthorized(req)) return onecUnauthorized()
   return NextResponse.json({
     ok: true,
-    service: 'АЭМЗ Логистика — шина интеграции 1С',
+    service: 'АЭМЗ Поток — шина интеграции 1С',
     version: ONEC_VERSION,
     time: new Date().toISOString(),
     queue: ['справочники', 'заявки/рейсы + статусы', 'ЭТрН'],

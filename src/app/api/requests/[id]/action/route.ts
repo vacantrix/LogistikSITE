@@ -10,6 +10,7 @@ import {
   applyCrew, finalizeExpired, inTx, loadRequestFor, losingBidders, lostNotice, minActiveBid, money, parseRuDate, TRUCK_TYPES, validateCrew,
 } from '@/lib/requests'
 import { allowedFor, permDenied, type PermKey } from '@/lib/permissions'
+import { scopeAllows } from '@/lib/transport-scope'
 
 /** Сообщение для «Журнала событий платформы» (Task 76) по выполненному действию */
 function actionLogMessage(action: string, actor: string, number: string, body: Record<string, unknown>, winnerName: string | null): string {
@@ -27,6 +28,8 @@ function actionLogMessage(action: string, actor: string, number: string, body: R
     case 'delete': return `Заявка удалена — №${number} (${actor})`
     case 'edit': return `Заявка отредактирована — №${number} (${actor})`
     case 'publish': return `Черновик опубликован на площадке — №${number} (${actor})`
+    case 'quarantine': return `Заявка помещена в карантин: ${String(body.reason ?? '—')} — №${number} (${actor})`
+    case 'unquarantine': return `Заявка возвращена из карантина — №${number} (${actor})`
     default: return `Действие «${action}» — №${number} (${actor})`
   }
 }
@@ -46,6 +49,8 @@ const ACTION_LOG_TYPE: Record<string, string> = {
   delete: 'REQUEST_DELETED',
   edit: 'REQUEST_UPDATED',
   publish: 'REQUEST_PUBLISHED',
+  quarantine: 'REQUEST_QUARANTINED',
+  unquarantine: 'REQUEST_RELEASED',
 }
 
 export const dynamic = 'force-dynamic'
@@ -65,6 +70,8 @@ const ACTION_PERM: Partial<Record<string, PermKey>> = {
   confirm: 'verify:decide',
   return: 'verify:decide',
   close: 'trip:close',
+  quarantine: 'request:quarantine',
+  unquarantine: 'request:quarantine',
 }
 
 /** Кто может выполнять действие. Перевозчик действует только от своего имени — carrierId берётся из сессии.
@@ -85,6 +92,8 @@ const ACTION_ROLE: Record<string, Role> = {
   delete: 'logist',
   edit: 'logist',
   publish: 'logist',
+  quarantine: 'logist',
+  unquarantine: 'logist',
 }
 
 /** Проверка роли действия: перевозчик — только роль carrier, операционные действия — внутренний контур */
@@ -354,13 +363,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           })
           await event('CONFIRMED_1C', 'Документы сверены и подтверждены — рейс выполняется')
           await event('PASS_SENT', 'Пакет на пропуск сформирован из заявки — логист загружает на платформу порта')
-          await event('ETRN_SENT', 'Транспортная накладная подготовлена — отправка в Диадок в разделе «Подписать ЭДО»')
+          await event('ETRN_SENT', 'Транспортная накладная подготовлена — ждёт подписания сторонами')
           notes.push({
             carrierId: r.winnerId,
             payload: {
               type: 'DOCS_CONFIRMED',
               title: `Документы подтверждены · №${r.number}`,
-              body: 'Логист сверил пакет — рейс выполняется: пропуск готовится, ЭТрН придёт на подпись в Диадок',
+              body: 'Логист сверил пакет — рейс выполняется: пропуск готовится, документы ждут подписания',
               requestId: id,
             },
           })
@@ -423,6 +432,70 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
               requestId: id,
             },
           })
+          break
+        }
+
+        // ------- логист: карантин заявки (единый статус контура) -------
+        case 'quarantine': {
+          if (r.status === 'QUARANTINE') fail('Заявка уже в карантине')
+          if (r.status === 'CLOSED' || r.status === 'DELETED') fail('Завершённую или удалённую заявку в карантин не помещают')
+          const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : ''
+          if (!reason) fail('Укажите причину карантина — она попадёт в журнал и уведомление')
+          await tx.request.update({
+            where: { id },
+            data: {
+              status: 'QUARANTINE',
+              statusBeforeQuarantine: r.status,
+              quarantineReason: reason,
+              quarantinedAt: now,
+              quarantinedBy: auth.name,
+            },
+          })
+          await event('REQUEST_QUARANTINED', `Заявка помещена в карантин: ${reason}`)
+          if (r.winnerId) {
+            notes.push({
+              carrierId: r.winnerId,
+              payload: {
+                type: 'REQUEST_QUARANTINED',
+                title: `Заявка приостановлена · №${r.number}`,
+                body: `Заявка временно в карантине: ${reason}. Работа по ней приостановлена до решения логиста`,
+                requestId: id,
+              },
+            })
+          }
+          liveType = 'REQUEST_QUARANTINED'
+          break
+        }
+
+        case 'unquarantine': {
+          if (r.status !== 'QUARANTINE') fail('Вернуть из карантина можно только заявку в карантине')
+          // возвращаем ровно тот статус, в котором заявка была до карантина; неизвестное значение — на площадку
+          const back = r.statusBeforeQuarantine && ['DRAFT', 'PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED'].includes(r.statusBeforeQuarantine)
+            ? r.statusBeforeQuarantine
+            : 'PUBLISHED'
+          await tx.request.update({
+            where: { id },
+            data: {
+              status: back,
+              statusBeforeQuarantine: null,
+              quarantineReason: null,
+              quarantinedAt: null,
+              quarantinedBy: null,
+            },
+          })
+          await event('REQUEST_RELEASED', `Заявка возвращена из карантина в статус «${back}»`)
+          if (r.winnerId) {
+            notes.push({
+              carrierId: r.winnerId,
+              payload: {
+                type: 'REQUEST_RELEASED',
+                title: `Заявка возвращена в работу · №${r.number}`,
+                body: `Карантин снят — заявка снова в работе (${r.fromPoint} → ${r.toPoint})`,
+                requestId: id,
+              },
+            })
+          }
+          liveType = 'REQUEST_RELEASED'
           break
         }
 
@@ -521,6 +594,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           }
           if (typeof body.truckType === 'string' && body.truckType.trim() && body.truckType.trim() !== r.truckType) {
             if (!TRUCK_TYPES.includes(body.truckType.trim())) fail(`Тип ТС — ${TRUCK_TYPES.join(' или ')}`)
+            if (auth.role === 'logist' && !scopeAllows(auth.transportScope, body.truckType.trim())) {
+              fail(`Тип ТС «${body.truckType.trim()}» вне вашей специализации`)
+            }
             patch.truckType = body.truckType.trim()
           }
           if (body.startRate != null && body.startRate !== '') {
@@ -560,10 +636,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   // журнал событий платформы (Task 76): выполненное действие — с актёром и номером заявки
+  const fresh = await loadRequestFor(id, viewer)
   await plog({
     type: ACTION_LOG_TYPE[action] ?? action.toUpperCase(), source: 'api/requests/action',
     actor: { login: auth.login, name: auth.name, role: auth.role },
     requestId: id, requestNumber: visible.number, carrierName: visible.winner?.name ?? null,
+    objectType: 'request', objectId: id,
+    before: visible.status, after: fresh?.status ?? null,
     message: actionLogMessage(action, auth.name, visible.number, body, visible.winner?.name ?? null),
   })
 
@@ -578,7 +657,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   notifyLive({ type: liveType, requestId: id })
-  const fresh = await loadRequestFor(id, viewer)
   if (!fresh) return NextResponse.json({ ok: true })
   return NextResponse.json({ request: toRequestDTO(fresh, viewer) })
 }

@@ -9,6 +9,7 @@ export const REQUEST_STATUS_META: Record<RequestStatus, { label: string; short: 
   AWARDED: { label: 'Перевозчик выбран', short: 'Выбран', badge: 'bg-violet-100 text-violet-800 border-violet-200', dot: 'bg-violet-500' },
   DOCS_REVIEW: { label: 'Документы проверяются', short: 'Проверка', badge: 'bg-amber-100 text-amber-800 border-amber-200', dot: 'bg-amber-500' },
   AT_LOGIST: { label: 'У логиста — сверка', short: 'У логиста', badge: 'bg-blue-100 text-blue-800 border-blue-200', dot: 'bg-blue-600' },
+  QUARANTINE: { label: 'Карантин — работа приостановлена', short: 'Карантин', badge: 'bg-orange-100 text-orange-800 border-orange-300', dot: 'bg-orange-500' },
   CONFIRMED: { label: 'Рейс выполняется', short: 'В рейсе', badge: 'bg-emerald-100 text-emerald-800 border-emerald-200', dot: 'bg-emerald-500' },
   CLOSED: { label: 'Рейс закрыт', short: 'Закрыт', badge: 'bg-slate-200 text-slate-700 border-slate-300', dot: 'bg-slate-500' },
   DELETED: { label: 'Удалена', short: 'Удалена', badge: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-400' },
@@ -37,6 +38,7 @@ export function requestGroupOf(status: string): RequestGroup {
     case 'AWARDED':
     case 'DOCS_REVIEW':
     case 'AT_LOGIST':
+    case 'QUARANTINE':
     case 'CONFIRMED': return 'working' // рейс выполняется — завершён только после закрытия
     case 'CLOSED': return 'done'
     default: return 'deleted'
@@ -54,6 +56,7 @@ export const AGENT_STATUS_LABEL: Record<string, string> = {
   AWARDED: 'Подтверждено',
   DOCS_REVIEW: 'Документы',
   AT_LOGIST: 'Подготовка к рейсу',
+  QUARANTINE: 'Приостановлено: карантин',
   CONFIRMED: 'Рейс выполняется',
   CLOSED: 'Рейс закрыт',
 }

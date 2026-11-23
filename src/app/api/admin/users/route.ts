@@ -6,6 +6,7 @@ import { notifyLive } from '@/lib/notify'
 import {
   allAccess, allowedFor, defaultTemplateId, effective, invalidateAccessCache, permDenied, type Contour,
 } from '@/lib/permissions'
+import { normalizeTransportScope, transportScopeLabel } from '@/lib/transport-scope'
 import type { AdminUserDTO, SessionRole } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -32,6 +33,7 @@ async function holdersWithout(userId: string): Promise<number> {
 /** DTO учётной записи с проформой, компанией и должностью */
 function toAdminUserDTO(u: {
   id: string; login: string; name: string; role: string; carrierId: string | null; templateId: string | null; createdAt: Date
+  transportScope?: string
   carrier?: { name: string } | null
   profile?: { userId: string; fullName: string; position: string; phone: string; email: string; companyName: string; inn: string; kpp: string; address: string; director: string; contactName: string; note: string; updatedAt: Date } | null
 }): AdminUserDTO {
@@ -40,6 +42,7 @@ function toAdminUserDTO(u: {
     id: u.id, login: u.login, name: u.name, role: (ROLES.includes(u.role as SessionRole) ? u.role : 'carrier') as SessionRole,
     carrierId: u.carrierId, carrierName: u.carrier?.name ?? null,
     templateId: u.templateId,
+    transportScope: u.transportScope ?? 'all',
     createdAt: u.createdAt.toISOString(),
     profile: p ? {
       userId: p.userId, fullName: p.fullName, position: p.position, phone: p.phone, email: p.email,
@@ -77,6 +80,9 @@ export async function POST(req: NextRequest) {
   const password = typeof body?.password === 'string' ? body.password : ''
   const role = ROLES.includes(body?.role as SessionRole) ? (body?.role as SessionRole) : null
   const carrierId = typeof body?.carrierId === 'string' && body.carrierId ? body.carrierId : null
+  // специализация логиста: all | tent | board | tent,board. Для остальных ролей не имеет смысла
+  const transportScope = normalizeTransportScope(body?.transportScope)
+  if (transportScope === null) return NextResponse.json({ error: 'Специализация: все типы, тент или борт' }, { status: 400 })
 
   if (!login || !/^[a-z0-9._-]+$/.test(login)) {
     return NextResponse.json({ error: 'Логин — латиница, цифры и знаки . _ - (без пробелов)' }, { status: 400 })
@@ -114,6 +120,7 @@ export async function POST(req: NextRequest) {
   const user = await db.user.create({
     data: {
       login, name, role, carrierId, templateId, passwordHash: hashPassword(password),
+      transportScope: role === 'logist' ? transportScope : 'all',
       profile: { create: profileData },
     },
     include: { carrier: { select: { name: true } }, profile: true, template: { select: { name: true } } },
@@ -123,7 +130,7 @@ export async function POST(req: NextRequest) {
   await plog({
     type: 'USER_CREATED', source: 'api/admin/users',
     actor: { login: auth.login, name: auth.name, role: auth.role },
-    message: `Создан профиль «${name}» (логин ${login}, роль ${role}, должность «${user.template?.name ?? '—'}»)`,
+    message: `Создан профиль «${name}» (логин ${login}, роль ${role}, должность «${user.template?.name ?? '—'}», транспорт: ${transportScopeLabel(transportScope)})`,
   })
 
   return NextResponse.json({ user: toAdminUserDTO(user) }, { status: 201 })
@@ -180,6 +187,19 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'Учётке перевозчика нужна привязка к компании — укажите компанию' }, { status: 400 })
   }
 
+  // специализация логиста по транспорту: смена сразу меняет видимость заявок
+  let scopeChanged = false
+  if (body?.transportScope !== undefined) {
+    const scope = normalizeTransportScope(body.transportScope)
+    if (scope === null) return NextResponse.json({ error: 'Специализация: все типы, тент или борт' }, { status: 400 })
+    const effectiveRole = String(patch.role ?? existing.role)
+    const nextScope = effectiveRole === 'logist' ? scope : 'all'
+    if (nextScope !== existing.transportScope) {
+      patch.transportScope = nextScope
+      scopeChanged = true
+    }
+  }
+
   if (typeof body?.password === 'string' && body.password) {
     if (body.password.length < 6) return NextResponse.json({ error: 'Пароль — минимум 6 символов' }, { status: 400 })
     patch.passwordHash = hashPassword(body.password)
@@ -212,13 +232,14 @@ export async function PUT(req: NextRequest) {
     })
   })
   invalidateAccessCache()
-  if (roleChanged) notifyLive({ type: 'PERMS_CHANGED' })
+  if (roleChanged || scopeChanged) notifyLive({ type: 'PERMS_CHANGED' })
 
   await plog({
     type: roleChanged ? 'ACCESS_CHANGED' : 'USER_UPDATED', source: 'api/admin/users',
     actor: { login: auth.login, name: auth.name, role: auth.role },
     message: `Профиль изменён: ${user.name} (логин ${user.login})${
       roleChanged ? ` — роль ${existing.role} → ${user.role}, должность «${user.template?.name ?? '—'}», личные исключения сняты` : ''}${
+      scopeChanged ? ` — специализация по транспорту: ${transportScopeLabel(existing.transportScope)} → ${transportScopeLabel(user.transportScope)}` : ''}${
       typeof body?.password === 'string' && body.password ? ' — пароль сброшен' : ''}`,
   })
 

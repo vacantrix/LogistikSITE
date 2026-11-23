@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./kontur/kontur.css";
 import { Toaster } from "@/components/ui/toaster";
 
 const geistSans = Geist({
@@ -14,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "АЭМЗ Логистика",
-  description: "Закрытая площадка для агентов-перевозчиков: торги по заявкам, документы, проверка нейросетью, единый реестр рейсов в 1С:ERP.",
-  keywords: ["логистика", "АЭМЗ", "перевозки", "торги", "1С:ERP", "платформа"],
+  title: "АЭМЗ Поток",
+  description: "Единая логистическая платформа АЭМЗ: заявки и торги, документы и ЭДО, собственный парк и рейсы в одном контуре.",
+  keywords: ["логистика", "АЭМЗ", "Поток", "перевозки", "торги", "1С:ERP", "собственный парк"],
   authors: [{ name: "ООО «АЭМЗ»" }],
   // знак LogistikSITE: SVG для современных браузеров, ICO/PNG — для старых и закладок
   icons: {
@@ -28,16 +29,16 @@ export const metadata: Metadata = {
   },
   // превью ссылки в мессенджерах и почте
   openGraph: {
-    title: "АЭМЗ Логистика",
-    description: "Закрытая площадка АЭМЗ для перевозчиков: торги по заявкам, документы и реестр рейсов.",
-    siteName: "АЭМЗ Логистика",
+    title: "АЭМЗ Поток",
+    description: "Единая логистическая платформа АЭМЗ: заявки, документы, собственный парк и рейсы.",
+    siteName: "АЭМЗ Поток",
     locale: "ru_RU",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "АЭМЗ Логистика",
-    description: "Закрытая площадка АЭМЗ для перевозчиков: торги по заявкам, документы и реестр рейсов.",
+    title: "АЭМЗ Поток",
+    description: "Единая логистическая платформа АЭМЗ: заявки, документы, собственный парк и рейсы.",
   },
 };
 

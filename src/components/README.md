@@ -3,7 +3,7 @@
 ```
 components/
 ├── ui/          shadcn/ui (New York) — базовые кирпичики интерфейса
-└── platform/    экраны и блоки платформы «АЭМЗ Логистика»  → platform/README.md
+└── platform/    экраны и блоки платформы «АЭМЗ Поток»  → platform/README.md
 ```
 
 ## ui/ — shadcn/ui

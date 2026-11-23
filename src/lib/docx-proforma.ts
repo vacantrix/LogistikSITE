@@ -212,7 +212,7 @@ function noteAndSignature(formNo: number): Paragraph[] {
     }),
     new Paragraph({
       spacing: { after: 0, line: 276 },
-      children: [new TextRun({ text: `Сформировано автоматически платформой «АЭМЗ Логистика» — ${nowLabel()} (МСК).`, size: 17, color: '94A3B8', font: 'Calibri' })],
+      children: [new TextRun({ text: `Сформировано автоматически платформой «АЭМЗ Поток» — ${nowLabel()} (МСК).`, size: 17, color: '94A3B8', font: 'Calibri' })],
     }),
   ]
 }
@@ -230,7 +230,7 @@ function section(children: ISectionOptions['children'], formNo: number): ISectio
         children: [new Paragraph({
           tabStops: [{ type: TabStopType.RIGHT, position: 9638 }],
           children: [
-            new TextRun({ text: `Форма АЭМЗ-ОП-${formNo} · платформа «АЭМЗ Логистика»`, size: 16, color: '94A3B8', font: 'Calibri' }),
+            new TextRun({ text: `Форма АЭМЗ-ОП-${formNo} · платформа «АЭМЗ Поток»`, size: 16, color: '94A3B8', font: 'Calibri' }),
             new TextRun({ children: ['\tСтр. ', PageNumber.CURRENT, ' из ', PageNumber.TOTAL_PAGES], size: 16, color: '94A3B8', font: 'Calibri' }),
           ],
         })],
@@ -322,7 +322,7 @@ export async function buildProforma2Docx(data: ReportSummary, operator = '—'):
       { label: 'ОБОРОТ', value: fmtMoney(p2.turnover), accent: true },
       { label: 'СРЕДНЯЯ СТАВКА', value: fmtRate(p2.avgRate) },
     ]),
-    p(`Общий тоннаж заявок: ${fmtTon(p2.tonnageTotal)} · среднее число ставок на заявку: ${String(p2.avgBids).replace('.', ',')} · рейсов с ЭТрН: ${p2.etrnCount} из ${p2.confirmedCount}`, { size: 18, color: '64748B', before: 60 }),
+    p(`Общий тоннаж заявок: ${fmtTon(p2.tonnageTotal)} · среднее число ставок на заявку: ${String(p2.avgBids).replace('.', ',')} · рейсов с накладными: ${p2.etrnCount} из ${p2.confirmedCount}`, { size: 18, color: '64748B', before: 60 }),
 
     heading('2. Привлечённый транспорт'),
     ...(await chartBlock(chart1)),

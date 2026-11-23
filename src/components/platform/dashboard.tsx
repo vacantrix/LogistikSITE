@@ -102,7 +102,7 @@ export default function DashboardTab({ onNavigate }: TabProps) {
               label="Документов принято автоматически"
               value={`${kpi.docsAutoShare}%`}
               tone="navy"
-              hint={`Рейсы с ЭТрН: ${kpi.etrnShare}%`}
+              hint={`Рейсов выполняется: ${counts.CONFIRMED}`}
             />
           </div>
 

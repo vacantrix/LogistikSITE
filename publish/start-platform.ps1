@@ -31,6 +31,10 @@ $env:NODE_ENV = 'production'
 $env:PORT = "$PlatformPort"
 $env:HOSTNAME = '127.0.0.1'
 $env:DATABASE_URL = 'file:' + ($DbPath -replace '\\', '/')
+# KONTUR: база диспетчерской. С этапа объединения баз это та же combat.db:
+# таблицы Контура живут в ней с префиксом Dispatch (см. prisma/kontur.prisma).
+$env:KONTUR_DATABASE_URL = 'file:' + ($KonturDb -replace '\\', '/')
+$env:CONTOUR_AUDIT_FILE = (Join-Path $LogDir 'contour-audit.jsonl')
 $env:NEXT_TELEMETRY_DISABLED = '1'
 
 $outLog = Join-Path $LogDir 'platform.out.log'

@@ -1,0 +1,415 @@
+// Прототип правил B5 (ТЗ v5.0) — подмножество модели B4.
+// Продакшн-схема (PostgreSQL/Flyway, все 25 таблиц B4) — в этапе 2, db/migration.
+//
+// С этапа объединения баз таблицы диспетчерской живут в общей базе платформы
+// (combat.db) с префиксом Dispatch: платформенные User/Driver/Trailer и
+// диспетчерские DispatchUser/DispatchDriver/DispatchTrailer не пересекаются.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/kontur-client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Пользователи кабинета (ролевая система по мотивам LogistikSITE, адаптирована:
+// на контуре — логисты и администрация). Пароли — демо-контур, sha256.
+model User {
+  id           String   @id @default(uuid())
+  login        String   @unique
+  fullName     String
+  position     String
+  role         String // logist | admin
+  phone        String?
+  email        String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@map("DispatchUser")
+}
+
+// B4.2 — штатный водитель АЭМЗ. Поля справочника (паспорт, ВУ) — для контроля
+// сроков документов в разделе «Справочники» (стиль LogistikSITE, адаптация).
+model Driver {
+  id            String   @id @default(uuid())
+  fullName      String
+  phone         String
+  birthDate     String? // ДД.ММ.ГГГГ
+  passport      String? // серия и номер
+  licenseUntil  String? // ВУ действительно до, ДД.ММ.ГГГГ
+  status        String   @default("active") // active/vacation/sick/other
+  statusComment String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@map("DispatchDriver")
+}
+
+// B4.3 — транспорт принадлежит АЭМЗ: ownership "own" = собственный ТС (логистический
+// контур — назначение только из своего парка, привлечённый транспорт не используется)
+model Vehicle {
+  id        String   @id @default(uuid())
+  brand     String
+  plate     String   @unique
+  vin       String?
+  sts       String? // СТС: серия и номер
+  techTill  String? // техосмотр до, ДД.ММ.ГГГГ
+  capacityT Float?
+  volumeM3  Float?
+  ownership String   @default("own") // own = собственный ТС АЭМЗ
+  isRepair  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("DispatchVehicle")
+}
+
+// B4.4 — прицепы также из собственного парка АЭМЗ
+model Trailer {
+  id              String   @id @default(uuid())
+  brand           String
+  plate           String   @unique
+  type            String
+  sts             String? // СТС: серия и номер
+  techTill        String? // техосмотр до, ДД.ММ.ГГГГ
+  volumeM3        Float?
+  sideLoadHeightM Float?
+  beltsCount      Int?
+  workingBoards   Boolean  @default(false)
+  ownership       String   @default("own") // own = собственный прицеп АЭМЗ
+  isRepair        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@map("DispatchTrailer")
+}
+
+// B4.5
+model Order {
+  id               String    @id @default(uuid())
+  externalId       String    @unique
+  number           String
+  customer         String
+  product          String
+  loadPoint        String
+  unloadPoint      String
+  loadDatePlan     DateTime?
+  unloadDatePlan   DateTime?
+  tariff           Float?
+  kp               String?
+  source           String    @default("1c") // 1c/manual/csv
+  extra            String?
+  status           String    @default("new") // new/ready_to_plan/planned/quarantine
+  quarantineReason String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  @@map("DispatchOrder")
+}
+
+// B4.6
+model Trip {
+  id               String    @id @default(uuid())
+  vehicleId        String
+  trailerId        String?
+  driverId         String
+  startedAt        DateTime?
+  endedAt          DateTime?
+  status           String    @default("draft") // draft/active/completed/cancelled
+  ackStatus        String    @default("pending") // pending/acknowledged/problem
+  ackAt            DateTime?
+  ackProblemReason String?
+  waitingReturn    Boolean   @default(false)
+  reviewAt         DateTime?
+  incidentOpen     Boolean   @default(false)
+  notes            String?
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  @@map("DispatchTrip")
+}
+
+// B4.7 (с полями барьера корректировки B5.6: statusSource/statusSetAt)
+model Leg {
+  id             String    @id @default(uuid())
+  tripId         String
+  seq            Int
+  type           String    @default("main") // main/return/empty_return
+  cargoSource    String? // 1c/ati/manual
+  loadPoint      String
+  unloadPoint    String
+  loadDatePlan   DateTime?
+  unloadDatePlan DateTime?
+  loadDateFact   DateTime?
+  unloadDateFact DateTime?
+  status         String    @default("assigned")
+  statusSource   String    @default("driver") // driver/logist
+  statusSetAt    DateTime  @default(now())
+  docsPending    Boolean   @default(false)
+  docsLost       Boolean   @default(false)
+  rate           Float?
+  paymentType    String?
+  cargoDesc      String?
+  weightT        Float?
+  volumeM3       Float?
+  kmPlan         Int?
+  odometerStart  Int?
+  odometerEnd    Int?
+  kmFact         Int?
+  dealId         String?
+  orderId        String?
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([tripId, seq])
+  @@map("DispatchLeg")
+}
+
+// B4.14 — со всеми флагами B5
+model StatusEvent {
+  id                 String    @id @default(uuid())
+  legId              String
+  status             String
+  type               String    @default("normal") // normal/correction
+  actorId            String?
+  actorRole          String // driver/logist/system
+  clientId           String?   @unique
+  deviceId           String?
+  seqNo              Int?
+  clientTs           DateTime?
+  serverTs           DateTime  @default(now())
+  receivedOffline    Boolean   @default(false)
+  clockSkew          Boolean   @default(false)
+  superseded         Boolean   @default(false)
+  lateArrival        Boolean   @default(false)
+  needsReview        Boolean   @default(false)
+  legacy             Boolean   @default(false)
+  appliedByReview    Boolean   @default(false)
+  skippedConflict    Boolean   @default(false)
+  parentCorrectionId String?
+  comment            String?
+  requiredFiles      String? // JSON [{clientId, kind}]
+  reviewState        String? // pending/applied/rejected
+  result             String? // applied/superseded/needs_review/rejected/skipped_conflict
+  rejectReason       String?
+  createdAt          DateTime  @default(now())
+  @@map("DispatchStatusEvent")
+}
+
+// B4.15
+model TripEvent {
+  id      String   @id @default(uuid())
+  tripId  String
+  type    String // assigned/ack/problem/composition_change/incident_opened/incident_closed/waiting_return/cancelled
+  actorId String?
+  payload String? // JSON
+  at      DateTime @default(now())
+  @@map("DispatchTripEvent")
+}
+
+// Онлайн-мониторинг водителя/машины (телеметрия из приложения водителя).
+// Контур тестовый: реальные статусы шлёт приложение водителя через
+// POST /api/driver/telemetry; до подключения приложения работает симулятор.
+model DriverOnline {
+  id           String    @id @default(uuid())
+  driverId     String    @unique
+  tripId       String? // текущий рейс (для контекста статуса)
+  vehicleId    String?
+  status       String    @default("offline") // см. MONITOR_STATUSES
+  statusSetAt  DateTime  @default(now())
+  statusSource String    @default("app") // app/test_sim/system
+  comment      String?
+  lat          Float?
+  lng          Float?
+  speedKmh     Float?
+  headingDeg   Float?
+  pointAt      DateTime? // время фиксации точки от устройства
+  lastSeenAt   DateTime? // последний выход на связь
+  appInstalled Boolean   @default(false) // приложение установлено (виден на карте)
+  appVersion   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  @@map("DispatchDriverOnline")
+}
+
+// История GPS-точек водителя — трек на карте (хвост ограничен)
+model DriverGeoPoint {
+  id       String   @id @default(uuid())
+  driverId String
+  tripId   String?
+  lat      Float
+  lng      Float
+  speedKmh Float?
+  status   String?
+  at       DateTime @default(now())
+
+  @@index([driverId, at])
+  @@map("DispatchDriverGeoPoint")
+}
+
+// B4.23
+model Device {
+  id                String    @id
+  driverId          String?
+  appVersion        String    @default("2.4.0")
+  isLegacy          Boolean   @default(false)
+  lastSeenAt        DateTime?
+  clockSkewCount24h Int       @default(0)
+  systematicSkew    Boolean   @default(false)
+  fcmAvailable      Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  @@map("DispatchDevice")
+}
+
+// B4.19 (файлы без байтов — состояние доставки)
+model FileRec {
+  id            String   @id @default(uuid())
+  ownerType     String // leg/communication/deal/message/incident
+  ownerId       String
+  kind          String // tttn/odometer/other
+  clientId      String   @unique
+  state         String   @default("uploaded") // uploaded/confirmed/lost/rejected
+  eventClientId String?
+  lateArrival   Boolean  @default(false)
+  sizeBytes     Int      @default(1200000)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@map("DispatchFileRec")
+}
+
+// B4.21
+model Outbox1c {
+  id            Int      @id @default(autoincrement())
+  eventType     String
+  payload       String // JSON
+  state         String   @default("pending") // pending/acked/stale/failed_delivery
+  firstSeenAt   DateTime @default(now())
+  lastAttemptAt DateTime?
+  attempts      Int      @default(0)
+  ackedAt       DateTime?
+  lastError     String?
+  @@map("DispatchOutbox1c")
+}
+
+// Задача звонка — контур «моста на телефон» логиста. Клик «Позвонить» в кабинете
+// на ПК создаёт задачу; лёгкое приложение на телефоне логиста забирает её
+// (GET /api/call?poll=1) и показывает заявку с кнопкой вызова — номер вводить
+// вручную не нужно. До релиза нативного приложения работает веб-демо
+// /phone-bridge/index.html тем же контрактом.
+model CallTask {
+  id          String    @id @default(uuid())
+  userId      String // логист, инициировавший звонок
+  orderId     String?
+  driverId    String?
+  driverName  String?
+  driverPhone String
+  orderNumber String?
+  orderRoute  String? // «Абинск (АЭМЗ) → Краснодар»
+  orderInfo   String? // заявка · заказчик · груз · дата погрузки
+  status      String    @default("pending") // pending/delivered/called/dismissed
+  deviceId    String? // устройство-мост, забравшее задачу
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+  finishedAt  DateTime?
+  @@map("DispatchCallTask")
+}
+
+// Закрепление состава: водитель ↔ тягач ↔ прицеп. Водители АЭМЗ почти всегда
+// работают на «своих» машине и прицепе; подбор и планирование предлагают
+// закреплённый состав в первую очередь, смена — редкое явление (перекрепить
+// можно в любой момент — кнопка «Закрепить» в подборе и диалоге планирования).
+model VehicleBinding {
+  id        String   @id @default(uuid())
+  driverId  String   @unique // у водителя одно закрепление
+  vehicleId String
+  trailerId String?
+  pinnedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("DispatchVehicleBinding")
+}
+
+// Заявка на груз с биржи ATI.SU, по которому АЭМЗ договорилась с грузовладельцем.
+// Отделяет согласованные грузы от общего подбора витрины. Две стадии:
+//   stage=preliminary — предварительное согласование: договорились по телефону
+//                       (ставка, дата погрузки), документы ещё не обменяны;
+//   stage=full        — полное согласование: документы обменяны (заявка на
+//                       перевозку подписана), заявка вступила в силу.
+// status=cancelled — договорённость не состоялась (отказ до/после документов).
+// Данные груза сохраняются снимком: даже когда груз исчезнет с биржи, заявка
+// остаётся в кабинете с контактами и условиями.
+model AtiDeal {
+  id            String    @id @default(uuid())
+  loadId        String    @unique // id груза из выдачи биржи (снимок привязки)
+  atiId         Int? // номер груза на ATI.SU
+  from          String
+  fromRegion    String?
+  to            String
+  toRegion      String?
+  km            Int?
+  bodies        String? // «тент / реф» — строка для карточки
+  cargo         String
+  weightT       Float?
+  volumeM3      Float?
+  loadDateFrom  String? // окно погрузки, ДД.ММ
+  loadDateTo    String?
+  rate          Float?
+  perKm         Float?
+  payment       String? // id формы оплаты (cashless_vat …)
+  ndsPct        Int?
+  carrierFirm   String // грузовладелец
+  carrierRating Float?
+  contactName   String?
+  contactPhone  String?
+  stage         String    @default("preliminary") // preliminary / full
+  status        String    @default("active") // active / cancelled
+  comment       String? // условия договорённости (ставка, время, нюансы)
+  cancelReason  String?
+  agreedAt      DateTime  @default(now()) // момент предварительного согласования
+  docsAt        DateTime? // момент обмена документами (полное согласование)
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  @@map("DispatchAtiDeal")
+}
+
+// Ручной план логиста — запись календаря «Планирования» на любую дату.
+// Отличается от расчётных событий (они выводятся из плеч рейсов и грузов
+// ATI.SU движком planner.ts): логист сам планирует работу состава —
+// погрузку, выгрузку, возврат на базу АЭМЗ или заметку — на любой день.
+// date «YYYY-MM-DD» и time «HH:MM» — строки, а не DateTime: календарный
+// день важен, сдвиг часовых поясов исключён.
+model PlanEntry {
+  id            String   @id @default(uuid())
+  driverId      String
+  vehicleId     String? // тягач на момент планирования (для подсказки в календаре)
+  date          String // YYYY-MM-DD
+  time          String? // HH:MM; не задано — «в течение дня»
+  kind          String   @default("load") // load/unload/return/note
+  point         String? // пункт погрузки/выгрузки (для return — база АЭМЗ)
+  note          String?
+  createdById   String?
+  createdByName String?
+  closedAt      DateTime? // когда событие закрыто (выполнено) — до этого просрочка пульсирует красным
+  closedByName  String? // кто закрыл событие
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([date])
+  @@map("DispatchPlanEntry")
+}
+
+// B4.24
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorRole String // driver/logist/admin/system
+  actorName String?
+  object    String
+  objectId  String
+  field     String?
+  was       String?
+  became    String?
+  comment   String?
+  at        DateTime @default(now())
+  @@map("DispatchAuditLog")
+}

@@ -1,0 +1,1236 @@
+'use client'
+
+/**
+ * Раздел «Планирование» — график работы парка АЭМЗ в виде доски Ганта.
+ *
+ * Стандарт диспетчерских TMS (FleetOutlook, AscendTMS, Syncfusion Logistics
+ * Gantt): строки — ВСЕ составы парка (занятые + свободный резерв; при
+ * большом парке — поиск и быстрые фильтры по статусу), время идёт слева
+ * направо, рейс — ОДНА непрерывная полоса от погрузки до возврата на базу.
+ * Шапка дней и колонка составов ЗАКРЕПЛЕНЫ — при прокрутке всегда видно,
+ * чья строка и какой день.
+ *
+ * СИСТЕМА ПРОСРОЧКИ: событие, чей срок прошёл, а факт не закрыт,
+ * ПУЛЬСИРУЕТ И СВЕТИТСЯ КРАСНЫМ — погрузка/выгрузка рейса без факта, план
+ * логиста без отметки «выполнено», груз без состава с истёкшим окном.
+ * Закрытое событие становится СЕРЫМ — «прошло и всё в порядке». Кнопка ✓ у
+ * метки плана закрывает событие, ↺ возвращает в план; факт погрузки/
+ * выгрузки рейса фиксируется в карточке рейса. Составы с просрочкой —
+ * первыми строками и с бейджем «!N».
+ *
+ * Планирование на любую дату: клик по свободному месту строки (день
+ * подставляется сам, состав уже выбран), «+» в шапке дня или кнопка
+ * «Запланировать» — диалог с датой/временем/типом события (PlanEntry в БД,
+ * стиль — индиго-пунктир). Расчёт времён — общий движок src/lib/planner.ts,
+ * поэтому «Заявки», «Занятость» и «ATI.SU» сходятся в один график.
+ */
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
+import {
+  CalendarDays, CalendarPlus, Check, ChevronLeft, ChevronRight, ClipboardList, FileCheck2,
+  Hourglass, Inbox, ListChecks, Plus, RotateCcw, Search, X,
+} from 'lucide-react'
+import { Card, CardContent } from '@/components/kontur/ui/card'
+import { Button } from '@/components/kontur/ui/button'
+import { Input } from '@/components/kontur/ui/input'
+import { InfoTip, Pill } from '@/components/kontur/proto/bits'
+import { PlanDealDialog } from '@/components/kontur/proto/PlanDealDialog'
+import { PlanEntryDialog, isoDate } from '@/components/kontur/proto/PlanEntryDialog'
+import { buildPlan, fmtWhen } from '@/lib/kontur/planner'
+import { authFetch } from '@/lib/kontur/session-token'
+import { useToast } from '@/hooks/use-toast'
+import type { AtiDealDto, StateResponse } from '@/lib/kontur/client-types'
+
+const DAY_MS = 86400000
+const HOUR_MS = 3600000
+const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
+
+function shortName(full: string): string {
+  const [fam, im, ot] = full.split(' ')
+  return ot ? `${fam} ${im?.[0] ?? ''}.${ot[0]}.` : im ? `${fam} ${im[0]}.` : fam
+}
+
+/** Русское множественное число: 1 состав / 2 состава / 5 составов */
+function pluralSostav(n: number): string {
+  const d10 = n % 10
+  const d100 = n % 100
+  if (d10 === 1 && d100 !== 11) return 'состав'
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return 'состава'
+  return 'составов'
+}
+
+function fmtHM(ms: number): string {
+  return new Date(ms).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+}
+
+function fmtDM(iso: string): string {
+  return `${iso.slice(8, 10)}.${iso.slice(5, 7)}`
+}
+
+/**
+ * Просрочена ли запись плана логиста: срок прошёл (30 минут допуска для
+ * точного времени, конец дня — для «в течение дня»), а закрытия (факта) нет.
+ * Единая формула для плитки «Просрочено», бейджа строки и списка планов.
+ */
+function manualEntryOverdue(p: { date: string; time?: string | null; closedAt?: string | null }, now: number): boolean {
+  if (p.closedAt) return false
+  const [y, m, dd] = p.date.split('-').map(Number)
+  const dayStart = new Date(y, m - 1, dd).getTime()
+  const ms = p.time
+    ? dayStart + Number(p.time.slice(0, 2)) * HOUR_MS + Number(p.time.slice(3, 5)) * 60000
+    : dayStart + 12 * HOUR_MS
+  const deadline = p.time ? ms + 30 * 60000 : dayStart + DAY_MS
+  return deadline < now
+}
+
+// ——— раскраска полос графика ———
+
+type SegKind = 'deadhead' | 'load' | 'run1c' | 'runAti' | 'unload' | 'base'
+
+/** Состояние события: впереди/сейчас · прошло и закрыто (серое) · просрочка (красный пульс) */
+export type SegState = 'active' | 'done' | 'overdue'
+
+/**
+ * Высота блока кодирует тип («брус» — движение, «квадрат» — операция),
+ * цвет — состояние: рабочие цвета — впереди; серое — прошло и закрыто;
+ * красное с пульсом — срок прошёл, а факт не закрыт (просрочка).
+ */
+function segCls(kind: SegKind, state: SegState): string {
+  const square = kind === 'load' || kind === 'unload'
+  if (state === 'overdue') {
+    return `${square ? 'h-6 min-w-[12px] rounded-[5px]' : 'h-5 rounded-full'} bg-red-500 shadow-sm anim-overdue`
+  }
+  if (state === 'done') {
+    if (kind === 'deadhead') return 'h-4 rounded-full border border-dashed border-slate-300 bg-slate-100'
+    if (square) return 'h-6 min-w-[12px] rounded-[5px] bg-slate-300 shadow-sm'
+    return 'h-5 rounded-full bg-slate-300'
+  }
+  switch (kind) {
+    case 'load':
+      return 'h-6 min-w-[12px] rounded-[5px] bg-blue-500 shadow-sm'
+    case 'unload':
+      return 'h-6 min-w-[12px] rounded-[5px] bg-amber-500 shadow-sm'
+    case 'run1c':
+      return 'h-5 rounded-full bg-emerald-500'
+    case 'runAti':
+      return 'h-5 rounded-full bg-violet-500'
+    case 'base':
+      return 'h-5 rounded-full bg-teal-600'
+    case 'deadhead':
+      return 'h-4 rounded-full border border-dashed border-slate-400 bg-slate-200'
+  }
+}
+
+/** Метка плана логиста: индиго-пунктир (впереди) · красный пульс (просрочка) · серое (выполнено) */
+function manualCls(state: SegState): string {
+  if (state === 'overdue') return 'border-red-400 bg-red-50 text-red-700 shadow-sm anim-overdue'
+  if (state === 'done') return 'border-slate-300 bg-slate-50 text-slate-400'
+  return 'border-dashed border-indigo-400 bg-white/95 text-indigo-800 shadow-sm'
+}
+
+const LANE_STATUS: Record<string, { dot: string; label: string }> = {
+  on_trip: { dot: 'bg-emerald-500', label: 'на линии' },
+  assigned: { dot: 'bg-sky-500', label: 'по плану' },
+  free: { dot: 'bg-slate-300', label: 'на базе' },
+}
+
+const MANUAL_KIND_LABEL: Record<string, string> = {
+  load: 'Погрузка',
+  unload: 'Выгрузка',
+  return: 'Возврат на АЭМЗ',
+  note: 'Заметка',
+}
+
+// ——— модель строки графика ———
+
+type Seg = {
+  key: string
+  kind: SegKind
+  start: number // ms, обрезано окном
+  end: number
+  ms: number // исходное начало (для метки времени)
+  label: string // текст внутри полосы — только если влезает
+  title: string
+  tripId?: string
+  state: SegState // активная · серое «прошло-закрыто» · красный пульс «просрочка»
+  showLabel: boolean
+  timeLabel: number | null // px-позиция метки времени над блоком; null — скрыть
+}
+
+type Manual = { id: string; ms: number; time: string | null; label: string; title: string; state: SegState }
+
+type Lane = {
+  driverId: string
+  name: string
+  sub: string
+  status: 'on_trip' | 'assigned' | 'free'
+  overdueCount: number // просроченных событий (рейсы + план логиста) — бейдж «!N»
+  segs: Seg[]
+  manuals: Manual[]
+}
+
+type Ghost = {
+  key: string
+  ms: number
+  time: string | null
+  overdue: boolean // окно погрузки прошло, а состава всё нет
+  tip: string
+  cls: string
+  labelCls: string
+  onClick: () => void
+  labelX: number | null
+}
+
+export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, onFindOrder }: {
+  state: StateResponse
+  onChanged: () => void
+  onOpenTrip: (tripId: string) => void
+  onOpenAtiDeals: () => void
+  onFindOrder: (number: string) => void
+}) {
+  const { toast } = useToast()
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  const [span, setSpan] = useState<3 | 7>(3)
+  const [startIso, setStartIso] = useState(() => isoDate(new Date()))
+  const [planDeal, setPlanDeal] = useState<AtiDealDto | null>(null)
+  const [entryOpen, setEntryOpen] = useState(false)
+  const [entryDate, setEntryDate] = useState(() => isoDate(new Date()))
+  const [entryDriverId, setEntryDriverId] = useState<string | null>(null)
+  const [unplanBusy, setUnplanBusy] = useState<string | null>(null)
+  const [removeBusy, setRemoveBusy] = useState<string | null>(null)
+  const [closeBusy, setCloseBusy] = useState<string | null>(null)
+  // весь парк в графике: поиск по составу + быстрый фильтр по статусу
+  const [laneQuery, setLaneQuery] = useState('')
+  const [laneFilter, setLaneFilter] = useState<'all' | 'on_trip' | 'assigned' | 'free' | 'overdue'>('all')
+
+  // тик каждую минуту: «сегодня», линия «сейчас» и метки не протухают
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  const plan = useMemo(() => buildPlan(state, nowTick), [state, nowTick])
+
+  // окно графика: startIso 00:00 → +span дней (парсим локально, без UTC-сдвига)
+  const startMs = useMemo(() => {
+    const [y, m, d] = startIso.split('-').map(Number)
+    return new Date(y, m - 1, d).getTime()
+  }, [startIso])
+  const winMs = span * DAY_MS
+  const winEnd = startMs + winMs
+
+  // ширина дорожки в px — для меток без наложения (меряем после монтирования)
+  const laneRef = useRef<HTMLDivElement | null>(null)
+  const [laneW, setLaneW] = useState(900)
+  useEffect(() => {
+    const update = () => setLaneW(laneRef.current?.clientWidth ?? 900)
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [span])
+
+  function shift(dir: -1 | 1) {
+    setStartIso(isoDate(new Date(startMs + dir * span * DAY_MS)))
+  }
+  function goToday() {
+    setStartIso(isoDate(new Date()))
+  }
+  function openEntry(iso: string, driverId?: string) {
+    setEntryDate(iso)
+    setEntryDriverId(driverId ?? null)
+    setEntryOpen(true)
+  }
+
+  // ——— колонки дней ———
+  const days = useMemo(() => {
+    const todayIso = isoDate(new Date(nowTick))
+    return Array.from({ length: span }, (_, i) => {
+      const ds = new Date(startMs + i * DAY_MS)
+      const iso = isoDate(ds)
+      const wd = ds.getDay()
+      return {
+        i,
+        iso,
+        wd: ds.toLocaleDateString('ru-RU', { weekday: 'short' }),
+        dm: ds.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+        isToday: iso === todayIso,
+        past: iso < todayIso,
+        weekend: wd === 0 || wd === 6,
+      }
+    })
+  }, [span, startMs, nowTick])
+
+  // ——— дорожки составов: события рейсов + ручной план логиста ———
+  const lanes = useMemo<Lane[]>(() => {
+    // ручной план по водителям. Состояние записи считаем по ВСЕМ записям
+    // (не только в окне графика): бейдж просрочки «!N» у строки должен гореть
+    // и когда запись чуть за краем видимого окна
+    const manualByDriver = new Map<string, Manual[]>()
+    const overdueManualsByDriver = new Map<string, number>()
+    for (const p of state.planEntries) {
+      const [y, m, dd] = p.date.split('-').map(Number)
+      const dayStart = new Date(y, m - 1, dd).getTime()
+      const ms = p.time
+        ? dayStart + Number(p.time.slice(0, 2)) * HOUR_MS + Number(p.time.slice(3, 5)) * 60000
+        : dayStart + 12 * HOUR_MS // без времени — середина дня
+      const closed = !!p.closedAt
+      const overdue = manualEntryOverdue(p, nowTick)
+      if (overdue) overdueManualsByDriver.set(p.driverId, (overdueManualsByDriver.get(p.driverId) ?? 0) + 1)
+      if (ms < startMs || ms >= winEnd) continue
+      const kindLabel = MANUAL_KIND_LABEL[p.kind] ?? p.kind
+      const label =
+        p.kind === 'note' ? (p.note?.trim() || 'Заметка')
+        : p.kind === 'return' ? 'Возврат на АЭМЗ'
+        : `${kindLabel} · ${p.point ?? '—'}`
+      const man: Manual = {
+        id: p.id,
+        ms,
+        time: p.time ?? null,
+        label,
+        state: closed ? 'done' : overdue ? 'overdue' : 'active',
+        title:
+          `${kindLabel}${p.point ? ` · ${p.point}` : ''}${p.note ? ` · ${p.note}` : ''}` +
+          (closed
+            ? ` · ВЫПОЛНЕНО${p.closedByName ? ` (${p.closedByName})` : ''}`
+            : overdue
+              ? ' · ПРОСРОЧКА: срок прошёл — закройте ✓ или снимите ×'
+              : '') +
+          ` · план логиста${p.createdByName ? ` (${p.createdByName})` : ''} · ✓ закрыть · × снять`,
+      }
+      const arr = manualByDriver.get(p.driverId) ?? []
+      arr.push(man)
+      manualByDriver.set(p.driverId, arr)
+    }
+
+    return plan.rows.map((r) => {
+      const segs: Seg[] = []
+      // оценка ширины текста text-[10px]: ~5.4px/символ + внутренние отступы
+      const estPx = (t: string) => t.length * 5.4 + 14
+      for (const e of r.events) {
+        const start = Math.max(e.start, startMs)
+        const end = Math.min(e.end, winEnd)
+        if (end <= start) continue
+        const kind: SegKind =
+          e.kind === 'load' ? 'load'
+          : e.kind === 'unload' ? 'unload'
+          : e.kind === 'base_return' ? 'base'
+          : e.kind === 'deadhead' ? 'deadhead'
+          : e.source === 'ati' ? 'runAti' : 'run1c'
+        const state: SegState = e.overdue ? 'overdue' : e.done ? 'done' : 'active'
+        const wPx = ((end - start) / winMs) * laneW
+        // подпись внутри полосы — только если точно влезает, без обрезки;
+        // для узких полос хода — короткая форма «→ Город»
+        let text = ''
+        if (kind === 'run1c' || kind === 'runAti') {
+          if (wPx >= estPx(e.label)) text = e.label
+          else {
+            const short = `→ ${e.label.split(' → ')[1] ?? ''}`
+            if (wPx >= estPx(short)) text = short
+          }
+        } else if (kind === 'base') {
+          if (wPx >= estPx('на базу')) text = 'на базу'
+        } else if (kind === 'deadhead') {
+          if (wPx >= estPx('порожняк')) text = 'порожняк'
+        }
+        segs.push({
+          key: e.key,
+          kind,
+          start,
+          end,
+          ms: e.start,
+          label: text,
+          title: `${e.title}${e.fact ? ' · факт' : ''} · клик — карточка рейса`,
+          tripId: e.tripId,
+          state,
+          showLabel: text !== '',
+          timeLabel: null,
+        })
+      }
+      // метки времени над блоками погрузки/выгрузки — слева направо, без наложения
+      let lastRight = -Infinity
+      for (const s of segs.filter((x) => x.kind === 'load' || x.kind === 'unload').sort((a, b) => a.ms - b.ms)) {
+        const cx = ((s.ms - startMs) / winMs) * laneW
+        if (cx < -30 || cx > laneW + 30) continue
+        if (cx - lastRight >= 30) {
+          s.timeLabel = Math.max(12, Math.min(laneW - 12, Math.max(0, cx)))
+          lastRight = cx + 26
+        }
+      }
+      return {
+        driverId: r.driverId,
+        name: r.driverName,
+        sub: r.vehicleLabel,
+        status: r.status,
+        overdueCount: r.overdueCount + (overdueManualsByDriver.get(r.driverId) ?? 0),
+        segs,
+        manuals: (manualByDriver.get(r.driverId) ?? []).sort((a, b) => a.ms - b.ms),
+      }
+    })
+  }, [plan, state.planEntries, startMs, winMs, winEnd, laneW, nowTick])
+
+  // ——— грузы без состава (ждут назначения) — верхняя дорожка ———
+  const ghosts = useMemo<Ghost[]>(() => {
+    const list: Ghost[] = []
+    // окно погрузки прошло больше полудня назад, а состава всё нет — просрочка
+    const ghostOverdue = (ms: number) => ms + 12 * HOUR_MS < nowTick
+    for (const w of plan.waitingDeals) {
+      if (w.loadAt == null || w.loadAt < startMs || w.loadAt >= winEnd) continue
+      const full = w.deal.stage === 'full'
+      const overdue = ghostOverdue(w.loadAt)
+      list.push({
+        key: `gd-${w.deal.id}`,
+        ms: w.loadAt,
+        time: fmtHM(w.loadAt),
+        overdue,
+        tip:
+          (overdue
+            ? 'ПРОСРОЧКА: окно погрузки прошло, состав не назначен · '
+            : full
+              ? 'Груз ATI.SU в силе, состав не назначен · '
+              : 'Предварительное согласование ATI.SU · ') +
+          `${w.deal.from} → ${w.deal.to}${w.deal.weightT != null ? ` · ${w.deal.weightT} т` : ''}` +
+          (full ? ' — клик откроет подбор состава' : ' — дождитесь обмена документами; клик откроет раздел ATI.SU'),
+        cls: overdue
+          ? 'border-red-400 bg-red-200 anim-overdue'
+          : full ? 'border-violet-400 bg-violet-100' : 'border-amber-400 bg-amber-100',
+        labelCls: overdue ? 'text-red-700' : full ? 'text-violet-700' : 'text-amber-700',
+        onClick: full ? () => setPlanDeal(w.deal) : onOpenAtiDeals,
+        labelX: null,
+      })
+    }
+    for (const w of plan.waitingOrders) {
+      if (w.loadAt == null || w.loadAt < startMs || w.loadAt >= winEnd) continue
+      const overdue = ghostOverdue(w.loadAt)
+      list.push({
+        key: `go-${w.order.id}`,
+        ms: w.loadAt,
+        time: fmtHM(w.loadAt),
+        overdue,
+        tip: overdue
+          ? `ПРОСРОЧКА: плановая погрузка заявки прошла, состав не назначен · ${w.order.loadPoint.split(',')[0]} → ${w.order.unloadPoint.split(',')[0]} — клик откроет заявку в «Заявках»`
+          : `Заявка 1С «к планированию» · ${w.order.loadPoint.split(',')[0]} → ${w.order.unloadPoint.split(',')[0]} — клик откроет заявку в «Заявках»`,
+        cls: overdue ? 'border-red-400 bg-red-200 anim-overdue' : 'border-slate-400 bg-slate-100',
+        labelCls: overdue ? 'text-red-700' : 'text-slate-600',
+        onClick: () => onFindOrder(w.order.number),
+        labelX: null,
+      })
+    }
+    list.sort((a, b) => a.ms - b.ms)
+    let lastRight = -Infinity
+    for (const g of list) {
+      const cx = ((g.ms - startMs) / winMs) * laneW
+      if (cx < -30 || cx > laneW + 30) {
+        g.labelX = null
+        continue
+      }
+      if (cx - lastRight >= 34) {
+        g.labelX = Math.max(14, Math.min(laneW - 14, Math.max(0, cx)))
+        lastRight = cx + 30
+      } else {
+        g.labelX = null
+      }
+    }
+    return list
+  }, [plan, startMs, winMs, winEnd, laneW, nowTick, onOpenAtiDeals, onFindOrder])
+
+  /** позиция по времени, в % ширины дорожки */
+  const xPct = (ms: number) => `${((ms - startMs) / winMs) * 100}%`
+  const wPct = (a: number, b: number) => `${((b - a) / winMs) * 100}%`
+
+  // клик по пустому месту дорожки → план на этот день для этого состава
+  function laneClick(e: ReactMouseEvent<HTMLDivElement>, lane: Lane) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const dayIdx = Math.max(0, Math.min(span - 1, Math.floor((x / rect.width) * span)))
+    openEntry(isoDate(new Date(startMs + dayIdx * DAY_MS)), lane.driverId)
+  }
+
+  async function unplan(dealId: string, label: string) {
+    setUnplanBusy(dealId)
+    try {
+      const res = await authFetch('/api/atisu/deals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unplan', dealId }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.error?.message ?? `HTTP ${res.status}`)
+      toast({ title: 'Груз снят с плана', description: `${label} · ${json?.message ?? ''}` })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Не удалось снять груз с плана', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
+    } finally {
+      setUnplanBusy(null)
+    }
+  }
+
+  async function removeEntry(id: string) {
+    setRemoveBusy(id)
+    try {
+      const res = await authFetch(`/api/plan-entries?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.error?.message ?? `HTTP ${res.status}`)
+      toast({ title: 'Снято с плана', description: json?.message })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Не удалось снять запись', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
+    } finally {
+      setRemoveBusy(null)
+    }
+  }
+
+  /** Закрыть событие плана (выполнено — перестаёт пульсировать, становится серым) или вернуть в план */
+  async function setEntryClosed(id: string, close: boolean) {
+    setCloseBusy(id)
+    try {
+      const res = await authFetch('/api/plan-entries', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: close ? 'close' : 'reopen' }),
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.error?.message ?? `HTTP ${res.status}`)
+      toast({ title: close ? 'Событие закрыто — выполнено' : 'Возвращено в план', description: json?.message })
+      onChanged()
+    } catch (e) {
+      toast({ title: 'Не удалось изменить запись', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
+    } finally {
+      setCloseBusy(null)
+    }
+  }
+
+  const s = plan.summary
+  // просрочка: события рейсов без факта + планы логиста + грузы без состава
+  const overdueManuals = state.planEntries.filter((p) => manualEntryOverdue(p, nowTick)).length
+  const overdueWaiting = [...plan.waitingDeals, ...plan.waitingOrders].filter(
+    (w) => w.loadAt != null && w.loadAt + 12 * HOUR_MS < nowTick,
+  ).length
+  const overdueTotal = s.overdue + overdueManuals + overdueWaiting
+  const tiles: { count: number; label: string; dot: string; hint: string }[] = [
+    { count: overdueTotal, label: 'Просрочено', dot: 'bg-red-500', hint: 'События, чей срок прошёл, а факт не закрыт: погрузки/выгрузки рейсов, планы логиста, грузы без состава. В графике пульсируют красным' },
+    { count: s.busy, label: 'В работе', dot: 'bg-emerald-500', hint: 'Составы на линии: активные рейсы из «Заявок»' },
+    { count: s.assigned, label: 'Назначены', dot: 'bg-sky-500', hint: 'Рейсы составлены (включая грузы ATI.SU из плана), выезд по плану' },
+    { count: s.atBase, label: 'На базе', dot: 'bg-amber-500', hint: 'Свободный резерв на базе АЭМЗ — зелёные строки в графике' },
+    { count: s.loadsToday, label: 'Погрузок сегодня', dot: 'bg-blue-500', hint: 'Плановые погрузки сегодня — заявки 1С, грузы ATI.SU и ручной план' },
+    { count: s.unloadsToday, label: 'Выгрузок сегодня', dot: 'bg-amber-500', hint: 'Плановые выгрузки сегодня по всем рейсам' },
+    { count: s.returnsToday, label: 'Вернутся сегодня', dot: 'bg-teal-600', hint: 'Составы, которые вернутся на базу АЭМЗ до конца дня' },
+    { count: s.returnsTomorrow, label: 'Вернутся завтра', dot: 'bg-teal-400', hint: 'Составы с возвратом на базу АЭМЗ завтра' },
+  ]
+
+  const plannedCount = plan.rows.filter((r) => r.status !== 'free').length
+  const waitingCount = plan.waitingDeals.length + plan.waitingOrders.length
+  const freeLaneCount = lanes.filter((l) => l.status === 'free').length
+  const overdueLaneCount = lanes.filter((l) => l.overdueCount > 0).length
+  // весь парк: без сворачивания — фильтруем поиском и быстрыми фильтрами
+  const shownLanes = useMemo(() => {
+    const needle = laneQuery.trim().toLowerCase()
+    return lanes.filter((l) => {
+      if (needle && !`${l.name} ${l.sub}`.toLowerCase().includes(needle)) return false
+      if (laneFilter === 'all') return true
+      if (laneFilter === 'overdue') return l.overdueCount > 0
+      return l.status === laneFilter
+    })
+  }, [lanes, laneQuery, laneFilter])
+  const FILTERS: { key: 'all' | 'on_trip' | 'assigned' | 'free' | 'overdue'; label: string; count: number }[] = [
+    { key: 'all', label: 'Все', count: lanes.length },
+    { key: 'on_trip', label: 'На линии', count: lanes.filter((l) => l.status === 'on_trip').length },
+    { key: 'assigned', label: 'По плану', count: lanes.filter((l) => l.status === 'assigned').length },
+    { key: 'free', label: 'На базе', count: freeLaneCount },
+    { key: 'overdue', label: 'Просрочка', count: overdueLaneCount },
+  ]
+  const filterChipCls = (active: boolean, danger = false) =>
+    `h-7 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${
+      active
+        ? danger
+          ? 'border-red-400 bg-red-50 text-red-700'
+          : 'border-blue-400 bg-blue-50 text-blue-700 ring-2 ring-blue-100'
+        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+    }`
+  // просрочка — верх списка, закрытые — вниз
+  const entriesAll = [...state.planEntries].sort((a, b) => {
+    const rank = (p: (typeof state.planEntries)[number]) => (manualEntryOverdue(p, nowTick) ? 0 : p.closedAt ? 2 : 1)
+    return rank(a) - rank(b) || (a.date + (a.time ?? '')).localeCompare(b.date + (b.time ?? ''))
+  })
+  const segClsSpan = (active: boolean) =>
+    `h-8 px-3 text-xs font-medium transition-colors ${active ? 'bg-[#0E1B2C] text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`
+
+  const nowMs = nowTick
+  const showNow = nowMs >= startMs && nowMs < winEnd
+
+  return (
+    <div className="space-y-4">
+      {/* Шапка раздела: вид 3/7 дней, навигация, планирование на любую дату */}
+      <Card className="rounded-xl border-slate-200 shadow-sm">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <CalendarDays className="h-4 w-4 text-slate-400" aria-hidden />
+            <span className="text-sm font-bold text-slate-900">Планирование · график парка</span>
+            <Pill className="bg-slate-100 text-slate-600" title="Момент пересчёта графика">
+              обновлено {new Date(nowTick).toLocaleTimeString('ru-RU')}
+            </Pill>
+            <InfoTip label="Как читать график">
+              Одна строка — один состав (весь парк: слева поиск и фильтры), время идёт
+              слева направо. Рейс — непрерывная полоса от погрузки до возврата на базу:
+              серый пунктир — порожняк, синий квадрат — погрузка (время — над квадратом),
+              зелёная полоса — ход с грузом по заявке 1С, фиолетовая — груз ATI.SU,
+              янтарный квадрат — выгрузка, бирюзовая — возврат на АЭМЗ, красная линия —
+              «сейчас». Серые блоки — прошло и закрыто. КРАСНЫЙ ПУЛЬС — просрочка: срок
+              события прошёл, а факт не закрыт (погрузка/выгрузка рейса без факта, план
+              логиста без ✓, груз без состава с истёкшим окном). Закройте его — факт в
+              карточке рейса или ✓ у метки — и он станет серым. Клик по свободному месту
+              строки запланирует работу на этот день.
+            </InfoTip>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex overflow-hidden rounded-lg border border-slate-200" role="group" aria-label="Горизонт графика">
+              <button type="button" className={segClsSpan(span === 3)} onClick={() => setSpan(3)} title="Быстрый вид: 3 дня">
+                3 дня
+              </button>
+              <button type="button" className={segClsSpan(span === 7)} onClick={() => setSpan(7)} title="Быстрый вид: 7 дней">
+                7 дней
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shift(-1)} title={`Назад на ${span} дн.`}>
+                <ChevronLeft className="h-4 w-4" aria-hidden />
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 px-2.5 text-xs" onClick={goToday} title="Показать график с сегодняшнего дня">
+                Сегодня
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shift(1)} title={`Вперёд на ${span} дн.`}>
+                <ChevronRight className="h-4 w-4" aria-hidden />
+              </Button>
+              <Input
+                type="date"
+                value={startIso}
+                onChange={(e) => { if (e.target.value) setStartIso(e.target.value) }}
+                className="h-8 w-[150px] text-xs"
+                title="Показать график с любой даты"
+                aria-label="Начальная дата графика"
+              />
+            </div>
+            <Button
+              size="sm"
+              className="h-8 bg-[#0E1B2C] px-3 text-xs text-white hover:bg-[#16304f]"
+              onClick={() => openEntry(startIso)}
+              title="Запланировать работу состава на любую дату"
+            >
+              <CalendarPlus className="mr-1 h-3.5 w-3.5" aria-hidden />Запланировать
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 px-3 text-xs" onClick={onChanged}>
+              Пересчитать
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Плитки-счётчики */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8" role="group" aria-label="Сводка планирования">
+        {tiles.map((t) => (
+          <div key={t.label} className="flex flex-col gap-0.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm" title={t.hint}>
+            <span className="flex w-full items-center justify-between">
+              <span className="text-xl font-bold tabular-nums text-slate-900">{t.count}</span>
+              <span className={`h-2 w-2 rounded-full ${t.dot}`} aria-hidden />
+            </span>
+            <span className="text-[11px] font-medium leading-tight text-slate-500">{t.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Доска Ганта: строки — составы, полосы — рейсы */}
+      <Card className="rounded-xl border-slate-200 shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-slate-900">
+            <ClipboardList className="h-4 w-4 text-slate-400" aria-hidden />
+            График работы парка
+            <Pill className="bg-slate-100 text-slate-600">
+              {fmtDM(days[0]?.iso ?? startIso)} – {fmtDM(days[days.length - 1]?.iso ?? startIso)} · {span === 3 ? '3 дня' : '7 дней'}
+            </Pill>
+            {overdueLaneCount > 0 && (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700"
+                title="Составы с просроченными событиями — показаны первыми, бейдж «!N» у фамилии"
+              >
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
+                </span>
+                просрочка у {overdueLaneCount} {pluralSostav(overdueLaneCount)}
+              </span>
+            )}
+            {/* Легенда: форма блока кодирует тип операции, цвет — состояние */}
+            <span className="ml-auto hidden flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-medium text-slate-500 xl:flex">
+              <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] bg-blue-500" aria-hidden />погрузка</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-emerald-500" aria-hidden />ход · 1С</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-violet-500" aria-hidden />ход · ATI.SU</span>
+              <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] bg-amber-500" aria-hidden />выгрузка</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-teal-600" aria-hidden />на базу</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full border border-dashed border-slate-400 bg-slate-200" aria-hidden />порожняк</span>
+              <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] border border-dashed border-indigo-400 bg-indigo-50" aria-hidden />план логиста</span>
+              <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] bg-red-500 anim-overdue" aria-hidden />просрочка</span>
+              <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] bg-slate-300" aria-hidden />прошло · закрыто</span>
+            </span>
+          </div>
+
+          {/* Весь парк в графике: поиск по составу + быстрые фильтры по статусу */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden />
+              <Input
+                value={laneQuery}
+                onChange={(e) => setLaneQuery(e.target.value)}
+                placeholder="Водитель, госномер, марка…"
+                className="h-8 w-60 pl-8 text-xs"
+                aria-label="Поиск состава в графике"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Фильтр составов по статусу">
+              {FILTERS.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setLaneFilter(f.key)}
+                  className={filterChipCls(laneFilter === f.key, f.key === 'overdue' && f.count > 0)}
+                  title={`Показать: ${f.label.toLowerCase()}`}
+                >
+                  {f.label} <span className="tabular-nums opacity-70">{f.count}</span>
+                </button>
+              ))}
+            </div>
+            {(laneQuery || laneFilter !== 'all') && (
+              <button
+                type="button"
+                onClick={() => { setLaneQuery(''); setLaneFilter('all') }}
+                className="text-[11px] font-medium text-blue-700 underline-offset-2 hover:underline"
+              >
+                сбросить · показано {shownLanes.length} из {lanes.length}
+              </button>
+            )}
+          </div>
+
+          <div className={`overflow-auto ${THIN_SCROLL} max-h-[68vh] rounded-lg border border-slate-100`}>
+            <div className={`flex ${span === 7 ? 'min-w-[1200px]' : 'min-w-[800px]'}`}>
+              {/* Левая колонка: составы — закреплена при горизонтальной прокрутке */}
+              <div className="sticky left-0 z-40 w-[212px] shrink-0 border-r border-slate-200 bg-white">
+                <div className="sticky top-0 z-50 flex h-9 items-center gap-1.5 border-b border-slate-200 bg-white px-2">
+                  <span className="text-[11px] font-bold text-slate-600">Составы</span>
+                  <Pill className="bg-slate-100 text-slate-600" title="Всего строк в графике — весь парк">{lanes.length}</Pill>
+                </div>
+                {ghosts.length > 0 && (
+                  <div className="flex h-[52px] items-center gap-1.5 border-b border-slate-100 px-2">
+                    <Inbox className="h-3.5 w-3.5 shrink-0 text-violet-400" aria-hidden />
+                    <span className="truncate text-[11px] font-semibold text-slate-700" title="Грузы и заявки, которым ещё не назначен состав">
+                      Ждут состава
+                    </span>
+                    <Pill className="bg-violet-100 text-violet-700">{ghosts.length}</Pill>
+                  </div>
+                )}
+                {shownLanes.map((l) => (
+                  <div key={l.driverId} className="flex h-[52px] flex-col justify-center gap-0.5 border-b border-slate-100 px-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      {l.overdueCount > 0 ? (
+                        <span className="relative flex h-2 w-2 shrink-0" title="Есть просроченные события">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                        </span>
+                      ) : (
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${LANE_STATUS[l.status].dot}`} aria-hidden />
+                      )}
+                      <span className="min-w-0 truncate text-xs font-semibold text-slate-800" title={l.name}>{shortName(l.name)}</span>
+                      {l.overdueCount > 0 ? (
+                        <span
+                          className="ml-auto shrink-0 rounded-full bg-red-100 px-1.5 py-px text-[9px] font-bold tabular-nums text-red-700"
+                          title={`Просроченных событий: ${l.overdueCount} — закройте факт или отметьте выполнение`}
+                        >
+                          !{l.overdueCount}
+                        </span>
+                      ) : (
+                        <span className="ml-auto shrink-0 text-[9px] font-medium text-slate-400">{LANE_STATUS[l.status].label}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0 truncate pl-3.5 text-[10px] text-slate-400" title={l.sub}>{l.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Дорожки времени */}
+              <div className="relative min-w-0 flex-1" ref={laneRef}>
+                {/* сетка дней: выходные, «сегодня», вертикальные линии */}
+                <div className="pointer-events-none absolute inset-0 z-0" aria-hidden>
+                  {days.map((d) => (d.isToday || d.weekend) && (
+                    <div
+                      key={`bg-${d.iso}`}
+                      className={`absolute inset-y-0 ${d.isToday ? 'bg-blue-50/50' : 'bg-slate-50/60'}`}
+                      style={{ left: xPct(startMs + d.i * DAY_MS), width: wPct(startMs + d.i * DAY_MS, startMs + (d.i + 1) * DAY_MS) }}
+                    />
+                  ))}
+                  {days.map((d) => d.i > 0 && (
+                    <div
+                      key={`ln-${d.iso}`}
+                      className="absolute inset-y-0 w-px bg-slate-200"
+                      style={{ left: xPct(startMs + d.i * DAY_MS) }}
+                    />
+                  ))}
+                </div>
+
+                {/* шапка дней — закреплена при вертикальной прокрутке */}
+                <div className="sticky top-0 z-30 grid h-9 border-b border-slate-200 bg-white" style={{ gridTemplateColumns: `repeat(${span}, minmax(0, 1fr))` }}>
+                  {days.map((d) => (
+                    <div key={d.iso} className={`flex min-w-0 items-center gap-1 px-2 ${d.i > 0 ? 'border-l border-slate-100' : ''} ${d.isToday ? 'bg-blue-50/70' : ''}`}>
+                      <span className={`min-w-0 truncate text-[11px] font-bold ${d.isToday ? 'text-blue-700' : d.past ? 'text-slate-400' : 'text-slate-600'}`}>
+                        {d.isToday ? `Сегодня · ${d.wd} ${d.dm}` : `${d.wd}, ${d.dm}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openEntry(d.iso)}
+                        title={`Запланировать работу на ${d.wd} ${d.dm}`}
+                        className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-slate-300 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        <Plus className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* дорожка «ждут состава» */}
+                {ghosts.length > 0 && (
+                  <div className="relative z-10 h-[52px] border-b border-slate-100 bg-violet-50/20">
+                    {ghosts.map((g) => (
+                      <Fragment key={g.key}>
+                        <div className="absolute top-1/2 z-10 -translate-x-1/2 -translate-y-1/2" style={{ left: xPct(g.ms) }}>
+                          <button
+                            type="button"
+                            onClick={g.onClick}
+                            title={g.tip}
+                            aria-label={g.tip}
+                            className={`flex h-6 w-3.5 items-center justify-center rounded-[4px] border border-dashed shadow-sm transition-transform hover:scale-125 ${g.cls}`}
+                          />
+                        </div>
+                        {g.labelX != null && (
+                          <span
+                            className={`pointer-events-none absolute top-0 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-white/85 px-0.5 text-[9px] font-semibold leading-3 tabular-nums ${g.labelCls}`}
+                            style={{ left: `${g.labelX}px` }}
+                          >
+                            {g.time}
+                          </span>
+                        )}
+                      </Fragment>
+                    ))}
+                  </div>
+                )}
+
+                {/* дорожки составов */}
+                {shownLanes.map((l) => (
+                  <div
+                    key={l.driverId}
+                    className={`relative z-10 h-[52px] cursor-pointer border-b border-slate-100 transition-colors ${
+                      l.overdueCount > 0
+                        ? 'bg-red-50/30 hover:bg-red-50/60'
+                        : l.status === 'free'
+                          ? 'bg-emerald-50/40 hover:bg-emerald-50/80'
+                          : 'hover:bg-slate-50/70'
+                    }`}
+                    title={`${l.name} · ${l.sub}. Клик по свободному месту — запланировать работу на этот день`}
+                    onClick={(e) => laneClick(e, l)}
+                  >
+                    {l.status === 'free' && l.segs.length === 0 && l.manuals.length === 0 && (
+                      <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center whitespace-nowrap text-[10px] font-medium text-emerald-700/60">
+                        свободен — клик запланирует работу
+                      </span>
+                    )}
+                    {l.segs.map((sg) =>
+                      sg.kind === 'load' || sg.kind === 'unload' ? (
+                        <Fragment key={sg.key}>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); if (sg.tripId) onOpenTrip(sg.tripId) }}
+                            title={sg.title}
+                            aria-label={sg.title}
+                            className={`absolute top-1/2 z-10 -translate-y-1/2 transition-transform hover:z-20 hover:scale-110 ${segCls(sg.kind, sg.state)}`}
+                            style={{ left: xPct(sg.start), width: wPct(sg.start, sg.end) }}
+                          />
+                          {sg.timeLabel != null && (
+                            <span
+                              className={`pointer-events-none absolute top-0 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-white/85 px-0.5 text-[9px] font-semibold leading-3 tabular-nums ${
+                                sg.kind === 'load' ? 'text-blue-700' : 'text-amber-700'
+                              } ${sg.state === 'done' ? 'opacity-50' : ''}`}
+                              style={{ left: `${sg.timeLabel}px` }}
+                            >
+                              {fmtHM(sg.ms)}
+                            </span>
+                          )}
+                        </Fragment>
+                      ) : (
+                        <button
+                          key={sg.key}
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); if (sg.tripId) onOpenTrip(sg.tripId) }}
+                          title={sg.title}
+                          aria-label={sg.title}
+                          className={`absolute top-1/2 z-0 -translate-y-1/2 text-left ${segCls(sg.kind, sg.state)}`}
+                          style={{ left: xPct(sg.start), width: wPct(sg.start, sg.end) }}
+                        >
+                          {sg.showLabel && (
+                            <span
+                              className={`pointer-events-none flex h-full items-center overflow-hidden px-2 text-[10px] font-medium leading-none ${
+                                sg.state === 'active' ? 'text-white' : 'text-slate-600'
+                              }`}
+                            >
+                              <span className="truncate">{sg.label}</span>
+                            </span>
+                          )}
+                        </button>
+                      ),
+                    )}
+                    {/* ручной план логиста: индиго-пунктир / красный пульс / серое «выполнено» */}
+                    {l.manuals.map((m) => (
+                      <div
+                        key={m.id}
+                        className="absolute top-1/2 z-20 -translate-x-1/2 -translate-y-1/2"
+                        style={{ left: `min(max(${xPct(m.ms)}, 96px), calc(100% - 96px))` }}
+                        title={m.title}
+                      >
+                        <span className={`flex items-center gap-1 rounded-md border py-0.5 pl-1.5 pr-1 text-[10px] ${manualCls(m.state)}`}>
+                          {m.state === 'done' ? (
+                            <Check className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
+                          ) : (
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.state === 'overdue' ? 'bg-red-500' : 'bg-indigo-500'}`} aria-hidden />
+                          )}
+                          {m.time && <b className="tabular-nums">{m.time}</b>}
+                          <span className={`max-w-[170px] truncate ${m.state === 'done' ? 'line-through decoration-slate-300' : ''}`}>{m.label}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); void setEntryClosed(m.id, m.state !== 'done') }}
+                            disabled={closeBusy === m.id}
+                            title={m.state === 'done' ? 'Вернуть в план — снова ждёт выполнения' : 'Закрыть: событие выполнено (перестанет пульсировать, станет серым)'}
+                            className={`flex items-center rounded p-px transition-colors ${
+                              m.state === 'done'
+                                ? 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'
+                                : 'text-red-500 hover:bg-red-100 hover:text-red-700'
+                            }`}
+                          >
+                            {m.state === 'done' ? <RotateCcw className="h-3 w-3" aria-hidden /> : <Check className="h-3 w-3" aria-hidden />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); void removeEntry(m.id) }}
+                            disabled={removeBusy === m.id}
+                            title="Снять с плана"
+                            className={`flex items-center rounded p-px transition-colors ${
+                              m.state === 'done'
+                                ? 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'
+                                : 'text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700'
+                            }`}
+                          >
+                            <X className="h-3 w-3" aria-hidden />
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+
+                {/* линия «сейчас» */}
+                {showNow && (
+                  <div className="pointer-events-none absolute inset-y-0 z-[15] w-[2px] bg-rose-500/80" style={{ left: xPct(nowMs) }}>
+                    <span className="absolute left-1/2 top-[38px] -translate-x-1/2 whitespace-nowrap rounded bg-rose-500 px-1 py-px text-[9px] font-bold leading-3 text-white shadow-sm">
+                      сейчас
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            Строка — состав, полоса — рейс от погрузки до возврата на базу АЭМЗ. Красный пульс —
+            просрочка (срок прошёл, факт не закрыт): закройте факт в карточке рейса или нажмите ✓
+            у метки плана логиста. Серое — прошло и закрыто. Клик по полосе — карточка рейса, клик
+            по свободному месту строки — план на этот день, «+» в шапке дня — план на день.
+            В графике {plannedCount} {pluralSostav(plannedCount)} · резерв на базе {s.atBase}
+            {(laneQuery || laneFilter !== 'all') ? ` · показано ${shownLanes.length} из ${lanes.length}` : ''} · ждут состава {waitingCount}.
+          </p>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        {/* Ждёт планирования: сделки ATI.SU + заявки */}
+        <Card className="rounded-xl border-slate-200 shadow-sm xl:col-span-2">
+          <CardContent className="space-y-2 p-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+              <ClipboardList className="h-4 w-4 text-slate-400" aria-hidden />
+              Ждёт планирования
+              <Pill className="bg-slate-100 text-slate-600">{waitingCount}</Pill>
+              <InfoTip label="Что здесь">
+                Согласованные грузы ATI.SU «в силе» (кнопка «В план» назначает состав —
+                откроется общий подбор) и заявки 1С в статусе «к планированию» из «Заявок».
+                Предварительные сделки ждут обмена документами. Их же видно пунктиром
+                в строке «Ждут состава» на графике.
+              </InfoTip>
+            </div>
+
+            {plan.waitingDeals.length === 0 && plan.waitingOrders.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+                Незапланированной работы нет — всё назначено
+              </div>
+            ) : (
+              <div className={`grid grid-cols-1 gap-1.5 md:grid-cols-2 ${THIN_SCROLL} max-h-80 overflow-y-auto pr-1`}>
+                {plan.waitingDeals.map((w) => {
+                  const full = w.deal.stage === 'full'
+                  return (
+                    <div key={w.deal.id} className="rounded-lg border border-slate-100 px-2.5 py-2">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-xs font-semibold text-slate-900">
+                          {w.deal.from} → {w.deal.to}
+                        </span>
+                        <Pill className={full ? 'bg-violet-100 text-violet-700' : 'bg-amber-100 text-amber-700'} title={full ? 'Документы обменяны — заявка в силе' : 'Предварительное согласование — дождитесь обмена документами'}>
+                          {full ? 'ATI.SU · в силе' : 'ATI.SU · док-ты не обменяны'}
+                        </Pill>
+                        <span className="ml-auto shrink-0 text-[10px] text-slate-400">{fmtWhen(w.loadAt, nowTick)}</span>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
+                        <span className="truncate">{w.deal.cargo}{w.deal.weightT != null ? ` · ${w.deal.weightT} т` : ''}</span>
+                        {w.deal.rate != null && <span className="font-medium text-slate-700">{w.deal.rate.toLocaleString('ru-RU')} ₽</span>}
+                      </div>
+                      {full && (
+                        <div className="mt-1.5 flex gap-1.5">
+                          <Button
+                            size="sm"
+                            className="h-7 bg-[#0E1B2C] px-2.5 text-xs text-white hover:bg-[#16304f]"
+                            onClick={() => setPlanDeal(w.deal)}
+                            title="Назначить состав: свободный или освобождающийся — общий подбор с «Занятостью»"
+                          >
+                            <CalendarPlus className="mr-1 h-3 w-3" aria-hidden />В план
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onOpenAtiDeals} title="Открыть сделку в разделе ATI.SU">
+                            Сделка
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                {plan.waitingOrders.map((w) => (
+                  <div key={w.order.id} className="rounded-lg border border-slate-100 px-2.5 py-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-xs font-semibold text-slate-900">
+                        {w.order.loadPoint.split(',')[0]} → {w.order.unloadPoint.split(',')[0]}
+                      </span>
+                      <Pill className="bg-slate-100 text-slate-600">заявка {w.order.number}</Pill>
+                      <span className="ml-auto shrink-0 text-[10px] text-slate-400">{fmtWhen(w.loadAt, nowTick)}</span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-500">
+                      <span className="truncate">{w.order.customer} · {w.order.product}</span>
+                    </div>
+                    <div className="mt-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2.5 text-xs"
+                        onClick={() => onFindOrder(w.order.number)}
+                        title="Открыть заявку в разделе «Заявки»: проверка и назначение состава"
+                      >
+                        <Inbox className="mr-1 h-3 w-3" aria-hidden />К заявке
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {plan.newOrders > 0 && (
+              <p className="text-[11px] text-slate-500">
+                Новых заявок из 1С: {plan.newOrders} — сначала проверьте их в «Заявках».
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Правая колонка: ручной план + ATI.SU в плане */}
+        <div className="space-y-4">
+          <Card className="rounded-xl border-slate-200 shadow-sm">
+            <CardContent className="space-y-2 p-4">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                <ListChecks className="h-4 w-4 text-slate-400" aria-hidden />
+                Планы логиста
+                <Pill className="bg-indigo-100 text-indigo-700">{state.planEntries.length}</Pill>
+                {overdueManuals > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 anim-overdue"
+                    title="Записи, чей срок прошёл, а выполнения нет — вверху списка"
+                  >
+                    просрочка {overdueManuals}
+                  </span>
+                )}
+                <InfoTip label="Что здесь">
+                  Записи, созданные кликом по строке графика, «+» в дне или кнопкой
+                  «Запланировать»: погрузки, выгрузки, возвраты на АЭМЗ и заметки на
+                  любую дату. ✓ закрывает событие (выполнено — серое), ↺ возвращает
+                  в план, × снимает. Пока срок не прошёл — метка индиго; срок прошёл
+                  и не закрыто — пульсирует красным (просрочка).
+                </InfoTip>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 w-full text-xs"
+                onClick={() => openEntry(startIso)}
+                title="Новая запись плана на любую дату"
+              >
+                <CalendarPlus className="mr-1 h-3 w-3" aria-hidden />Запланировать…
+              </Button>
+              {entriesAll.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+                  Ручных планов ещё нет — запланируйте работу состава на любую дату
+                </div>
+              ) : (
+                <div className={`space-y-1 ${THIN_SCROLL} max-h-64 overflow-y-auto pr-1`}>
+                  {entriesAll.map((p) => {
+                    const d = state.drivers.find((x) => x.id === p.driverId)
+                    const closed = !!p.closedAt
+                    const overdue = manualEntryOverdue(p, nowTick)
+                    return (
+                      <div
+                        key={p.id}
+                        className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
+                          overdue ? 'border-red-200 bg-red-50/60' : closed ? 'border-slate-200 bg-slate-50' : 'border-indigo-100 bg-indigo-50/40'
+                        }`}
+                      >
+                        <span className="flex w-11 shrink-0 flex-col leading-tight" title={`${p.date}${p.time ? ` в ${p.time}` : ' — в течение дня'}`}>
+                          <span className={`text-[11px] font-semibold tabular-nums ${overdue ? 'text-red-700' : closed ? 'text-slate-400' : 'text-indigo-700'}`}>{fmtDM(p.date)}</span>
+                          <span className="text-[10px] tabular-nums text-slate-500">{p.time ?? 'день'}</span>
+                        </span>
+                        <span className="w-24 shrink-0 truncate text-[11px] font-medium text-slate-800" title={d?.fullName ?? ''}>
+                          {d ? shortName(d.fullName) : '—'}
+                        </span>
+                        <span
+                          className={`min-w-0 flex-1 truncate text-[11px] ${
+                            closed ? 'text-slate-400 line-through decoration-slate-300' : overdue ? 'font-semibold text-red-700' : 'text-slate-600'
+                          }`}
+                          title={`${MANUAL_KIND_LABEL[p.kind] ?? p.kind}${p.kind !== 'note' && p.point ? ` · ${p.point}` : ''}${p.kind === 'note' && p.note ? ` · ${p.note}` : ''}${closed ? ` · выполнено${p.closedByName ? ` (${p.closedByName})` : ''}` : ''}`}
+                        >
+                          {MANUAL_KIND_LABEL[p.kind] ?? p.kind}
+                          {p.kind !== 'note' && p.point ? ` · ${p.point}` : ''}
+                          {p.kind === 'note' && p.note ? ` · ${p.note}` : ''}
+                        </span>
+                        {overdue && !closed && (
+                          <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-px text-[9px] font-bold text-red-700" title="Срок прошёл, выполнения нет">
+                            просрочка
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          title={closed ? 'Вернуть в план — снова ждёт выполнения' : 'Закрыть: событие выполнено'}
+                          disabled={closeBusy === p.id}
+                          onClick={() => void setEntryClosed(p.id, !closed)}
+                          className={`flex shrink-0 items-center rounded p-1 transition-colors ${
+                            closed ? 'text-slate-400 hover:bg-slate-200 hover:text-slate-600' : 'text-red-500 hover:bg-red-100 hover:text-red-700'
+                          }`}
+                        >
+                          {closed ? <RotateCcw className="h-3.5 w-3.5" aria-hidden /> : <Check className="h-3.5 w-3.5" aria-hidden />}
+                        </button>
+                        <button
+                          type="button"
+                          title="Снять с плана"
+                          disabled={removeBusy === p.id}
+                          onClick={() => void removeEntry(p.id)}
+                          className="flex shrink-0 items-center rounded p-1 text-slate-400 transition-colors hover:bg-indigo-100 hover:text-indigo-700"
+                        >
+                          <X className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ATI.SU в плане — назначенные грузы */}
+          {plan.plannedDeals.length > 0 && (
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-2 p-4">
+                <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <FileCheck2 className="h-4 w-4 text-slate-400" aria-hidden />
+                  ATI.SU · в плане
+                  <Pill className="bg-violet-100 text-violet-700">{plan.plannedDeals.length}</Pill>
+                </div>
+                <div className={`space-y-1.5 ${THIN_SCROLL} max-h-56 overflow-y-auto pr-1`}>
+                  {plan.plannedDeals.map((w) => (
+                    <div key={w.deal.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-violet-100 bg-violet-50/40 px-2.5 py-1.5">
+                      <span className="text-xs font-semibold text-slate-900">
+                        {w.deal.from} → {w.deal.to}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">{w.driverName ? shortName(w.driverName) : '—'}</span>
+                      {w.tripId && (
+                        <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={() => onOpenTrip(w.tripId!)} title="Карточка рейса в «Заявках»">
+                          Рейс
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-[11px] text-slate-400 hover:text-red-700"
+                        disabled={unplanBusy === w.deal.id}
+                        onClick={() => void unplan(w.deal.id, `${w.deal.from} → ${w.deal.to}`)}
+                        title="Снять груз с состава: плечо отменится, состав освободится"
+                      >
+                        Снять
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Напоминание про возвраты, ждущие обратки */}
+          {plan.rows.some((r) => r.awaitingBackhaul) && (
+            <Card className="rounded-xl border-slate-200 shadow-sm">
+              <CardContent className="space-y-1.5 p-4">
+                <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                  <Hourglass className="h-4 w-4 text-amber-500" aria-hidden />
+                  Ждут обратную загрузку
+                  <Pill className="bg-amber-100 text-amber-700">{plan.rows.filter((r) => r.awaitingBackhaul).length}</Pill>
+                </div>
+                {plan.rows
+                  .filter((r) => r.awaitingBackhaul)
+                  .map((r) => (
+                    <div key={r.driverId} className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-slate-50">
+                      <span className="w-32 shrink-0 truncate text-xs font-medium text-slate-800" title={r.driverName}>
+                        {shortName(r.driverName)}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400">
+                        {r.vehicleLabel.split(' · ')[1] ?? r.vehicleLabel} · после выгрузки в {r.events.filter((e) => e.kind === 'unload').slice(-1)[0]?.toPoint ?? '—'}
+                      </span>
+                    </div>
+                  ))}
+                <p className="text-[11px] leading-relaxed text-slate-500">
+                  Возврат на АЭМЗ для них не планируется — сначала подберите обратный груз.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Диалог «Запланировать работу» — ручной план на любую дату */}
+      <PlanEntryDialog
+        open={entryOpen}
+        initialDate={entryDate}
+        initialDriverId={entryDriverId ?? undefined}
+        state={state}
+        onOpenChange={setEntryOpen}
+        onDone={onChanged}
+      />
+
+      {/* Диалог «В план» — общий с «ATI.SU» и «Занятостью» */}
+      <PlanDealDialog
+        deal={planDeal}
+        state={state}
+        nowTick={nowTick}
+        onOpenChange={(v) => { if (!v) setPlanDeal(null) }}
+        onDone={() => onChanged()}
+      />
+    </div>
+  )
+}

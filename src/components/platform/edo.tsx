@@ -175,6 +175,7 @@ export default function EdoTab({ role, liveTick }: TabProps) {
         }
       >
         <div className="flex flex-wrap items-center gap-2">
+          <StatusDot dot="bg-slate-400">Раздел в подготовке</StatusDot>
           <StatusDot dot="bg-amber-500">Ожидают подписи: {counters.awaiting}</StatusDot>
           <StatusDot dot="bg-emerald-500">Подписано: {counters.signed}</StatusDot>
           {diadoc?.enabled && (

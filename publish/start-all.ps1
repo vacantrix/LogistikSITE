@@ -27,7 +27,8 @@ $requiredPortal = @(
     (Join-Path $portalDir 'dl\VacantrixAvito.exe'),
     (Join-Path $portalDir 'dl\VacantrixPublisher.exe'),
     (Join-Path $portalDir 'dl\VacantrixMonitor.exe'),
-    (Join-Path $portalDir 'dl\VacantrixAnalytics.exe')
+    (Join-Path $portalDir 'dl\VacantrixAnalytics.exe'),
+    (Join-Path $portalDir 'dl\Drivemobile.apk')
 )
 $missingPortal = @($requiredPortal | Where-Object { -not (Test-Path $_) })
 if ($missingPortal.Count -gt 0) {
@@ -35,7 +36,7 @@ if ($missingPortal.Count -gt 0) {
     $missingPortal | ForEach-Object { Write-Output "  $_" }
     exit 1
 }
-Write-Output "portal files: OK (catalog, previews, 6 installers)"
+Write-Output "portal files: OK (catalog, previews, 6 installers, Drivemobile APK)"
 
 # 1. OCR service (localhost only)
 $ocrOwner = Get-PortOwner $OcrPort
@@ -125,6 +126,14 @@ if ((Get-PortOwner $PortalAuthPort) -eq 0) {
     exit 1
 }
 
+# 4.1 API приложения водителя (:3102). Диспетчерская «Контур» теперь
+# работает внутри платформы на $PlatformPort, отдельный процесс :3101 не нужен.
+& (Join-Path $PublishDir 'start-drivemobile.ps1')
+if ((Get-PortOwner $DriverApiPort) -eq 0) {
+    Write-Output "ERROR: Drivemobile API is not listening on $DriverApiPort"
+    exit 1
+}
+
 # 5. Public HTTPS entry (Caddy, Let's Encrypt)
 & (Join-Path $PublishDir 'start-caddy.ps1')
 if ((Get-PortOwner 443) -eq 0) {
@@ -192,6 +201,10 @@ Write-Output ""
 Write-Output "Portal: $MainUrl"
 Write-Output "Catalog: $PortalCatalogUrl"
 Write-Output "LogistikSITE demo: $DemoUrl"
+Write-Output "Platform: $DemoUrl (login $KonturAuthUser)"
+Write-Output "Legacy /kontur: $KonturUrl (redirects into platform)"
+Write-Output "Driver API: $DriverApiUrl"
+Write-Output "Drivemobile APK: $MainUrl/dl/Drivemobile.apk"
 Write-Output "Platform local: http://127.0.0.1:$PlatformPort/"
 Write-Output "Status: powershell -NoProfile -ExecutionPolicy Bypass -File `"$PublishDir\status.ps1`""
 exit 0

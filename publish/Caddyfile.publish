@@ -31,6 +31,11 @@ logistiksite.vacantrix.ru {
 }
 
 vacantrix.ru {
+	log {
+		output file "C:/Users/AUSU/Desktop/AEMZ-Logistika/LogistikSITE/publish/logs/access.log"
+		format json
+	}
+
 	encode zstd gzip
 
 	header {
@@ -40,9 +45,47 @@ vacantrix.ru {
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
+	# HTML и код портала — всегда ревалидировать. Без этого браузер после
+	# обновления сайта может держать старый index.html/JS и показывать пустую
+	# страницу /app/<key> (на другом ПК это выглядит как «приложение не открылось»).
+	@portal_html path / /index.html /apps /apps/ /app /app/* *.html manifest.webmanifest
+	header @portal_html Cache-Control "no-cache, must-revalidate"
+
+	@portal_code path /js/* /css/*
+	header @portal_code Cache-Control "no-cache, must-revalidate"
+
 	# Старые ссылки на демо с основного домена — на демо-поддомен.
 	redir /demo https://logistiksite.vacantrix.ru/demo/ permanent
 	redir /demo/* https://logistiksite.vacantrix.ru{uri} permanent
+
+	# Диспетчерская — часть монолита «АЭМЗ Поток» на 127.0.0.1:3000.
+	# Периметр дополнительно закрыт Basic Auth, внутри — вход по учётной записи.
+	@kontur path /kontur /kontur/*
+	handle @kontur {
+		basic_auth {
+			admin $2a$14$oHjn91durC7nX3s1BD8ggOer8YaOThTiDPxdWmyhdjrbZoV3mzWyO
+		}
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# API приложения водителя для APK — публичный, без Basic Auth.
+	# Сюда приходят sync/pull, sync/push и sync/marks. Это отдельный
+	# сервис Drivemobile (:3102), а не API диспетчерской. Next-модуль
+	# живёт с basePath /driver, поэтому путь дополняется префиксом.
+	handle /api/driver/* {
+		rewrite * /driver{uri}
+		reverse_proxy 127.0.0.1:3102
+	}
+
+	# Обмен с 1С (эмулятор) — только по паролю: публичная запись заявок опасна.
+	# После слияния /api/1c/* живёт в том же Next.js, что и /kontur.
+	handle /api/1c/* {
+		basic_auth {
+			admin $2a$14$oHjn91durC7nX3s1BD8ggOer8YaOThTiDPxdWmyhdjrbZoV3mzWyO
+		}
+		rewrite * /kontur{uri}
+		reverse_proxy 127.0.0.1:3000
+	}
 
 	# Локальный сервис входа портала (Node, SQLite) на 127.0.0.1:8090.
 	# Без него работают только старые Supabase-фолбэки, а вход невозможен.
@@ -50,9 +93,20 @@ vacantrix.ru {
 		reverse_proxy 127.0.0.1:8090
 	}
 
+	# Построение маршрута для APK: публичный OSRM-демо-сервер через наш
+	# домен. С телефона в РФ router.project-osrm.org часто недоступен, а
+	# vacantrix.ru доступен всегда — иначе карта пишет «маршрут недоступен».
+	# Префикс /osrm отбрасывается, дальше идёт штатный путь OSRM.
+	handle_path /osrm/* {
+		reverse_proxy https://router.project-osrm.org
+	}
+
 	# Установщики: отсутствующий файл должен давать честный 404, а не
 	# SPA-фолбэк на index.html (иначе битая ссылка «скачивает» HTML).
 	handle /dl/* {
+		# APK обновляется по тому же адресу: браузер и телефон обязаны
+		# ревалидировать файл, иначе можно скачать старую сборку из кэша.
+		header Cache-Control "no-cache, must-revalidate"
 		root * "C:/Users/AUSU/Desktop/AEMZ-Logistika/LogistikSITE/publish/portal"
 		file_server
 	}

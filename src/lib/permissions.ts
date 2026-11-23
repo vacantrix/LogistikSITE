@@ -19,6 +19,7 @@ import type { Role } from '@/lib/auth'
 import { plog } from '@/lib/platform-log'
 import {
   TEMPLATE_SEEDS, inContour, isContour, isPermKey, permLabel, permsFor,
+  ADMIN_VIEW_SECTIONS, CARRIER_VIEW_SECTIONS, LOGIST_VIEW_SECTIONS, OWN_VIEW_SECTIONS,
   type Contour, type PermKey,
 } from '@/lib/perm-catalog'
 
@@ -49,17 +50,19 @@ const CACHE_TTL_MS = 5_000 // правки из «Профилей и досту
 /** Прежние права ролей по умолчанию (Task 111) — нужны только переносу, если матрица RolePerm пуста */
 const LEGACY_DEFAULTS: Record<Contour, PermKey[]> = {
   logist: [
-    'draft:create', 'draft:edit', 'draft:delete', 'request:publish', 'request:delete', 'request:extend',
+    'draft:create', 'draft:edit', 'draft:delete', 'request:publish', 'request:delete', 'request:quarantine', 'request:extend',
     'request:raise', 'request:offer', 'bid:submit', 'verify:decide', 'docs:upload', 'docs:request',
     'crew:assign', 'edo:sync', 'edo:sign', 'edo:send', 'directory:addManual', 'directory:edit',
     'notify:agent', 'trip:close', 'reports:view',
+    'own:process', 'own:assign', 'own:plan', 'own:atisu', 'own:directory',
   ],
   carrier: ['bid:submit', 'crew:assign', 'docs:request', 'edo:sign', 'edo:send', 'directory:edit'],
   // Task 113 (z.ai): администрация — максимум прав платформы (все права, фильтр по контуру ниже)
   admin: [
-    'draft:create', 'draft:edit', 'draft:delete', 'request:publish', 'request:delete', 'request:extend',
+    'draft:create', 'draft:edit', 'draft:delete', 'request:publish', 'request:delete', 'request:quarantine', 'request:extend',
     'request:raise', 'request:offer', 'verify:decide', 'docs:upload', 'edo:sync', 'edo:sign', 'edo:send',
     'directory:addManual', 'directory:edit', 'notify:agent', 'trip:close', 'reports:view', 'profile:edit',
+    'own:process', 'own:assign', 'own:plan', 'own:atisu', 'own:directory',
   ],
 }
 
@@ -146,6 +149,91 @@ async function seedTemplates(): Promise<void> {
   }
 }
 
+/**
+ * Новое право «Карантин заявки» появляется у существующих должностей контура:
+ * у кого было удаление заявок, тот управляет и карантином. Идемпотентно.
+ */
+async function backfillQuarantinePerm(): Promise<void> {
+  const templates = await db.accessTemplate.findMany({
+    where: { contour: { in: ['logist', 'admin'] }, perms: { some: { key: 'request:delete' } } },
+    select: { id: true, perms: { where: { key: 'request:quarantine' }, select: { key: true } } },
+  })
+  const rows = templates.filter((t) => t.perms.length === 0).map((t) => ({ templateId: t.id, key: 'request:quarantine' }))
+  if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
+}
+
+/**
+ * Новые права видимости разделов (`section:*`) появляются у уже существующих должностей.
+ * Без этого после обновления логисты потеряли бы вкладки: старые должности не содержат
+ * новых ключей. Набор подбирается по прежним операционным правам, поэтому итоговая
+ * картина сохраняется: ведущий видит всё, линейный — рабочий минимум, наблюдатель — всё
+ * без действий. Идемпотентно: должность, у которой уже есть хотя бы один section:*, не трогаем.
+ */
+async function backfillSectionPerms(): Promise<void> {
+  const templates = await db.accessTemplate.findMany({ include: { perms: { select: { key: true } } } })
+  const rows: { templateId: string; key: string }[] = []
+  for (const t of templates) {
+    if (!isContour(t.contour)) continue
+    const keys = new Set(t.perms.map((p) => p.key))
+    if ([...keys].some((k) => k.startsWith('section:'))) continue
+    let sectionKeys: PermKey[]
+    if (t.contour === 'admin') {
+      sectionKeys = [...LOGIST_VIEW_SECTIONS, ...OWN_VIEW_SECTIONS, ...ADMIN_VIEW_SECTIONS]
+    } else if (t.contour === 'carrier') {
+      sectionKeys = CARRIER_VIEW_SECTIONS
+    } else {
+      const lead = ['request:publish', 'request:delete', 'trip:close', 'own:assign'].some((k) => keys.has(k))
+      const line = ['draft:create', 'draft:edit', 'docs:upload'].some((k) => keys.has(k))
+      sectionKeys = lead
+        ? [...LOGIST_VIEW_SECTIONS, ...OWN_VIEW_SECTIONS]
+        : line
+          ? ['section:board', 'section:drafts', 'section:verify', 'section:requests', 'section:directory', 'section:support',
+              'section:ownRequests', 'section:ownPlanning', 'section:ownOccupancy', 'section:ownDirectory']
+          : [...LOGIST_VIEW_SECTIONS, ...OWN_VIEW_SECTIONS]
+    }
+    for (const key of sectionKeys) {
+      if (inContour(t.contour, key)) rows.push({ templateId: t.id, key })
+    }
+  }
+  if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
+}
+
+/** Права действий собственного транспорта у существующих должностей — по прежнему объёму. */
+async function backfillOwnTransportPerms(): Promise<void> {
+  const templates = await db.accessTemplate.findMany({ include: { perms: { select: { key: true } } } })
+  const rows: { templateId: string; key: string }[] = []
+  for (const t of templates) {
+    if (t.contour !== 'logist' && t.contour !== 'admin') continue
+    const keys = new Set(t.perms.map((p) => p.key))
+    if (['own:process', 'own:assign', 'own:plan', 'own:atisu', 'own:directory'].some((k) => keys.has(k))) continue
+    const lead = ['request:publish', 'request:delete', 'trip:close', 'own:assign'].some((k) => keys.has(k))
+    const line = ['draft:create', 'draft:edit', 'docs:upload'].some((k) => keys.has(k))
+    const add: PermKey[] = lead
+      ? ['own:process', 'own:assign', 'own:plan', 'own:atisu', 'own:directory']
+      : line
+        ? ['own:process', 'own:plan', 'own:directory']
+        : []
+    for (const key of add) rows.push({ templateId: t.id, key })
+  }
+  if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
+}
+
+/**
+ * Новый раздел «Приложение водителя» (администрация). Старые должности уже
+ * содержат section:*, поэтому backfillSectionPerms их не трогает — выдаём
+ * право адресно всем шаблонам контура «Администрация». Идемпотентно.
+ */
+async function backfillDriverAppPerm(): Promise<void> {
+  const templates = await db.accessTemplate.findMany({
+    where: { contour: 'admin' },
+    select: { id: true, perms: { where: { key: 'section:driverApp' }, select: { key: true } } },
+  })
+  const rows = templates
+    .filter((t) => t.perms.length === 0)
+    .map((t) => ({ templateId: t.id, key: 'section:driverApp' }))
+  if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
+}
+
 let ensured = false
 let ensuring: Promise<void> | null = null
 
@@ -154,6 +242,10 @@ export async function ensureAccess(): Promise<void> {
   if (ensured) return
   ensuring ??= (async () => {
     if ((await db.accessTemplate.count()) === 0) await seedTemplates()
+    await backfillQuarantinePerm()
+    await backfillSectionPerms()
+    await backfillDriverAppPerm()
+    await backfillOwnTransportPerms()
     // пользователи без должности с прежними правами (после обновления) получают ближайшую должность;
     // новые учётки создаются сразу с должностью, поэтому повторно это почти ничего не делает
     const pending = await db.user.count({ where: { templateId: null, OR: [{ permOverrides: { not: null } }, { profileEditOwn: { not: null } }] } })

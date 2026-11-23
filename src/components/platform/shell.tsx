@@ -22,8 +22,8 @@
  */
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
-  ArrowLeft, BarChart3, Brain, Building2, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
-  History, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Save, ScanSearch, ShieldCheck, SlidersHorizontal, Truck,
+  ArrowLeft, BarChart3, BookOpen, Brain, Building2, CalendarDays, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
+  Gavel, History, Inbox, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Radar, Save, ScanSearch, ScrollText, ShieldCheck, SlidersHorizontal, Smartphone, Truck,
   UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
 import {
@@ -49,26 +49,42 @@ import { activateAccount, api, listAccounts } from '@/lib/api'
  *  Система прав (Task 109): три роли — администрация (максимальные права: операционный
  *  контур логиста плюс профили и база данных), логист (внутренний контур),
  *  перевозчик/экспедитор (кабинет). Профиль и обращения — у всех ролей.
- *  Task 113: внутри разделов функции скрываются по гранулярным правам (useCan). */
-const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[] }[] = [
-  { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier', 'admin'] },
-  { key: 'drafts', label: 'Черновики заявок', roles: ['logist', 'admin'] },
-  { key: 'my', label: 'Мои заявки', roles: ['carrier'] },
-  { key: 'apply', label: 'Подать документы', roles: ['carrier'] },
-  { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'] },
-  { key: 'verify', label: 'Проверка документов', roles: ['logist', 'admin'] },
-  { key: 'requests', label: 'Реестр заявок', roles: ['logist', 'admin'] },
-  { key: 'registry', label: 'Реестр рейсов', roles: ['logist', 'admin'] },
-  { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier', 'admin'] },
-  { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier', 'admin'] },
-  { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'] },
-  { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'] },
-  { key: 'nn', label: 'Нейросеть', roles: ['admin'] },
-  { key: 'settings', label: 'Настройки', roles: ['admin'] },
-  { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'] },
-  { key: 'admin-db', label: 'База данных', roles: ['admin'] },
-  { key: 'arch', label: 'Архитектура', roles: ['admin'] },
-  { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'] },
+ *  Task 113: внутри разделов функции скрываются по гранулярным правам (useCan).
+ *
+ *  Двухуровневая навигация: group = attracted — верхний уровень «Привлечённый транспорт»,
+ *  own — нижний уровень «Собственный транспорт», admin — служебное меню «Управление».
+ *  Видимость каждого раздела дополнительно закрыта правом section:* (SECTION_PERM). */
+type NavGroup = 'attracted' | 'own' | 'admin'
+
+const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup; muted?: boolean }[] = [
+  { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
+  { key: 'drafts', label: 'Черновики заявок', roles: ['logist', 'admin'], group: 'attracted' },
+  { key: 'my', label: 'Мои заявки', roles: ['carrier'], group: 'attracted' },
+  { key: 'apply', label: 'Подать документы', roles: ['carrier'], group: 'attracted' },
+  { key: 'crew', label: 'Назначение экипажей', roles: ['carrier'], group: 'attracted' },
+  { key: 'verify', label: 'Проверка документов', roles: ['logist', 'admin'], group: 'attracted' },
+  { key: 'requests', label: 'Реестр заявок', roles: ['logist', 'admin'], group: 'attracted' },
+  { key: 'registry', label: 'Реестр рейсов', roles: ['logist', 'admin'], group: 'attracted' },
+  { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier', 'admin'], group: 'attracted', muted: true },
+  { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
+  { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'], group: 'attracted' },
+  { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'], group: 'attracted' },
+  { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
+
+  { key: 'own-requests', label: 'Заявки 1С', roles: ['logist', 'admin'], group: 'own' },
+  { key: 'own-atisu', label: 'ATI.SU', roles: ['logist', 'admin'], group: 'own' },
+  { key: 'own-occupancy', label: 'Занятость', roles: ['logist', 'admin'], group: 'own' },
+  { key: 'own-planning', label: 'Планирование', roles: ['logist', 'admin'], group: 'own' },
+  { key: 'own-monitor', label: 'Мониторинг', roles: ['logist', 'admin'], group: 'own' },
+  { key: 'own-directory', label: 'Справочники парка', roles: ['logist', 'admin'], group: 'own' },
+  { key: 'own-audit', label: 'Аудит контура', roles: ['admin'], group: 'own' },
+  { key: 'driver-app', label: 'Приложение водителя', roles: ['admin'], group: 'own' },
+
+  { key: 'nn', label: 'Нейросеть', roles: ['admin'], group: 'admin' },
+  { key: 'settings', label: 'Настройки', roles: ['admin'], group: 'admin' },
+  { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'], group: 'admin' },
+  { key: 'admin-db', label: 'База данных', roles: ['admin'], group: 'admin' },
+  { key: 'arch', label: 'Архитектура', roles: ['admin'], group: 'admin' },
 ]
 
 /** Иконка и короткая подпись раздела для нижнего Tab Bar (мобильные) */
@@ -91,18 +107,50 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   'admin-db': { Icon: Database, short: 'База' },
   arch: { Icon: Network, short: 'Архитектура' },
   support: { Icon: MessagesSquare, short: 'Обращения' },
+  'own-requests': { Icon: Inbox, short: 'Заявки 1С' },
+  'own-atisu': { Icon: Gavel, short: 'ATI.SU' },
+  'own-occupancy': { Icon: LayoutGrid, short: 'Занятость' },
+  'own-planning': { Icon: CalendarDays, short: 'План' },
+  'own-monitor': { Icon: Radar, short: 'Мониторинг' },
+  'own-directory': { Icon: BookOpen, short: 'Парк' },
+  'own-audit': { Icon: ScrollText, short: 'Аудит' },
+  'driver-app': { Icon: Smartphone, short: 'Водитель' },
 }
 
-/** Разделы, доступные выбранной роли */
-export function navFor(role: RoleKind): { key: TabKey; label: string }[] {
-  return NAV_ALL.filter((n) => n.roles.includes(role)).map(({ key, label }) => ({ key, label }))
+/** Разделы, доступные выбранной роли. muted — раздел приглушён в навигации
+ *  (в подготовке), но остаётся доступным. */
+export function navFor(role: RoleKind): { key: TabKey; label: string; group: NavGroup; muted?: boolean }[] {
+  return NAV_ALL.filter((n) => n.roles.includes(role)).map(({ key, label, group, muted }) => ({ key, label, group, muted }))
 }
 
 /** Разделы, закрытые правом: без права раздел не показывается в меню и не открывается */
 const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
-  reports: 'reports:view',
-  'admin-users': 'admin:users',
-  'admin-db': 'admin:db',
+  board: 'section:board',
+  drafts: 'section:drafts',
+  my: 'section:my',
+  apply: 'section:apply',
+  crew: 'section:crew',
+  verify: 'section:verify',
+  requests: 'section:requests',
+  registry: 'section:registry',
+  edo: 'section:edo',
+  directory: 'section:directory',
+  reports: 'section:reports',
+  journal: 'section:journal',
+  support: 'section:support',
+  nn: 'section:neural',
+  settings: 'section:settings',
+  'admin-users': 'section:adminUsers',
+  'admin-db': 'section:adminDb',
+  arch: 'section:arch',
+  'own-requests': 'section:ownRequests',
+  'own-atisu': 'section:ownAtisu',
+  'own-occupancy': 'section:ownOccupancy',
+  'own-planning': 'section:ownPlanning',
+  'own-monitor': 'section:ownMonitor',
+  'own-directory': 'section:ownDirectory',
+  'own-audit': 'section:ownAudit',
+  'driver-app': 'section:driverApp',
 }
 
 export function sectionAllowed(tab: TabKey, can: (key: PermKey) => boolean): boolean {
@@ -110,8 +158,15 @@ export function sectionAllowed(tab: TabKey, can: (key: PermKey) => boolean): boo
   return !key || can(key)
 }
 
+export const isOwnTab = (tab: TabKey): boolean => tab.startsWith('own-')
+
 export function firstTabFor(role: RoleKind): TabKey {
   return navFor(role)[0]?.key ?? 'board'
+}
+
+/** Первый доступный раздел с учётом прав: используется после загрузки прав и при смене роли */
+export function firstAllowedTab(role: RoleKind, can: (key: PermKey) => boolean): TabKey {
+  return navFor(role).find((n) => sectionAllowed(n.key, can))?.key ?? firstTabFor(role)
 }
 
 export interface RoleSelection {
@@ -123,13 +178,14 @@ export interface RoleSelection {
 }
 
 /** Кнопка нижней панели: иконка + короткая подпись, полоска-индикатор у активного раздела */
-function TabItem({ tabKey, label, short, active, onClick, Icon }: {
+function TabItem({ tabKey, label, short, active, onClick, Icon, muted }: {
   tabKey: string
   label: string
   short: string
   active: boolean
   onClick: () => void
   Icon: ComponentType<{ className?: string }>
+  muted?: boolean
 }) {
   return (
     <button
@@ -138,8 +194,9 @@ function TabItem({ tabKey, label, short, active, onClick, Icon }: {
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       aria-label={label}
+      title={muted ? 'Раздел в подготовке' : undefined}
       className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 px-0.5 pt-1.5 pb-1 transition-colors ${
-        active ? 'text-slate-900' : 'text-slate-500 active:bg-slate-100'
+        active ? 'text-slate-900' : muted ? 'text-slate-400/70 active:bg-slate-100' : 'text-slate-500 active:bg-slate-100'
       }`}
     >
       {/* индикатор активного раздела — полоска сверху */}
@@ -159,7 +216,7 @@ function TabItem({ tabKey, label, short, active, onClick, Icon }: {
 function BottomTabBar({ tab, onNavigate, nav }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
-  nav: { key: TabKey; label: string }[]
+  nav: { key: TabKey; label: string; muted?: boolean }[]
 }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const MAX_ITEMS = 5
@@ -181,6 +238,7 @@ function BottomTabBar({ tab, onNavigate, nav }: {
               label={n.label}
               short={TAB_ICONS[n.key].short}
               active={tab === n.key}
+              muted={n.muted}
               onClick={() => onNavigate(n.key)}
               Icon={TAB_ICONS[n.key].Icon}
             />
@@ -217,11 +275,12 @@ function BottomTabBar({ tab, onNavigate, nav }: {
                   onClick={() => { setMoreOpen(false); onNavigate(n.key) }}
                   aria-current={active ? 'page' : undefined}
                   className={`flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
-                    active ? 'bg-slate-100 text-slate-900' : 'text-slate-700 hover:bg-slate-100'
+                    active ? 'bg-slate-100 text-slate-900' : n.muted ? 'text-slate-400 hover:bg-slate-50' : 'text-slate-700 hover:bg-slate-100'
                   }`}
                 >
                   <Icon className="h-5 w-5 shrink-0" />
                   <span className="flex-1">{n.label}</span>
+                  {n.muted && !active && <span className="text-[11px] font-normal text-slate-400">в подготовке</span>}
                   {active && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-700" aria-hidden />}
                 </button>
               )
@@ -560,6 +619,59 @@ function AccountMenu({ user, profile, compact, canEditProfile, onLogout, onAddAc
   )
 }
 
+/** Служебное меню администрации: профили, база, настройки, архитектура, нейросеть.
+ *  Не занимает строку транспортных вкладок — управление вынесено в отдельное меню. */
+function AdminMenu({ nav, tab, onNavigate, compact }: {
+  nav: { key: TabKey; label: string; muted?: boolean }[]
+  tab: TabKey
+  onNavigate: (t: TabKey) => void
+  compact?: boolean
+}) {
+  if (nav.length === 0) return null
+  const active = nav.some((n) => n.key === tab)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        {compact ? (
+          <button
+            type="button"
+            aria-label="Управление платформой"
+            title="Управление платформой"
+            className={`rounded-lg p-2 transition-colors hover:bg-white/10 ${active ? 'bg-white/15 text-white' : 'text-blue-100'}`}
+          >
+            <SlidersHorizontal className="h-4 w-4" aria-hidden />
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-current={active ? 'page' : undefined}
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
+              active ? 'bg-white font-semibold text-[#0E1B2C]' : 'text-blue-100 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+            Управление
+            <ChevronDown className="h-3.5 w-3.5 opacity-80" aria-hidden />
+          </button>
+        )}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-60">
+        {nav.map((n) => (
+          <DropdownMenuItem key={n.key} onSelect={() => onNavigate(n.key)} className="gap-2.5">
+            {n.key === 'admin-users' ? <UserCog className="h-4 w-4" aria-hidden />
+              : n.key === 'admin-db' ? <Database className="h-4 w-4" aria-hidden />
+                : n.key === 'arch' ? <Network className="h-4 w-4" aria-hidden />
+                  : n.key === 'nn' ? <Brain className="h-4 w-4" aria-hidden />
+                    : <SlidersHorizontal className="h-4 w-4" aria-hidden />}
+            <span className="flex-1">{n.label}</span>
+            {tab === n.key && <span className="h-2 w-2 rounded-full bg-blue-700" aria-hidden />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liveTick, children }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
@@ -577,9 +689,16 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   const isLogist = role.kind === 'logist'
   const isAdmin = role.kind === 'admin'
   const can = useCan()
-  // разделы роли; «Отчёты» дополнительно закрыты правом reports:view (Task 111) —
+  // разделы роли; каждый раздел дополнительно закрыт правом section:* —
   // без права пункт меню исчезает целиком
   const nav = navFor(role.kind).filter((n) => sectionAllowed(n.key, can))
+  const attractedNav = nav.filter((n) => n.group === 'attracted')
+  const ownNav = nav.filter((n) => n.group === 'own')
+  const adminNav = nav.filter((n) => n.group === 'admin')
+  const internal = role.kind !== 'carrier'
+  // у внутреннего контура верхняя строка — привлечённый транспорт, нижняя — собственный;
+  // у перевозчика собственного транспорта нет, поэтому нижняя панель — его разделы
+  const mobileBottomNav = internal && ownNav.length > 0 ? ownNav : attractedNav
   const userName = user.name
   // проформа для плашки аккаунта: ФИО, должность, организация (Task 111)
   const [profile, setProfile] = useState<ProfileDTO | null>(null)
@@ -627,9 +746,10 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             элементы — логотип, название, профиль и выход. Меню ушло в нижний Tab Bar. */}
         <div className="flex h-12 items-center gap-2 px-3 md:hidden">
           <LogoMark variant="inverse" className="h-7 w-7" />
-          <div className="truncate text-sm font-bold leading-none">АЭМЗ Логистика</div>
+          <div className="truncate text-sm font-bold leading-none">АЭМЗ Поток</div>
           <div className="ml-auto flex min-w-0 items-center gap-1.5">
-            <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
+            {isAdmin && <AdminMenu nav={adminNav} tab={tab} onNavigate={onNavigate} compact />}
+            <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} tabs={nav.map((n) => n.key)} />
             {/* меню аккаунта: смена/добавление/выход (Task 74) */}
             <AccountMenu
               user={user}
@@ -642,12 +762,37 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
           </div>
         </div>
 
+        {/* Мобильный верхний уровень: привлечённый транспорт. Собственный транспорт —
+            в нижней панели: так две группы не конкурируют за место на экране. */}
+        {internal && ownNav.length > 0 && attractedNav.length > 0 && (
+          <nav aria-label="Привлечённый транспорт" className="border-t border-white/10 md:hidden">
+            <div className="flex gap-1 overflow-x-auto px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <span className="shrink-0 self-center pr-1 text-[10px] font-semibold uppercase tracking-wide text-blue-300/70">Привлечённый</span>
+              {attractedNav.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => onNavigate(item.key)}
+                  aria-current={tab === item.key ? 'page' : undefined}
+                  className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-xs transition-colors ${
+                    tab === item.key
+                      ? 'bg-white font-semibold text-[#0E1B2C]'
+                      : item.muted ? 'text-blue-200/45' : 'text-blue-100 hover:bg-white/10'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+        )}
+
         {/* Десктопная шапка: полный блок с бейджем контура, именем и горизонтальным меню */}
         <div className="hidden w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6 md:flex">
           <div className="flex items-center gap-2.5">
             <LogoMark variant="inverse" className="h-9 w-9" />
             <div>
-              <div className="text-sm font-bold leading-tight sm:text-base">АЭМЗ Логистика</div>
+              <div className="text-sm font-bold leading-tight sm:text-base">АЭМЗ Поток</div>
               <div className="text-[11px] text-slate-300">{isAdmin ? 'Администрация платформы' : isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}</div>
             </div>
           </div>
@@ -655,7 +800,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             {/* Real-time индикатор убран (Task 52): потеря связи показывается оверлеем
                 «Восстанавливаем соединение»; пузырь вида платформы убран (Task 70) */}
             {/* колокольчик персональных уведомлений (Task 69) */}
-            <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} />
+            <NotificationBell role={role.kind} onNavigate={onNavigate} liveTick={liveTick} tabs={nav.map((n) => n.key)} />
             {/* меню аккаунта: смена/добавление/выход (Task 74); роль задаётся учётной записью */}
             <AccountMenu
               user={user}
@@ -666,11 +811,12 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             />
           </div>
         </div>
-        <nav aria-label="Разделы платформы" className="hidden border-t border-white/10 md:block">
-          {/* много разделов (12 у администратора) не влезают в одну строку на 1280–1440px:
-              переносим на вторую строку — все разделы видны, скрытой прокрутки нет */}
-          <div className="flex w-full flex-wrap gap-1 px-2 py-1.5 sm:px-6">
-            {nav.map((item) => (
+        <nav aria-label="Привлечённый транспорт" className="hidden border-t border-white/10 md:block">
+          {/* Верхний уровень: всё, что относится к привлечённому транспорту.
+              Служебные разделы администрации — в меню «Управление», чтобы не занимать строку. */}
+          <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
+            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-blue-300/70">Привлечённый транспорт</span>
+            {attractedNav.map((item) => (
               <button
                 key={item.key}
                 onClick={() => onNavigate(item.key)}
@@ -678,14 +824,41 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
                 className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
                   tab === item.key
                     ? 'bg-white font-semibold text-[#0E1B2C]'
-                    : 'text-blue-100 hover:bg-white/10 hover:text-white'
+                    : item.muted
+                      ? 'text-blue-200/45 hover:bg-white/5 hover:text-blue-100'
+                      : 'text-blue-100 hover:bg-white/10 hover:text-white'
                 }`}
+                title={item.muted ? 'Раздел в подготовке' : undefined}
               >
                 {item.label}
               </button>
             ))}
+            {isAdmin && <div className="ml-auto"><AdminMenu nav={adminNav} tab={tab} onNavigate={onNavigate} /></div>}
           </div>
         </nav>
+        {internal && ownNav.length > 0 && (
+          <nav aria-label="Собственный транспорт" className="hidden border-t border-white/10 md:block">
+            {/* Нижний уровень: собственный парк АЭМЗ — заявки 1С, ATI.SU, занятость,
+                планирование, мониторинг и справочники парка. */}
+            <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
+              <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/80">Собственный транспорт</span>
+              {ownNav.map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => onNavigate(item.key)}
+                  aria-current={tab === item.key ? 'page' : undefined}
+                  className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
+                    tab === item.key
+                      ? 'bg-emerald-400 font-semibold text-[#0E1B2C]'
+                      : 'text-emerald-100 hover:bg-emerald-400/10 hover:text-white'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </nav>
+        )}
       </header>
 
       <main className="w-full flex-1 px-4 py-6 sm:px-6">{children}</main>
@@ -708,7 +881,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
         aria-hidden
         className="h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] bg-[#0E1B2C] md:hidden"
       />
-      <BottomTabBar tab={tab} onNavigate={onNavigate} nav={nav} />
+      <BottomTabBar tab={tab} onNavigate={onNavigate} nav={mobileBottomNav} />
     </div>
   )
 }

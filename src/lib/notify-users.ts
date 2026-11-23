@@ -31,6 +31,8 @@
  */
 import { db } from '@/lib/db'
 import { notifyLive } from '@/lib/notify'
+import { allowedFor, type PermKey } from '@/lib/permissions'
+import { scopeAllows } from '@/lib/transport-scope'
 
 export type NotifyType =
   | 'BID_PLACED' | 'BID_OUTBID' | 'AUCTION_FINISHED' | 'WINNER_AWARDED'
@@ -39,6 +41,7 @@ export type NotifyType =
   | 'EDO_READY' | 'EDO_SIGNED' | 'DOC_EXPIRY'
   | 'DOCS_EXCHANGED'
   | 'TICKET_NEW' | 'TICKET_REPLY' | 'TICKET_CLOSED'
+  | 'REQUEST_QUARANTINED' | 'REQUEST_RELEASED'
 
 export interface NotifyPayload {
   type: NotifyType
@@ -47,9 +50,50 @@ export interface NotifyPayload {
   requestId?: string
 }
 
-/** Создать уведомление всем пользователям внутреннего контура — логистам и администрации */
+/**
+ * Какое право нужно, чтобы отреагировать на уведомление. Получатель без этого
+ * права уведомление не получает — иначе логист видит событие, но не может
+ * выполнить действие (п. 2: уведомления только по доступным операциям).
+ */
+export const NOTIFY_PERM: Partial<Record<NotifyType, PermKey>> = {
+  BID_PLACED: 'request:offer',
+  AUCTION_FINISHED: 'request:offer',
+  CREW_ASSIGNED: 'verify:decide',
+  DOCS_READY: 'verify:decide',
+  MOVED_TO_DRAFT: 'draft:edit',
+  EDO_SIGNED: 'edo:sign',
+  TRIP_CLOSED: 'trip:close',
+}
+
+/** Тип транспорта заявки для проверки специализации логиста */
+async function requestTruckType(requestId?: string): Promise<string | null> {
+  if (!requestId) return null
+  const request = await db.request.findUnique({ where: { id: requestId }, select: { truckType: true } })
+  return request?.truckType ?? null
+}
+
+/** Учётные записи, которым действительно можно показать уведомление */
+async function logistRecipients(n: NotifyPayload): Promise<{ id: string }[]> {
+  const users = await db.user.findMany({
+    where: { role: { in: ['logist', 'admin'] } },
+    select: { id: true, role: true, transportScope: true },
+  })
+  if (users.length === 0) return []
+  const truckType = await requestTruckType(n.requestId)
+  const need = NOTIFY_PERM[n.type]
+  const out: { id: string }[] = []
+  for (const u of users) {
+    // администрация видит весь контур; логист — только свою группу транспорта
+    if (n.requestId && u.role === 'logist' && !scopeAllows(u.transportScope, truckType)) continue
+    if (need && !(await allowedFor({ id: u.id, role: u.role as 'admin' | 'logist' | 'carrier' }, need))) continue
+    out.push({ id: u.id })
+  }
+  return out
+}
+
+/** Создать уведомление логистам и администрации — с фильтром прав и специализации */
 export async function notifyLogists(n: NotifyPayload): Promise<void> {
-  const users = await db.user.findMany({ where: { role: { in: ['logist', 'admin'] } }, select: { id: true } })
+  const users = await logistRecipients(n)
   if (users.length === 0) return
   await db.notification.createMany({
     data: users.map((u) => ({ userId: u.id, type: n.type, title: n.title, body: n.body, requestId: n.requestId ?? null })),
@@ -80,8 +124,13 @@ export async function notifyAdmins(n: NotifyPayload): Promise<void> {
 
 /** Персональное уведомление одному пользователю (автору обращения и т. п.) */
 export async function notifyUser(userId: string, n: NotifyPayload): Promise<void> {
-  const user = await db.user.findUnique({ where: { id: userId }, select: { id: true } })
+  const user = await db.user.findUnique({ where: { id: userId }, select: { id: true, role: true, transportScope: true } })
   if (!user) return
+  // даже персональное уведомление не показываем, если заявка вне специализации логиста
+  if (n.requestId && user.role === 'logist') {
+    const truckType = await requestTruckType(n.requestId)
+    if (!scopeAllows(user.transportScope, truckType)) return
+  }
   await db.notification.create({
     data: { userId: user.id, type: n.type, title: n.title, body: n.body, requestId: n.requestId ?? null },
   })

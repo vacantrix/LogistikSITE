@@ -105,6 +105,7 @@ export const ONEC_STATUS_RU: Record<RequestStatus, string> = {
   AWARDED: 'Перевозчик выбран',
   DOCS_REVIEW: 'Документы проверяются',
   AT_LOGIST: 'Подготовка к рейсу',
+  QUARANTINE: 'Карантин',
   CONFIRMED: 'Рейс выполняется',
   CLOSED: 'Рейс закрыт',
   DELETED: 'Удалена',

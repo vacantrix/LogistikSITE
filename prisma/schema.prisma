@@ -51,6 +51,9 @@ model User {
   sessionVersion Int             @default(0)
   role           String // 'admin' | 'logist' | 'carrier'
   carrierId      String?
+  // специализация логиста по типу транспорта: all | tent | board (можно несколько через запятую).
+  // Ограничивает видимость и действия по заявкам с соответствующим truckType. Администрацию не ограничивает.
+  transportScope String          @default("all")
   // должность (набор прав внутри контура роли); null — должность контура по умолчанию
   templateId     String?
   template       AccessTemplate? @relation(fields: [templateId], references: [id])
@@ -286,7 +289,12 @@ model Request {
   mode               String // AUCTION | CLOSED
   startRate          Float
   bestRate           Float?
-  status             String         @default("PUBLISHED") // DRAFT | PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | CONFIRMED | CLOSED | DELETED
+  status             String         @default("PUBLISHED") // DRAFT | PUBLISHED | AWARDED | DOCS_REVIEW | AT_LOGIST | QUARANTINE | CONFIRMED | CLOSED | DELETED
+  // карантин заявки: причина, автор и статус до помещения в карантин (для возврата)
+  quarantineReason   String?
+  quarantinedAt      DateTime?
+  quarantinedBy      String?
+  statusBeforeQuarantine String?
   loadDate           String
   loadWindow         String
   deadline           DateTime?
@@ -514,6 +522,15 @@ model PlatformLog {
   carrierName   String? // перевозчик, которого касается событие
   message       String
   meta          String? // JSON: подробности (стек ошибки, параметры, код статуса)
+  // единый журнал контура: платформа или диспетчерская, сквозной идентификатор и объект действия
+  contour       String   @default("platform") // platform | dispatcher
+  correlationId String?
+  objectType    String?
+  objectId      String?
+  before        String?
+  after         String?
+  ip            String?
+  userAgent     String?
   createdAt     DateTime @default(now())
 
   @@index([createdAt])

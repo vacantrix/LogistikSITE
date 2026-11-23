@@ -71,6 +71,31 @@ try {
     $healthy = $false
 }
 
+# Диспетчерская «Контур» — теперь часть монолита на :3000.
+try {
+    $accounts = Invoke-RestMethod -Uri "http://127.0.0.1:$PlatformPort/kontur/api/auth/accounts" -TimeoutSec 15
+    Write-Output "platform API         : accounts=$(@($accounts).Count)"
+} catch {
+    Write-Output "platform API         : FAIL ($($_.Exception.Message))"
+    $healthy = $false
+}
+
+# API приложения водителя (:3102) — зеркало событий и позиции для мониторинга.
+$daOwner = Get-PortOwner $DriverApiPort
+if ($daOwner -gt 0) {
+    Write-Output "driver api port $DriverApiPort : UP (pid=$daOwner)"
+} else {
+    Write-Output "driver api port $DriverApiPort : DOWN"
+    $healthy = $false
+}
+try {
+    $pull = Invoke-RestMethod -Uri "http://127.0.0.1:$DriverApiPort/api/driver/v1/sync/pull?cursor=0" -TimeoutSec 15
+    Write-Output "driver sync pull     : entries=$(@($pull.entries).Count)"
+} catch {
+    Write-Output "driver sync pull     : FAIL ($($_.Exception.Message))"
+    $healthy = $false
+}
+
 $caddyPid = 0
 $caddyPidFile = Join-Path $LogDir 'caddy.pid'
 if (Test-Path $caddyPidFile) {
@@ -173,6 +198,25 @@ if ($mainDnsIp -and $dnsIp -and $mainDnsIp -eq $dnsIp) {
         Write-Output "portal downloads     : OK (HH 200, Tasks 404)"
     } else {
         Write-Output "portal downloads     : FAIL (HH=$dlHh, Tasks=$dlTasks)"
+        $healthy = $false
+    }
+
+    # Публичный API водителя и защищённая диспетчерская.
+    $drvCode = curl.exe -sS --ssl-no-revoke --max-time 20 --resolve "${MainHost}:443:127.0.0.1" -H "X-Driver-Id: $DriverDemoAppId" -o NUL -w "%{http_code}" "https://$MainHost/api/driver/v1/sync/pull?cursor=0" 2>$null
+    $apkCode = curl.exe -sS --ssl-no-revoke --max-time 30 -I --resolve "${MainHost}:443:127.0.0.1" "https://$MainHost/dl/Drivemobile.apk" -o NUL -w "%{http_code}" 2>$null
+    if ($drvCode -eq '200' -and $apkCode -eq '200') {
+        Write-Output "drivemobile public   : OK (API 200, APK 200)"
+    } else {
+        Write-Output "drivemobile public   : FAIL (API=$drvCode, APK=$apkCode)"
+        $healthy = $false
+    }
+
+    $kNoAuth = curl.exe -sS --ssl-no-revoke --max-time 20 --resolve "${MainHost}:443:127.0.0.1" -o NUL -w "%{http_code}" "https://$MainHost/kontur" 2>$null
+    $kAuth = curl.exe -sS -L --ssl-no-revoke --max-time 20 --resolve "${MainHost}:443:127.0.0.1" -u "${KonturAuthUser}:${KonturAuthPass}" -o NUL -w "%{http_code}" "https://$MainHost/kontur" 2>$null
+    if ($kNoAuth -eq '401' -and $kAuth -eq '200') {
+        Write-Output "platform access      : OK (401 without password, 200 with; legacy /kontur redirects into platform)"
+    } else {
+        Write-Output "platform access      : FAIL (noauth=$kNoAuth, auth=$kAuth)"
         $healthy = $false
     }
 

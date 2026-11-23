@@ -36,9 +36,43 @@ try {
     [System.IO.File]::WriteAllLines($envPath, $new, (New-Object System.Text.UTF8Encoding($false)))
     Write-Output "Public vars prepared for the build: NEXT_PUBLIC_WS_URL blanked, NEXT_PUBLIC_DEMO_PASSWORD kept (demo login button)."
 
+    # Google Fonts на стенде недоступен: Turbopack берёт уже скачанные шрифты из .next/cache.
+    # Чистая сборка удаляет .next целиком, поэтому кэш сохраняем и возвращаем до next build.
+    $cache = Join-Path $RepoRoot '.next\cache'
+    $cacheBak = Join-Path $env:TEMP "logistiksite-next-cache-$PID"
+    if (Test-Path $cache) {
+        Remove-Item $cacheBak -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item $cache $cacheBak -Recurse -Force
+        Write-Output "Preserved .next/cache for offline font resolution."
+    }
     Remove-Item (Join-Path $RepoRoot '.next') -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $cacheBak) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot '.next') | Out-Null
+        Copy-Item $cacheBak (Join-Path $RepoRoot '.next\cache') -Recurse -Force
+        Remove-Item $cacheBak -Recurse -Force
+    }
     $env:NODE_ENV = 'production'
     $env:NEXT_TELEMETRY_DISABLED = '1'
+
+    # Второй Prisma-клиент — для базы диспетчерской. Генерируем перед сборкой,
+    # чтобы схема kontur.prisma и клиент не расходились.
+    Write-Output "Generating dispatcher Prisma client ..."
+    $prismaCode = 1
+    $prevPrismaEap = $ErrorActionPreference
+    try {
+        # Prisma пишет служебные строки в stderr; при ErrorActionPreference=Stop
+        # PowerShell 5.1 считает это ошибкой, хотя генерация успешна.
+        $ErrorActionPreference = 'Continue'
+        & npx prisma generate --schema prisma/kontur.prisma *> (Join-Path $LogDir 'build-kontur-prisma.log')
+        $prismaCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevPrismaEap
+    }
+    if ($prismaCode -ne 0) {
+        Write-Output "ERROR: prisma generate (kontur) failed. Log tail:"
+        Get-LogTail (Join-Path $LogDir 'build-kontur-prisma.log') 30
+        exit 1
+    }
 
     Push-Location $RepoRoot
     $prevEap = $ErrorActionPreference

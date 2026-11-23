@@ -19,6 +19,8 @@ import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
 export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo' | 'support' | 'nn' | 'settings' | 'admin-users' | 'admin-db' | 'arch'
+  | 'own-requests' | 'own-atisu' | 'own-occupancy' | 'own-planning' | 'own-monitor' | 'own-directory' | 'own-audit'
+  | 'driver-app'
 
 /** Роль пользователя: администрация, сотрудник АЭМЗ (логист) или перевозчик/экспедитор */
 export type RoleKind = 'admin' | 'logist' | 'carrier'

@@ -1,8 +1,8 @@
-﻿# Создаёт ярлык «LogistikSITE — запуск» на рабочем столе.
+﻿# Создаёт ярлык «АЭМЗ Поток — запуск» на рабочем столе.
 # Ярлык запускает publish\start-production.ps1 без прав администратора.
 
 param(
-    [string]$Name = 'LogistikSITE — запуск'
+    [string]$Name = 'АЭМЗ Поток — запуск'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,7 +35,7 @@ $shortcut.TargetPath = $powershell
 $shortcut.Arguments = "-NoProfile -NoLogo -ExecutionPolicy Bypass -File `"$launcher`""
 $shortcut.WorkingDirectory = $PublishDir
 $shortcut.IconLocation = "$iconPath,0"
-$shortcut.Description = 'LogistikSITE — боевой запуск: OCR, платформа, HTTPS и домен'
+$shortcut.Description = 'АЭМЗ Поток — боевой запуск: портал, OCR, HTTPS, Контур и Drivemobile'
 $shortcut.WindowStyle = 1
 $shortcut.Save()
 

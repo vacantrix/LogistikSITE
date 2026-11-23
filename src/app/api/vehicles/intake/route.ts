@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   const started = startOcrJob<VehicleIntakeResult>(async () => {
     const settings = await loadVerifySettings()
     const read = (u: Upload | null) => (u
-      ? analyzeIntakeDoc(String(u.fileName ?? '').slice(0, 200), 'STS', u.dataUri!, settings)
+      ? analyzeIntakeDoc(String(u.fileName ?? '').slice(0, 200), 'STS', u.dataUri!, settings, undefined, true)
       : Promise.resolve(null))
     const [vFront, vBack] = await Promise.all([read(front), read(back)])
 

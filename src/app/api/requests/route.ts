@@ -8,10 +8,11 @@ import { notifyLive } from '@/lib/notify'
 import { plog, plogError } from '@/lib/platform-log'
 import { normalizePoint } from '@/lib/points'
 import { allowedFor, permDenied } from '@/lib/permissions'
+import { scopeAllows } from '@/lib/transport-scope'
 
 export const dynamic = 'force-dynamic'
 
-const STATUSES = ['DRAFT', 'PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'CONFIRMED', 'CLOSED', 'DELETED']
+const STATUSES = ['DRAFT', 'PUBLISHED', 'AWARDED', 'DOCS_REVIEW', 'AT_LOGIST', 'QUARANTINE', 'CONFIRMED', 'CLOSED', 'DELETED']
 const MODES = ['AUCTION', 'CLOSED']
 const MAX_DEADLINE_HOURS = 30 * 24
 
@@ -98,6 +99,10 @@ export async function POST(req: NextRequest) {
   if (!toPoint) return NextResponse.json({ error: 'Укажите точку выгрузки' }, { status: 400 })
   if (!MODES.includes(mode)) return NextResponse.json({ error: 'Вид тендера: AUCTION или CLOSED' }, { status: 400 })
   if (!TRUCK_TYPES.includes(truckType)) return NextResponse.json({ error: `Тип ТС — ${TRUCK_TYPES.join(' или ')}` }, { status: 400 })
+  // специализация логиста: нельзя завести заявку в чужой группе транспорта
+  if (auth.role === 'logist' && !scopeAllows(auth.transportScope, truckType)) {
+    return NextResponse.json({ error: `Заявки типа «${truckType}» вне вашей специализации — обратитесь к администратору` }, { status: 403 })
+  }
   // у черновика ставку можно не указывать (0 — «не задана»), к публикации она обязательна
   const rateOptional = isDraft && (body.startRate == null || body.startRate === '' || startRate === 0)
   if (!rateOptional && (!Number.isFinite(startRate) || startRate <= 0 || startRate > 10_000_000)) {
