@@ -48,7 +48,7 @@ export interface RealRoute {
   maneuvers: RealManeuver[]
   segments: RealRouteSegment[]
   fetchedAt: number
-  source: '2gis' | 'osrm'
+  source: '2gis' | 'osrm' | 'yandex'
 }
 
 const TRUCK_PARAMS = { mass: 28000, height: 4, width: 2.55, length: 14 }
@@ -240,6 +240,7 @@ export function routeFromCoords(
   coords: [number, number][],
   distanceM?: number | null,
   durationS?: number | null,
+  source: 'yandex' | 'osrm' = 'osrm',
 ): RealRoute | null {
   if (!Array.isArray(coords) || coords.length < 2) return null
   const lengthM = polylineLengthM(coords)
@@ -251,7 +252,7 @@ export function routeFromCoords(
     maneuvers: [],
     segments: [],
     fetchedAt: Date.now(),
-    source: 'osrm',
+    source,
   }
 }
 
@@ -268,7 +269,12 @@ export async function fetchRouteForOrder(
   },
   signal?: AbortSignal,
 ): Promise<RealRoute | null> {
-  const direct = routeFromCoords(order.routeCoords ?? [], order.routeDistanceM, order.routeDurationS)
+  const direct = routeFromCoords(
+    order.routeCoords ?? [],
+    order.routeDistanceM,
+    order.routeDurationS,
+    'yandex',
+  )
   if (direct) return direct
   return fetchRealRoute(signal, order.routeWaypoints)
 }

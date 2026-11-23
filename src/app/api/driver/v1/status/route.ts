@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     {
       ok: true,
       service: 'aemz-driver',
-      version: '0.3.0',
+      version: '0.3.2',
       driverId,
       trips,
       activeTrips,

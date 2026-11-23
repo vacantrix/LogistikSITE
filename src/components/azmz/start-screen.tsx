@@ -247,7 +247,9 @@ export function StartScreen() {
           }`}
         >
           {realRouteStatus === 'ready'
-            ? 'Маршрут по дорогам OSM (OSRM) · без API-ключей'
+            ? realRoute?.source === 'yandex'
+              ? 'Маршрут офиса (Яндекс.Карты) · линия как в офисе'
+              : 'Маршрут по точкам офиса (OSRM) · без API-ключей'
             : 'Демо-геометрия А-146 — сервис маршрутов недоступен'}
         </div>
         <button

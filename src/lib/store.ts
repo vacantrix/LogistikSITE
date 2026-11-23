@@ -476,10 +476,10 @@ export const useAzmz = create<AzmzState>()(
         const next = incoming.find((o) => o.number === activeNumber)
         if (!next || routeSignature(next) === prevSig) return
         const direct = next.routeCoords?.length
-          ? routeFromCoords(next.routeCoords, next.routeDistanceM, next.routeDurationS)
+          ? routeFromCoords(next.routeCoords, next.routeDistanceM, next.routeDurationS, 'yandex')
           : null
         if (direct) {
-          set({ realRoute: direct, realRouteStatus: 'ready' })
+          set({ realRoute: direct, realRouteStatus: 'ready', simProgressF: 0, simSpeedKmh: 0 })
           get().showToast('Офис обновил маршрут — линия на карте обновлена')
         } else if (next.routeWaypoints?.length) {
           void get().refetchRealRoute()
@@ -491,7 +491,7 @@ export const useAzmz = create<AzmzState>()(
         // Готовая линия офиса уже в заявке — маршрут появляется мгновенно,
         // без ожидания OSRM. Точки и порядок — ровно как в Яндекс.Картах.
         const office = order?.routeCoords?.length
-          ? routeFromCoords(order.routeCoords, order.routeDistanceM, order.routeDurationS)
+          ? routeFromCoords(order.routeCoords, order.routeDistanceM, order.routeDurationS, 'yandex')
           : null
         if (office) {
           set({
@@ -499,6 +499,10 @@ export const useAzmz = create<AzmzState>()(
             orderStage: 'route_ready',
             realRoute: office,
             realRouteStatus: 'ready',
+            // Офисная линия начинается в точке погрузки: ставим машину на
+            // её начало, а не на долю демо-маршрута А-146.
+            simProgressF: 0,
+            simSpeedKmh: 0,
           })
           get().showToast(
             `Заявка ${number} принята. Маршрут офиса: ${(office.lengthM / 1000).toFixed(0)} км · ~${Math.round(office.durationS / 60)} мин`,
@@ -536,7 +540,7 @@ export const useAzmz = create<AzmzState>()(
         if (!number || get().realRouteStatus === 'loading') return
         const order = get().orders.find((o) => o.number === number)
         const office = order?.routeCoords?.length
-          ? routeFromCoords(order.routeCoords, order.routeDistanceM, order.routeDurationS)
+          ? routeFromCoords(order.routeCoords, order.routeDistanceM, order.routeDurationS, 'yandex')
           : null
         if (office) {
           set({ realRoute: office, realRouteStatus: 'ready', orderStage: 'route_ready' })
@@ -582,6 +586,9 @@ export const useAzmz = create<AzmzState>()(
         // старт на реальной геометрии: за ~30 м до первого манёвра (баннер, как в мокапе)
         if (rr && rr.maneuvers[0]) {
           set({ simProgressF: Math.max(0, Math.min(rr.maneuvers[0].f - 30 / rr.lengthM, 0.99)) })
+        } else if (rr) {
+          // Офисная линия Яндекса: едем с её начала, а не с доли демо-А-146.
+          set({ simProgressF: 0 })
         }
         get().showToast('Маршрут проложен — вы в пути. Рейс Z-1067')
       },
