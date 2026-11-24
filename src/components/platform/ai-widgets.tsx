@@ -1,0 +1,288 @@
+'use client'
+
+/**
+ * Виджеты ответов нейросети в чате — «нейросеть сама создаёт элементы прямо
+ * в окне общения», но только отображения для удобства человека:
+ *
+ *  • AiCardList — карточки фактов (ai-card): профиль перевозчика, характеристики,
+ *    памятка, сравнение — иконка по типу, метки-фильтры, пары «параметр — значение»;
+ *  • AiReportCard — отчёт (ai-report): показатели, разделы с таблицами и выводами,
+ *    кнопка «Скачать Word» (сервер повторно валидирует и верстает DOCX);
+ *  • AiLinkChips — кнопки-переходы (ai-links) на любой раздел платформы:
+ *    ключ проверен сервером по каталогу, нажатие открывает раздел.
+ *
+ * Все данные приходят уже провалидированными с сервера (белые списки в
+ * lib/ai/tools): виджеты не пишут в базу и не трогают платформу — это только
+ * удобное отображение и навигация для человека.
+ */
+import { useState } from 'react'
+import {
+  ArrowRight,
+  Briefcase,
+  Download,
+  FileText,
+  Gauge,
+  Info,
+  ListChecks,
+  Loader2,
+  Route,
+  Store,
+  TrendingUp,
+  Truck,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { useToast } from '@/hooks/use-toast'
+import { aiFetch } from '@/components/platform/ai-shared'
+import { aiNavLink } from '@/lib/ai/nav-catalog'
+import type { AiCard, AiLinkRef, AiReport } from '@/lib/ai/tools'
+import type { TabKey } from '@/components/platform/common'
+
+/* ——— карточки фактов (ai-card) ——— */
+
+const CARD_KIND_META: Record<string, { Icon: typeof Briefcase; title: string; accent: string; iconCls: string }> = {
+  profile: { Icon: Briefcase, title: 'Профиль', accent: 'bg-emerald-50 text-emerald-700', iconCls: 'text-emerald-600' },
+  vehicle: { Icon: Truck, title: 'Машина', accent: 'bg-amber-50 text-amber-700', iconCls: 'text-amber-600' },
+  route: { Icon: Route, title: 'Маршрут', accent: 'bg-sky-50 text-sky-700', iconCls: 'text-sky-600' },
+  market: { Icon: Store, title: 'Рынок', accent: 'bg-violet-50 text-violet-700', iconCls: 'text-violet-600' },
+  analysis: { Icon: Gauge, title: 'Разбор', accent: 'bg-slate-100 text-slate-700', iconCls: 'text-slate-600' },
+  notice: { Icon: Info, title: 'Важно', accent: 'bg-red-50 text-red-700', iconCls: 'text-red-600' },
+  checklist: { Icon: ListChecks, title: 'Памятка', accent: 'bg-teal-50 text-teal-700', iconCls: 'text-teal-600' },
+}
+
+export function AiCardList({ cards }: { cards: AiCard[] }) {
+  if (cards.length === 0) return null
+  return (
+    <div className="mt-2 grid gap-2.5 sm:grid-cols-2">
+      {cards.map((card, i) => {
+        const meta = CARD_KIND_META[card.kind] ?? CARD_KIND_META.analysis
+        const Icon = meta.Icon
+        return (
+          <Card key={`${card.title}-${i}`} className="border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+            <CardContent className="flex h-full flex-col gap-2.5 p-4">
+              <div className="flex items-start gap-2.5">
+                <span aria-hidden className={`mt-0.5 shrink-0 rounded-lg ${meta.accent} p-1.5`}>
+                  <Icon className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{meta.title}</p>
+                  <p className="text-sm font-semibold leading-snug text-slate-900">{card.title}</p>
+                </div>
+              </div>
+
+              {card.badges.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {card.badges.map((b, j) => (
+                    <span key={j} className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                      {b}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {card.fields.length > 0 && (
+                <dl className="space-y-1.5">
+                  {card.fields.map((f, j) => (
+                    <div key={j} className="flex gap-2 text-xs">
+                      <dt className="w-24 shrink-0 truncate text-slate-400">{f.label}</dt>
+                      <dd className="min-w-0 flex-1 break-words font-medium text-slate-800">{f.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+
+              {card.note && (
+                <p className={`mt-auto rounded-lg px-3 py-2 text-xs leading-relaxed ${card.kind === 'notice' ? 'bg-red-50 text-red-900' : 'bg-slate-50 text-slate-600'}`}>
+                  {card.note}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ——— ссылки на разделы платформы (ai-links) ——— */
+
+export function AiLinkChips({ links, onNavigate }: { links: AiLinkRef[]; onNavigate?: (tab: TabKey) => void }) {
+  if (links.length === 0) return null
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500">
+        <ArrowRight aria-hidden className="h-3.5 w-3.5 text-emerald-600" />
+        Дальше на платформе:
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {links.map((link, i) => {
+          const meta = aiNavLink(link.tab)
+          return (
+            <button
+              key={`${link.tab}-${i}`}
+              type="button"
+              disabled={!onNavigate}
+              onClick={onNavigate ? () => onNavigate(link.tab as TabKey) : undefined}
+              className="group flex min-h-[44px] w-full items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-left shadow-sm transition-all hover:border-emerald-300 hover:bg-emerald-50/50 hover:shadow disabled:cursor-default disabled:opacity-60"
+              aria-label={`Открыть раздел «${meta?.label ?? link.tab}»: ${link.label}`}
+            >
+              <span
+                aria-hidden
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 transition-colors group-hover:bg-emerald-100"
+              >
+                <ArrowRight className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-800">{meta?.label ?? link.tab}</span>
+                <span className="block truncate text-xs text-slate-500">{link.label}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/* ——— отчёт (ai-report) ——— */
+
+export function AiReportCard({ report }: { report: AiReport }) {
+  const { toast } = useToast()
+  const [downloading, setDownloading] = useState(false)
+
+  const download = async () => {
+    if (downloading) return
+    setDownloading(true)
+    try {
+      const res = await aiFetch('/api/ai/report/download', {
+        method: 'POST',
+        body: JSON.stringify({ report }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json?.error ?? `HTTP ${res.status}`)
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'ai-report.docx'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast({ title: 'Word-отчёт скачан', description: report.title })
+    } catch (e) {
+      toast({
+        title: 'Не удалось скачать отчёт',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      })
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const cells = report.kpis
+  const kpiRows: AiReport['kpis'][] = []
+  for (let i = 0; i < cells.length; i += 3) kpiRows.push(cells.slice(i, i + 3))
+
+  return (
+    <Card className="mt-2 border-slate-200 bg-white shadow-sm">
+      <CardContent className="space-y-4 p-4">
+        {/* шапка отчёта */}
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+              <FileText aria-hidden className="h-3.5 w-3.5" />
+              Отчёт нейросети
+              {report.period && <span className="font-normal text-slate-400">{` · ${report.period}`}</span>}
+            </p>
+            <h3 className="mt-1 text-base font-bold leading-snug text-slate-900">{report.title}</h3>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 shrink-0 border-slate-300 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-800"
+            disabled={downloading}
+            onClick={() => void download()}
+            aria-label={`Скачать отчёт «${report.title}» в Word`}
+          >
+            {downloading ? (
+              <Loader2 aria-hidden className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download aria-hidden className="mr-1 h-3.5 w-3.5" />
+            )}
+            Скачать Word
+          </Button>
+        </div>
+
+        {/* главный вывод */}
+        {report.summary && (
+          <p className="flex gap-2 rounded-xl bg-emerald-50/70 px-3.5 py-2.5 text-sm leading-relaxed text-emerald-900">
+            <TrendingUp aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            <span>{report.summary}</span>
+          </p>
+        )}
+
+        {/* показатели */}
+        {kpiRows.length > 0 && (
+          <div className="space-y-2">
+            {kpiRows.map((row, i) => (
+              <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {row.map((k, j) => (
+                  <div key={j} className="rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{k.label}</p>
+                    <p className="mt-0.5 text-lg font-extrabold leading-none text-slate-900">{k.value}</p>
+                    {k.note && <p className="mt-1 text-[11px] leading-snug text-slate-500">{k.note}</p>}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* разделы: заголовок, абзацы, таблица */}
+        {report.sections.map((s, i) => (
+          <section key={i} className="space-y-2">
+            <h4 className="flex items-center gap-2 text-sm font-bold text-slate-800">
+              <span aria-hidden className="h-4 w-1 rounded bg-emerald-500" />
+              {s.heading}
+            </h4>
+            {s.paragraphs.map((p, j) => (
+              <p key={j} className="text-sm leading-relaxed text-slate-700">
+                {p}
+              </p>
+            ))}
+            {s.table && (
+              <div className="max-h-80 overflow-auto rounded-xl border border-slate-200" style={{ scrollbarWidth: 'thin' }}>
+                <table className="w-full border-collapse text-sm">
+                  <thead className="sticky top-0 bg-slate-100 text-left">
+                    <tr>
+                      {s.table.columns.map((c, j) => (
+                        <th key={j} className="whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {s.table.rows.map((r, j) => (
+                      <tr key={j} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/50">
+                        {s.table!.columns.map((_, k) => (
+                          <td key={k} className="px-3 py-2 align-top text-slate-700">
+                            {r[k] ?? '—'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
