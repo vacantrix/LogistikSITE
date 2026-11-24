@@ -1,49 +1,341 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
-import { aiLog, buildRestrictedContext, buildSystemPrompt, getZai } from '@/lib/ai/core'
+import { db } from '@/lib/db'
+import {
+  aiChatComplete, aiChatStreamComplete, aiLog, aiRightMode,
+  buildRestrictedContext, buildSystemPrompt, getAiRights,
+  type EngineMessage,
+} from '@/lib/ai/core'
+import { extractAiTools } from '@/lib/ai/tools'
+import { validGigaModel, DEFAULT_GIGA_MODEL } from '@/lib/ai/models'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * POST /api/ai/chat — вопрос нейросети-консультанту.
- * Контекст собирается на сервере только из разрешённых ей источников (частичное
- * чтение: контакты без телефонов и почты); ответ модели НЕ пишется в контакты и
- * заявки — только в журнал нейросети. Права ограничены жёстко, на стороне сервера.
+ * POST /api/ai/chat — вопрос нейросети в чат (потоковый ответ).
+ *
+ * Ответ — NDJSON-стрим (строки JSON через \n), чтобы в окне чата отражалось
+ * ВСЁ, что делает нейросеть, по мере того как она это делает (как в harness):
+ *   {"type":"step","at":1732512000000,"text":"Собираю контекст…"}  — ход работы текстом;
+ *   {"type":"delta","text":"…"}                                    — ответ печатается чанками;
+ *   {"type":"done",…}                                              — итог: виджеты, метаданные, id записи;
+ *   {"type":"error","error":"…"}                                   — честная ошибка движка.
+ *
+ * Возможности:
+ *  • выбор уровня модели GigaChat в запросе (model) — каталог lib/ai/models.ts;
+ *  • прикреплённые файлы (files) — текст читается и попадает в контекст;
+ *  • история чата берётся из БД (AiChatMessage) — сервер источник правды;
+ *  • оба сообщения сохраняются в историю: чат не теряется при перезагрузке;
+ *  • права ИИ действуют по матрице администратора (getAiRights): контактный
+ *    контекст, запись перевозчиков, свой список и журнал — по режимам прав.
+ *
+ * Единственная модель — GigaChat (Сбер); сбои не переключают движок.
+ * При сбое потока делается один повтор обычным (не потоковым) вызовом —
+ * это тот же движок и уровень, человек не замечает подмены.
  */
+
+// ограничение темпа: не чаще 30 вопросов в минуту на пользователя (in-memory)
+const rateBuckets = new Map<string, number[]>()
+function allowRate(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now()
+  const arr = (rateBuckets.get(key) ?? []).filter((t) => now - t < windowMs)
+  if (arr.length >= limit) {
+    rateBuckets.set(key, arr)
+    return false
+  }
+  arr.push(now)
+  rateBuckets.set(key, arr)
+  return true
+}
+
+interface ChatFile {
+  name: string
+  type: string
+  size: number
+  text: string
+}
+
+/** Прикреплённые файлы: до 3, каждый до 8 000 символов, суммарно до 16 000. */
+function sanitizeFiles(raw: unknown): ChatFile[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((f): f is { name?: unknown; type?: unknown; size?: unknown; text?: unknown } =>
+      !!f && typeof f === 'object' && typeof (f as { name?: unknown }).name === 'string')
+    .slice(0, 3)
+    .map((f) => ({
+      name: String(f.name).slice(0, 200),
+      type: typeof f.type === 'string' ? f.type.slice(0, 100) : '',
+      size: typeof f.size === 'number' && Number.isFinite(f.size) ? Math.max(0, Math.min(f.size, 99_999_999)) : 0,
+      text: typeof f.text === 'string' ? f.text.slice(0, 8_000) : '',
+    }))
+    .filter((f) => f.text.trim().length > 0)
+}
+
 export async function POST(req: Request) {
   const auth = await requireUser('logist', 'admin')
   if (auth instanceof NextResponse) return auth
-  const body = (await req.json().catch(() => null)) as { message?: unknown; history?: unknown } | null
-  const message = typeof body?.message === 'string' ? body.message.trim() : ''
-  if (!message) return NextResponse.json({ error: 'Пустой вопрос' }, { status: 400 })
-  const history = Array.isArray(body?.history)
-    ? (body.history as unknown[])
-        .filter((m): m is { role: 'user' | 'assistant'; content: string } => {
-          if (!m || typeof m !== 'object') return false
-          const role = (m as { role?: unknown }).role
-          const content = (m as { content?: unknown }).content
-          return (role === 'user' || role === 'assistant') && typeof content === 'string' && content.length > 0
-        })
-        .slice(-6)
-    : []
 
-  await aiLog('info', 'chat_start', `Вопрос (${auth.login}): ${message.slice(0, 300)}`, { historyMessages: history.length })
-  try {
-    const ctx = await buildRestrictedContext()
-    const system = buildSystemPrompt(ctx)
-    const zai = await getZai()
-    const completion = await zai.chat.completions.create({
-      // системный промпт передаётся ролью 'assistant' (требование z-ai-web-dev-sdk)
-      messages: [{ role: 'assistant', content: system }, ...history, { role: 'user', content: message }],
-      thinking: { type: 'disabled' },
-    })
-    const answer = completion.choices[0]?.message?.content ?? ''
-    if (!answer.trim()) throw new Error('пустой ответ модели')
-    await aiLog('info', 'chat_done', `Ответ выдан (${answer.length} симв.)`)
-    return NextResponse.json({ answer })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    await aiLog('error', 'chat_error', `Ошибка ответа: ${msg}`)
-    return NextResponse.json({ error: `Нейросеть не ответила: ${msg}` }, { status: 502 })
+  const body = (await req.json().catch(() => null)) as
+    | { message?: unknown; history?: unknown; model?: unknown; files?: unknown }
+    | null
+  const message = typeof body?.message === 'string' ? body.message.trim().slice(0, 4000) : ''
+  if (!message) return NextResponse.json({ error: 'Пустой вопрос' }, { status: 400 })
+  const files = sanitizeFiles(body?.files)
+  const modelKey = validGigaModel(body?.model)
+  const filesChars = files.reduce((s, f) => s + f.text.length, 0)
+  if (filesChars > 16_000) {
+    return NextResponse.json({ error: 'Файлы слишком большие: суммарно до 16 000 символов' }, { status: 413 })
   }
+
+  if (!allowRate(`chat:${auth.id}`, 30, 60_000)) {
+    return NextResponse.json({ error: 'Слишком много вопросов подряд — подождите минуту' }, { status: 429 })
+  }
+
+  const encoder = new TextEncoder()
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false
+      const emit = (obj: unknown): void => {
+        if (closed) return
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + '\n'))
+        } catch {
+          closed = true
+        }
+      }
+      const steps: { at: number; text: string }[] = []
+      const step = (text: string): void => {
+        const at = Date.now()
+        steps.push({ at, text })
+        emit({ type: 'step', at, text })
+      }
+
+      void (async () => {
+        let answer = ''
+        let engine = 'gigachat'
+        let model = modelKey
+        let latencyMs = 0
+        let userMessageId: string | undefined
+        try {
+          step(`Принял вопрос (${message.length} симв.) — уровень модели: ${modelKey}`)
+          if (files.length > 0) {
+            step(files.map((f) => `Прочитал файл «${f.name}» — ${f.text.length} симв.`).join('; '))
+          }
+
+          // действующая матрица прав — администратор правит её в разделе «Права»
+          const rights = await getAiRights()
+          const carriersWrite = aiRightMode(rights, 'carriers-write') === 'write'
+          const ownListOn = aiRightMode(rights, 'own-list') === 'write'
+          const ownLogOn = aiRightMode(rights, 'own-log') === 'write'
+          const log = ownLogOn ? aiLog : null
+          step('Проверяю права — что мне разрешено на платформе')
+
+          // история чата из БД: сервер — источник правды, клиент ничего не пересылает
+          const historyRows = await db.aiChatMessage.findMany({
+            where: { userId: auth.id },
+            orderBy: { createdAt: 'desc' },
+            take: 8,
+          })
+          const history: EngineMessage[] = historyRows
+            .slice()
+            .reverse()
+            .map((r) => ({ role: r.role === 'assistant' ? 'assistant' : 'user', content: r.content.slice(0, 4_000) }))
+
+          const filesBlock =
+            files.length > 0
+              ? `\n\n### Файлы, прикреплённые человеком (прочитай и используй)\n${files
+                  .map((f) => `--- файл: ${f.name} (${f.size} Б) ---\n${f.text}`)
+                  .join('\n\n')}`
+              : ''
+
+          const userMsg = await db.aiChatMessage.create({
+            data: {
+              userId: auth.id,
+              role: 'user',
+              content: message,
+              filesJson:
+                files.length > 0
+                  ? JSON.stringify(files.map((f) => ({ name: f.name, size: f.size, excerpt: f.text.slice(0, 200) })))
+                  : null,
+            },
+          })
+          userMessageId = userMsg.id
+          step(`Вопрос сохранён в историю чата (предыдущих сообщений: ${history.length})`)
+
+          const ctx = await buildRestrictedContext(rights)
+          const system = buildSystemPrompt(ctx, rights)
+          const contactsMode = aiRightMode(rights, 'contacts-read')
+          step(`Контекст собран: память контактов — ${
+            contactsMode === 'denied'
+              ? 'закрыта администратором'
+              : contactsMode === 'write'
+                ? 'полная (с телефонами и почтой)'
+                : 'частичная (без телефонов и почты)'
+          }, свой список — ${ctx.ownList ? 'последние разборы' : 'пусто'}`)
+
+          const messages: EngineMessage[] = [
+            { role: 'system', content: system },
+            ...history,
+            { role: 'user', content: message + filesBlock },
+          ]
+
+          await log?.('info', 'chat_start', `Вопрос (${auth.login}): ${message.slice(0, 300)}`, {
+            model: modelKey,
+            files: files.map((f) => f.name),
+            historyMessages: history.length,
+          })
+
+          step(`Спрашиваю GigaChat (${modelKey})…`)
+          let completion
+          try {
+            completion = await aiChatStreamComplete(messages, {
+              temperature: 0.4,
+              timeoutMs: 110_000,
+              model: modelKey,
+              onDelta: (chunk) => emit({ type: 'delta', text: chunk }),
+            })
+          } catch (streamErr) {
+            step(`Поток не пошёл (${streamErr instanceof Error ? streamErr.message.slice(0, 120) : 'ошибка'}) — повторяю обычным вызовом`)
+            await log?.('warn', 'chat_stream_fallback', `Поток ответа не пошёл — отвечено обычным вызовом: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`)
+            completion = await aiChatComplete(messages, { temperature: 0.4, timeoutMs: 110_000, model: modelKey })
+            emit({ type: 'delta', text: completion.answer })
+          }
+          answer = completion.answer
+          engine = completion.engine
+          model = completion.model
+          latencyMs = completion.latencyMs
+          step(`Модель ответила за ${(latencyMs / 1000).toFixed(1)} с (${answer.length} симв.) — разбираю блоки карточек, отчётов и ссылок`)
+
+          // инструменты модели: ai-contact (запись перевозчиков), ai-best (лучшие
+          // предложения), ai-card (карточки фактов), ai-report (отчёт), ai-links (переходы)
+          const { cleaned, contacts, best, cards, report, links } = extractAiTools(answer)
+
+          const savedContacts: { id: string; name: string; company: string; kind: string }[] = []
+          if (carriersWrite) {
+            for (const card of contacts) {
+              try {
+                const contact = await db.memoryContact.create({
+                  data: {
+                    name: card.name,
+                    company: card.company,
+                    kind: card.kind,
+                    phone: card.phone,
+                    email: card.email,
+                    source: 'ai',
+                    atiRef: card.atiRef || null,
+                    atiFirmId: card.atiFirmId || null,
+                    rating: card.rating,
+                    notes: card.notes,
+                    recordFormat: card.format,
+                  },
+                })
+                savedContacts.push({ id: contact.id, name: contact.name, company: contact.company, kind: contact.kind })
+                step(`Записал перевозчика в «Память контактов»: ${card.name}${card.company ? ` (${card.company})` : ''}`)
+                await log?.('info', 'contact_write', `Нейросеть записала в память: ${card.name}${card.company ? ` (${card.company})` : ''} — формат: ${card.format}`)
+              } catch (e) {
+                await log?.('warn', 'contact_write_error', `Не удалось записать карточку «${card.name}»: ${e instanceof Error ? e.message : String(e)}`)
+              }
+            }
+          } else if (contacts.length > 0) {
+            step(`Право записи перевозчиков закрыто администратором — ${contacts.length} карточк${contacts.length === 1 ? 'а' : 'и'} не сохранены`)
+          }
+
+          const finalAnswer =
+            savedContacts.length > 0
+              ? `${cleaned}\n\n**Записано в «Память контактов»:** ${savedContacts
+                  .map((c) => `${c.name}${c.company ? ` (${c.company})` : ''}`)
+                  .join(', ')} — проверьте и при необходимости поправьте.`
+              : cleaned
+
+          // свой список: каждая консультация сохраняется — человек видит в любой момент
+          let itemId: string | undefined
+          if (ownListOn) {
+            const item = await db.aiListItem.create({
+              data: {
+                kind: 'chat',
+                query: message.slice(0, 120),
+                answer: finalAnswer.slice(0, 12_000),
+                bestJson: best.length > 0 ? JSON.stringify(best) : null,
+                cardsJson: cards.length > 0 ? JSON.stringify(cards) : null,
+                reportJson: report ? JSON.stringify(report) : null,
+                linksJson: links.length > 0 ? JSON.stringify(links) : null,
+                engine,
+                status: 'done',
+              },
+            })
+            itemId = item.id
+            step('Разбор сохранён в список ИИ')
+          } else {
+            step('Свой список закрыт администратором — разбор живёт только в чате')
+          }
+
+          const assistantMsg = await db.aiChatMessage.create({
+            data: {
+              userId: auth.id,
+              role: 'assistant',
+              content: finalAnswer.slice(0, 12_000),
+              modelKey,
+              engine,
+              stepsJson: JSON.stringify(steps),
+              widgetsJson: JSON.stringify({
+                best: best.slice(0, 8),
+                cards: cards.slice(0, 6),
+                report: report ?? null,
+                links: links.slice(0, 5),
+                saved: savedContacts.map((c) => `${c.name}${c.company ? `, ${c.company}` : ''}`),
+              }),
+            },
+          })
+          step('Ответ сохранён в историю чата и журнал')
+
+          await log?.('info', 'chat_done', `Ответ выдан (${answer.length} симв.), движок: ${engine}`, {
+            engine,
+            model,
+            latencyMs,
+            savedContacts: savedContacts.length,
+          })
+
+          emit({
+            type: 'done',
+            answer: finalAnswer,
+            engine,
+            model,
+            modelKey,
+            latencyMs,
+            savedContacts,
+            itemId,
+            userMessageId,
+            assistantMessageId: assistantMsg.id,
+            steps,
+            best: best.map((b) => ({ ...b, query: message.slice(0, 200) })),
+            cards,
+            report,
+            links,
+          })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          step(`Ошибка: ${msg.slice(0, 200)}`)
+          await aiLog('error', 'chat_error', `Ошибка ответа: ${msg}`)
+          emit({ type: 'error', error: `Нейросеть не ответила: ${msg}` })
+        } finally {
+          if (!closed) {
+            closed = true
+            try {
+              controller.close()
+            } catch {
+              /* стрим уже закрыт */
+            }
+          }
+        }
+      })()
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Cache-Control': 'no-store, no-transform',
+      'X-Accel-Buffering': 'no',
+    },
+  })
 }

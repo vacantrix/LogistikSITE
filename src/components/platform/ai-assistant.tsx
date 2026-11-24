@@ -1,12 +1,24 @@
 'use client'
 
 /**
- * Раздел «ИИ-помощник» — нейросеть-консультант логиста/экспедитора.
- * Основная работа помощника: подбор грузов и перевозчиков на ATI.SU.
- * Четыре вкладки: Чат (консультации), Список ИИ (что нейросеть нашла и разобрала —
- * в любой момент, последний разбор выводится сразу после выполнения запроса),
- * Логи (что нейросеть делала), Права (жёстко ограниченный доступ: запись — только
- * в свой список и журнал, остальное — частичное чтение).
+ * Раздел «ИИ-помощник» — чат с нейросетью-консультантом платформы.
+ *
+ * Экран нейросети — чёрно-белый (терминальная эстетика harness):
+ *  — история переписки хранится на сервере (AiChatMessage) и не теряется;
+ *    «Новый чат» начинает диалог с чистого листа;
+ *  — ход работы нейросеть пишет ПРОСТЫМ ТЕКСТОМ прямо в ленте — как в harness:
+ *    каждая строка («Проверяю права…», «Спрашиваю GigaChat…») появляется вживую
+ *    и остаётся над ответом в истории;
+ *  — ответ печатается медленно и постепенно: сервер стримит чанки, а клиент
+ *    «печатает» их с плавным темпом (rAF-тайперайтер) + мигающая каретка;
+ *  — новые сообщения, строки хода работы и виджеты появляются с мягкими
+ *    анимациями (fade/slide-in);
+ *  — выбор уровня модели GigaChat — компактный переключатель в композере,
+ *    рядом с кнопкой «Спросить»;
+ *  — кнопка «добавить файл»: текстовые файлы читаются и попадают в контекст;
+ *  — кнопки-вкладки «Чат», «Логи», «Список ИИ» убраны: всё отражается в самом
+ *    чате; остался единственный переключатель «Права» — матрица доступа ИИ,
+ *    которую редактирует администратор (AiRight), она действует сразу.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -14,38 +26,60 @@ import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { SectionHeader, EmptyState, LoadingBlock, ErrorBlock, type TabProps } from '@/components/platform/common'
-import { AI_RIGHTS, AI_RIGHT_MODE_LABELS, AI_ACTION_LABELS, AI_KIND_LABELS, type AiRightMode } from '@/lib/ai/rights'
-import { getSessionToken } from '@/lib/api'
 import {
-  Ban, Bot, ChevronDown, Clock, Eye, ListChecks, Loader2, MessagesSquare, PenLine, RefreshCw,
-  ScrollText, Send, ShieldCheck, Trash2,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { SectionHeader, EmptyState, LoadingBlock, ErrorBlock, type TabProps } from '@/components/platform/common'
+import { AI_RIGHT_MODE_LABELS, AI_ENGINE_LABELS, type AiRightMode, type AiRight } from '@/lib/ai/rights'
+import { type AiBestOffer, type AiCard, type AiLinkRef, type AiReport } from '@/lib/ai/tools'
+import { AiOfferList } from '@/components/platform/ai-offer-list'
+import { AiCardList, AiLinkChips, AiReportCard } from '@/components/platform/ai-widgets'
+import { aiFetch } from '@/components/platform/ai-shared'
+import { GIGA_MODELS, DEFAULT_GIGA_MODEL, gigaModelLabel } from '@/lib/ai/models'
+import { useToast } from '@/hooks/use-toast'
+import {
+  ArrowLeft, Ban, Cpu, Eye, FileText, Loader2, Lock, MessagesSquare, Paperclip, PenLine, RefreshCw, Send,
+  ShieldCheck, Stethoscope, Trash2, X,
 } from 'lucide-react'
 
-type SubKey = 'chat' | 'list' | 'logs' | 'rights'
-type ChatMessage = { role: 'user' | 'assistant'; content: string }
-type AiItem = { id: string; kind: string; query: string; answer: string; status: string; createdAt: string }
-type AiLogRow = { id: string; level: string; action: string; message: string; details?: string | null; createdAt: string }
+type SubKey = 'chat' | 'rights'
 
-const SUBTABS: { id: SubKey; label: string; Icon: typeof Bot }[] = [
-  { id: 'chat', label: 'Чат', Icon: Bot },
-  { id: 'list', label: 'Список ИИ', Icon: ListChecks },
-  { id: 'logs', label: 'Логи', Icon: ScrollText },
-  { id: 'rights', label: 'Права', Icon: ShieldCheck },
-]
+/** шаг хода работы — строка текста (harness-лог: «что я сейчас делаю») */
+type ChatStep = { at: number; text: string }
+/** метаданные прикреплённого файла в истории */
+type ChatFileMeta = { name: string; size: number; excerpt?: string }
+/** файл, прикреплённый в композере (текст уже прочитан на клиенте) */
+type AttachedFile = { name: string; size: number; type: string; text: string }
 
-const KIND_BADGE: Record<string, string> = {
-  load: 'bg-slate-100 text-slate-700',
-  truck: 'bg-amber-100 text-amber-700',
-  both: 'bg-emerald-100 text-emerald-700',
-  chat: 'bg-violet-100 text-violet-700',
-}
-
-const LEVEL_META: Record<string, { dot: string; cls: string; label: string }> = {
-  info: { dot: 'bg-slate-400', cls: 'text-slate-600', label: 'инфо' },
-  warn: { dot: 'bg-amber-500', cls: 'text-amber-700', label: 'внимание' },
-  error: { dot: 'bg-red-500', cls: 'text-red-700', label: 'ошибка' },
+type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  engine?: string
+  modelKey?: string
+  createdAt?: string
+  steps?: ChatStep[]
+  files?: ChatFileMeta[]
+  saved?: string[]
+  best?: AiBestOffer[]
+  bestQuery?: string
+  bestEngine?: string
+  cards?: AiCard[]
+  report?: AiReport | null
+  links?: AiLinkRef[]
 }
 
 const RIGHT_ICON: Record<AiRightMode, typeof Ban> = { 'write': PenLine, 'read-partial': Eye, 'denied': Ban }
@@ -55,81 +89,160 @@ const RIGHT_BADGE: Record<AiRightMode, string> = {
   'denied': 'bg-red-100 text-red-700',
 }
 
-/** fetch к платформенным API с токеном этой вкладки (кука идёт сама) */
-async function aiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers = new Headers(init?.headers)
-  if (init?.body != null && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  try {
-    const token = getSessionToken()
-    if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`)
-  } catch {
-    /* приватный режим — остаёмся на cookie-сессии */
-  }
-  return fetch(path, { ...init, headers })
-}
+/** прикреплять можно текстовые файлы — их содержимое попадает в контекст модели */
+const TEXT_FILE_RE = /\.(txt|md|markdown|csv|tsv|json|xml|log|html?|ya?ml)$/i
+const MAX_FILES = 3
+const MAX_FILE_BYTES = 64_000
+
+/** минимальная скорость «печати» ответа (симв./сек); при большом отставании
+ *  от стрима темп плавно подрастает, чтобы не отставать больше ~3 секунд */
+const TYPE_SPEED_MIN = 80
+const TYPE_LAG_SEC = 3
 
 function fmtTime(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-export default function AiAssistantTab({ liveTick }: TabProps) {
-  const [sub, setSub] = useState<SubKey>('chat')
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} Б`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`
+  return `${(n / 1024 / 1024).toFixed(1)} МБ`
+}
 
-  // ——— чат ———
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+/** строки хода работы — простой текст, как в harness: «› что делаю сейчас» */
+function StepsLines({ steps, busy }: { steps: ChatStep[]; busy?: boolean }) {
+  if (steps.length === 0 && !busy) return null
+  return (
+    <div className="space-y-0.5" aria-label="Ход работы нейросети">
+      {steps.map((s, i) => (
+        <div
+          key={i}
+          className="animate-in fade-in slide-in-from-bottom-1 duration-700 text-[13px] leading-relaxed text-zinc-500"
+        >
+          <span className="mr-1.5 select-none text-zinc-600" aria-hidden>›</span>
+          <span>{s.text}</span>
+        </div>
+      ))}
+      {busy && (
+        <div className="animate-pulse text-[13px] leading-relaxed text-zinc-600" aria-hidden>
+          <span className="mr-1.5 select-none text-zinc-600">›</span>
+          работаю…
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Чат с нейросетью: история, модель, файлы, живой ход работы и медленно печатающийся ответ */
+export default function AiAssistantTab({ onNavigate, role }: TabProps) {
+  const [sub, setSub] = useState<SubKey>('chat')
+  const { toast } = useToast()
+  const isAdmin = role === 'admin'
+
+  // ——— чат: история из БД ———
+  const [messages, setMessages] = useState<ChatMessage[] | null>(null)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  // выбранная модель чата (уровень GigaChat) — переключатель у кнопки отправить
+  const [modelKey, setModelKey] = useState<string>(DEFAULT_GIGA_MODEL)
+  // прикреплённые файлы (текст уже прочитан)
+  const [attached, setAttached] = useState<AttachedFile[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  // ход работы текущего ответа — текстом, по мере выполнения
+  const [liveSteps, setLiveSteps] = useState<ChatStep[]>([])
+  // потоковый текст ответа — печатается плавно (тайперайтер ниже)
+  const [liveAnswer, setLiveAnswer] = useState('')
+  // движок последнего ответа (для бейджа) и самотест модели
+  const [engineInfo, setEngineInfo] = useState<{ engine: string; model: string } | null>(null)
+  const [clearArmed, setClearArmed] = useState(false)
+  const [diagOpen, setDiagOpen] = useState(false)
+  const [diagBusy, setDiagBusy] = useState(false)
+  const [diag, setDiag] = useState<{ answer: string; engine: string; model: string; latencyMs: number } | null>(null)
+  const [diagError, setDiagError] = useState<string | null>(null)
   const chatEndRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [messages])
+    chatEndRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [messages, liveSteps, liveAnswer])
 
-  const send = useCallback(async () => {
-    const text = input.trim()
-    if (!text || sending) return
-    setSending(true)
-    setChatError(null)
-    const history = messages.slice(-6)
-    setMessages((m) => [...m, { role: 'user', content: text }])
-    setInput('')
-    try {
-      const res = await aiFetch('/api/ai/chat', { method: 'POST', body: JSON.stringify({ message: text, history }) })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
-      setMessages((m) => [...m, { role: 'assistant', content: json.answer as string }])
-    } catch (e) {
-      setChatError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSending(false)
+  // ——— тайперайтер: ответ печатается медленно и постепенно ———
+  // стрим приносит чанки сразу пачками; клиент «печатает» их с ровным темпом,
+  // чтобы текст появлялся плавно, как в живом диалоге
+  const typerRef = useRef<{ target: string; shown: number; rendered: number; last: number | null }>({
+    target: '', shown: 0, rendered: 0, last: null,
+  })
+  const rafRef = useRef<number | null>(null)
+  const activeRef = useRef(false)
+  const drainRef = useRef<(() => void) | null>(null)
+  const tickRef = useRef<(ts: number) => void>(() => {})
+
+  const tick = useCallback((ts: number): void => {
+    const t = typerRef.current
+    if (t.last == null) t.last = ts
+    const dt = Math.max(0, (ts - t.last) / 1000)
+    t.last = ts
+    const backlog = t.target.length - t.shown
+    if (backlog > 0) {
+      const speed = Math.max(TYPE_SPEED_MIN, Math.ceil(backlog / TYPE_LAG_SEC))
+      t.shown = Math.min(t.target.length, t.shown + speed * dt)
     }
-  }, [input, sending, messages])
+    const shownInt = Math.floor(t.shown)
+    if (shownInt !== t.rendered) {
+      t.rendered = shownInt
+      setLiveAnswer(t.target.slice(0, shownInt))
+    }
+    if (t.shown >= t.target.length && !activeRef.current) {
+      // допечатано и стрим закрыт — останавливаем цикл, отпускаем ожидание
+      rafRef.current = null
+      t.last = null
+      drainRef.current?.()
+      drainRef.current = null
+      return
+    }
+    rafRef.current = requestAnimationFrame((next) => tickRef.current(next))
+  }, [])
 
-  // ——— список ИИ ———
-  const [items, setItems] = useState<AiItem[] | null>(null)
-  const [listError, setListError] = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [clearArmed, setClearArmed] = useState(false)
+  useEffect(() => { tickRef.current = tick }, [tick])
+  useEffect(() => () => { if (rafRef.current != null) cancelAnimationFrame(rafRef.current) }, [])
 
-  const loadList = useCallback(async () => {
-    setListError(null)
+  /** дождаться, пока тайперайтер допечатает накопленный текст */
+  const waitTyped = useCallback((): Promise<void> => new Promise<void>((resolve) => {
+    const t = typerRef.current
+    if (t.shown >= t.target.length) return resolve()
+    drainRef.current = resolve
+  }), [])
+
+  const stopTyper = useCallback((): void => {
+    activeRef.current = false
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+    drainRef.current = null
+    typerRef.current.last = null
+  }, [])
+
+  const loadHistory = useCallback(async () => {
+    setHistoryError(null)
     try {
-      const res = await aiFetch('/api/ai/list')
+      const res = await aiFetch('/api/ai/messages')
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
-      setItems(json.items as AiItem[])
+      const rows = (json.messages ?? []) as ChatMessage[]
+      setMessages(rows)
     } catch (e) {
-      setListError(e instanceof Error ? e.message : String(e))
-      setItems(null)
+      setHistoryError(e instanceof Error ? e.message : String(e))
+      setMessages([])
     }
   }, [])
 
   useEffect(() => {
-    if (sub === 'list') void loadList()
-  }, [sub, liveTick, loadList])
+    if (sub === 'chat') void loadHistory()
+  }, [sub, loadHistory])
 
-  const clearList = useCallback(async () => {
+  const newChat = useCallback(async () => {
     if (!clearArmed) {
       setClearArmed(true)
       window.setTimeout(() => setClearArmed(false), 4000)
@@ -137,191 +250,581 @@ export default function AiAssistantTab({ liveTick }: TabProps) {
     }
     setClearArmed(false)
     try {
-      await aiFetch('/api/ai/list', { method: 'DELETE' })
-      await loadList()
+      const res = await aiFetch('/api/ai/messages', { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setMessages([])
+      setLiveSteps([])
+      setLiveAnswer('')
+      setChatError(null)
+      toast({ title: 'Новый чат начат', description: 'Предыдущая переписка очищена — только у вас.' })
     } catch (e) {
-      setListError(e instanceof Error ? e.message : String(e))
+      toast({ title: 'Не удалось очистить чат', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
     }
-  }, [clearArmed, loadList])
+  }, [clearArmed, toast])
 
-  // ——— логи ———
-  const [logs, setLogs] = useState<AiLogRow[] | null>(null)
-  const [logsError, setLogsError] = useState<string | null>(null)
+  // ——— прикрепление файлов: читаем текст на клиенте ———
+  const pickFiles = useCallback(async (fileList: FileList | null): Promise<void> => {
+    if (!fileList || fileList.length === 0) return
+    const next = [...attached]
+    for (const f of Array.from(fileList)) {
+      if (next.length >= MAX_FILES) {
+        toast({ title: 'Файлов слишком много', description: `Не больше ${MAX_FILES} файлов на один вопрос.`, variant: 'destructive' })
+        break
+      }
+      if (!TEXT_FILE_RE.test(f.name)) {
+        toast({ title: 'Файл не прочитан', description: `«${f.name}»: пока понимаем только текстовые форматы (txt, csv, json, md, xml…).`, variant: 'destructive' })
+        continue
+      }
+      if (f.size > MAX_FILE_BYTES) {
+        toast({ title: 'Файл слишком большой', description: `«${f.name}»: до 64 КБ на файл.`, variant: 'destructive' })
+        continue
+      }
+      const text = await f.text()
+      next.push({ name: f.name, size: f.size, type: f.type || 'text', text: text.slice(0, 8_000) })
+    }
+    setAttached(next)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [attached, toast])
 
-  const loadLogs = useCallback(async () => {
-    setLogsError(null)
+  const removeFile = useCallback((name: string): void => {
+    setAttached((prev) => prev.filter((f) => f.name !== name))
+  }, [])
+
+  // ——— отправка вопроса: NDJSON-стрим шагов, дельт и итога ———
+  const send = useCallback(async () => {
+    const text = input.trim()
+    if (!text || sending) return
+    setSending(true)
+    setChatError(null)
+    setLiveSteps([])
+    setLiveAnswer('')
+    typerRef.current = { target: '', shown: 0, rendered: 0, last: null }
+    activeRef.current = true
+    if (rafRef.current == null) rafRef.current = requestAnimationFrame((ts) => tickRef.current(ts))
+    const localId = `local-${Date.now()}`
+    const filesMeta = attached.map((f) => ({ name: f.name, size: f.size }))
+    setMessages((m) => [...(m ?? []), { id: localId, role: 'user', content: text, files: filesMeta }])
+    setInput('')
+    const files = attached.map((f) => ({ name: f.name, size: f.size, type: f.type, text: f.text }))
     try {
-      const res = await aiFetch('/api/ai/logs?limit=100')
+      const res = await aiFetch('/api/ai/chat', {
+        method: 'POST',
+        body: JSON.stringify({ message: text, model: modelKey, files }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json?.error ?? `HTTP ${res.status}`)
+      }
+      if (!res.body) throw new Error('Стрим недоступен — обновите страницу')
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      // накопитель стрима: событие done приносит итог — все виджеты и метаданные
+      const acc: {
+        steps: ChatStep[]
+        answer: string
+        done?: {
+          answer: string; engine: string; model: string; modelKey?: string; latencyMs: number
+          savedContacts?: { name: string; company: string }[]
+          best?: AiBestOffer[]; cards?: AiCard[]; report?: AiReport | null; links?: AiLinkRef[]
+          assistantMessageId?: string
+        }
+        error?: string
+      } = { steps: [], answer: '' }
+      const handleLine = (line: string): void => {
+        if (!line.trim()) return
+        let ev: { type?: string; at?: number; text?: string; error?: string } & Record<string, unknown>
+        try {
+          ev = JSON.parse(line) as typeof ev
+        } catch {
+          return
+        }
+        if (ev.type === 'step') {
+          acc.steps = [...acc.steps, { at: Number(ev.at) || Date.now(), text: String(ev.text ?? '') }]
+          setLiveSteps(acc.steps)
+        } else if (ev.type === 'delta') {
+          // чанк стрима — в накопитель тайперайтера (он печатает ровным темпом)
+          typerRef.current.target += String(ev.text ?? '')
+        } else if (ev.type === 'done') {
+          acc.done = ev as NonNullable<typeof acc.done>
+        } else if (ev.type === 'error') {
+          acc.error = String(ev.error ?? 'Ошибка')
+        }
+      }
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl = buf.indexOf('\n')
+        while (nl !== -1) {
+          handleLine(buf.slice(0, nl))
+          buf = buf.slice(nl + 1)
+          nl = buf.indexOf('\n')
+        }
+      }
+      if (buf) handleLine(buf)
+      if (acc.error) throw new Error(acc.error)
+      const done = acc.done
+      if (!done) throw new Error('Соединение оборвалось до конца ответа')
+      // стрим закрыт: тайперайтер допечатывает накопленное — и только потом итог в ленту
+      activeRef.current = false
+      await waitTyped()
+      const savedContacts = Array.isArray(done.savedContacts)
+        ? done.savedContacts.map((c) => [c.name, c.company].filter(Boolean).join(' · '))
+        : []
+      const assistantId = done.assistantMessageId ?? `a-${Date.now()}`
+      setMessages((m) => [
+        ...(m ?? []),
+        {
+          id: assistantId,
+          role: 'assistant',
+          content: done.answer,
+          engine: done.engine,
+          modelKey: done.modelKey ?? modelKey,
+          steps: acc.steps,
+          saved: savedContacts,
+          best: Array.isArray(done.best) ? done.best.slice(0, 8) : [],
+          bestQuery: text.slice(0, 200),
+          bestEngine: done.engine,
+          cards: Array.isArray(done.cards) ? done.cards.slice(0, 6) : [],
+          report: done.report && typeof done.report === 'object' ? done.report : null,
+          links: Array.isArray(done.links) ? done.links.slice(0, 5) : [],
+        },
+      ])
+      setEngineInfo({ engine: done.engine, model: done.model })
+      setAttached([])
+    } catch (e) {
+      // вопрос остаётся в истории (сервер сохранил до вызова модели) — ошибка показывается честно
+      stopTyper()
+      setChatError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSending(false)
+      setLiveSteps([])
+      setLiveAnswer('')
+    }
+  }, [input, sending, attached, modelKey, waitTyped, stopTyper])
+
+  // ——— диагностика модели: что она видит и что реально может ———
+  const runDiagnose = useCallback(async () => {
+    setDiagBusy(true)
+    setDiagError(null)
+    setDiag(null)
+    try {
+      const res = await aiFetch('/api/ai/diagnose', { method: 'POST' })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
-      setLogs(json.logs as AiLogRow[])
+      setDiag({
+        answer: json.answer as string,
+        engine: json.engine as string,
+        model: json.model as string,
+        latencyMs: Number(json.latencyMs) || 0,
+      })
     } catch (e) {
-      setLogsError(e instanceof Error ? e.message : String(e))
-      setLogs(null)
+      setDiagError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDiagBusy(false)
+    }
+  }, [])
+
+  // ——— права: действующая матрица + редактирование администратором ———
+  const [rights, setRights] = useState<AiRight[] | null>(null)
+  const [lockedRights, setLockedRights] = useState<string[]>([])
+  const [rightsError, setRightsError] = useState<string | null>(null)
+  const [rightsSavingKey, setRightsSavingKey] = useState<string | null>(null)
+
+  const loadRights = useCallback(async () => {
+    setRightsError(null)
+    try {
+      const res = await aiFetch('/api/ai/rights')
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setRights(json.rights as AiRight[])
+      setLockedRights(Array.isArray(json.locked) ? (json.locked as string[]) : [])
+    } catch (e) {
+      setRightsError(e instanceof Error ? e.message : String(e))
+      setRights(null)
     }
   }, [])
 
   useEffect(() => {
-    if (sub !== 'logs') return
-    void loadLogs()
-    const t = setInterval(() => void loadLogs(), 10000)
-    return () => clearInterval(t)
-  }, [sub, loadLogs])
+    if (sub === 'rights') void loadRights()
+  }, [sub, loadRights])
+
+  const changeRight = useCallback(async (right: AiRight, mode: AiRightMode) => {
+    setRightsSavingKey(right.key)
+    try {
+      const res = await aiFetch('/api/ai/rights', { method: 'PUT', body: JSON.stringify({ key: right.key, mode }) })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setRights(json.rights as AiRight[])
+      toast({
+        title: 'Право обновлено',
+        description: `«${right.title}» → ${AI_RIGHT_MODE_LABELS[mode]}. Матрица действует для следующих вопросов.`,
+      })
+    } catch (e) {
+      toast({ title: 'Право не сохранено', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
+    } finally {
+      setRightsSavingKey(null)
+    }
+  }, [toast])
 
   return (
     <div className="space-y-5">
       <SectionHeader
         eyebrow="Нейросеть-консультант"
         title="ИИ-помощник"
-        desc="Помощник по грузам и перевозчикам ATI.SU: разбирает запросы, оценивает ставки и риски, готовит черновики сообщений. Права ограничены жёстко — пишет только в свой список и журнал, остальное видит частично."
+        desc="Чат с нейросетью на чёрно-белом экране: ход работы она пишет простым текстом прямо в ленте — как в harness, ответ печатается медленно и постепенно. Уровень GigaChat выбирается рядом с кнопкой отправки, файлы прикрепляются скрепкой. Карточки, отчёты (Word) и переходы к разделам появляются в самом чате. Единственный переключатель — «Права»: матрицу редактирует администратор, действует сразу."
       >
         <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 text-sm">
-          {SUBTABS.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setSub(id)}
-              aria-current={sub === id ? 'true' : undefined}
-              className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-3.5 font-medium transition-colors ${
-                sub === id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" aria-hidden />
-              {label}
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={() => setSub(sub === 'rights' ? 'chat' : 'rights')}
+            aria-pressed={sub === 'rights'}
+            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-3.5 font-medium transition-colors ${
+              sub === 'rights' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+            Права
+          </button>
         </div>
       </SectionHeader>
 
-      {/* ——— Чат ——— */}
+      {/* ——— Чат: чёрно-белый экран нейросети ——— */}
       {sub === 'chat' && (
-        <Card className="border-slate-200 shadow-sm">
-          <CardContent className="flex max-h-[72vh] flex-col gap-3 p-4">
-            {messages.length === 0 && (
-              <EmptyState
-                icon={<MessagesSquare className="h-8 w-8" aria-hidden />}
-                title="Спросите нейросеть-консультанта"
-                hint="Например: «груз Скопин → Ростов, тент, до 170 тысяч без НДС — на что смотреть и что спросить у грузовладельца?»"
-              />
-            )}
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-              {messages.map((m, i) => (
-                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-[min(46rem,92%)] rounded-2xl px-4 py-2.5 ${
-                      m.role === 'user'
-                        ? 'bg-slate-800 text-white'
-                        : 'border border-slate-200 bg-white text-slate-800'
-                    }`}
-                  >
-                    {m.role === 'assistant' ? (
-                      <div className="markdown-view text-sm text-slate-800">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="whitespace-pre-wrap text-sm">{m.content}</p>
-                    )}
+        <Card className="border-zinc-800 bg-neutral-950 text-zinc-100 shadow-sm">
+          <CardContent className="flex h-[calc(100vh-15rem)] max-h-[820px] min-h-[480px] flex-col gap-3 p-3 sm:p-4">
+            {/* верхняя панель: движок + действия */}
+            <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
+              <Badge
+                className={`border ${
+                  engineInfo
+                    ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
+                    : 'border-zinc-700 bg-zinc-900 text-zinc-400'
+                }`}
+              >
+                {engineInfo
+                  ? `Отвечает: ${AI_ENGINE_LABELS[engineInfo.engine] ?? engineInfo.engine}${engineInfo.model ? ` · ${engineInfo.model}` : ''}`
+                  : 'GigaChat (Сбер)'}
+              </Badge>
+              <div className="ml-auto flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={`h-9 border-zinc-700 bg-transparent hover:bg-zinc-800 hover:text-white ${
+                    clearArmed ? 'border-zinc-400 text-white' : 'text-zinc-400'
+                  }`}
+                  onClick={() => void newChat()}
+                  disabled={sending}
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" aria-hidden />
+                  {clearArmed ? 'Точно новый?' : 'Новый чат'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 border-zinc-700 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                  onClick={() => {
+                    setDiagOpen(true)
+                    if (!diag && !diagBusy) void runDiagnose()
+                  }}
+                >
+                  <Stethoscope aria-hidden className="mr-1 h-3.5 w-3.5" />
+                  Диагностика
+                </Button>
+              </div>
+            </div>
+
+            {/* лента сообщений: ч/б, всё отражается здесь же (grayscale — строго монохром) */}
+            <div
+              className="grayscale min-h-0 flex-1 animate-in fade-in duration-700 space-y-3 overflow-y-auto pr-1"
+              style={{ scrollbarWidth: 'thin' }}
+              aria-label="Лента чата с нейросетью"
+            >
+              {messages === null && !historyError && <LoadingBlock label="Загружаем историю чата…" />}
+              {historyError && <ErrorBlock message={historyError} onRetry={() => void loadHistory()} />}
+              {messages != null && messages.length === 0 && (
+                <EmptyState
+                  icon={<MessagesSquare className="h-8 w-8" aria-hidden />}
+                  title="Спросите нейросеть-консультанта"
+                  hint="История чата сохраняется. Прикрепите файл (txt, csv, json, md — до 3), выберите уровень GigaChat рядом с кнопкой «Спросить» и задайте вопрос: «груз Скопин → Ростов, тент, до 170 тысяч без НДС — на что смотреть?», «запиши перевозщика: Пётр, ООО Ромашка…» или «составь отчёт по рынку Краснодар → Москва». Ход работы будет виден текстом, ответ напечатается постепенно, карточки и отчёт появятся в чате."
+                />
+              )}
+              {messages?.map((m) => (
+                <div key={m.id} className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-2">
+                  {/* ход работы — простой текст над ответом, как в harness */}
+                  {m.role === 'assistant' && m.steps && m.steps.length > 0 && (
+                    <StepsLines steps={m.steps} />
+                  )}
+                  <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[min(46rem,92%)] rounded-2xl px-4 py-2.5 ${
+                        m.role === 'user'
+                          ? 'bg-white text-neutral-950'
+                          : 'border border-zinc-800 bg-zinc-900 text-zinc-100'
+                      }`}
+                    >
+                      {m.role === 'assistant' ? (
+                        <div className="markdown-view markdown-view-dark text-sm text-zinc-100">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                          {m.saved && m.saved.length > 0 && (
+                            <div className="mt-2 rounded-lg border border-zinc-700 bg-zinc-800/60 px-2.5 py-2 text-xs text-zinc-300">
+                              <span className="font-semibold">Записано в «Память контактов»:</span> {m.saved.join(', ')}
+                              <span className="mt-1 block text-zinc-500">
+                                Карточки помечены «Записано ИИ» — проверьте их в разделе «Привлечённый транспорт → Память контактов».
+                              </span>
+                            </div>
+                          )}
+                          {m.engine && (
+                            <div className="mt-1 text-[10px] uppercase tracking-wide text-zinc-500">
+                              {AI_ENGINE_LABELS[m.engine] ?? m.engine}
+                              {m.modelKey && ` · уровень: ${gigaModelLabel(m.modelKey)}`}
+                              {m.createdAt && ` · ${fmtTime(m.createdAt)}`}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <p className="whitespace-pre-wrap text-sm">{m.content}</p>
+                          {m.files && m.files.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {m.files.map((f) => (
+                                <span
+                                  key={f.name}
+                                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-100 px-2 py-1 text-[11px] text-zinc-700"
+                                >
+                                  <FileText className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
+                                  <span className="truncate">{f.name}</span>
+                                  <span className="shrink-0 text-zinc-400">{fmtBytes(f.size)}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
+                  {m.role === 'assistant' && m.best && m.best.length > 0 && (
+                    <div className="animate-in fade-in duration-700">
+                      <AiOfferList offers={m.best} query={m.bestQuery ?? ''} engine={m.bestEngine} onNavigate={onNavigate} compact />
+                    </div>
+                  )}
+                  {m.role === 'assistant' && m.cards && m.cards.length > 0 && (
+                    <div className="animate-in fade-in duration-700">
+                      <AiCardList cards={m.cards} />
+                    </div>
+                  )}
+                  {m.role === 'assistant' && m.report && (
+                    <div className="animate-in fade-in duration-700">
+                      <AiReportCard report={m.report} />
+                    </div>
+                  )}
+                  {m.role === 'assistant' && m.links && m.links.length > 0 && (
+                    <div className="animate-in fade-in duration-700">
+                      <AiLinkChips links={m.links} onNavigate={onNavigate} />
+                    </div>
+                  )}
                 </div>
               ))}
+
+              {/* живой ответ: ход работы текстом + медленно печатающийся текст */}
               {sending && (
-                <div className="flex items-center gap-2 text-sm text-slate-500">
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  Нейросеть думает…
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-2">
+                  <StepsLines steps={liveSteps} busy />
+                  <div className="flex justify-start">
+                    <div className="max-w-[min(46rem,92%)] rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100">
+                      <div className="markdown-view markdown-view-dark">
+                        {liveAnswer ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{liveAnswer}</ReactMarkdown>
+                        ) : (
+                          <span className="inline-flex items-center gap-2 text-zinc-400">
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                            {liveSteps.length > 0 ? liveSteps[liveSteps.length - 1].text : 'Нейросеть начинает…'}
+                          </span>
+                        )}
+                        {liveAnswer && (
+                          <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-zinc-400 align-middle" aria-hidden />
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
+
             {chatError && (
-              <ErrorBlock message={chatError} onRetry={() => void send()} />
+              <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200">
+                <span className="font-semibold">Не получилось:</span> {chatError}
+              </div>
             )}
-            <div className="flex items-end gap-2">
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    void send()
-                  }
-                }}
-                rows={2}
-                aria-label="Вопрос нейросети"
-                placeholder="Спросите про груз, машину, ставку или риски сделки… (Enter — отправить)"
-                className="min-h-[44px] text-sm"
-              />
-              <Button onClick={() => void send()} disabled={sending || !input.trim()} className="h-11 shrink-0">
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
-                Спросить
-              </Button>
+
+            {/* композер: файлы + вопрос + модель (у кнопки отправить) */}
+            <div className="space-y-2 border-t border-zinc-800 pt-2">
+              {attached.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {attached.map((f) => (
+                    <span
+                      key={f.name}
+                      className="animate-in fade-in duration-500 inline-flex max-w-full items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
+                    >
+                      <FileText className="h-3 w-3 shrink-0 text-zinc-500" aria-hidden />
+                      <span className="truncate">{f.name}</span>
+                      <span className="shrink-0 text-zinc-500">{fmtBytes(f.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(f.name)}
+                        aria-label={`Убрать файл ${f.name}`}
+                        className="shrink-0 rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                      >
+                        <X className="h-3 w-3" aria-hidden />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap items-end gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".txt,.md,.markdown,.csv,.tsv,.json,.xml,.log,.html,.htm,.yml,.yaml"
+                  className="hidden"
+                  onChange={(e) => void pickFiles(e.target.files)}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-11 w-11 shrink-0 border-zinc-700 bg-zinc-900 p-0 text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={sending}
+                  aria-label="Прикрепить файл (текстовый)"
+                  title="Прикрепить файл: txt, csv, json, md, xml — до 3 файлов по 64 КБ"
+                >
+                  <Paperclip className="h-4 w-4" aria-hidden />
+                </Button>
+                <Textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      void send()
+                    }
+                  }}
+                  rows={2}
+                  aria-label="Вопрос нейросети"
+                  placeholder="Спросите про груз, ставку или риски — Enter отправить"
+                  className="min-w-[12rem] flex-1 border-zinc-700 bg-zinc-900 text-sm text-zinc-100 caret-zinc-100 placeholder:text-zinc-500 focus-visible:ring-zinc-500"
+                />
+                {/* выбор модели перенесён к кнопке отправить: в триггере — только короткое имя уровня */}
+                <Select value={modelKey} onValueChange={(v) => setModelKey(v)} disabled={sending}>
+                  <SelectTrigger
+                    size="sm"
+                    className="h-11 w-[12rem] shrink-0 border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                    aria-label="Уровень модели GigaChat"
+                    title={`Уровень модели GigaChat: ${gigaModelLabel(modelKey)}`}
+                  >
+                    <Cpu className="mr-1 h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden />
+                    <span className="truncate">{gigaModelLabel(modelKey)}</span>
+                  </SelectTrigger>
+                  <SelectContent className="border-zinc-700 bg-zinc-900 text-zinc-100">
+                    {GIGA_MODELS.map((m) => (
+                      <SelectItem
+                        key={m.key}
+                        value={m.key}
+                        className="focus:bg-zinc-800 focus:text-white [&_svg:not([class*='text-'])]:text-zinc-500"
+                      >
+                        <span className="flex flex-col items-start gap-0.5">
+                          <span className="text-sm font-medium">{m.label}</span>
+                          <span className="text-xs text-zinc-500">{m.hint}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={() => void send()}
+                  disabled={sending || !input.trim()}
+                  className="h-11 shrink-0 bg-white text-neutral-950 hover:bg-zinc-200"
+                >
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+                  Спросить
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* ——— Список ИИ ——— */}
-      {sub === 'list' && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
+      {/* ——— Права: матрица, редактируемая администратором ——— */}
+      {sub === 'rights' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => setSub('chat')}
+            >
+              <ArrowLeft aria-hidden className="mr-1 h-3.5 w-3.5" />
+              К чату
+            </Button>
             <span className="text-sm text-slate-600">
-              Список, который ведёт нейросеть: разборы поисковых запросов и консультации. Последний — сверху.
+              Права нейросети задаёт администратор платформы: режимы ниже редактируются и применяются
+              к следующим вопросам сразу — контекст для модели собирает сервер по действующей матрице.
             </span>
-            <div className="ml-auto flex items-center gap-2">
-              <Button variant="outline" size="sm" className="h-9" onClick={() => void loadList()}>
-                <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
-                Обновить
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className={`h-9 ${clearArmed ? 'border-red-300 text-red-700 hover:bg-red-50' : 'text-slate-500'}`}
-                onClick={() => void clearList()}
-              >
-                <Trash2 className="mr-1 h-3.5 w-3.5" aria-hidden />
-                {clearArmed ? 'Точно очистить?' : 'Очистить список'}
-              </Button>
-            </div>
           </div>
-          {listError && <ErrorBlock message={listError} onRetry={() => void loadList()} />}
-          {items === null && !listError && <LoadingBlock label="Загружаем список нейросети…" />}
-          {items !== null && items.length === 0 && (
-            <EmptyState
-              icon={<ListChecks className="h-8 w-8" aria-hidden />}
-              title="Список пока пуст"
-              hint="Нейросеть запишет сюда первый разбор, как только вы зададите ей поиск — кнопка «Найти с ИИ» в разделе ATI.SU."
-            />
-          )}
-          {items !== null && items.length > 0 && (
-            <div className="max-h-[70vh] space-y-2 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-              {items.map((item, idx) => {
-                const expanded = expandedId === item.id
+          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700">
+            Права «Заявки, рейсы, ЭДО, 1С» и «Персональные данные» зашиты в платформу и не редактируются.
+            {!isAdmin && ' Ваша роль — только просмотр; изменения вносит администрация.'}
+          </div>
+          {rightsError && <ErrorBlock message={rightsError} onRetry={() => void loadRights()} />}
+          {rights === null && !rightsError && <LoadingBlock label="Загружаем матрицу прав…" />}
+          {rights !== null && (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {rights.map((r) => {
+                const Icon = RIGHT_ICON[r.mode]
+                const locked = lockedRights.includes(r.key)
                 return (
-                  <Card key={item.id} className={`border-slate-200 shadow-sm ${idx === 0 ? 'border-emerald-300' : ''}`}>
-                    <CardContent className="p-3.5">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedId(expanded ? null : item.id)}
-                        aria-expanded={expanded}
-                        className="flex w-full items-center gap-2 text-left"
-                      >
-                        <Badge className={`${KIND_BADGE[item.kind] ?? 'bg-slate-100 text-slate-700'} shrink-0 border-0`}>
-                          {AI_KIND_LABELS[item.kind] ?? item.kind}
-                        </Badge>
-                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800">{item.query}</span>
-                        {idx === 0 && (
-                          <Badge className="shrink-0 border-0 bg-emerald-100 text-emerald-700">последний</Badge>
-                        )}
-                        <span className="flex shrink-0 items-center gap-1 text-xs text-slate-500">
-                          <Clock className="h-3 w-3" aria-hidden />
-                          {fmtTime(item.createdAt)}
+                  <Card key={r.key} className="border-slate-200 shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Icon
+                          className={`h-4 w-4 shrink-0 ${r.mode === 'denied' ? 'text-red-500' : r.mode === 'read-partial' ? 'text-amber-600' : 'text-emerald-600'}`}
+                          aria-hidden
+                        />
+                        <span className="text-sm font-semibold text-slate-900">{r.title}</span>
+                        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                          {locked && (
+                            <Badge variant="outline" className="gap-1 border-slate-300 text-slate-500">
+                              <Lock className="h-3 w-3" aria-hidden />
+                              зашито
+                            </Badge>
+                          )}
+                          {isAdmin && !locked ? (
+                            <Select
+                              value={r.mode}
+                              onValueChange={(v) => void changeRight(r, v as AiRightMode)}
+                              disabled={rightsSavingKey === r.key}
+                            >
+                              <SelectTrigger className="h-8 w-[210px] text-xs" aria-label={`Режим права «${r.title}»`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(['write', 'read-partial', 'denied'] as AiRightMode[]).map((mode) => (
+                                  <SelectItem key={mode} value={mode} className="text-xs">
+                                    {AI_RIGHT_MODE_LABELS[mode]}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge className={`border-0 ${RIGHT_BADGE[r.mode]}`}>{AI_RIGHT_MODE_LABELS[r.mode]}</Badge>
+                          )}
                         </span>
-                        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden />
-                      </button>
-                      {expanded && (
-                        <div className="markdown-view mt-2 border-t border-slate-100 pt-2 text-sm text-slate-800">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.answer}</ReactMarkdown>
-                        </div>
-                      )}
+                      </div>
+                      <p className="mt-2 text-xs leading-relaxed text-slate-600">{r.detail}</p>
                     </CardContent>
                   </Card>
                 )
@@ -331,91 +834,41 @@ export default function AiAssistantTab({ liveTick }: TabProps) {
         </div>
       )}
 
-      {/* ——— Логи ——— */}
-      {sub === 'logs' && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-slate-600">
-              Журнал нейросети: что она делала и когда. Обновляется каждые 10 секунд.
-            </span>
-            <Button variant="outline" size="sm" className="ml-auto h-9" onClick={() => void loadLogs()}>
-              <RefreshCw className="mr-1 h-3.5 w-3.5" aria-hidden />
-              Обновить
+      {/* ——— Диагностика модели: что она видит и что реально может ——— */}
+      <Dialog open={diagOpen} onOpenChange={setDiagOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Stethoscope aria-hidden className="h-5 w-5 text-slate-500" />
+              Диагностика модели
+            </DialogTitle>
+            <DialogDescription>
+              Модель честно описывает, что она видит в интеграции и что реально может делать. Ответ показывается как есть.
+            </DialogDescription>
+          </DialogHeader>
+          {diagBusy && <LoadingBlock label="Модель проводит самодиагностику…" />}
+          {diagError && <ErrorBlock message={diagError} onRetry={() => void runDiagnose()} />}
+          {diag && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Badge className="border-0 bg-zinc-800 text-zinc-100">{AI_ENGINE_LABELS[diag.engine] ?? diag.engine}</Badge>
+                <Badge variant="outline" className="text-slate-600">{diag.model}</Badge>
+                <Badge variant="outline" className="text-slate-600">{`${(diag.latencyMs / 1000).toFixed(1)} с`}</Badge>
+              </div>
+              <div className="markdown-view rounded-lg border border-zinc-200 bg-white px-3.5 py-3 text-sm text-slate-800">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{diag.answer}</ReactMarkdown>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" className="h-10" onClick={() => void runDiagnose()} disabled={diagBusy}>
+              <RefreshCw aria-hidden className="mr-1 h-3.5 w-3.5" />
+              Повторить тест
             </Button>
-          </div>
-          {logsError && <ErrorBlock message={logsError} onRetry={() => void loadLogs()} />}
-          {logs === null && !logsError && <LoadingBlock label="Загружаем журнал нейросети…" />}
-          {logs !== null && logs.length === 0 && (
-            <EmptyState icon={<ScrollText className="h-8 w-8" aria-hidden />} title="Журнал пуст — нейросеть ещё ничего не делала" />
-          )}
-          {logs !== null && logs.length > 0 && (
-            <Card className="border-slate-200 shadow-sm">
-              <CardContent className="p-0">
-                <div className="max-h-[70vh] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="sticky top-0 border-b border-slate-200 bg-slate-50 text-left text-slate-500">
-                        <th className="px-3 py-2 font-medium">Время</th>
-                        <th className="px-3 py-2 font-medium">Уровень</th>
-                        <th className="px-3 py-2 font-medium">Действие</th>
-                        <th className="px-3 py-2 font-medium">Что произошло</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {logs.map((row) => {
-                        const meta = LEVEL_META[row.level] ?? LEVEL_META.info
-                        return (
-                          <tr key={row.id} className="border-b border-slate-100 last:border-0">
-                            <td className="whitespace-nowrap px-3 py-2 text-slate-500">{fmtTime(row.createdAt)}</td>
-                            <td className="whitespace-nowrap px-3 py-2">
-                              <span className={`inline-flex items-center gap-1.5 ${meta.cls}`}>
-                                <span className={`h-2 w-2 rounded-full ${meta.dot}`} aria-hidden />
-                                {meta.label}
-                              </span>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-700">
-                              {AI_ACTION_LABELS[row.action] ?? row.action}
-                            </td>
-                            <td className="px-3 py-2 text-slate-600">{row.message}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* ——— Права ——— */}
-      {sub === 'rights' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700">
-            Права нейросети заданы на сервере и не отключаются интерфейсом: контекст для модели собирает
-            сервер из разрешённых источников, сама модель ничего, кроме своего списка и журнала, писать не может.
-            Остальное — частичное чтение: контакты видны ей без телефонов и почты.
-          </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {AI_RIGHTS.map((r) => {
-              const Icon = RIGHT_ICON[r.mode]
-              return (
-                <Card key={r.key} className="border-slate-200 shadow-sm">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2">
-                      <Icon className={`h-4 w-4 shrink-0 ${r.mode === 'denied' ? 'text-red-500' : r.mode === 'read-partial' ? 'text-amber-600' : 'text-emerald-600'}`} aria-hidden />
-                      <span className="text-sm font-semibold text-slate-900">{r.title}</span>
-                      <Badge className={`ml-auto shrink-0 border-0 ${RIGHT_BADGE[r.mode]}`}>{AI_RIGHT_MODE_LABELS[r.mode]}</Badge>
-                    </div>
-                    <p className="mt-2 text-xs leading-relaxed text-slate-600">{r.detail}</p>
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
-        </div>
-      )}
+            <Button className="h-10" onClick={() => setDiagOpen(false)}>Закрыть</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
