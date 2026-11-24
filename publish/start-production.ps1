@@ -33,9 +33,11 @@ $statusErr = Join-Path $LogDir 'launcher-status.err.log'
 $gigaConfigured = $false
 $envLocal = Join-Path $RepoRoot '.env.local'
 if (Test-Path $envLocal) {
-    $gigaConfigured = [bool](Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_ID\s*=\s*\S+' -ErrorAction SilentlyContinue)
+    $gigaId = Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_ID\s*=\s*\S+' -ErrorAction SilentlyContinue
+    $gigaSecret = Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_SECRET\s*=\s*\S+' -ErrorAction SilentlyContinue
+    $gigaConfigured = ($null -ne $gigaId) -and ($null -ne $gigaSecret)
 }
-$aiState = if ($gigaConfigured) { 'GigaChat подключён' } else { 'GigaChat не настроен (ключи в .env.local)' }
+$aiState = if ($gigaConfigured) { 'GigaChat подключён (client id + secret)' } else { 'GigaChat не настроен (ключи в .env.local)' }
 
 function Write-Step([string]$text) {
     Write-Host ""

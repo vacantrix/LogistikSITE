@@ -1,4 +1,4 @@
-# Build manifest for the production standalone bundle.
+﻿# Build manifest for the production standalone bundle.
 #
 # Records SHA-256 fingerprints of build inputs (src, public, root configs) and
 # build artifacts (.next/standalone server, static and public trees). start-all
@@ -24,6 +24,9 @@ $ErrorActionPreference = 'Stop'
 
 $BuildManifestRepo = Split-Path -Parent $PSScriptRoot
 $BuildManifestPath = Join-Path $PSScriptRoot 'build-manifest.json'
+# .env.local намеренно не входит в отпечаток сборки: это runtime-конфигурация
+# с секретами (GigaChat, токены). Её изменение не должно требовать пересборки
+# и не должно ломать проверку целостности при запуске.
 $BuildManifestConfigFiles = @(
     'package.json',
     'bun.lock',
@@ -33,8 +36,7 @@ $BuildManifestConfigFiles = @(
     'tailwind.config.ts',
     'components.json',
     'prisma/schema.prisma',
-    'prisma/kontur.prisma',
-    '.env.local'
+    'prisma/kontur.prisma'
 )
 
 # Runtime-only directories inside the compiled server tree. Next.js creates them

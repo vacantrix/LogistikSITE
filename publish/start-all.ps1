@@ -69,9 +69,11 @@ if ($python) {
 $gigaConfigured = $false
 $envLocal = Join-Path $RepoRoot '.env.local'
 if (Test-Path $envLocal) {
-    $gigaConfigured = [bool](Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_ID\s*=\s*\S+' -ErrorAction SilentlyContinue)
+    $gigaId = Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_ID\s*=\s*\S+' -ErrorAction SilentlyContinue
+    $gigaSecret = Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_SECRET\s*=\s*\S+' -ErrorAction SilentlyContinue
+    $gigaConfigured = ($null -ne $gigaId) -and ($null -ne $gigaSecret)
 }
-if ($gigaConfigured) { Write-Output "AI helper: GigaChat configured" }
+if ($gigaConfigured) { Write-Output "AI helper: GigaChat configured (client id + secret)" }
 else { Write-Output "AI helper: GigaChat not configured (GIGACHAT_CLIENT_ID/SECRET in .env.local)" }
 
 # 1. OCR service (localhost only)

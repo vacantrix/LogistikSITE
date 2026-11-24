@@ -2567,3 +2567,21 @@ Work Log:
 Stage Summary:
 - Скрипт запуска обновлён и проверен на рабочем ПК; стенд работает, повторный запуск идемпотентен.
 - Для живого ИИ-чата остаётся добавить ключи GigaChat в `.env.local`.
+
+---
+
+Task ID: 130
+Agent: DeepSeek V4.1 Flash (main)
+Task: Подключение GigaChat по новым ключам, проверка раздела «ИИ-помощник» и запуск стенда
+
+Work Log:
+- Ключи GigaChat (`GIGACHAT_CLIENT_ID`, `GIGACHAT_CLIENT_SECRET`, scope `GIGACHAT_API_PERS`, модель `GigaChat-2-Max`) добавлены только в `.env.local`; файл в git не попадает. В `.env.example` добавлены пустые placeholder-переменные для GitHub.
+- Проверка GigaChat напрямую: OAuth `HTTP 200`, токен получен, `/models` вернул `GigaChat-2-Max` и другие модели. Живой запрос к `POST /api/ai/chat` вернул `engine=gigachat`, `model=GigaChat-2-Max:2.0.28.2`, ответ за 701 мс.
+- `publish/build-manifest.ps1`: `.env.local` исключён из отпечатка сборки — runtime-секреты не должны требовать пересборки и ломать проверку целостности. Манифест перегенерирован: `BUILD_ID=T6sYFwpy20caku3zNglKw`, source=408, artifacts=1148; `start-all.ps1` проходит.
+- `publish/start-all.ps1` и `publish/start-production.ps1` теперь считают GigaChat настроенным только при наличии и client id, и secret.
+- UI проверен в браузере под `admin`: вкладка «ИИ-помощник» открывается, история чата и ответ GigaChat отображаются; «Избранное» доступно рядом. На телефоне — нижняя вкладка «ИИ», на компьютере — ряд «Собственный транспорт» или боковое меню. Логист и администратор видят раздел, перевозчик — нет.
+- `publish/start-all.ps1` — `RESULT: OK`; `publish/status.ps1` — `RESULT: OK` (платформа, Caddy/HTTPS, OCR, Driver API, portal-auth, real-time, сборка).
+
+Stage Summary:
+- GigaChat работает на стенде с новыми ключами; раздел «ИИ-помощник» и «Избранное» доступны администратору и логисту.
+- Секреты остаются только в `.env.local`; сборка и проверка целостности больше не зависят от runtime-ключей.
