@@ -1,0 +1,416 @@
+{
+  "generated": "2026-11-11T05:13:01.920907+00:00",
+  "url": "http://localhost:3000/api/2gis/routing",
+  "results": [
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 1,
+      "eta_s": 344,
+      "eta_alt_s": null,
+      "distance_m": 1737,
+      "algorithm": "с учётом пробок",
+      "colors": {
+        "fast": 3,
+        "normal": 1,
+        "slow": 2,
+        "ignore": 0,
+        "other": 0
+      },
+      "wkt_segments": 6,
+      "test": "T1",
+      "title": "Новороссийск ~4 км, car+jam",
+      "http": 200,
+      "latency_ms": 677,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 634,
+        "cached": false,
+        "keyConfigured": true,
+        "upstreamStatus": 200
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "car",
+        "route_mode": "fastest",
+        "traffic_mode": "jam",
+        "output": "detailed",
+        "alternative": 0
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 37.788,
+          "lat": 44.713,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.7755,
+          "lat": 44.7235
+        }
+      ]
+    },
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 1,
+      "eta_s": 1837,
+      "eta_alt_s": null,
+      "distance_m": 21080,
+      "algorithm": "с учётом пробок",
+      "colors": {
+        "fast": 24,
+        "normal": 9,
+        "slow": 1,
+        "ignore": 0,
+        "other": 0
+      },
+      "wkt_segments": 34,
+      "test": "T2a",
+      "title": "Абинск→Крымск, car+jam",
+      "http": 200,
+      "latency_ms": 233,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 228,
+        "cached": false,
+        "keyConfigured": true,
+        "upstreamStatus": 200
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "car",
+        "route_mode": "fastest",
+        "traffic_mode": "jam",
+        "output": "detailed",
+        "alternative": 0
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 38.157,
+          "lat": 44.8682,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.9926,
+          "lat": 44.9312
+        }
+      ]
+    },
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 1,
+      "eta_s": 1846,
+      "eta_alt_s": null,
+      "distance_m": 21674,
+      "algorithm": "с учётом пробок",
+      "colors": {
+        "fast": 27,
+        "normal": 9,
+        "slow": 1,
+        "ignore": 0,
+        "other": 0
+      },
+      "wkt_segments": 37,
+      "test": "T2b",
+      "title": "Абинск→Крымск, truck 18т h3.5",
+      "http": 200,
+      "latency_ms": 255,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 249,
+        "cached": false,
+        "keyConfigured": true,
+        "upstreamStatus": 200
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "truck",
+        "route_mode": "fastest",
+        "traffic_mode": "jam",
+        "output": "detailed",
+        "alternative": 0,
+        "truck_params": {
+          "mass": 18000,
+          "height": 3.5,
+          "width": 2.55,
+          "length": 9
+        }
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 38.157,
+          "lat": 44.8682,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.9926,
+          "lat": 44.9312
+        }
+      ]
+    },
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 1,
+      "eta_s": 5206,
+      "eta_alt_s": null,
+      "distance_m": 65071,
+      "algorithm": "с учётом пробок",
+      "colors": {
+        "fast": 42,
+        "normal": 19,
+        "slow": 6,
+        "ignore": 0,
+        "other": 0
+      },
+      "wkt_segments": 67,
+      "test": "T3",
+      "title": "Абинск→Новороссийск 63 км (лимит?)",
+      "http": 200,
+      "latency_ms": 283,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 279,
+        "cached": false,
+        "keyConfigured": true,
+        "upstreamStatus": 200
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "car",
+        "route_mode": "fastest",
+        "traffic_mode": "jam",
+        "output": "detailed",
+        "alternative": 0
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 38.157,
+          "lat": 44.8682,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.7755,
+          "lat": 44.7235
+        }
+      ]
+    },
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 1,
+      "eta_s": 1701,
+      "eta_alt_s": null,
+      "distance_m": 21080,
+      "algorithm": "без учёта пробок",
+      "colors": {
+        "fast": 0,
+        "normal": 0,
+        "slow": 0,
+        "ignore": 0,
+        "other": 20
+      },
+      "wkt_segments": 20,
+      "test": "T4a",
+      "title": "Абинск→Крымск, car+statistics",
+      "http": 200,
+      "latency_ms": 237,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 232,
+        "cached": false,
+        "keyConfigured": true,
+        "upstreamStatus": 200
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "car",
+        "route_mode": "fastest",
+        "traffic_mode": "statistics",
+        "output": "detailed",
+        "alternative": 0
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 38.157,
+          "lat": 44.8682,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.9926,
+          "lat": 44.9312
+        }
+      ]
+    },
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 3,
+      "eta_s": 1846,
+      "eta_alt_s": 1877,
+      "distance_m": 21674,
+      "algorithm": "с учётом пробок",
+      "colors": {
+        "fast": 75,
+        "normal": 26,
+        "slow": 2,
+        "ignore": 0,
+        "other": 0
+      },
+      "wkt_segments": 38,
+      "test": "T5",
+      "title": "Абинск→Крымск, truck+alternative=2",
+      "http": 200,
+      "latency_ms": 310,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 304,
+        "cached": false,
+        "keyConfigured": true,
+        "upstreamStatus": 200
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "truck",
+        "route_mode": "fastest",
+        "traffic_mode": "jam",
+        "output": "detailed",
+        "alternative": 2,
+        "truck_params": {
+          "mass": 18000,
+          "height": 3.5,
+          "width": 2.55,
+          "length": 9
+        }
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 38.157,
+          "lat": 44.8682,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.9926,
+          "lat": 44.9312
+        }
+      ]
+    },
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 1,
+      "eta_s": 344,
+      "eta_alt_s": null,
+      "distance_m": 1737,
+      "algorithm": "с учётом пробок",
+      "colors": {
+        "fast": 3,
+        "normal": 1,
+        "slow": 2,
+        "ignore": 0,
+        "other": 0
+      },
+      "wkt_segments": 6,
+      "test": "T6",
+      "title": "Невалидный ключ (ожидаем отказ)",
+      "http": 200,
+      "latency_ms": 5,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 1,
+        "cached": true,
+        "keyConfigured": true
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "car",
+        "route_mode": "fastest",
+        "traffic_mode": "jam",
+        "output": "detailed",
+        "alternative": 0
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 37.788,
+          "lat": 44.713,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.7755,
+          "lat": 44.7235
+        }
+      ]
+    },
+    {
+      "status": "OK",
+      "message": null,
+      "type": "result",
+      "variants": 1,
+      "eta_s": 1837,
+      "eta_alt_s": null,
+      "distance_m": 21080,
+      "algorithm": "с учётом пробок",
+      "colors": {
+        "fast": 24,
+        "normal": 9,
+        "slow": 1,
+        "ignore": 0,
+        "other": 0
+      },
+      "wkt_segments": 34,
+      "test": "T2a-rep",
+      "title": "Повтор T2a — кеш прокси?",
+      "http": 200,
+      "latency_ms": 4,
+      "error": null,
+      "proxy_meta": {
+        "latencyMs": 1,
+        "cached": true,
+        "keyConfigured": true
+      },
+      "request": {
+        "locale": "ru",
+        "transport": "car",
+        "route_mode": "fastest",
+        "traffic_mode": "jam",
+        "output": "detailed",
+        "alternative": 0
+      },
+      "points": [
+        {
+          "type": "stop",
+          "lon": 38.157,
+          "lat": 44.8682,
+          "start": true
+        },
+        {
+          "type": "stop",
+          "lon": 37.9926,
+          "lat": 44.9312
+        }
+      ]
+    }
+  ]
+}

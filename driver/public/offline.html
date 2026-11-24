@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Нет связи — АЭМЗ Поток</title>
+  <meta name="theme-color" content="#101E2E" />
+  <link rel="icon" href="/driver/icons/favicon.ico" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      background: #101E2E; color: #fff;
+      font-family: -apple-system, "Segoe UI", Roboto, "Inter", sans-serif;
+      text-align: center; padding: 24px;
+    }
+    .card { max-width: 420px; }
+    .mark {
+      width: 88px; height: 88px; margin: 0 auto 20px;
+      background: #F97316; border-radius: 22px; position: relative;
+    }
+    .mark::before {
+      content: ""; position: absolute; left: 22px; top: 40px;
+      width: 18px; height: 34px; border: solid #fff; border-width: 0 8px 8px 0;
+      transform: rotate(-45deg);
+    }
+    h1 { font-size: 20px; margin-bottom: 10px; }
+    p { color: #9DB0C3; font-size: 14px; line-height: 1.5; }
+    button {
+      margin-top: 22px; padding: 12px 28px; border: 0; border-radius: 10px;
+      background: #F97316; color: #fff; font-size: 15px; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="mark"></div>
+    <h1>Нет связи</h1>
+    <p>Приложение ещё не загружено в кэш устройства.<br />Появится сеть — нажмите «Повторить».</p>
+    <button onclick="location.reload()">Повторить</button>
+  </div>
+</body>
+</html>

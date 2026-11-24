@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: azmz-driver-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/azmz
+    username: azmz
+    password: azmz
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8080
+
+# 152-ФЗ: продакшен-конфиг указывает на облако РФ; локальная разработка — localhost.

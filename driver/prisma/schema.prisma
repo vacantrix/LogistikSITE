@@ -1,0 +1,167 @@
+// АЗМЗ Логистика — демо-сервер протокола синхронизации водителя.
+// Схема зеркалит Flyway-миграции каркаса (V1–V6, download/azmz-karkas/backend).
+// Время — DateTime (SQLite), наружу отдаётся как epoch millis (как в SyncDtos.kt).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../db/custom.db"
+}
+
+// V2__trips.sql — рейс
+model Trip {
+  id              String    @id
+  tripCode        String
+  status          String // assigned | in_progress | completed | cancelled
+  driverId        String?
+  vehicleId       String?
+  plannedStartAt  DateTime?
+  plannedFinishAt DateTime?
+  routeGeoJson    String?
+  routeStepsJson  String?
+  routeDistanceM  Int?
+  routeDurationS  Int?
+  routeMinLat     Float?
+  routeMinLon     Float?
+  routeMaxLat     Float?
+  routeMaxLon     Float?
+  lastEventType   String?
+  lastEventAt     DateTime?
+  updatedAt       DateTime  @updatedAt
+  points          TripPoint[]
+}
+
+// V2__trips.sql — точки маршрута (геозона смарт-карточки «Вы у точки»)
+model TripPoint {
+  id                String    @id
+  tripId            String
+  seqNo             Int
+  kind              String // loading | unloading | waypoint
+  name              String?
+  address           String?
+  lat               Float
+  lon               Float
+  geofenceRadiusM   Int       @default(300)
+  plannedArrivalAt  DateTime?
+  plannedDepartureAt DateTime?
+  trip              Trip      @relation(fields: [tripId], references: [id])
+
+  @@index([tripId])
+}
+
+// V3__events.sql — события рейса (слой 1). Интервальность — на «открывашке».
+model TripEvent {
+  id                 String    @id
+  tripId             String
+  tripPointId        String?
+  driverId           String
+  vehicleId          String
+  deviceId           String?
+  type               String
+  occurredAt         DateTime // может быть в прошлом (MANUAL_BACKDATED)
+  source             String // GEOFENCE | MANUAL | MANUAL_BACKDATED
+  lat                Float?
+  lon                Float?
+  note               String?
+  intervalClosedAt   DateTime?
+  intervalClosedBy   String?
+  intervalAutoClosed Boolean?
+  correctionOf       String?
+  editedAt           DateTime?
+  createdAt          DateTime
+
+  @@index([tripId])
+  @@index([tripPointId])
+}
+
+// V4__marks.sql — пометки «водители для водителей» (слой 2). Автор НЕ хранится.
+model RoadMark {
+  id             String   @id
+  category       String // POTHOLE | ROADWORKS | POLICE | ACCIDENT | CLOSED
+  polylineGeoJson String
+  comment        String?
+  ttlHours       Int // 6 | 12 | 720
+  confirmCount   Int      @default(0)
+  outdatedCount  Int      @default(0)
+  createdAt      DateTime
+  expiresAt      DateTime
+  updatedAt      DateTime @updatedAt
+  minLat         Float
+  minLon         Float
+  maxLat         Float
+  maxLon         Float
+
+  @@index([expiresAt])
+}
+
+model MarkVote {
+  id            Int      @id @default(autoincrement())
+  markId        String
+  voterDriverId String
+  vote          Int // 1 | -1
+  createdAt     DateTime @default(now())
+
+  @@unique([markId, voterDriverId])
+}
+
+// V4__marks.sql — анти-спам: 10 публикаций в час на аккаунт, без привязки к пометке
+model MarkPublicationLog {
+  id          Int      @id @default(autoincrement())
+  driverId    String
+  publishedAt DateTime @default(now())
+
+  @@index([driverId, publishedAt])
+}
+
+// V5__sync.sql — чат с офисом (таб «Офис»)
+model ChatMessage {
+  id        String   @id
+  driverId  String
+  tripId    String?
+  sender    String // DRIVER | DISPATCHER
+  body      String
+  createdAt DateTime
+
+  @@index([driverId])
+}
+
+// V5__sync.sql — системные уведомления водителю
+model SystemNote {
+  id        String    @id
+  driverId  String
+  kind      String
+  body      String
+  ref       String?
+  createdAt DateTime
+  readAt    DateTime?
+
+  @@index([driverId])
+}
+
+// V5__sync.sql — личный журнал водителя (канал 1 pull-курсора)
+model SyncJournal {
+  seq       Int      @id @default(autoincrement())
+  driverId  String
+  entity    String // TRIP | TRIP_POINT | TRIP_EVENT | CHAT_MESSAGE | SYSTEM_NOTE
+  op        String // UPSERT | DELETE
+  payload   String // JSON-снимок строки
+  createdAt DateTime @default(now())
+
+  @@index([driverId, seq])
+}
+
+// V5__sync.sql — журнал outbox-операций (идемпотентность по opId)
+model SyncOperation {
+  opId         String    @id
+  driverId     String
+  type         String // TRIP_EVENT_CREATE | MARK_PUBLISH | MARK_VOTE | CHAT_SEND | NOTE_READ
+  payload      String
+  state        String    @default("PENDING") // APPLIED | DUPLICATE | REJECTED
+  rejectReason String?
+  attempts     Int       @default(0)
+  createdAt    DateTime  @default(now())
+  syncedAt     DateTime?
+}

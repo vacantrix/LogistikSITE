@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --text: #111827; --text-sub: #6B7280; --text-muted: #9CA3AF;
+    --border: #E5E7EB; --connector: #94A3B8;
+    --green: #10B981; --orange: #F97316; --red: #EF4444;
+  }
+  body {
+    font-family: 'DejaVu Sans', 'PT Sans', system-ui, sans-serif;
+    background: #FFFFFF; color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { width: fit-content; min-width: 1020px; margin: 0 auto; padding: 48px 44px; background: #FFFFFF; }
+
+  .flow-title { font-size: 24px; font-weight: 700; text-align: center; }
+  .flow-subtitle { font-size: 14px; color: var(--text-sub); text-align: center; margin-top: 8px; margin-bottom: 28px; line-height: 1.5; }
+
+  /* индикатор связи — легенда сверху */
+  .conn-legend {
+    display: flex; gap: 14px; justify-content: center; margin-bottom: 32px;
+  }
+  .conn-pill {
+    display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
+    color: #374151; background: #F8FAFC; border: 1px solid #E5E7EB;
+    border-radius: 20px; padding: 7px 16px;
+  }
+  .conn-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ── фазы: единая сине-серая гамма, Scheme B (5 фаз) ── */
+  .phase-group { background: #F8FAFC; border-radius: 12px; padding: 20px 24px; }
+  .phase-title {
+    font-size: 16.5px; font-weight: 700; padding: 10px 16px;
+    border-radius: 8px; margin-bottom: 14px;
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  .phase-title .who {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+    padding: 2px 10px; border-radius: 10px; background: rgba(255,255,255,0.75);
+  }
+  .phase-steps { display: flex; flex-direction: column; gap: 8px; padding-left: 12px; }
+  .phase-step {
+    font-size: 14.5px; font-weight: 400; color: var(--text);
+    padding: 9px 14px; background: white; border-radius: 6px;
+    border: 1px solid var(--border); line-height: 1.5;
+    display: flex; align-items: baseline;
+  }
+  .phase-step .step-num {
+    flex-shrink: 0; display: inline-block; width: 23px; height: 23px; line-height: 23px;
+    text-align: center; border-radius: 50%; font-size: 12px; font-weight: 600;
+    margin-right: 11px; transform: translateY(4px);
+  }
+  .phase-step b { font-weight: 700; }
+  .phase-step .api {
+    font-family: 'DejaVu Sans Mono', monospace; font-size: 12.5px; font-weight: 700;
+    color: #1D4ED8; background: #EFF6FF; border: 1px solid #BFDBFE;
+    border-radius: 4px; padding: 0 6px; white-space: nowrap;
+  }
+  .phase-step .tbl {
+    font-family: 'DejaVu Sans Mono', monospace; font-size: 12.5px; font-weight: 700;
+    color: #14532D; background: #F0FDF4; border: 1px solid #BBF7D0;
+    border-radius: 4px; padding: 0 6px; white-space: nowrap;
+  }
+
+  .phase-1 .phase-title { background: #F8FAFC; color: #334155; border-left: 4px solid #94A3B8; }
+  .phase-1 .step-num { background: #F1F5F9; color: #475569; }
+  .phase-2 .phase-title { background: #F1F5F9; color: #334155; border-left: 4px solid #7B8FA3; }
+  .phase-2 .step-num { background: #E2E8F0; color: #475569; }
+  .phase-3 .phase-title { background: #E8EDF3; color: #2D4156; border-left: 4px solid #6B809A; }
+  .phase-3 .step-num { background: #DBEAFE; color: #2D4156; }
+  .phase-4 .phase-title { background: #E2E8F0; color: #283C52; border-left: 4px solid #5B7590; }
+  .phase-4 .step-num { background: #D0D9E4; color: #283C52; }
+  .phase-5 .phase-title { background: #DAE1EB; color: #23364D; border-left: 4px solid #4B6A87; }
+  .phase-5 .step-num { background: #C7D2E0; color: #23364D; }
+
+  .arrow { text-align: center; color: var(--connector); font-size: 24px; margin: 6px 0; line-height: 1; }
+  .arrow .arrow-label { font-size: 12px; color: var(--text-sub); display: block; margin-bottom: 2px; }
+
+  .footnote {
+    margin-top: 26px; text-align: center; font-size: 12px; color: var(--text-muted); line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <div class="flow-title">Потоки синхронизации — офлайн-first по построению</div>
+  <div class="flow-subtitle">Room — единственный источник правды для UI · исходящие — только через outbox (UUID + идемпотентный apply) · входящие — дельта по курсору · 2–8 часов без связи — штатный режим</div>
+
+  <div class="conn-legend">
+    <div class="conn-pill"><span class="conn-dot" style="background:#10B981;"></span>На связи</div>
+    <div class="conn-pill"><span class="conn-dot" style="background:#F97316;"></span>Отправка: N — очередь тает на глазах</div>
+    <div class="conn-pill"><span class="conn-dot" style="background:#EF4444;"></span>Офлайн. В очереди: N</div>
+  </div>
+
+  <div class="phase-group phase-1">
+    <div class="phase-title">Фаза 1 · Офлайн — водитель отмечает <span class="who">КЛИЕНТ</span></div>
+    <div class="phase-steps">
+      <div class="phase-step"><span class="step-num">1</span><span>Смарт-карточка по геозоне («Вы у точки выгрузки → Отметить») или ручная кнопка «Отметить событие» — работает <b>без сети и GPS</b>; «Указать время» → поздняя отметка с пометкой «вручную»</span></div>
+      <div class="phase-step"><span class="step-num">2</span><span>Одна Room-транзакция: сущность (событие / пометка / сообщение) + операция outbox со своим UUID — атомарно, UI читает сразу</span></div>
+      <div class="phase-step"><span class="step-num">3</span><span>Авто-закрытие открытых интервалов локально — те же правила, что на сервере (дубль правил — кандидат на общий KMP-модуль)</span></div>
+      <div class="phase-step"><span class="step-num">4</span><span>Индикатор: красный «Офлайн. В очереди: N» — счётчик из Flow глубины outbox</span></div>
+    </div>
+  </div>
+
+  <div class="arrow"><span class="arrow-label">ConnectivityObserver → WorkManager, внеочередной kick</span>↓</div>
+
+  <div class="phase-group phase-2">
+    <div class="phase-title">Фаза 2 · Связь появилась <span class="who">КЛИЕНТ</span></div>
+    <div class="phase-steps">
+      <div class="phase-step"><span class="step-num">5</span><span>PushWorker берёт батч PENDING-операций и отправляет на сервер; индикатор — оранжевый пульсирующий «Отправка: N»</span></div>
+      <div class="phase-step"><span class="step-num">6</span><span>Сеть / 5xx → честный Result.retry() с экспоненциальным backoff; REJECTED — финален, причина видна водителю</span></div>
+    </div>
+  </div>
+
+  <div class="arrow"><span class="arrow-label">POST /sync/push — батч UUID-операций</span>↓</div>
+
+  <div class="phase-group phase-3">
+    <div class="phase-title">Фаза 3 · Идемпотентное применение <span class="who">СЕРВЕР · Spring Boot</span></div>
+    <div class="phase-steps">
+      <div class="phase-step"><span class="step-num">7</span><span>«Замок» операции: <span class="tbl">sync_operation</span> INSERT … ON CONFLICT (op_id) DO NOTHING — повторная доставка того же батча безвредна</span></div>
+      <div class="phase-step"><span class="step-num">8</span><span>Appliers: TripEventApplier (авто-закрытие интервалов + пересчёт статусов) · MarkApplier (TTL автора, лимиты 10/час) · ChatApplier</span></div>
+      <div class="phase-step"><span class="step-num">9</span><span>Ответ по каждой операции: APPLIED / DUPLICATE / REJECTED — клиент закрывает outbox</span></div>
+    </div>
+  </div>
+
+  <div class="arrow"><span class="arrow-label">та же транзакция — дельта не теряется</span>↓</div>
+
+  <div class="phase-group phase-4">
+    <div class="phase-title">Фаза 4 · Журнал и автостатусы <span class="who">СЕРВЕР · PostgreSQL</span></div>
+    <div class="phase-steps">
+      <div class="phase-step"><span class="step-num">10</span><span><span class="tbl">sync_journal</span> ← снимки изменённых строк (личный канал водителя, монотонный seq)</span></div>
+      <div class="phase-step"><span class="step-num">11</span><span><span class="tbl">trip.last_event_*</span> ← автостатусы: реестр рейсов офиса заполняется сам — «не звоним где ты»</span></div>
+    </div>
+  </div>
+
+  <div class="arrow"><span class="arrow-label">два канала доставки</span>↓</div>
+
+  <div class="phase-group phase-5">
+    <div class="phase-title">Фаза 5 · Доставка всем <span class="who">КЛИЕНТЫ</span></div>
+    <div class="phase-steps">
+      <div class="phase-step"><span class="step-num">12</span><span>Автор и офис: <span class="api">GET /sync/pull?cursor=seq</span> — страницы дельты, upsert по id, курсор сохраняется после каждой страницы</span></div>
+      <div class="phase-step"><span class="step-num">13</span><span>Все водители: <span class="api">GET /sync/marks?bbox коридора</span> — снимок активных пометок (канал 2, PostGIS), истёкшие чистятся локально</span></div>
+      <div class="phase-step"><span class="step-num">14</span><span>Пуши (RuStore Push + FCM) — только «будильник» для ускорения pull, данные ими не передаются</span></div>
+    </div>
+  </div>
+
+  <div class="footnote">Очередь опустела и дельта применена → индикатор зелёный «На связи». Клиент сходится к серверу через upsert-ы по id — без разрешений конфликтов.</div>
+
+</div>
+</body>
+</html>

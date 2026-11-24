@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --text: #111827; --text-sub: #6B7280; --text-muted: #9CA3AF;
+    --border: #E5E7EB; --navy: #101E2E; --orange: #F97316;
+  }
+  body {
+    font-family: 'DejaVu Sans', 'PT Sans', system-ui, sans-serif;
+    background: #FFFFFF; color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { width: fit-content; min-width: 1720px; margin: 0 auto; padding: 48px 44px; background: #FFFFFF; }
+
+  /* ── шапка в стилистике платформы ─────────────────────────────── */
+  .hero {
+    background: linear-gradient(135deg, #101E2E 0%, #0F172A 100%);
+    border-radius: 16px; padding: 36px 44px; color: white; margin-bottom: 32px;
+    display: flex; align-items: center; gap: 24px;
+  }
+  .hero .logo {
+    width: 56px; height: 56px; border-radius: 12px; background: #F97316;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .hero h1 { font-size: 27px; font-weight: 700; letter-spacing: 0.2px; }
+  .hero p { font-size: 14.5px; color: #94A3B8; margin-top: 8px; line-height: 1.5; }
+  .hero .badge {
+    display: inline-block; background: rgba(249,115,22,0.16); color: #FDBA74;
+    font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 20px;
+    margin-bottom: 10px; letter-spacing: 0.4px;
+  }
+
+  /* ── сетка доменов ─────────────────────────────────────────────── */
+  .domains {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start;
+  }
+  .domain {
+    border-radius: 14px; padding: 22px 22px 18px; position: relative;
+  }
+  .domain-title {
+    font-size: 17px; font-weight: 700; padding: 10px 16px; border-radius: 8px;
+    margin-bottom: 16px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  }
+  .domain-title .sub { font-size: 12px; font-weight: 400; opacity: 0.75; }
+
+  /* домены различаются смыслом слоёв данных: 4 приглушённых оттенка из разрешённых,
+     насыщенность — только на левой границе заголовка */
+  .dom-ref   { background: #F0F4F8; }
+  .dom-ref   .domain-title { background: #E4EAF1; color: #334155; border-left: 4px solid #64748B; }
+  .dom-layer1 { background: #EFF6FF; }
+  .dom-layer1 .domain-title { background: #DBEAFE; color: #1E40AF; border-left: 4px solid #3B82F6; }
+  .dom-layer2 { background: #FFF7ED; }
+  .dom-layer2 .domain-title { background: #FFEDD5; color: #9A3412; border-left: 4px solid #F97316; }
+  .dom-sync  { background: #F0FDF4; }
+  .dom-sync  .domain-title { background: #DCFCE7; color: #14532D; border-left: 4px solid #10B981; }
+
+  .tables { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .tables.single { grid-template-columns: 1fr; }
+
+  /* ── карточка таблицы ──────────────────────────────────────────── */
+  .table-card {
+    background: #FFFFFF; border: 1.5px solid #E2E8F0; border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.05);
+  }
+  .dom-ref    .table-card { border-color: #C3CEDB; }
+  .dom-layer1 .table-card { border-color: #BFDBFE; }
+  .dom-layer2 .table-card { border-color: #FED7AA; }
+  .dom-sync   .table-card { border-color: #BBF7D0; }
+
+  .t-head {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 14px 8px; border-bottom: 1px solid #F1F5F9;
+  }
+  .t-name { font-family: 'DejaVu Sans Mono', monospace; font-size: 15px; font-weight: 700; color: #0F172A; }
+  .t-tag {
+    font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 10px; letter-spacing: 0.3px;
+  }
+  .tag-uuid  { background: #FEE2E2; color: #991B1B; }
+  .tag-gis   { background: #DBEAFE; color: #1E40AF; }
+  .tag-cursor{ background: #DCFCE7; color: #14532D; }
+  .tag-phase { background: #F1F5F9; color: #475569; }
+
+  .t-cols { padding: 8px 6px 10px; }
+  .col {
+    display: flex; align-items: baseline; gap: 7px;
+    font-size: 12.5px; padding: 3px 9px; border-radius: 5px; line-height: 1.45;
+    flex-wrap: wrap;
+  }
+  .col:hover { background: #F8FAFC; }
+  .col .dot { width: 5px; height: 5px; border-radius: 50%; background: #CBD5E1; flex-shrink: 0; transform: translateY(-2px); }
+  .col.pk  { font-weight: 700; }
+  .col.pk .dot { background: #F97316; }
+  .cname { font-family: 'DejaVu Sans Mono', monospace; color: #1F2937; }
+  .col.pk .cname { color: #0F172A; }
+  .ctype { color: var(--text-muted); font-size: 11.5px; }
+  .fk {
+    font-size: 10.5px; font-weight: 700; color: #1D4ED8;
+    background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 4px;
+    padding: 0 6px; white-space: nowrap;
+  }
+  .note { color: var(--text-sub); font-size: 11px; }
+  .t-note {
+    font-size: 11px; color: var(--text-sub); padding: 6px 14px 10px;
+    border-top: 1px dashed #F1F5F9; line-height: 1.5;
+  }
+
+  /* ── нижняя полоса: ключевые связи + легенда ───────────────────── */
+  .bottom {
+    margin-top: 28px; display: grid; grid-template-columns: 1.6fr 1fr; gap: 28px;
+  }
+  .panel { background: #F8FAFC; border: 1px solid #E5E7EB; border-radius: 12px; padding: 18px 22px; }
+  .panel h3 { font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 12px; }
+  .rel-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .rel {
+    font-size: 12px; color: #374151; background: #FFFFFF;
+    border: 1px solid #E2E8F0; border-radius: 6px; padding: 5px 10px;
+  }
+  .rel b { font-family: 'DejaVu Sans Mono', monospace; font-weight: 700; color: #0F172A; font-size: 11.5px; }
+  .rel .arr { color: #F97316; font-weight: 700; padding: 0 2px; }
+  .legend-row { display: flex; flex-direction: column; gap: 8px; }
+  .leg { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: #374151; }
+  .leg .swatch { width: 14px; height: 14px; border-radius: 4px; border: 2px solid; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <div class="hero">
+    <div class="logo">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none">
+        <path d="M4 12.5 L10 18.5 L20 6.5" stroke="#FFFFFF" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="badge">КАРКАС · П.1 ПЛАНА РАБОТ</div>
+      <h1>АЗМЗ Логистика — модель данных приложения водителя</h1>
+      <p>PostgreSQL 16 + PostGIS · Flyway V1–V6 · 15 таблиц · идентификаторы — клиентские UUID · время — epoch-миллисекунды · два слоя данных не смешиваются: события рейса и пометки дорог</p>
+    </div>
+  </div>
+
+  <div class="domains">
+
+    <!-- ══ Домен: справочники ══ -->
+    <div class="domain dom-ref">
+      <div class="domain-title">Справочники и привязка <span class="sub">планшет — в кабине, водитель — в смене (MDM)</span></div>
+      <div class="tables">
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">driver</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">full_name</span><span class="note">интеграция с контуром персонала</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">is_active</span></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">vehicle</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">plate</span><span class="ctype">UQ · госномер</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">model</span></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">device</span><span class="t-tag tag-phase">Headwind MDM</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">vehicle_id</span><span class="fk">→ vehicle</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">mdm_enrollment_id</span></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">driver_shift</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">driver_id</span><span class="fk">→ driver</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">device_id</span><span class="fk">→ device</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">ended_at</span><span class="ctype">NULL = смена открыта</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Домен: синхронизация и офис ══ -->
+    <div class="domain dom-sync">
+      <div class="domain-title">Синхронизация · Офис · Телеметрия <span class="sub">канал 1 — личный журнал, идемпотентность push</span></div>
+      <div class="tables">
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">sync_operation</span><span class="t-tag tag-uuid">идемпотентность</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">op_id</span><span class="ctype">uuid PK · из outbox</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">driver_id</span><span class="fk">→ driver</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">status</span><span class="ctype">APPLIED / DUPLICATE / REJECTED</span></div>
+          </div>
+          <div class="t-note">Повтор батча безопасен: статус берётся отсюда, применение пропускается</div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">sync_journal</span><span class="t-tag tag-cursor">канал 1 · курсор</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">seq</span><span class="ctype">bigint PK · курсор pull</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">driver_id</span><span class="fk">→ driver</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">entity</span><span class="ctype">TRIP · TRIP_POINT · TRIP_EVENT…</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">payload</span><span class="ctype">jsonb — снимок строки</span></div>
+          </div>
+          <div class="t-note">Записи создаются в той же транзакции, что и изменение данных</div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">chat_message</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">driver_id</span><span class="fk">→ driver</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">trip_id</span><span class="fk">→ trip</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">sender</span><span class="ctype">DRIVER / DISPATCHER</span></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">system_note</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">driver_id</span><span class="fk">→ driver</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">body</span><span class="note">«Заявка Z-1067 изменена офисом»</span></div>
+          </div>
+        </div>
+        <div class="table-card" style="grid-column: 1 / -1;">
+          <div class="t-head"><span class="t-name">position_ping</span><span class="t-tag tag-phase">фаза 5 · дашборд директора</span></div>
+          <div class="t-cols" style="display: flex; flex-wrap: wrap; gap: 2px 18px;">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">bigint PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">trip_id</span><span class="fk">→ trip</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">lat, lon, speed_mps</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">recorded_at</span><span class="note">best-effort, мимо outbox · ПДн · retention 90 дн.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Домен: слой 1 — события рейса ══ -->
+    <div class="domain dom-layer1">
+      <div class="domain-title">Слой 1 · События рейса <span class="sub">привязаны ко времени, отмечает водитель</span></div>
+      <div class="tables single">
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">trip</span><span class="t-tag tag-gis">PostGIS</span><span class="t-tag tag-phase">рождается офисом платформы</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">trip_code</span><span class="ctype">UQ · «Z-xxxx»</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">status</span><span class="ctype">assigned → in_progress → completed</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">driver_id</span><span class="fk">→ driver</span><span class="cname">vehicle_id</span><span class="fk">→ vehicle</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">route_geom</span><span class="ctype">geography(LineString) · OSRM</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">route_steps</span><span class="ctype">jsonb · манёвры для офлайн-навигации</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">last_event_type / at</span><span class="note">автостатус реестра офиса — «не звоним где ты»</span></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">trip_point</span><span class="t-tag tag-gis">PostGIS</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">trip_id</span><span class="fk">→ trip</span><span class="cname">seq_no</span><span class="ctype">UQ вместе</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">kind</span><span class="ctype">loading / unloading / waypoint</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">geom</span><span class="ctype">geography(Point)</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">geofence_radius_m</span><span class="note">радиус смарт-карточки «Вы у точки»</span></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">trip_event</span><span class="t-tag tag-uuid">клиентский UUID</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK · повтор = DUPLICATE</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">trip_id</span><span class="fk">→ trip</span><span class="cname">trip_point_id</span><span class="fk">→ trip_point</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">driver_id + vehicle_id + device_id</span><span class="note">авторство события</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">type</span><span class="ctype">8 кодов: DEPARTURE … TRIP_DONE</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">occurred_at</span><span class="note">может быть в прошлом — «Указать время»</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">source</span><span class="ctype">GEOFENCE / MANUAL / MANUAL_BACKDATED</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">interval_closed_at / by / auto</span><span class="note">интервальность живёт на «открывашке»</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">correction_of</span><span class="fk">↺ trip_event</span><span class="cname">edited_at / by</span><span class="note">гибридные правки</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Домен: слой 2 — пометки ══ -->
+    <div class="domain dom-layer2">
+      <div class="domain-title">Слой 2 · Пометки дорог <span class="sub">«водители для водителей», привязаны к участку дороги</span></div>
+      <div class="tables single">
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">road_mark</span><span class="t-tag tag-gis">PostGIS</span><span class="t-tag tag-uuid">клиентский UUID</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">id</span><span class="ctype">uuid PK</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">category</span><span class="ctype">POTHOLE / ROADWORKS / POLICE / ACCIDENT / CLOSED</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">geom</span><span class="ctype">geometry(LineString) · цветной участок поверх дорог</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">ttl_hours</span><span class="ctype">6 / 12 / 720</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">expires_at</span><span class="note">TTL автора, не продлевается голосами</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">confirm_count / outdated_count</span><span class="note">влияют только на порядок показа</span></div>
+          </div>
+          <div class="t-note">Колонки автора нет вовсе — минимизация ПДн (152-ФЗ). Рассылка — не через журнал, а снимком активных по bbox коридора (канал 2).</div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">mark_vote</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">mark_id + voter_driver_id</span><span class="ctype">композитный PK — дедупликация</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">mark_id</span><span class="fk">→ road_mark</span><span class="cname">voter_driver_id</span><span class="fk">→ driver</span></div>
+            <div class="col"><span class="dot"></span><span class="cname">vote</span><span class="ctype">+1 «подтвердить» / −1 «неактуально»</span></div>
+          </div>
+        </div>
+        <div class="table-card">
+          <div class="t-head"><span class="t-name">mark_publication_log</span><span class="t-tag tag-phase">анти-спам</span></div>
+          <div class="t-cols">
+            <div class="col pk"><span class="dot"></span><span class="cname">driver_id</span><span class="fk">→ driver</span><span class="cname">published_at</span><span class="ctype">PK</span></div>
+          </div>
+          <div class="t-note">Только факт и время публикации — без ссылки на пометку: узнать автора конкретной пометки из БД нельзя. Дефолт лимита: 10 публикаций в час.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ низ: связи и легенда ══ -->
+  <div class="bottom">
+    <div class="panel">
+      <h3>Ключевые связи</h3>
+      <div class="rel-list">
+        <div class="rel"><b>device</b><span class="arr">→</span><b>vehicle</b> · планшет живёт в кабине</div>
+        <div class="rel"><b>driver_shift</b><span class="arr">→</span><b>driver</b>, <b>device</b> · логин в смену</div>
+        <div class="rel"><b>trip</b><span class="arr">→</span><b>driver</b>, <b>vehicle</b></div>
+        <div class="rel"><b>trip_point</b><span class="arr">→</span><b>trip</b> · (trip_id, seq_no) UQ</div>
+        <div class="rel"><b>trip_event</b><span class="arr">→</span><b>trip</b>, <b>trip_point</b> · correction_of ↺</div>
+        <div class="rel"><b>mark_vote</b><span class="arr">→</span><b>road_mark</b>, <b>driver</b></div>
+        <div class="rel"><b>sync_journal</b><span class="arr">→</span><b>driver</b> · дельта по seq</div>
+        <div class="rel"><b>chat_message</b>, <b>system_note</b><span class="arr">→</span><b>driver</b></div>
+        <div class="rel"><b>position_ping</b><span class="arr">→</span><b>trip</b> · фаза 5</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Легенда</h3>
+      <div class="legend-row">
+        <div class="leg"><span class="swatch" style="background:#FFFFFF;border-color:#F97316;"></span>оранжевая точка — первичный ключ</div>
+        <div class="leg"><span class="fk">→ таблица</span>внешний ключ</div>
+        <div class="leg"><span class="t-tag tag-uuid">клиентский UUID</span>id генерируется приложением — идемпотентность</div>
+        <div class="leg"><span class="t-tag tag-gis">PostGIS</span>пространственные типы и GiST-индексы</div>
+        <div class="leg"><span class="t-tag tag-cursor">курсор</span>позиция дельта-синхронизации</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

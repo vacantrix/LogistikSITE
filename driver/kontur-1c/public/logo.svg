@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 349" width="1200" height="349" role="img" aria-label="АЭМЗ — Абинский электрометаллургический завод">
+  <rect width="1200" height="349" fill="#101C28"/>
+  <g transform="translate(242 175) scale(1.99) translate(-64 -64)">
+    <g fill="none" stroke="#8DCACF" stroke-width="2.1" stroke-linecap="round">
+      <ellipse cx="64" cy="64" rx="52" ry="29"/>
+      <ellipse cx="64" cy="64" rx="32" ry="29"/>
+      <line x1="64" y1="35" x2="64" y2="93"/>
+      <ellipse cx="64" cy="64" rx="48" ry="16"/>
+      <path d="M12 64 H116"/>
+    </g>
+    <g fill="none" stroke="#FFFFFF" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M64 35 L71.5 56.5 L93 64 L71.5 71.5 L64 93 L56.5 71.5 L35 64 L56.5 56.5 Z"/>
+      <path d="M64 54 L74 64 L64 74 L54 64 Z"/>
+    </g>
+  </g>
+  <text x="385" y="204.6" fill="#FFFFFF" font-family="'Arial Black','Segoe UI',Arial,sans-serif" font-weight="900" font-size="82" letter-spacing="1" textLength="306" lengthAdjust="spacingAndGlyphs">АЭМЗ</text>
+  <g fill="#798289" font-family="Arial,'Segoe UI',sans-serif" font-size="21" letter-spacing="1.6">
+    <text x="736" y="157.8">АБИНСКИЙ</text>
+    <text x="736" y="179.2">ЭЛЕКТРОМЕТАЛЛУРГИЧЕСКИЙ</text>
+    <text x="736" y="200.6">ЗАВОД</text>
+  </g>
+</svg>

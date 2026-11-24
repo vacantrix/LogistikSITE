@@ -1,0 +1,43 @@
+# Локальная разработка каркаса.
+# Продакшен: сервер в облаке РФ, ПДн не покидают РФ (152-ФЗ).
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: azmz
+      POSTGRES_USER: azmz
+      POSTGRES_PASSWORD: azmz
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # OSRM — роутинг (self-hosted, выгрузка РФ). Запуск после загрузки данных:
+  #   mkdir osrm-data && cd osrm-data
+  #   wget https://download.geofabrik.de/russia-latest.osm.pbf
+  #   docker run --rm -v $(pwd):/data osrm/osrm-backend:v5.27.1 osrm-extract -p /opt/car.lua /data/russia-latest.osm.pbf
+  #   docker run --rm -v $(pwd):/data osrm/osrm-backend:v5.27.1 osrm-partition /data/russia-latest.osrm
+  #   docker run --rm -v $(pwd):/data osrm/osrm-backend:v5.27.1 osrm-customize /data/russia-latest.osrm
+  # osrm:
+  #   image: osrm/osrm-backend:v5.27.1
+  #   volumes:
+  #     - ./osrm-data:/data
+  #   command: ["routed", "--algorithm", "mld", "/data/russia-latest.osrm"]
+  #   ports:
+  #     - "5000:5000"
+
+  # Nominatim — геокодирование. СВОЙ инстанс: публичный API по политике
+  # использования не допускает продакшн-нагрузку и автоматические запросы.
+  # nominatim:
+  #   image: mediagis/nominatim:4.4
+  #   environment:
+  #     PBF_URL: https://download.geofabrik.de/russia-latest.osm.pbf
+  #     REPLICATION_URL: https://download.geofabrik.de/russia-updates/
+  #     IMPORT_WIKIPEDIA: "false"
+  #   ports:
+  #     - "8081:8080"
+  #   shm_size: 1g
+
+volumes:
+  pgdata:

@@ -1,0 +1,76 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+!kontur-1c/.env
+
+# vercel
+.vercel
+
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+.claude
+.z-ai-config
+*.log
+dev.log
+dev.out.log
+test
+prompt
+
+server.log
+
+# Android: служебные файлы компилятора и готовые APK (публикуются отдельно)
+.kotlin/
+download/Drivemobile.apk
+download/azmz-driver.apk
+public/azmz-driver.apk
+
+# Skills directory
+/skills/
+# session artifacts
+tool-results/
+upload/*
+# ТЗ и проектная документация в upload/ — в репозитории; скриншоты и фото — нет
+!upload/*.md
+!upload/*.pdf
+!upload/*.docx
+
+# Платформа «Контур 1С» (развёрнута из handoff-архива)
+kontur-1c/node_modules/
+kontur-1c/.next/
+kontur-1c/dev.log
+kontur-1c/tsconfig.tsbuildinfo

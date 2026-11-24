@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>MapGL key isolation test</title>
+  <style>body{font-family:sans-serif;margin:12px}#m1,#m2{width:420px;height:280px;border:1px solid #ccc;margin:8px 0}</style>
+</head>
+<body>
+  <h3>m1: real key · m2: fake key</h3>
+  <div id="m1"></div><div id="out1">init…</div>
+  <div id="m2"></div><div id="out2">init…</div>
+  <script>
+    function Q(n){return new URLSearchParams(location.search).get(n)}
+    window.addEventListener('error', e => { document.getElementById('out1').textContent = 'window.onerror: ' + e.message }, true)
+    const KEY1 = Q('k1'), KEY2 = Q('k2')
+    const s = document.createElement('script')
+    s.src = 'https://mapgl.2gis.com/api/js/v1?key=' + encodeURIComponent(KEY1)
+    s.onload = () => {
+      try {
+        const m1 = new window.mapgl.Map('m1', KEY1, {center:[37.768,44.726], zoom:11, trafficOn:true})
+        document.getElementById('out1').textContent = 'm1 created OK'
+        m1.on('ready', () => { document.getElementById('out1').textContent = 'm1 READY (tiles ok)' })
+      } catch (e) { document.getElementById('out1').textContent = 'm1 throw: ' + e.message }
+      try {
+        const m2 = new window.mapgl.Map('m2', KEY2, {center:[37.768,44.726], zoom:11})
+        document.getElementById('out2').textContent = 'm2 created OK'
+      } catch (e) { document.getElementById('out2').textContent = 'm2 throw: ' + e.message }
+    }
+    s.onerror = () => { document.getElementById('out1').textContent = 'sdk script failed' }
+    document.head.appendChild(s)
+  </script>
+</body>
+</html>
