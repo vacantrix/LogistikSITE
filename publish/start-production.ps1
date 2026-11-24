@@ -95,7 +95,7 @@ if (-not (Test-Path (Join-Path $DriverStandalone 'server.js'))) { $missing += (J
 if (-not (Test-Path $DriverDb)) { $missing += $DriverDb }
 if (-not (Test-Path $KonturDb)) { $missing += $KonturDb }
 if (-not (Test-Path (Join-Path $RepoRoot '.next\standalone\server.js'))) { $missing += (Join-Path $RepoRoot '.next\standalone\server.js') }
-$ocrStart = Join-Path $RepoRoot 'mini-services\paddle-ocr\bench-v6\start-service.ps1'
+$ocrStart = Join-Path $RepoRoot 'mini-services\paddle-ocr\start-service.ps1'
 if (-not (Test-Path $ocrStart)) { $missing += $ocrStart }
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { $missing += 'node.exe' }
 
@@ -104,7 +104,7 @@ if ($missing.Count -gt 0) {
     $missing | ForEach-Object { Write-Host "      $_" -ForegroundColor Red }
     Write-Host ""
     Write-Host "  Если отсутствует сборка .next — выполните build-public.ps1." -ForegroundColor Yellow
-    Write-Host "  Для Drivemobile нужна сборка Drivemobile\.next\standalone." -ForegroundColor Yellow
+    Write-Host "  Для Drivemobile нужна сборка driver\.next\standalone (publish\build-driver.ps1)." -ForegroundColor Yellow
     Add-LauncherLog "missing: $($missing -join '; ')"
     Write-Host ""
     if (-not $NoPause) { Read-Host "  Нажмите Enter, чтобы закрыть" }

@@ -1,7 +1,18 @@
+import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  /**
+   * В монорепозитории рядом лежат два lockfile (корень и driver/). Без
+   * явного корня Next выбирает корень репозитория и подхватывает чужие
+   * src/instrumentation.ts и алиасы платформы. Сборка модуля должна видеть
+   * только driver/.
+   */
+  outputFileTracingRoot: path.resolve(__dirname),
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
   /**
    * Модуль водителя живёт внутри «АЭМЗ Поток» по адресу /driver/.
    * basePath даёт собственные /driver/_next/*, /driver/manifest.webmanifest,

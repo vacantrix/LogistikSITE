@@ -38,7 +38,7 @@ if (-not (Test-Path $NodeExe)) { $errors += "node.exe not found" }
 if ($errors.Count -gt 0) {
     Write-Output 'ERROR: Drivemobile is not ready:'
     $errors | ForEach-Object { Write-Output "  $_" }
-    Write-Output "Build: cd Drivemobile && npx next build, then retry."
+    Write-Output "Build: cd driver && npx next build, then retry (or run publish\build-driver.ps1)."
     exit 1
 }
 

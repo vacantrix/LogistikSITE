@@ -31,8 +31,11 @@ $TunaExe = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\tuna.exe'
 # платформы с префиксом Dispatch (см. prisma/kontur.prisma), поэтому отдельный
 # файл базы не нужен. Исходный LogistikSITEnow2/db/custom.db остаётся резервом
 # для отката: вернуть $KonturDb на него можно одной строкой.
-$DrivemobileRoot = Join-Path (Split-Path -Parent $RepoRoot) 'Drivemobile'
-$DispatcherRoot = Join-Path (Split-Path -Parent $RepoRoot) 'LogistikSITEnow2'
+#
+# Монорепозиторий: модуль водителя лежит в ./driver (git subtree из
+# vacantrix/Drivemobile). Отдельная копия Drivemobile рядом с репозиторием
+# больше не нужна — весь стек собирается из одного дерева.
+$DrivemobileRoot = Join-Path $RepoRoot 'driver'
 $DriverApiPort = 3102
 $KonturUrl = "$MainUrl/kontur"
 $DriverApiUrl = "$MainUrl/api/driver/v1/"

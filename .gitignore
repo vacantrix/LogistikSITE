@@ -73,6 +73,7 @@ mini-services/paddle-ocr/.models/
 mini-services/paddle-ocr/.venv-v6/
 mini-services/paddle-ocr/.models-v6/
 mini-services/paddle-ocr/bench-v6/
+mini-services/paddle-ocr/logs/
 mini-services/paddle-ocr/*.bak-*
 publish/*.bak-*
 publish/logs/
@@ -88,3 +89,12 @@ src/generated/
 
 # Рабочие заметки субагентов
 agent-ctx/
+
+# OCR-пробы: окружение, синтетические образцы, результаты и реальные сканы
+tools/ocr-probe/.venv/
+tools/ocr-probe/samples/
+tools/ocr-probe/samples_real/
+tools/ocr-probe/out/
+tools/ocr-probe/out_real/
+tools/ocr-probe/requests/
+tools/ocr-probe/__pycache__/

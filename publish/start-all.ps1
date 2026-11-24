@@ -43,7 +43,7 @@ $ocrOwner = Get-PortOwner $OcrPort
 if ($ocrOwner -gt 0) {
     Write-Output "OCR already running: pid=$ocrOwner port=$OcrPort"
 } else {
-    $startOcr = Join-Path $RepoRoot 'mini-services\paddle-ocr\bench-v6\start-service.ps1'
+    $startOcr = Join-Path $RepoRoot 'mini-services\paddle-ocr\start-service.ps1'
     if (-not (Test-Path $startOcr)) {
         Write-Output "ERROR: OCR start script not found: $startOcr"
         exit 1
@@ -72,7 +72,7 @@ while ((Get-Date) -lt $deadline) {
 }
 if (-not $ocrReady) {
     Write-Output "ERROR: OCR is not ready on $ocrUrl"
-    Get-LogTail (Join-Path $RepoRoot 'mini-services\paddle-ocr\bench-v6\logs\service-3031.err.log') 30
+    Get-LogTail (Join-Path $RepoRoot 'mini-services\paddle-ocr\logs\service-3031.err.log') 30
     exit 1
 }
 $ocrEngine = if ($ocrInfo.activeEngine) { $ocrInfo.activeEngine } else { $ocrInfo.engines.paddle.engine }

@@ -2488,3 +2488,27 @@ Stage Summary:
 - Если страница Яндекса недоступна, маршрут всё равно сохраняется: точки уходят водителю, линия строится OSRM через них, а в интерфейсе честно указано «линия по точкам».
 - Проверено на живом стенде: геометрия из Яндекса доходит до ленты и журнала APK без ручных обновлений; PWA показывает 94 км, маршрут офиса и ровно две точки, а не OSRM от демо-точек.
 - DISPATCH-заявка принимается водителем, офисная линия приоритетнее OSRM, карта рисует её без ошибки воркера; ETA и пробег считаются по фактической линии.
+
+---
+
+Task ID: 127
+Agent: DeepSeek V4.1 Flash (main)
+Task: Единый монорепозиторий: перенос всех проектов в LogistikSITE и полная системная документация
+
+Work Log:
+- `Drivemobile` импортирован в `driver/` через `git subtree add` с полной историей до `e7d65ee`; коммит объединения `baa1148`. В `driver/` вошли PWA, API водителя, Android-каркас, автономный «Контур 1С», демо-база и APK.
+- `publish/config.ps1`: `$DrivemobileRoot = Join-Path $RepoRoot 'driver'`; ссылки на соседний `..\Drivemobile` убраны. `$DispatcherRoot` оставлен только как исторический резерв для отката.
+- Добавлены `publish/build-driver.ps1` (сборка standalone модуля, синхронизация static/public) и `publish/publish-apk.ps1` (публикация APK в портал и standalone).
+- Добавлены `tools/android-build/` (build-apk.ps1, publish-apk.ps1, mirror.init.gradle, README) и CI `.github/workflows/android-apk.yml` (JDK 17, Gradle 8.9, артефакт `azmz-driver-apk`).
+- Добавлены `tools/ocr-probe/` (только скрипты, без реальных сканов) и `mini-services/paddle-ocr/start-service.ps1`/`stop-service.ps1` с переносимыми путями.
+- Канонический APK оставлен один: `driver/download/azmz-driver.apk` (0.3.2-pilot, versionCode 6, 38 119 513 байт, SHA-256 F90722580DF6EC1857491B88B94E34FC26861B780A6D6A325722F7C62980C953). Дубли `driver/public/azmz-driver.apk` и старый `АЗМЗ-Логистика-водитель-v0.2.0.apk` удалены из рабочего дерева.
+- Написана документация: обновлён корневой `README.md`, созданы `docs/README.md`, `docs/architecture/{system-overview,data-model}.md`, `docs/modules/{platform,driver,kontur-1c,ocr}.md`, `docs/integrations/{1c,yandex-routes}.md`, `docs/operations/{deployment,troubleshooting,backup-restore}.md`, `docs/development/{monorepo,build-and-test}.md`, `docs/security.md`, `docs/history/{legacy-and-archive,consolidation-2026-11-24}.md`.
+- В `docs/materials/` перенесены паспорт проекта, презентация и речь; в `docs/assets/` — QR; в `docs/history/` — исходный промпт.
+- `.gitignore` дополнен каталогами OCR-проб (`.venv`, `samples*`, `out*`, `requests`, `__pycache__`), чтобы реальные сканы и результаты не попали в git.
+- Сборка в монорепозитории разведена: `driver/next.config.ts` фиксирует `outputFileTracingRoot`/`turbopack.root` на `driver/`, корневой `tsconfig.json` исключает `driver/`. Иначе Next выбирал корень репозитория и подхватывал чужие алиасы (`@/lib/platform-log`).
+- Проверки: `publish/build-driver.ps1` — `BUILD_DRIVER_OK`; `publish/build-public.ps1` — `BUILD_ID=huCaCxC4PNdVv6axCZJqy`, source=385, artifacts=1046; `publish/start-all.ps1` — `RESULT: OK`; `publish/status.ps1` — все порты и публичные URL в норме, OCR `ready=True`, драйвер `entries=28`; `git status` не содержит секретов/баз/ПДн; `driver/` — 473 файла и история `Drivemobile`; ссылки в `docs/README.md` существуют.
+
+Stage Summary:
+- Все действующие проекты собраны в `vacantrix/LogistikSITE`: платформа, модуль водителя с историей, OCR, WS, ЭДО, публикация, Android-сборка и документация.
+- Отдельные репозитории остаются источником/архивом; новые изменения ведутся в монорепозитории.
+- Ограничение: физический телефон к ADB не подключён, установка APK на устройстве в этом прогоне не проверялась; публикация и веб-контур от этого не зависят.

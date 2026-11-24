@@ -53,10 +53,12 @@ prompt
 
 server.log
 
-# Android: служебные файлы компилятора и готовые APK (публикуются отдельно)
+# Android: служебные файлы компилятора и готовые APK.
+# Канонический APK лежит в download/azmz-driver.apk и обновляется
+# tools/android-build/build-apk.ps1; staging-копии и дубли не коммитим.
 .kotlin/
 download/Drivemobile.apk
-download/azmz-driver.apk
+download/АЗМЗ-*.apk
 public/azmz-driver.apk
 
 # Skills directory

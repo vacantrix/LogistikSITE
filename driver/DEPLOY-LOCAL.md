@@ -34,9 +34,12 @@
 ## 2. Получить код
 
 ```bash
-git clone https://github.com/vacantrix/drivemobile.git
-cd drivemobile
+git clone https://github.com/vacantrix/LogistikSITE.git
+cd LogistikSITE/driver
 ```
+
+Этот документ описывает автономный стенд модуля. Штатный production-контур
+(платформа + модуль на одном домене) — в [../docs/operations/deployment.md](../docs/operations/deployment.md).
 
 В репозитории уже лежат базы SQLite с демо-данными (`db/custom.db`,
 `kontur-1c/db/custom.db`) — ничего мигрировать и настраивать не нужно.

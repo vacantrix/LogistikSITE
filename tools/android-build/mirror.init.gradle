@@ -1,0 +1,19 @@
+// Репозитории для сборки Android: прямой Google Maven, Maven Central и Plugin Portal.
+// Зеркала не используются: часть из них отдаёт 502 на артефакты, которых у неё нет.
+def googleDirect = 'https://dl.google.com/dl/android/maven2'
+def centralDirect = 'https://repo.maven.apache.org/maven2'
+def pluginPortal = 'https://plugins.gradle.org/m2'
+
+settingsEvaluated { settings ->
+    settings.pluginManagement.repositories.clear()
+    settings.pluginManagement.repositories {
+        maven { url googleDirect; name 'googleDirect' }
+        maven { url centralDirect; name 'mavenCentralDirect' }
+        maven { url pluginPortal; name 'pluginPortalDirect' }
+    }
+    settings.dependencyResolutionManagement.repositories.clear()
+    settings.dependencyResolutionManagement.repositories {
+        maven { url googleDirect; name 'googleDirect' }
+        maven { url centralDirect; name 'mavenCentralDirect' }
+    }
+}
