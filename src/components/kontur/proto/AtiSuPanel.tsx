@@ -6,6 +6,7 @@ import { Button } from '@/components/kontur/ui/button'
 import { InfoTip, Pill } from './bits'
 import type { StateResponse, Trip } from '@/lib/kontur/client-types'
 import { AtiSuMarketPanel, type MarketMode } from './AtiSuMarketPanel'
+import { AtiAiSearchDialog } from './AtiAiSearchDialog'
 import {
   BadgeCheck, Calculator, FileCheck2, History, Loader2, MapPin, RefreshCw, Repeat2, Route,
   Save, Search, Star, Truck,
@@ -39,7 +40,7 @@ function fmtDay(iso: string | null): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 
-export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip }: {
+export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip, onOpenAi }: {
   state: StateResponse
   /** стартовый подраздел: 'deals' — когда ведём пользователя к сделке из других разделов */
   initialSub?: 'search' | 'deals'
@@ -47,6 +48,8 @@ export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip
   onChanged?: () => void
   /** переход к карточке рейса запланированного груза в «Заявках» */
   onOpenTrip?: (tripId: string) => void
+  /** переход к разделу «ИИ-помощник» (список нейросети) из окна поиска */
+  onOpenAi?: () => void
 }) {
   const [sub, setSub] = useState<Sub>(initialSub)
   const [status, setStatus] = useState<AtiStatus | null>(null)
@@ -106,16 +109,21 @@ export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip
             </div>
           )}
 
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto h-8"
-            onClick={() => void loadStatus()}
-            disabled={statusLoading}
-          >
-            {statusLoading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
-            Проверить связь
-          </Button>
+          {/* ИИ-поиск + связь: справа в ряд; окно «что найти» открывает нейросеть,
+              которая видит и грузы, и поиск машин */}
+          <div className="ml-auto flex items-center gap-2">
+            <AtiAiSearchDialog onOpenAi={onOpenAi} />
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8"
+              onClick={() => void loadStatus()}
+              disabled={statusLoading}
+            >
+              {statusLoading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+              Проверить связь
+            </Button>
+          </div>
 
           {lostLink && (
             <div className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">

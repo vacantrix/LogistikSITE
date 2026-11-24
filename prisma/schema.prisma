@@ -584,3 +584,81 @@ model RolePerm {
 
   @@id([role, key])
 }
+
+// ============ Память контактов: с кем работали и какие сделки заключались ============
+
+/**
+ * Контакт из рабочей тетради логиста/экспедитора: перевозчик, грузовладелец,
+ * водитель, менеджер биржи. Хранится отдельно от справочника Carrier (допущенные
+ * компании платформы): сюда попадают все, с кем хотя бы разговаривали по сделке,
+ * в том числе «отказные» — чтобы не звонить повторно в пустоту.
+ */
+model MemoryContact {
+  id        String        @id @default(cuid())
+  name      String // ФИО контактного лица
+  company   String        @default("") // организация (перевозчик/грузовладелец)
+  kind      String        @default("carrier") // carrier=перевозчик | shipper=грузовладелец | driver=водитель | other
+  phone     String        @default("")
+  email     String        @default("")
+  source    String        @default("manual") // manual=внесён вручную | ati=с биржи ATI.SU
+  atiRef    String? // привязка к грузу/машине ATI.SU (номер или ссылка)
+  rating    Int           @default(0) // как отработали вместе: 0..5
+  notes     String        @default("") // чем запомнился: возит аккуратно, платит в срок…
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  deals     MemoryDeal[]
+
+  @@index([kind])
+}
+
+/** Сделка с контактом: переговоры по грузу (нашли груз) или машине (нашли перевозчика). */
+model MemoryDeal {
+  id        String         @id @default(cuid())
+  contactId String
+  contact   MemoryContact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  direction String         @default("load") // load=нашли груз | truck=нашли машину
+  route     String         @default("") // «Скопин → Ростов-на-Дону»
+  cargo     String         @default("") // что возили/что искали
+  amount    Float? // сумма, ₽ (без НДС у ИП — как договорились)
+  status    String         @default("talks") // talks=переговоры | done=заключена и выполнена | refuse=отказ | lost=не вышло
+  dealDate  String? // дата, ДД.ММ.ГГГГ (строкой — календарный день без сдвига поясов)
+  notes     String         @default("") // условия и нюансы
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([contactId])
+  @@index([status])
+}
+
+// ============ ИИ-помощник: собственный список нейросети и её журнал ============
+
+/**
+ * Запись из списка, который ведёт нейросеть-консультант: разбор поискового запроса
+ * по грузам/машинам ATI.SU или консультация. Человек может посмотреть список
+ * в любой момент; после выполнения запроса последний разбор выводится сразу.
+ * Это ЕДИНСТВЕННЫЕ таблицы, в которые нейросети позволено писать (жёсткое
+ * ограничение прав: остальное — частичное чтение, контакты и заявки только
+ * через серверный контекст без телефонов).
+ */
+model AiListItem {
+  id        String   @id @default(cuid())
+  kind      String // load=грузы | truck=машины | both=грузы и машины | chat=консультация
+  query     String // что искали / о чём консультация
+  answer    String // разбор (markdown) — то, что нейросеть выводит по запросу
+  status    String   @default("done") // done | error
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/** Журнал нейросети: что она делала и когда — видно человеку в разделе «ИИ-помощник». */
+model AiLog {
+  id        String   @id @default(cuid())
+  level     String   @default("info") // info | warn | error
+  action    String // chat_start | chat_done | search_start | search_done | search_error | list_write | list_clear
+  message   String
+  details   String? // JSON: параметры запроса, объём контекста и т.п.
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

@@ -108,7 +108,11 @@ async function migrateUsers(): Promise<void> {
     const scored = candidates.map((t) => {
       const set = new Set(t.perms.map((p) => p.key))
       const allow = [...had].filter((k) => !set.has(k))
-      const deny = [...set].filter((k) => isPermKey(k) && inContour(contour, k) && !had.has(k as PermKey)) as PermKey[]
+      // Видимость разделов (section:*) в исключения-запреты не пишем: секции — производная
+      // операционных прав, их выдаёт backfillSectionPerms/backfillAiPerms по объёму работы.
+      // На чистой базе (пустая матрица RolePerm) прежний код запрещал все вкладки первому
+      // вошедшему пользователю — навигация становилась пустой.
+      const deny = [...set].filter((k) => isPermKey(k) && inContour(contour, k) && !k.startsWith('section:') && !had.has(k as PermKey)) as PermKey[]
       return { t, allow, deny, score: allow.length + deny.length }
     }).sort((a, b) => a.score - b.score || Number(b.t.isDefault) - Number(a.t.isDefault))
     const best = scored[0]
@@ -234,6 +238,25 @@ async function backfillDriverAppPerm(): Promise<void> {
   if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
 }
 
+/**
+ * Новые разделы «ИИ-помощник» и «Память контактов» (логист + администрация).
+ * Существующие должности уже хранят свои section:*, поэтому новые права выдаём
+ * адресно шаблонам контуров «логист» и «администрация». Идемпотентно.
+ */
+async function backfillAiPerms(): Promise<void> {
+  const templates = await db.accessTemplate.findMany({
+    where: { contour: { in: ['logist', 'admin'] } },
+    select: { id: true, perms: { where: { key: { in: ['section:ai', 'section:contacts'] } }, select: { key: true } } },
+  })
+  const rows: { templateId: string; key: PermKey }[] = []
+  for (const t of templates) {
+    const has = new Set(t.perms.map((p) => p.key))
+    if (!has.has('section:ai')) rows.push({ templateId: t.id, key: 'section:ai' })
+    if (!has.has('section:contacts')) rows.push({ templateId: t.id, key: 'section:contacts' })
+  }
+  if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
+}
+
 let ensured = false
 let ensuring: Promise<void> | null = null
 
@@ -246,6 +269,7 @@ export async function ensureAccess(): Promise<void> {
     await backfillSectionPerms()
     await backfillDriverAppPerm()
     await backfillOwnTransportPerms()
+    await backfillAiPerms()
     // пользователи без должности с прежними правами (после обновления) получают ближайшую должность;
     // новые учётки создаются сразу с должностью, поэтому повторно это почти ничего не делает
     const pending = await db.user.count({ where: { templateId: null, OR: [{ permOverrides: { not: null } }, { profileEditOwn: { not: null } }] } })

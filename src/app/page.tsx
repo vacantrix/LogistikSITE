@@ -35,6 +35,8 @@ import ArchitectureTab from '@/components/platform/architecture'
 import NeuralTab from '@/components/platform/neural'
 import SettingsTab from '@/components/platform/settings'
 import { PermProvider, useCan, usePerms } from '@/components/platform/perms'
+import ContactsMemoryTab from '@/components/platform/contacts-memory'
+import AiAssistantTab from '@/components/platform/ai-assistant'
 import { KonturWorkspace } from '@/components/platform/kontur-workspace'
 
 /** Роль интерфейса из пользователя сессии */
@@ -292,6 +294,8 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
           {tab === 'reports' && <ReportsTab {...tabProps} />}
           {tab === 'journal' && <JournalTab {...tabProps} />}
           {tab === 'support' && <SupportTab {...tabProps} />}
+          {tab === 'contacts' && <ContactsMemoryTab {...tabProps} />}
+          {tab === 'ai' && <AiAssistantTab {...tabProps} />}
           {tab === 'nn' && <NeuralTab {...tabProps} />}
           {tab === 'settings' && <SettingsTab {...tabProps} />}
           {tab === 'admin-users' && <AdminUsersTab {...tabProps} />}

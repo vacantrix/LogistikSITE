@@ -22,7 +22,7 @@
  */
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
-  ArrowLeft, BarChart3, BookOpen, Brain, Building2, CalendarDays, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
+  ArrowLeft, BarChart3, BookOpen, BookUser, Bot, Brain, Building2, CalendarDays, ChevronDown, CircleUserRound, ClipboardList, Database, FilePen, FileSignature, FileUp, FolderOpen,
   Gavel, History, Inbox, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Radar, Save, ScanSearch, ScrollText, ShieldCheck, SlidersHorizontal, Smartphone, Truck,
   UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
@@ -43,7 +43,7 @@ import { useCan } from '@/components/platform/perms'
 import type { PermKey } from '@/lib/perm-catalog'
 import { OneCMark, type RoleKind, type TabKey } from '@/components/platform/common'
 import type { ProfileDTO, SessionUserDTO } from '@/lib/types'
-import { activateAccount, api, listAccounts } from '@/lib/api'
+import { activateAccount, api, getSessionToken, listAccounts } from '@/lib/api'
 
 /** Полный список разделов с пометкой ролей: A — администрация, L — логист, C — перевозчик.
  *  Система прав (Task 109): три роли — администрация (максимальные права: операционный
@@ -70,9 +70,11 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup;
   { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'], group: 'attracted' },
   { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'], group: 'attracted' },
   { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
+  { key: 'contacts', label: 'Память контактов', roles: ['logist', 'admin'], group: 'attracted' },
 
   { key: 'own-requests', label: 'Заявки 1С', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-atisu', label: 'ATI.SU', roles: ['logist', 'admin'], group: 'own' },
+  { key: 'ai', label: 'ИИ-помощник', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-occupancy', label: 'Занятость', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-planning', label: 'Планирование', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-monitor', label: 'Мониторинг', roles: ['logist', 'admin'], group: 'own' },
@@ -107,6 +109,8 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   'admin-db': { Icon: Database, short: 'База' },
   arch: { Icon: Network, short: 'Архитектура' },
   support: { Icon: MessagesSquare, short: 'Обращения' },
+  contacts: { Icon: BookUser, short: 'Контакты' },
+  ai: { Icon: Bot, short: 'ИИ' },
   'own-requests': { Icon: Inbox, short: 'Заявки 1С' },
   'own-atisu': { Icon: Gavel, short: 'ATI.SU' },
   'own-occupancy': { Icon: LayoutGrid, short: 'Занятость' },
@@ -138,6 +142,8 @@ const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
   reports: 'section:reports',
   journal: 'section:journal',
   support: 'section:support',
+  contacts: 'section:contacts',
+  ai: 'section:ai',
   nn: 'section:neural',
   settings: 'section:settings',
   'admin-users': 'section:adminUsers',
@@ -672,6 +678,123 @@ function AdminMenu({ nav, tab, onNavigate, compact }: {
   )
 }
 
+/** Боковое меню, открывающееся справа по клику на закладку у правого края:
+ *  все разделы платформы по группам + блок ИИ-помощника с последним разбором. */
+function SideMenuSheet({ nav, tab, onNavigate }: {
+  nav: { key: TabKey; label: string; group: NavGroup; muted?: boolean }[]
+  tab: TabKey
+  onNavigate: (t: TabKey) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [latest, setLatest] = useState<{ kind: string; query: string; createdAt: string } | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    const load = async () => {
+      try {
+        const headers = new Headers()
+        const token = getSessionToken()
+        if (token) headers.set('Authorization', `Bearer ${token}`)
+        const res = await fetch('/api/ai/list?latest=1', { headers })
+        if (!res.ok) return
+        const json = await res.json().catch(() => null)
+        if (alive) setLatest(json?.item ?? null)
+      } catch {
+        /* последний разбор не критичен */
+      }
+    }
+    void load()
+    return () => { alive = false }
+  }, [open])
+  const hasAi = nav.some((n) => n.key === 'ai')
+  const groups: { title: string; items: { key: TabKey; label: string; muted?: boolean }[] }[] = [
+    { title: 'Привлечённый транспорт', items: nav.filter((n) => n.group === 'attracted') },
+    { title: 'Собственный транспорт', items: nav.filter((n) => n.group === 'own' && n.key !== 'ai') },
+    { title: 'Управление', items: nav.filter((n) => n.group === 'admin') },
+  ].filter((g) => g.items.length > 0)
+  return (
+    <>
+      {/* закладка у правого края экрана: клик открывает меню */}
+      <button
+        type="button"
+        aria-label="Открыть боковое меню"
+        title="Боковое меню"
+        onClick={() => setOpen(true)}
+        className="fixed right-0 top-1/2 z-40 -translate-y-1/2 rounded-l-xl border border-r-0 border-slate-700 bg-slate-900 px-1 py-4 text-[11px] font-semibold uppercase tracking-widest text-white shadow-lg transition-colors hover:bg-slate-800"
+      >
+        <span className="inline-block [writing-mode:vertical-rl]">Меню</span>
+      </button>
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="right" className="w-80 overflow-y-auto sm:w-96">
+          <SheetHeader className="pb-1 text-left">
+            <SheetTitle>Меню</SheetTitle>
+            <SheetDescription>Все разделы платформы и ИИ-помощник</SheetDescription>
+          </SheetHeader>
+
+          {/* ИИ-помощник: отдельный блок наверху + последний разбор нейросети */}
+          {hasAi && (
+            <div className="mt-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => { setOpen(false); onNavigate('ai') }}
+                aria-current={tab === 'ai' ? 'page' : undefined}
+                className="flex w-full min-h-[44px] items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-left text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50"
+              >
+                <Bot className="h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
+                <span className="flex-1">ИИ-помощник</span>
+                {tab === 'ai' && <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />}
+              </button>
+              {latest && (
+                <button
+                  type="button"
+                  onClick={() => { setOpen(false); onNavigate('ai') }}
+                  className="flex w-full flex-col gap-0.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left transition-colors hover:bg-slate-100"
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Последний разбор нейросети</span>
+                  <span className="truncate text-xs text-slate-600">{latest.query}</span>
+                  <span className="text-[10px] text-slate-400">
+                    {new Date(latest.createdAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Разделы по группам */}
+          <div className="mt-3 space-y-3 pb-4">
+            {groups.map((g) => (
+              <div key={g.title}>
+                <div className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{g.title}</div>
+                <div className="grid grid-cols-1 gap-1">
+                  {g.items.map((n) => {
+                    const { Icon } = TAB_ICONS[n.key]
+                    const active = tab === n.key
+                    return (
+                      <button
+                        key={n.key}
+                        type="button"
+                        onClick={() => { setOpen(false); onNavigate(n.key) }}
+                        aria-current={active ? 'page' : undefined}
+                        className={`flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                          active ? 'bg-slate-100 text-slate-900' : n.muted ? 'text-slate-400 hover:bg-slate-50' : 'text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Icon className="h-5 w-5 shrink-0" />
+                        <span className="flex-1">{n.label}</span>
+                        {active && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-700" aria-hidden />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
+  )
+}
+
 export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liveTick, children }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
@@ -860,6 +983,9 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
           </nav>
         )}
       </header>
+
+      {/* Боковое меню (открывается справа по клику): все разделы + ИИ-помощник */}
+      <SideMenuSheet nav={nav} tab={tab} onNavigate={onNavigate} />
 
       <main className="w-full flex-1 px-4 py-6 sm:px-6">{children}</main>
 
