@@ -2545,6 +2545,7 @@ Work Log:
 - `docs/ai-helper.md` переписан под GigaChat и общую базу; добавлен в `docs/README.md`; в `docs/architecture/data-model.md` добавлен раздел 1.5 с моделями ИИ, контактов и избранного.
 - Проверки: `publish/build-public.ps1` — OK, `BUILD_ID=T6sYFwpy20caku3zNglKw`, source=409, artifacts=1148; `publish/start-all.ps1` — `RESULT: OK`; вход `admin` и API избранного: 0 → сохранение 1 → удаление 0; `DispatchUser`/`DispatchOrder` на месте; OCR `ready=True`.
 - Ограничение: ключи GigaChat в `.env.local` не заданы, поэтому живой ответ модели не проверялся — чат корректно сообщает «GigaChat не настроен». Физический телефон к ADB не подключён.
+- Публикация: `main` отправлен в `vacantrix/LogistikSITE`; GitHub API подтвердил head, дерево из 1516 записей и APK 38 119 513 байт. Проверка всей истории: GitHub-токенов, AWS-ключей и приватных ключей нет. Демо-базы модуля содержат только вымышленные контакты; сканы паспортов/прав и резервные копии рабочей базы в репозиторий не попали.
 
 Stage Summary:
 - GigaChat-функции, память контактов и избранное перенесены в монорепозиторий и работают на общей базе без потери Dispatch-данных.
