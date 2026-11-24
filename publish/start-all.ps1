@@ -38,6 +38,42 @@ if ($missingPortal.Count -gt 0) {
 }
 Write-Output "portal files: OK (catalog, previews, 6 installers, Drivemobile APK)"
 
+# 0.2. ИИ-помощник: таблицы в общей базе платформы. Существующие таблицы и
+# данные не трогаем; если каких-то таблиц нет — безопасно добавляем только их
+# DDL (prisma db push на рабочей базе запрещён: он удалит Dispatch*).
+$python = Get-Command python -ErrorAction SilentlyContinue
+$aiTablesOk = $false
+if ($python) {
+    & $python.Source (Join-Path $PublishDir 'check-ai-tables.py') $DbPath
+    switch ($LASTEXITCODE) {
+        0 { $aiTablesOk = $true }
+        2 {
+            Write-Output "AI tables missing; adding safely (no drop)..."
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PublishDir 'ensure-ai-tables.ps1')
+            if ($LASTEXITCODE -ne 0) {
+                Write-Output "ERROR: failed to add AI tables."
+                exit 1
+            }
+            $aiTablesOk = $true
+        }
+        default {
+            Write-Output "WARNING: AI tables check failed; platform starts without AI schema guarantee."
+        }
+    }
+} else {
+    Write-Output "WARNING: python not found; AI tables not checked."
+}
+
+# GigaChat: ключи читает сервер из .env.local. Без них чат честно отвечает
+# «GigaChat не настроен», остальные разделы платформы работают как обычно.
+$gigaConfigured = $false
+$envLocal = Join-Path $RepoRoot '.env.local'
+if (Test-Path $envLocal) {
+    $gigaConfigured = [bool](Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_ID\s*=\s*\S+' -ErrorAction SilentlyContinue)
+}
+if ($gigaConfigured) { Write-Output "AI helper: GigaChat configured" }
+else { Write-Output "AI helper: GigaChat not configured (GIGACHAT_CLIENT_ID/SECRET in .env.local)" }
+
 # 1. OCR service (localhost only)
 $ocrOwner = Get-PortOwner $OcrPort
 if ($ocrOwner -gt 0) {
@@ -83,6 +119,16 @@ Write-Output "OCR ready: engine=$ocrEngine version=$($ocrInfo.version)"
 if ((Get-PortOwner $PlatformPort) -eq 0) {
     Write-Output "ERROR: platform is not listening on port $PlatformPort"
     exit 1
+}
+
+# 2.0. Новые маршруты ИИ должны быть смонтированы в текущей сборке.
+# Без сессии /api/ai/favorites отвечает 401 — это и есть подтверждение,
+# что маршрут существует (404 означал бы старую сборку без ИИ).
+$aiCode = curl.exe -sS -o NUL -w "%{http_code}" --max-time 10 "http://127.0.0.1:$PlatformPort/api/ai/favorites" 2>$null
+if ($aiCode -eq '401' -or $aiCode -eq '200') {
+    Write-Output "AI API: OK (HTTP $aiCode on /api/ai/favorites)"
+} else {
+    Write-Output "WARNING: AI API probe returned HTTP $aiCode"
 }
 
 # 2.1 Real-time bus (socket.io, localhost:3003) — Caddy forwards ?XTransformPort=3003
@@ -205,6 +251,8 @@ Write-Output "Platform: $DemoUrl (login $KonturAuthUser)"
 Write-Output "Legacy /kontur: $KonturUrl (redirects into platform)"
 Write-Output "Driver API: $DriverApiUrl"
 Write-Output "Drivemobile APK: $MainUrl/dl/Drivemobile.apk"
+$aiSummary = if ($gigaConfigured) { 'GigaChat configured' } else { 'GigaChat not configured' }
+Write-Output "AI helper: $aiSummary — /api/ai/* (chat, search, favorites)"
 Write-Output "Platform local: http://127.0.0.1:$PlatformPort/"
 Write-Output "Status: powershell -NoProfile -ExecutionPolicy Bypass -File `"$PublishDir\status.ps1`""
 exit 0

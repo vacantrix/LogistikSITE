@@ -1,7 +1,7 @@
 ﻿# АЭМЗ Поток — единый боевой запуск (монолит: платформа + Контур).
-# Поднимает OCR, платформу с диспетчерской, локальный шлюз, Caddy
-# и API приложения Drivemobile, проверяет публичный HTTPS и открывает сайт
-# в браузере. Запускается ярлыком с рабочего стола.
+# Поднимает OCR, платформу с диспетчерской и ИИ-помощником GigaChat,
+# локальный шлюз, Caddy и API приложения Drivemobile, проверяет публичный
+# HTTPS и открывает сайт в браузере. Запускается ярлыком с рабочего стола.
 
 param(
     [switch]$NoPause,
@@ -27,6 +27,15 @@ $startOut = Join-Path $LogDir 'launcher-start.out.log'
 $startErr = Join-Path $LogDir 'launcher-start.err.log'
 $statusOut = Join-Path $LogDir 'launcher-status.out.log'
 $statusErr = Join-Path $LogDir 'launcher-status.err.log'
+
+# GigaChat: ключи читает сервер из .env.local; без них ИИ-чат честно
+# сообщает «GigaChat не настроен», а остальные разделы работают.
+$gigaConfigured = $false
+$envLocal = Join-Path $RepoRoot '.env.local'
+if (Test-Path $envLocal) {
+    $gigaConfigured = [bool](Select-String -Path $envLocal -Pattern '^\s*GIGACHAT_CLIENT_ID\s*=\s*\S+' -ErrorAction SilentlyContinue)
+}
+$aiState = if ($gigaConfigured) { 'GigaChat подключён' } else { 'GigaChat не настроен (ключи в .env.local)' }
 
 function Write-Step([string]$text) {
     Write-Host ""
@@ -145,7 +154,10 @@ $startText -split "`r?`n" | Where-Object { $_.Trim() } | ForEach-Object { Write-
 Add-LauncherLog $startText
 
 $startExit = $proc.ExitCode
-$startLooksOk = ($startText -match 'Portal: https://') -and ($startText -match 'Catalog: https://') -and ($startText -match 'Dispatcher:') -and ($startText -match 'Driver API:') -and ($startText -notmatch 'ERROR:')
+$startLooksOk = ($startText -match 'Portal: https://') -and ($startText -match 'Catalog: https://') -and ($startText -match 'Dispatcher \(monolith\):') -and ($startText -match 'Driver API:') -and ($startText -match 'AI API: OK') -and ($startText -notmatch 'ERROR:')
+# Start-Process -PassThru иногда оставляет ExitCode пустым даже после
+# WaitForExit(); при подтверждённом выводе считаем запуск успешным.
+if ($null -eq $startExit -and $startLooksOk) { $startExit = 0 }
 if (($null -ne $startExit -and $startExit -ne 0) -or -not $startLooksOk) {
     $exitText = if ($null -eq $startExit) { 'нет кода' } else { $startExit }
     Write-Fail "Стек завершился с ошибкой (код $exitText)."
@@ -165,7 +177,7 @@ Write-Step "Проверяю платформу и Drivemobile..."
 $konturPid = Get-PortOwner $PlatformPort
 $driverPid = Get-PortOwner $DriverApiPort
 $konturApiOk = ($konturPid -gt 0) -and (Wait-HttpOk -Url "http://127.0.0.1:$PlatformPort/kontur/api/auth/accounts" -TimeoutSec 20)
-$driverApiOk = ($driverPid -gt 0) -and (Wait-HttpOk -Url "http://127.0.0.1:$DriverApiPort/api/driver/v1/sync/pull?cursor=0" -TimeoutSec 20)
+$driverApiOk = ($driverPid -gt 0) -and (Wait-HttpOk -Url "http://127.0.0.1:$DriverApiPort/driver/api/driver/v1/sync/pull?cursor=0" -TimeoutSec 20)
 if ($konturApiOk -and $driverApiOk) {
     Write-Ok "Платформа: pid=$konturPid, Drivemobile API: pid=$driverPid"
     Add-LauncherLog "drivemobile: platform pid=$konturPid, driver-api pid=$driverPid"
@@ -184,10 +196,21 @@ if ($konturApiOk -and $driverApiOk) {
 # --- 3. Проверка состояния -------------------------------------------------
 Write-Step "Проверяю состояние и публичный HTTPS..."
 
+# Старый отчёт не должен приниматься за новый: иначе упавший status.ps1
+# оставит прошлый RESULT и лаунчер покажет ложную ошибку.
+Remove-Item -LiteralPath $statusOut, $statusErr -ErrorAction SilentlyContinue
+
 $statusProc = Start-Process -FilePath 'powershell.exe' `
     -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $statusScript) `
     -WindowStyle Hidden -PassThru -Wait `
     -RedirectStandardOutput $statusOut -RedirectStandardError $statusErr
+
+if (-not (Test-Path $statusOut)) {
+    Write-Fail "status.ps1 не создал отчёт о состоянии."
+    Show-Tail $statusErr 20
+    if (-not $NoPause) { Read-Host "  Нажмите Enter, чтобы закрыть" }
+    exit 1
+}
 
 $statusText = if (Test-Path $statusOut) { Get-Content $statusOut -Raw -ErrorAction SilentlyContinue } else { '' }
 $statusText -split "`r?`n" | Where-Object { $_.Trim() } | ForEach-Object {
@@ -216,6 +239,8 @@ if ($allOk) {
     Write-Host "  Drivemobile APK: $MainUrl/dl/Drivemobile.apk" -ForegroundColor White
     Write-Host "  Платформа локально: http://127.0.0.1:$PlatformPort/" -ForegroundColor DarkGray
     Write-Host "  OCR:      локально, 127.0.0.1:$OcrPort" -ForegroundColor DarkGray
+    Write-Host "  ИИ-помощник: $aiState" -ForegroundColor White
+    Write-Host "  Избранное: раздел «Избранное» в платформе" -ForegroundColor DarkGray
     Write-Host ""
     if (-not $NoOpen) {
         Write-Host "  Открываю портал Vacantrix в браузере..." -ForegroundColor Cyan

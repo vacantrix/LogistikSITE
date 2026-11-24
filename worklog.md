@@ -2551,3 +2551,19 @@ Stage Summary:
 - GigaChat-функции, память контактов и избранное перенесены в монорепозиторий и работают на общей базе без потери Dispatch-данных.
 - Сборка и стенд проходят; API избранного проверено живым запросом.
 - Для ответов нейросети нужно добавить `GIGACHAT_CLIENT_ID`/`GIGACHAT_CLIENT_SECRET` в `.env.local`.
+
+---
+
+Task ID: 129
+Agent: DeepSeek V4.1 Flash (main)
+Task: Обновление скрипта запуска под ИИ-модуль и запуск стенда после перезагрузки
+
+Work Log:
+- `publish/start-all.ps1` теперь проверяет таблицы ИИ в `db/combat.db` (`publish/check-ai-tables.py`), при отсутствии безопасно вызывает `ensure-ai-tables.ps1`, проверяет маршрут `/api/ai/favorites` (401 без сессии — норма) и печатает состояние GigaChat.
+- `publish/start-production.ps1`: добавлены статус ИИ и «Избранного» в итоговый отчёт; исправлены ложные ошибки — проверка `Dispatcher (monolith):`, путь Drivemobile `/driver/api/driver/v1/sync/pull`, удаление устаревшего `launcher-status.out.log` перед `status.ps1`.
+- `docs/ai-helper.md` дополнен описанием проверки таблиц ИИ при каждом запуске.
+- Запуск: `publish/start-production.ps1 -NoPause -NoOpen` — `RESULT: OK`, все сервисы UP, сборка `T6sYFwpy20caku3zNglKw`, `/api/ai/favorites` отвечает 401 (маршрут смонтирован), GigaChat не настроен (ключей нет).
+
+Stage Summary:
+- Скрипт запуска обновлён и проверен на рабочем ПК; стенд работает, повторный запуск идемпотентен.
+- Для живого ИИ-чата остаётся добавить ключи GigaChat в `.env.local`.
