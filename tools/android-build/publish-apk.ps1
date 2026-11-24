@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 # Копирует собранный APK из driver/download в публичные точки:
 #   publish/portal/dl/Drivemobile.apk  -> https://.../dl/Drivemobile.apk

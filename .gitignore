@@ -98,3 +98,7 @@ tools/ocr-probe/out/
 tools/ocr-probe/out_real/
 tools/ocr-probe/requests/
 tools/ocr-probe/__pycache__/
+
+# локальные артефакты песочницы/стенда: pid-файл дев-сервера и журналы
+/dev.pid
+/logs/

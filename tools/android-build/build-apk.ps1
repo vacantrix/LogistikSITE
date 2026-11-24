@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("debug", "release")][string]$Configuration = "debug"
 )
 

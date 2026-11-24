@@ -10,6 +10,7 @@
 | [architecture/system-overview.md](architecture/system-overview.md) | компоненты, порты, потоки данных, отказоустойчивость |
 | [architecture/data-model.md](architecture/data-model.md) | схема платформы, Dispatch-контура и модуля водителя |
 | [modules/platform.md](modules/platform.md) | платформа: роли, разделы, API, проверки |
+| [ai-helper.md](ai-helper.md) | ИИ-помощник GigaChat, память контактов, избранное, права |
 | [modules/kontur-1c.md](modules/kontur-1c.md) | диспетчерская, собственный парк, рейсы |
 | [modules/driver.md](modules/driver.md) | PWA/APK, синхронизация, офлайн, карта |
 | [modules/ocr.md](modules/ocr.md) | OCR-конвейер, очередь, модели, вердикты |

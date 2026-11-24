@@ -1,4 +1,4 @@
-. "$PSScriptRoot\config.ps1"
+﻿. "$PSScriptRoot\config.ps1"
 
 # Публикация APK модуля водителя.
 # Источник — driver/download/azmz-driver.apk (актуальная сборка 0.3.2-pilot,

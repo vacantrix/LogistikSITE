@@ -1,4 +1,4 @@
-param(
+﻿param(
     [int]$Port = 3031,
     [ValidateSet("0", "1", "auto")][string]$LowMemory = "auto"
 )

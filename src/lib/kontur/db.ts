@@ -53,9 +53,14 @@ function createClient() {
 type DbClient = ReturnType<typeof createClient>
 
 // Единственный экземпляр Prisma-клиента на процесс (hot-reload dev-режима
-// не плодит соединения; в проде — обычный синглтон).
-const globalForPrisma = globalThis as unknown as { prisma: DbClient | undefined }
+// не плодит соединений; в проде — обычный синглтон).
+// ВАЖНО: собственный ключ globalThis (konturPrisma), НЕ общий «prisma»:
+// платформенный клиент (src/lib/db.ts) кэшируется под globalThis.prisma,
+// и при общем ключе диспетчерская получала ПЛАТФОРМЕННЫЙ клиент (или наоборот,
+// в зависимости от того, кто загрузился первым) — таблицы User путались
+// и /kontur/api/state падал с «Unknown argument fullName».
+const globalForPrisma = globalThis as unknown as { konturPrisma: DbClient | undefined }
 
-export const db = globalForPrisma.prisma ?? createClient()
+export const db = globalForPrisma.konturPrisma ?? createClient()
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+if (process.env.NODE_ENV !== 'production') globalForPrisma.konturPrisma = db

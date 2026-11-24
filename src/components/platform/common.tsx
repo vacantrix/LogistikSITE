@@ -18,8 +18,9 @@ import { AGENT_STATUS_LABEL, DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } f
 import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
-export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo' | 'support' | 'nn' | 'settings' | 'admin-users' | 'admin-db' | 'arch'
-  | 'own-requests' | 'own-atisu' | 'own-occupancy' | 'own-planning' | 'own-monitor' | 'own-directory' | 'own-audit'
+export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo' | 'support' | 'contacts' | 'nn' | 'settings' | 'admin-users' | 'admin-db' | 'arch'
+  | 'own-requests' | 'own-atisu' | 'own-occupancy' | 'own-planning' | 'own-monitor' | 'own-directory' | 'own-audit' | 'ai'
+  | 'favorites'
   | 'driver-app'
 
 /** Роль пользователя: администрация, сотрудник АЭМЗ (логист) или перевозчик/экспедитор */

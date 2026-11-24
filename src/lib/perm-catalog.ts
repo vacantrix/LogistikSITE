@@ -64,6 +64,8 @@ export type PermKey =
   | 'section:reports'
   | 'section:journal'
   | 'section:support'
+  | 'section:contacts'
+  | 'section:ai'
   | 'section:settings'
   | 'section:adminUsers'
   | 'section:adminDb'
@@ -167,8 +169,10 @@ export const PERMS: PermItem[] = [
   { key: 'section:edo', group: 'Разделы: общие', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'ЭДО', hint: 'Вкладка «Подписать ЭДО»' },
   { key: 'section:directory', group: 'Разделы: общие', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Справочники', hint: 'Вкладка «Справочники» платформы' },
   { key: 'section:support', group: 'Разделы: общие', contours: ['logist', 'carrier', 'admin'], risk: 'normal', label: 'Обращения', hint: 'Вкладка «Обращения»' },
+  { key: 'section:contacts', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Память контактов', hint: 'Вкладка «Память контактов»: с кем работали и какие сделки заключались' },
   { key: 'section:ownRequests', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Заявки 1С', hint: 'Вкладка «Заявки» собственного транспорта: реестр 1С и карточка рейса' },
   { key: 'section:ownAtisu', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'ATI.SU', hint: 'Вкладка «ATI.SU»: биржа и согласованные грузы' },
+  { key: 'section:ai', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'ИИ-помощник', hint: 'Вкладка «ИИ-помощник»: нейросеть-консультант по грузам и машинам ATI.SU; права жёстко ограничены (запись — только свой список и журнал)' },
   { key: 'section:ownOccupancy', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Занятость', hint: 'Вкладка «Занятость»: кто чем занят' },
   { key: 'section:ownPlanning', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Планирование', hint: 'Вкладка «Планирование»: календарь погрузок, выгрузок и возвратов' },
   { key: 'section:ownMonitor', group: 'Разделы: собственный транспорт', contours: L, risk: 'normal', label: 'Мониторинг', hint: 'Вкладка «Мониторинг»: статусы, геолокация и устройства' },
@@ -248,11 +252,11 @@ const allOf = (contour: Contour, except: PermKey[] = []): PermKey[] =>
  */
 export const LOGIST_VIEW_SECTIONS: PermKey[] = [
   'section:board', 'section:drafts', 'section:verify', 'section:requests', 'section:registry',
-  'section:reports', 'section:journal', 'section:edo', 'section:directory', 'section:support',
+  'section:reports', 'section:journal', 'section:edo', 'section:directory', 'section:support', 'section:contacts',
 ]
 export const OWN_VIEW_SECTIONS: PermKey[] = [
   'section:ownRequests', 'section:ownAtisu', 'section:ownOccupancy',
-  'section:ownPlanning', 'section:ownMonitor', 'section:ownDirectory',
+  'section:ownPlanning', 'section:ownMonitor', 'section:ownDirectory', 'section:ai',
 ]
 export const ADMIN_VIEW_SECTIONS: PermKey[] = [
   'section:settings', 'section:adminUsers', 'section:adminDb', 'section:arch', 'section:neural',

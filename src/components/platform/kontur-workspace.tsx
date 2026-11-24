@@ -371,7 +371,7 @@ export function KonturWorkspace({ tab, onNavigate, liveTick }: {
             />
           )}
           {tab === 'own-atisu' && (
-            <AtiSuPanel state={state} initialSub={atisuSub} onChanged={onChanged} onOpenTrip={openTripAnywhere} />
+            <AtiSuPanel state={state} initialSub={atisuSub} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAi={() => onNavigate('ai')} />
           )}
           {tab === 'own-occupancy' && (
             <OccupancyPanel state={state} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAtiDeals={openAtiDeals} />

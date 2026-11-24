@@ -317,7 +317,7 @@ model Request {
   passPackage        Boolean        @default(false)
   etrnStatus         String         @default("NONE") // NONE | SENT | SIGNED
   /**
-   * комментарий логиста к сверки/отклонению (Task 62)
+   * комментарий логиста к сверке/отклонению (Task 62)
    */
   verifyComment      String?
   createdAt          DateTime       @default(now())
@@ -583,4 +583,150 @@ model RolePerm {
   updatedAt DateTime @updatedAt
 
   @@id([role, key])
+}
+
+// ============ Память контактов: с кем работали и какие сделки заключались ============
+
+/**
+ * Контакт из рабочей тетради логиста/экспедитора: перевозчик, грузовладелец,
+ * водитель, менеджер биржи. Хранится отдельно от справочника Carrier (допущенные
+ * компании платформы): сюда попадают все, с кем хотя бы разговаривали по сделке,
+ * в том числе «отказные» — чтобы не звонить повторно в пустоту.
+ */
+model MemoryContact {
+  id        String        @id @default(cuid())
+  name      String // ФИО контактного лица
+  company   String        @default("") // организация (перевозчик/грузовладелец)
+  kind      String        @default("carrier") // carrier=перевозчик | shipper=грузовладелец | driver=водитель | other
+  phone     String        @default("")
+  email     String        @default("")
+  source    String        @default("manual") // manual=внесён вручную | ati=с биржи ATI.SU | ai=записала нейросеть
+  atiRef    String? // привязка к грузу/машине ATI.SU (номер или ссылка)
+  atiFirmId String? // ID фирмы на ATI.SU — переход на страницу перевозчика на бирже (кнопка и клик по компании)
+  recordFormat String     @default("card") // card|list|table|text — формат записи (помечается у записей ИИ)
+  rating    Int           @default(0) // как отработали вместе: 0..5
+  notes     String        @default("") // чем запомнился: возит аккуратно, платит в срок…
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  deals     MemoryDeal[]
+
+  @@index([kind])
+}
+
+/** Сделка с контактом: переговоры по грузу (нашли груз) или машине (нашли перевозчика). */
+model MemoryDeal {
+  id        String         @id @default(cuid())
+  contactId String
+  contact   MemoryContact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  direction String         @default("load") // load=нашли груз | truck=нашли машину
+  route     String         @default("") // «Скопин → Ростов-на-Дону»
+  cargo     String         @default("") // что возили/что искали
+  amount    Float? // сумма, ₽ (без НДС у ИП — как договорились)
+  status    String         @default("talks") // talks=переговоры | done=заключена и выполнена | refuse=отказ | lost=не вышло
+  dealDate  String? // дата, ДД.ММ.ГГГГ (строкой — календарный день без сдвига поясов)
+  notes     String         @default("") // условия и нюансы
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([contactId])
+  @@index([status])
+}
+
+// ============ ИИ-помощник: собственный список нейросети и её журнал ============
+
+/**
+ * Запись из списка, который ведёт нейросеть-консультант: разбор поискового запроса
+ * по грузам/машинам ATI.SU или консультация. Человек может посмотреть список
+ * в любой момент; после выполнения запроса последний разбор выводится сразу.
+ * Это ЕДИНСТВЕННЫЕ таблицы, в которые нейросети позволено писать (жёсткое
+ * ограничение прав: остальное — частичное чтение, контакты и заявки только
+ * через серверный контекст без телефонов).
+ */
+model AiListItem {
+  id        String   @id @default(cuid())
+  kind      String // load=грузы | truck=машины | both=грузы и машины | chat=консультация
+  query     String // что искали / о чём консультация
+  answer    String // разбор (markdown) — то, что нейросеть выводит по запросу
+  bestJson  String? // лучшие предложения подбора (JSON массив: rank, title, route, rate, note)
+  cardsJson String? // карточки фактов из блока ai-card (JSON массив: kind, title, badges, fields, note)
+  reportJson String? // отчёт из блока ai-report (JSON объект: title, period, summary, kpis, sections)
+  linksJson String? // ссылки на разделы платформы из блока ai-links (JSON массив: tab, label)
+  engine    String? // каким движком дан ответ: gigachat | reserve
+  status    String   @default("done") // done | error
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/** Избранное: варианты, отобранные человеком из списков ИИ (ai-best).
+ *  Ключ — подпись title|route|rate: один и тот же вариант не дублируется. */
+model AiFavorite {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  query       String // запрос, по которому построен список
+  rank        Int      @default(1) // номер варианта в списке ИИ
+  title       String
+  route       String   @default("")
+  rate        String   @default("")
+  date        String   @default("")
+  company     String   @default("")
+  contact     String   @default("")
+  note        String   @default("")
+  engine      String? // какой движок дал ответ: gigachat (старые записи: ultra | reserve)
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/** Переговоры по избранному: чат «Договориться» — человек и модель GigaChat. */
+model AiFavoriteMessage {
+  id          String   @id @default(cuid())
+  favoriteKey String
+  role        String // user | assistant
+  content     String
+  createdAt   DateTime @default(now())
+
+  @@index([favoriteKey, createdAt])
+}
+
+/** Журнал нейросети: что она делала и когда — видно человеку в разделе «ИИ-помощник». */
+model AiLog {
+  id        String   @id @default(cuid())
+  level     String   @default("info") // info | warn | error
+  action    String // chat_start | chat_done | search_start | search_done | search_error | list_write | list_clear
+  message   String
+  details   String? // JSON: параметры запроса, объём контекста и т.п.
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+/** Чат с нейросетью: полная история переписки per-пользователя (в отличие от AiListItem —
+ *  это именно диалог: сообщения человека и модели, шаги работы, прикреплённые файлы
+ *  и виджеты, чтобы после перезагрузки страницы чат оставался на месте). */
+model AiChatMessage {
+  id          String   @id @default(cuid())
+  userId      String // чей вопрос/ответ (auth.id)
+  role        String // user | assistant
+  content     String // текст сообщения (у assistant — итоговый разбор после вырезания блоков)
+  modelKey    String? // выбранный уровень модели: GigaChat-2-Max | GigaChat-2-Pro | GigaChat-Max | GigaChat-Plus | GigaChat
+  engine      String? // движок, ответивший на сообщение (gigachat)
+  stepsJson   String? // ход работы текстом (harness-лог): [{at, text}] — «что я сейчас делаю»
+  filesJson   String? // прикреплённые файлы: [{name, size, excerpt}] — метаданные для показа в истории
+  widgetsJson String? // виджеты ответа для повторного показа истории: {best, cards, report, links, saved}
+  createdAt   DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/** Права ИИ-помощника — переопределения администратора. Ключ совпадает с AI_RIGHTS
+ *  из rights.ts; строка здесь означает, что администратор изменил режим права.
+ *  Нет строки — действует значение по умолчанию из кода. */
+model AiRight {
+  key       String   @id
+  mode      String // write | read-partial | denied — режим, выставленный администратором
+  updatedBy String // login администратора, последним тронувшего право
+  updatedAt DateTime @updatedAt
+
+  @@index([mode])
 }
