@@ -820,6 +820,10 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   const nav = navFor(role.kind).filter((n) => sectionAllowed(n.key, can))
   const attractedNav = nav.filter((n) => n.group === 'attracted')
   const ownNav = nav.filter((n) => n.group === 'own')
+  // ИИ-помощник и «Избранное» — не транспортные разделы: на десктопе выносим
+  // их в отдельную центрированную полосу между двумя рядами навигации.
+  const aiNav = ownNav.filter((n) => n.key === 'ai' || n.key === 'favorites')
+  const ownTransportNav = ownNav.filter((n) => n.key !== 'ai' && n.key !== 'favorites')
   const adminNav = nav.filter((n) => n.group === 'admin')
   const internal = role.kind !== 'carrier'
   // у внутреннего контура верхняя строка — привлечённый транспорт, нижняя — собственный;
@@ -962,13 +966,45 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             {isAdmin && <div className="ml-auto"><AdminMenu nav={adminNav} tab={tab} onNavigate={onNavigate} /></div>}
           </div>
         </nav>
-        {internal && ownNav.length > 0 && (
+        {/* ИИ-помощник и «Избранное» — по центру между привлечённым и собственным
+            транспортом: не конкурируют за место в ряду и всегда на виду. */}
+        {internal && aiNav.length > 0 && (
+          <nav aria-label="ИИ-помощник" className="hidden border-t border-white/10 md:block">
+            <div className="flex w-full items-center gap-3 px-4 py-1 sm:px-6">
+              <span aria-hidden className="h-px flex-1 bg-white/10" />
+              <div className="flex items-center gap-1.5">
+                {aiNav.map((item) => {
+                  const { Icon } = TAB_ICONS[item.key]
+                  const active = tab === item.key
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => onNavigate(item.key)}
+                      aria-current={active ? 'page' : undefined}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1 text-xs font-semibold transition-colors ${
+                        active
+                          ? 'border-emerald-300 bg-emerald-400 text-[#0E1B2C]'
+                          : 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20 hover:text-white'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" aria-hidden />
+                      {item.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <span aria-hidden className="h-px flex-1 bg-white/10" />
+            </div>
+          </nav>
+        )}
+        {internal && ownTransportNav.length > 0 && (
           <nav aria-label="Собственный транспорт" className="hidden border-t border-white/10 md:block">
             {/* Нижний уровень: собственный парк АЭМЗ — заявки 1С, ATI.SU, занятость,
                 планирование, мониторинг и справочники парка. */}
             <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
               <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/80">Собственный транспорт</span>
-              {ownNav.map((item) => (
+              {ownTransportNav.map((item) => (
                 <button
                   key={item.key}
                   onClick={() => onNavigate(item.key)}
