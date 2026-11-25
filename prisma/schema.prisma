@@ -460,7 +460,7 @@ model EdoDocument {
   kind            String // POA | ORDER | ETRN | ACT
   party           String // EXPEDITOR | CARRIER
   number          String // номер документа (ДОВ-1042, ПОР-1042, ЭТрН 1042, АКТ-1042)
-  payload         String // JSON: реквизиты для рендера скана и подписантов
+  payload         String // JSON: реквизиты для рендера скрана и подписантов
   aemzSigned      Boolean   @default(false)
   aemzSignedAt    DateTime?
   aemzSigner      String?
@@ -687,6 +687,21 @@ model AiFavoriteMessage {
   createdAt   DateTime @default(now())
 
   @@index([favoriteKey, createdAt])
+}
+
+/** Избранное агента: ответы чата, сохранённые человеком, — календарь в «Избранном».
+ *  messageId (если ответ из истории) уникален — повторное сохранение обновляет копию. */
+model AiSavedMessage {
+  id        String   @id @default(cuid())
+  userId    String // чьё сохранение (auth.id)
+  messageId String?  @unique // исходное сообщение чата (AiChatMessage.id)
+  question  String // вопрос, на который агент дал ответ
+  answer    String // текст сохранённого ответа
+  modelKey  String? // уровень модели: GigaChat-2-Max | GigaChat-2-Pro | GigaChat-Max | GigaChat-Plus | GigaChat
+  engine    String? // движок, ответивший (gigachat)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 /** Журнал нейросети: что она делала и когда — видно человеку в разделе «ИИ-помощник». */
