@@ -129,6 +129,25 @@ export function navFor(role: RoleKind): { key: TabKey; label: string; group: Nav
   return NAV_ALL.filter((n) => n.roles.includes(role)).map(({ key, label, group, muted }) => ({ key, label, group, muted }))
 }
 
+/** Короткие подписи для рядов шапки (десктоп): чтобы все кнопки вмещались
+ *  в один ряд без переноса. Полное название остаётся в тултипе, боковом меню
+ *  и заголовке раздела. */
+const ROW_SHORT: Partial<Record<TabKey, string>> = {
+  board: 'Площадка', // Площадка заявок
+  drafts: 'Черновики', // Черновики заявок
+  verify: 'Проверка', // Проверка документов
+  requests: 'Заявки', // Реестр заявок
+  registry: 'Рейсы', // Реестр рейсов
+  edo: 'ЭДО', // Подписать ЭДО
+  journal: 'Журнал', // Журнал событий
+  contacts: 'Контакты', // Память контактов
+}
+
+/** подпись кнопки в ряду шапки: короткая, если есть, иначе полная */
+function rowLabel(key: TabKey, label: string): string {
+  return ROW_SHORT[key] ?? label
+}
+
 /** Разделы, закрытые правом: без права раздел не показывается в меню и не открывается */
 const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
   board: 'section:board',
@@ -821,7 +840,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   const attractedNav = nav.filter((n) => n.group === 'attracted')
   const ownNav = nav.filter((n) => n.group === 'own')
   // ИИ-помощник и «Избранное» — не транспортные разделы: на десктопе выносим
-  // их в отдельную центрированную полосу между двумя рядами навигации.
+  // их в отдельную полосу у левого края между двумя рядами навигации.
   const aiNav = ownNav.filter((n) => n.key === 'ai' || n.key === 'favorites')
   const ownTransportNav = ownNav.filter((n) => n.key !== 'ai' && n.key !== 'favorites')
   const adminNav = nav.filter((n) => n.group === 'admin')
@@ -943,79 +962,83 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
         </div>
         <nav aria-label="Привлечённый транспорт" className="hidden border-t border-white/10 md:block">
           {/* Верхний уровень: всё, что относится к привлечённому транспорту.
-              Служебные разделы администрации — в меню «Управление», чтобы не занимать строку. */}
+              Служебные разделы администрации — в меню «Управление», чтобы не занимать строку.
+              Кнопки компактные — чтобы весь ряд помещался без переноса. */}
           <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
-            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-blue-300/70">Привлечённый транспорт</span>
+            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-blue-300/70" aria-hidden>
+              <span className="hidden 2xl:inline">Привлечённый транспорт</span>
+              <span className="2xl:hidden">Привлечённый</span>
+            </span>
             {attractedNav.map((item) => (
               <button
                 key={item.key}
                 onClick={() => onNavigate(item.key)}
                 aria-current={tab === item.key ? 'page' : undefined}
-                className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
+                className={`whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors ${
                   tab === item.key
                     ? 'bg-white font-semibold text-[#0E1B2C]'
                     : item.muted
                       ? 'text-blue-200/45 hover:bg-white/5 hover:text-blue-100'
                       : 'text-blue-100 hover:bg-white/10 hover:text-white'
                 }`}
-                title={item.muted ? 'Раздел в подготовке' : undefined}
+                title={ROW_SHORT[item.key] ? item.label : item.muted ? 'Раздел в подготовке' : undefined}
               >
-                {item.label}
+                {rowLabel(item.key, item.label)}
               </button>
             ))}
             {isAdmin && <div className="ml-auto"><AdminMenu nav={adminNav} tab={tab} onNavigate={onNavigate} /></div>}
           </div>
         </nav>
-        {/* ИИ-помощник и «Избранное» — по центру между привлечённым и собственным
-            транспортом: не конкурируют за место в ряду и всегда на виду. */}
+        {/* ИИ-помощник и «Избранное» — у левого края между привлечённым и собственным
+            транспортом: без разделителей, ряд не тратит место и всегда на виду. */}
         {internal && aiNav.length > 0 && (
           <nav aria-label="ИИ-помощник" className="hidden border-t border-white/10 md:block">
-            <div className="flex w-full items-center gap-3 px-4 py-1 sm:px-6">
-              <span aria-hidden className="h-px flex-1 bg-white/10" />
-              <div className="flex items-center gap-1.5">
-                {aiNav.map((item) => {
-                  const { Icon } = TAB_ICONS[item.key]
-                  const active = tab === item.key
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => onNavigate(item.key)}
-                      aria-current={active ? 'page' : undefined}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1 text-xs font-semibold transition-colors ${
-                        active
-                          ? 'border-emerald-300 bg-emerald-400 text-[#0E1B2C]'
-                          : 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20 hover:text-white'
-                      }`}
-                    >
-                      <Icon className="h-3.5 w-3.5" aria-hidden />
-                      {item.label}
-                    </button>
-                  )
-                })}
-              </div>
-              <span aria-hidden className="h-px flex-1 bg-white/10" />
+            <div className="flex w-full flex-wrap items-center gap-1.5 px-2 py-1.5 sm:px-6">
+              {aiNav.map((item) => {
+                const { Icon } = TAB_ICONS[item.key]
+                const active = tab === item.key
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => onNavigate(item.key)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1 text-xs font-semibold transition-colors ${
+                      active
+                        ? 'border-emerald-300 bg-emerald-400 text-[#0E1B2C]'
+                        : 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20 hover:text-white'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" aria-hidden />
+                    {item.label}
+                  </button>
+                )
+              })}
             </div>
           </nav>
         )}
         {internal && ownTransportNav.length > 0 && (
           <nav aria-label="Собственный транспорт" className="hidden border-t border-white/10 md:block">
             {/* Нижний уровень: собственный парк АЭМЗ — заявки 1С, ATI.SU, занятость,
-                планирование, мониторинг и справочники парка. */}
+                планирование, мониторинг и справочники парка. Кнопки компактные — как в верхнем ряду. */}
             <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
-              <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/80">Собственный транспорт</span>
+              <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/80" aria-hidden>
+                <span className="hidden 2xl:inline">Собственный транспорт</span>
+                <span className="2xl:hidden">Собственный</span>
+              </span>
               {ownTransportNav.map((item) => (
                 <button
                   key={item.key}
                   onClick={() => onNavigate(item.key)}
                   aria-current={tab === item.key ? 'page' : undefined}
-                  className={`whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
+                  className={`whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors ${
                     tab === item.key
                       ? 'bg-emerald-400 font-semibold text-[#0E1B2C]'
                       : 'text-emerald-100 hover:bg-emerald-400/10 hover:text-white'
                   }`}
+                  title={ROW_SHORT[item.key] ? item.label : undefined}
                 >
-                  {item.label}
+                  {rowLabel(item.key, item.label)}
                 </button>
               ))}
             </div>
