@@ -1,19 +1,20 @@
 'use client'
 
 /**
- * Раздел «Нейросеть» (только администратор) — настройки пропуска документов.
+ * Раздел «Padleocr» (только администратор) — настройки пропуска документов.
  *
- * Фото и файлы хранятся на серверах АЭМЗ; распознавание работает на серверах АЭМЗ
- * (сейчас показательно развёрнуто на отдельном GPU-ПК — временный стенд, подбор по
- * объёму VRAM). Значения хранятся в БД и применяются сразу после сохранения (очередь
- * распознавания перечитывает их перед каждым документом): максимум фото в обработке,
- * таймаут, кэш повторных сканов и сжатие фото перед отправкой в нейросеть.
+ * Движок распознавания — PaddleOCR (в интерфейсе называется «Padleocr»). Фото и файлы
+ * хранятся на серверах АЭМЗ; распознавание работает на серверах АЭМЗ (сейчас показательно
+ * развёрнуто на отдельном GPU-ПК — временный стенд, подбор по объёму VRAM). Значения
+ * хранятся в БД и применяются сразу после сохранения (очередь распознавания перечитывает
+ * их перед каждым документом): максимум фото в обработке, таймаут, кэш повторных
+ * сканов и сжатие фото перед отправкой в нейросеть.
  *
  * Многопользовательский сценарий: несколько перевозчиков могут подавать документы
  * одновременно — все фото встают в общую очередь; машина берёт в работу не больше
  * «максимума фото в обработке», остальные честно ждут своего хода.
  *
- * Здесь же — живая статистика контура (шлюз, очередь, кэш), проверка нейросети
+ * Здесь же — живая статистика контура (шлюз, очередь, кэш), проверка Padleocr
  * и реальный тестовый прогон демо-скана с замером времени.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -130,7 +131,7 @@ export default function NeuralTab(_: TabProps) {
       setStatus((s) => (s ? { ...s, settings: res.settings, limits: res.limits } : s))
       setDraft(res.settings)
       toast({
-        title: 'Настройки нейросети сохранены',
+        title: 'Настройки Padleocr сохранены',
         description: 'Применены сразу — очередь распознавания уже работает с новыми значениями',
       })
       void load()
@@ -195,7 +196,7 @@ export default function NeuralTab(_: TabProps) {
     }
   }
 
-  if (status === null && !error) return <LoadingBlock label="Загрузка настроек нейросети…" />
+  if (status === null && !error) return <LoadingBlock label="Загрузка настроек Padleocr…" />
   if (error && !status) return <ErrorBlock message={error} onRetry={() => { setError(null); void load() }} />
 
   const lim = status?.limits
@@ -203,7 +204,11 @@ export default function NeuralTab(_: TabProps) {
 
   return (
     <div>
-      <SectionHeader title="Нейросеть" />
+      <SectionHeader
+        title="Padleocr"
+        eyebrow="Администрирование"
+        desc="Движок распознавания документов (PaddleOCR) на серверах АЭМЗ: пропуск документов, кэш повторных сканов и живой статус контура. Права нейросети ИИ-помощника — в разделе «Облачная LLM»."
+      />
 
       {/* ——— 1. Пропуск документов ——— */}
       <Card className="border-slate-200 shadow-sm">
@@ -213,7 +218,7 @@ export default function NeuralTab(_: TabProps) {
             Пропуск документов
           </CardTitle>
           <CardDescription>
-            Скорость и надёжность распознавания нейросети на серверах АЭМЗ. Несколько перевозчиков могут подавать
+            Скорость и надёжность распознавания Padleocr на серверах АЭМЗ. Несколько перевозчиков могут подавать
             документы одновременно — все фото встают в общую очередь, машина берёт в работу не больше
             «максимума фото в обработке», остальные ждут. Изменения применяются сразу после сохранения — без перезапуска
           </CardDescription>
@@ -229,7 +234,7 @@ export default function NeuralTab(_: TabProps) {
                 max={lim.parallel.max}
                 step={1}
                 display={`${draft.parallel} фото`}
-                hint="Сколько фотографий машина нейросети обрабатывает одновременно — подбирается под объём VRAM видеокарты. Остальные фото автоматически ждут в общей очереди: неважно, сколько перевозчиков загрузили единовременно."
+                hint="Сколько фотографий машина Padleocr обрабатывает одновременно — подбирается под объём VRAM видеокарты. Остальные фото автоматически ждут в общей очереди: неважно, сколько перевозчиков загрузили единовременно."
                 onChange={(v) => setDraft((d) => (d ? { ...d, parallel: v } : d))}
               />
 
@@ -241,7 +246,7 @@ export default function NeuralTab(_: TabProps) {
                 max={lim.timeoutSec.max}
                 step={10}
                 display={fmtSec(draft.timeoutSec)}
-                hint="Сколько ждать нейросеть по одному документу. Если узел нейросети недоступен или завис — документ раньше выйдет из ожидания и вернётся «на проверку»."
+                hint="Сколько ждать Padleocr по одному документу. Если узел распознавания недоступен или завис — документ раньше выйдет из ожидания и вернётся «на проверку»."
                 onChange={(v) => setDraft((d) => (d ? { ...d, timeoutSec: v } : d))}
               />
 
@@ -253,7 +258,7 @@ export default function NeuralTab(_: TabProps) {
                 max={lim.cacheMin.max}
                 step={5}
                 display={fmtCache(draft.cacheMin)}
-                hint="Тот же файл (по содержимому) за это время распознаётся мгновенно, без повторного прогона нейросети. 0 — кэш выключен."
+                hint="Тот же файл (по содержимому) за это время распознаётся мгновенно, без повторного прогона Padleocr. 0 — кэш выключен."
                 onChange={(v) => setDraft((d) => (d ? { ...d, cacheMin: v } : d))}
               />
 
@@ -279,7 +284,7 @@ export default function NeuralTab(_: TabProps) {
                     max={lim.maxSide.max}
                     step={100}
                     display={`${draft.maxSide} px`}
-                    hint="Фото уменьшается до этого размера перед отправкой в нейросеть: меньше мегабайт и пикселей — быстрее распознавание. Слишком маленькое значение снижает читаемость мелкого текста."
+                    hint="Фото уменьшается до этого размера перед отправкой в Padleocr: меньше мегабайт и пикселей — быстрее распознавание. Слишком маленькое значение снижает читаемость мелкого текста."
                     onChange={(v) => setDraft((d) => (d ? { ...d, maxSide: v } : d))}
                   />
                 ) : (
@@ -318,7 +323,7 @@ export default function NeuralTab(_: TabProps) {
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
             <StatChip
               Icon={BrainCircuit}
-              label="Нейросеть"
+              label="Padleocr"
               value={svc?.running ? 'работает' : 'недоступна'}
               tone={svc?.running ? 'ok' : 'bad'}
             />
@@ -332,7 +337,7 @@ export default function NeuralTab(_: TabProps) {
           <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
             <Button variant="outline" className="gap-1.5" onClick={() => void checkEngine()} disabled={checking}>
               {checking ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> : <BrainCircuit className="h-4 w-4" aria-hidden />}
-              Проверить нейросеть
+              Проверить Padleocr
             </Button>
             <Button variant="outline" className="gap-1.5" onClick={() => void clearCache()}>
               <Eraser className="h-4 w-4" aria-hidden />
@@ -357,7 +362,7 @@ export default function NeuralTab(_: TabProps) {
             Тестовый прогон
           </CardTitle>
           <CardDescription>
-            Реальный путь демо-скана: платформа → шлюз → нейросеть на серверах АЭМЗ. Замер — с учётом текущих настроек
+            Реальный путь демо-скана: платформа → шлюз → Padleocr на серверах АЭМЗ. Замер — с учётом текущих настроек
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -374,7 +379,7 @@ export default function NeuralTab(_: TabProps) {
             </Select>
             <Button onClick={() => void runTest()} disabled={testing}>
               {testing ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
-              {testing ? 'Нейросеть распознаёт…' : 'Запустить распознавание'}
+              {testing ? 'Padleocr распознаёт…' : 'Запустить распознавание'}
             </Button>
           </div>
 
