@@ -239,6 +239,24 @@ async function backfillDriverAppPerm(): Promise<void> {
 }
 
 /**
+ * Новый раздел «Облачная LLM» (права нейросети ИИ-помощника) — администрация.
+ * Существующие должности уже хранят свои section:*, поэтому backfillSectionPerms их
+ * не трогает — выдаём право адресно всем шаблонам контура «Администрация»,
+ * у которых уже есть «Padleocr» (section:neural): кто управлял распознаванием,
+ * тот управляет и правами облачной LLM. Идемпотентно.
+ */
+async function backfillLlmPerm(): Promise<void> {
+  const templates = await db.accessTemplate.findMany({
+    where: { contour: 'admin' },
+    select: { id: true, perms: { where: { key: { in: ['section:neural', 'section:llm'] } }, select: { key: true } } },
+  })
+  const rows = templates
+    .filter((t) => t.perms.some((p) => p.key === 'section:neural') && !t.perms.some((p) => p.key === 'section:llm'))
+    .map((t) => ({ templateId: t.id, key: 'section:llm' }))
+  if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
+}
+
+/**
  * Новые разделы «ИИ-помощник» и «Память контактов» (логист + администрация).
  * Существующие должности уже хранят свои section:*, поэтому новые права выдаём
  * адресно шаблонам контуров «логист» и «администрация». Идемпотентно.
@@ -270,6 +288,7 @@ export async function ensureAccess(): Promise<void> {
     await backfillDriverAppPerm()
     await backfillOwnTransportPerms()
     await backfillAiPerms()
+    await backfillLlmPerm()
     // пользователи без должности с прежними правами (после обновления) получают ближайшую должность;
     // новые учётки создаются сразу с должностью, поэтому повторно это почти ничего не делает
     const pending = await db.user.count({ where: { templateId: null, OR: [{ permOverrides: { not: null } }, { profileEditOwn: { not: null } }] } })
