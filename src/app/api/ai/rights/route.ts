@@ -5,13 +5,15 @@ import {
   AI_RIGHTS_LOCKED, aiLog, getAiRights, invalidateAiRightsCache,
 } from '@/lib/ai/core'
 import { AI_RIGHT_MODE_LABELS } from '@/lib/ai/rights'
+import { gigachatConnectionInfo } from '@/lib/ai/gigachat'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/ai/rights — действующая матрица прав ИИ (значения по умолчанию
- * + переопределения администратора). Читают все: в разделе «Права» чата
- * видно, что нейросети сейчас разрешено.
+ * + переопределения администратора) и состояние облачного движка GigaChat.
+ * Читают все: в разделе «Права» чата и в разделе «Облачная LLM» (Управление)
+ * видно, что нейросети сейчас разрешено и настроен ли движок.
  *
  * PUT /api/ai/rights — изменить режим права. Только АДМИНИСТРАТОР.
  * Тело: {key: 'contacts-read', mode: 'read-partial'}.
@@ -31,6 +33,7 @@ export async function GET() {
     rights: rights.map((r) => ({ ...r })),
     locked: [...AI_RIGHTS_LOCKED],
     editable: auth.role === 'admin',
+    engine: gigachatConnectionInfo(),
   })
 }
 

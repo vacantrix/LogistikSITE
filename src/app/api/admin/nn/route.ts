@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
       ok: false, ms, docType, label: demo.label,
       error: result.kind === 'unsupported'
         ? 'Вид документа не распознаётся движком (422)'
-        : 'Нейросеть не ответила — проверьте узел нейросети и связь с ним',
+        : 'Padleocr не ответил — проверьте узел распознавания и связь с ним',
       settings: { parallel: settings.parallel, timeoutSec: settings.timeoutSec, cacheMin: settings.cacheMin, maxSide: settings.maxSide },
     })
   }
