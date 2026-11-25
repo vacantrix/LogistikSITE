@@ -33,6 +33,7 @@ import AdminUsersTab from '@/components/platform/admin-users'
 import AdminDbTab from '@/components/platform/admin-db'
 import ArchitectureTab from '@/components/platform/architecture'
 import NeuralTab from '@/components/platform/neural'
+import CloudLlmTab from '@/components/platform/cloud-llm'
 import SettingsTab from '@/components/platform/settings'
 import { PermProvider, useCan, usePerms } from '@/components/platform/perms'
 import ContactsMemoryTab from '@/components/platform/contacts-memory'
@@ -84,7 +85,7 @@ export default function Page() {
     }
   }, [])
 
-  // микротаск: проверка сессии после монтирования (как раньше восстанавливалась роль)
+  // микрозадача: проверка сессии после монтирования (как раньше восстанавливалась роль)
   useEffect(() => { void Promise.resolve().then(loadSession) }, [loadSession])
 
   // любой ответ 401 (сессия истекла, доступ перевозчика закрыт) возвращает на экран входа
@@ -299,13 +300,14 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
           {tab === 'ai' && <AiAssistantTab {...tabProps} />}
           {tab === 'favorites' && <FavoritesTab {...tabProps} />}
           {tab === 'nn' && <NeuralTab {...tabProps} />}
+          {tab === 'llm' && <CloudLlmTab {...tabProps} />}
           {tab === 'settings' && <SettingsTab {...tabProps} />}
           {tab === 'admin-users' && <AdminUsersTab {...tabProps} />}
           {tab === 'admin-db' && <AdminDbTab {...tabProps} />}
           {tab === 'arch' && <ArchitectureTab {...tabProps} />}
           {tab === 'driver-app' && <DriverAppTab liveTick={liveTick} />}
         </>
-      )}
+      )
 
       {/* потеря соединения (Task 52 + аудит №3): первые 8 секунд — оверлей (обычный
           рестарт шины укладывается в 1–3 с), при долгом простое — неблокирующий баннер */}

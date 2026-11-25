@@ -3,7 +3,7 @@
  * импортируется и на клиенте (раздел «Профили и доступы», подсказки), и на сервере,
  * и в сид-скриптах. Проверка прав — в src/lib/permissions.ts.
  *
- * Модель доступа «контур → должность → исключения»:
+ * Модель доступа «контур → должность → исключение»:
  *  1. Контур — роль учётной записи (администрация / логист / перевозчик). Определяет,
  *     какие права для пользователя вообще существуют: право вне контура не выдаётся
  *     и всегда ложно (админу нельзя дать «Создание черновиков», перевозчику — «Отчёты»).
@@ -71,6 +71,7 @@ export type PermKey =
   | 'section:adminDb'
   | 'section:arch'
   | 'section:neural'
+  | 'section:llm'
   | 'section:ownRequests'
   | 'section:ownAtisu'
   | 'section:ownOccupancy'
@@ -183,7 +184,8 @@ export const PERMS: PermItem[] = [
   { key: 'section:adminUsers', group: 'Разделы: управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Вкладка «Профили и доступы»: учётные записи, должности и исключения' },
   { key: 'section:adminDb', group: 'Разделы: управление', contours: A, risk: 'critical', label: 'База данных', hint: 'Вкладка «База данных»' },
   { key: 'section:arch', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Архитектура', hint: 'Вкладка «Архитектура»' },
-  { key: 'section:neural', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Нейросеть', hint: 'Вкладка «Нейросеть»' },
+  { key: 'section:neural', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Padleocr', hint: 'Вкладка «Padleocr»: настройки пропуска документов — движок распознавания на серверах АЭМЗ' },
+  { key: 'section:llm', group: 'Разделы: управление', contours: A, risk: 'important', label: 'Облачная LLM', hint: 'Вкладка «Облачная LLM»: права нейросети ИИ-помощника и состояние облачного движка GigaChat' },
 
   { key: 'admin:users', group: 'Управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Учётные записи, должности и исключения' },
   { key: 'admin:db', group: 'Управление', contours: A, risk: 'critical', label: 'Редактор базы данных', hint: 'Раздел «База данных»: прямая правка записей' },
@@ -259,7 +261,7 @@ export const OWN_VIEW_SECTIONS: PermKey[] = [
   'section:ownPlanning', 'section:ownMonitor', 'section:ownDirectory', 'section:ai',
 ]
 export const ADMIN_VIEW_SECTIONS: PermKey[] = [
-  'section:settings', 'section:adminUsers', 'section:adminDb', 'section:arch', 'section:neural',
+  'section:settings', 'section:adminUsers', 'section:adminDb', 'section:arch', 'section:neural', 'section:llm',
   'section:ownAudit', 'section:driverApp',
 ]
 export const CARRIER_VIEW_SECTIONS: PermKey[] = [
