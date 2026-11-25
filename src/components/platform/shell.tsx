@@ -207,3 +207,177 @@ export interface RoleSelection {
   /** перевозчик (для kind = carrier) */
   carrierId?: string | null
 }
+
+/** Кнопка нижней панели: иконка + короткая подпись, полоска-индикатор у активного раздела */
+function TabItem({ tabKey, label, short, active, onClick, Icon, muted }: {
+  tabKey: string
+  label: string
+  short: string
+  active: boolean
+  onClick: () => void
+  Icon: ComponentType<{ className?: string }>
+  muted?: boolean
+}) {
+  return (
+    <button
+      key={tabKey}
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      aria-label={label}
+      title={muted ? `${label} — в подготовке` : label}
+      className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 px-0.5 pt-1.5 pb-1 transition-colors ${
+        active ? 'text-slate-900' : muted ? 'text-slate-400/70 active:bg-slate-100' : 'text-slate-500 active:bg-slate-100'
+      }`}
+    >
+      {/* индикатор активного раздела — полоска сверху */}
+      <span
+        aria-hidden
+        className={`absolute top-0 h-0.5 w-8 rounded-full bg-blue-700 transition-opacity ${active ? 'opacity-100' : 'opacity-0'}`}
+      />
+      <Icon className="h-5 w-5" />
+      <span className="max-w-full truncate text-[10px] font-medium leading-none">{short}</span>
+    </button>
+  )
+}
+
+/** Нижний Tab Bar (мобильные, < md): до 5 разделов иконками с подписями.
+ *  Если разделов больше 5 — последний пункт «Ещё» открывает лист с остальными.
+ *  Зафиксирован внизу экрана, поверх контента при скролле, с safe-area iOS/Android. */
+function BottomTabBar({ tab, onNavigate, nav }: {
+  tab: TabKey
+  onNavigate: (t: TabKey) => void
+  nav: { key: TabKey; label: string; muted?: boolean }[]
+}) {
+  const [moreOpen, setMoreOpen] = useState(false)
+  const MAX_ITEMS = 5
+  const visible = nav.slice(0, MAX_ITEMS - (nav.length > MAX_ITEMS ? 1 : 0))
+  const hidden = nav.slice(visible.length)
+
+  return (
+    <>
+      <nav
+        aria-label="Нижняя навигация по разделам"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white shadow-[0_-4px_16px_rgba(15,23,42,0.08)] md:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="grid auto-cols-fr grid-flow-col">
+          {visible.map((n) => (
+            <TabItem
+              key={n.key}
+              tabKey={n.key}
+              label={n.label}
+              short={TAB_ICONS[n.key].short}
+              active={tab === n.key}
+              muted={n.muted}
+              onClick={() => onNavigate(n.key)}
+              Icon={TAB_ICONS[n.key].Icon}
+            />
+          ))}
+          {hidden.length > 0 && (
+            <TabItem
+              key="__more"
+              tabKey="__more"
+              label="Все разделы"
+              short="Ещё"
+              active={hidden.some((n) => n.key === tab)}
+              onClick={() => setMoreOpen(true)}
+              Icon={MoreHorizontal}
+            />
+          )}
+        </div>
+      </nav>
+
+      {/* меню «Ещё»: разделы, не поместившиеся в панель */}
+      <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+        <SheetContent side="bottom" className="rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <SheetHeader className="pb-1 text-left">
+            <SheetTitle>Все разделы</SheetTitle>
+            <SheetDescription>Разделы, не поместившиеся в нижнюю панель</SheetDescription>
+          </SheetHeader>
+          <div className="grid grid-cols-1 gap-1 pb-2">
+            {hidden.map((n) => {
+              const { Icon } = TAB_ICONS[n.key]
+              const active = tab === n.key
+              return (
+                <button
+                  key={n.key}
+                  type="button"
+                  onClick={() => { setMoreOpen(false); onNavigate(n.key) }}
+                  aria-current={active ? 'page' : undefined}
+                  className={`flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                    active ? 'bg-slate-100 text-slate-900' : n.muted ? 'text-slate-400 hover:bg-slate-50' : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <Icon className="h-5 w-5 shrink-0" />
+                  <span className="flex-1">{n.label}</span>
+                  {n.muted && !active && <span className="text-[11px] font-normal text-slate-400">в подготовке</span>}
+                  {active && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-700" aria-hidden />}
+                </button>
+              )
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
+  )
+}
+
+/** Иконка и бейдж роли в меню аккаунта */
+function RoleIcon({ role, className }: { role: RoleKind; className?: string }) {
+  if (role === 'admin') return <ShieldCheck className={`${className ?? 'h-4 w-4'} text-violet-600`} aria-hidden />
+  return role === 'logist'
+    ? <UserCog className={`${className ?? 'h-4 w-4'} text-blue-600`} aria-hidden />
+    : <Building2 className={`${className ?? 'h-4 w-4'} text-emerald-600`} aria-hidden />
+}
+
+const roleLabelOf = (role: RoleKind): string =>
+  role === 'admin' ? 'администрация' : role === 'logist' ? 'логист АЭМЗ' : 'перевозчик'
+
+/** Данные проформы для плашки аккаунта: ФИО крупнее, ниже — должность и организация.
+ *  Без проформы — имя учётки и роль. */
+function pillLines(profile: ProfileDTO | null, user: SessionUserDTO): { title: string; position: string; company: string } {
+  return {
+    title: profile?.fullName?.trim() || user.name,
+    position: profile?.position?.trim() || '',
+    company: profile?.companyName?.trim() || '',
+  }
+}
+
+/** Строка под ФИО в триггере плашки: должность слева, затем организация (переносится внутри пузыря) */
+const pillSub = (l: { position: string; company: string }, fallback: string): string =>
+  [l.position, l.company].filter(Boolean).join(' · ') || fallback
+
+/** Редактируемые поля проформы — форма правки переехала из раздела «Профиль» в плашку */
+type ProfileDraft = Pick<ProfileDTO,
+  'fullName' | 'position' | 'phone' | 'email' | 'companyName' | 'inn' | 'kpp' | 'address' | 'director' | 'contactName' | 'note'>
+
+const toDraft = (p: ProfileDTO): ProfileDraft => ({
+  fullName: p.fullName, position: p.position, phone: p.phone, email: p.email,
+  companyName: p.companyName, inn: p.inn, kpp: p.kpp, address: p.address,
+  director: p.director, contactName: p.contactName, note: p.note,
+})
+
+/** Поле формы правки профиля внутри плашки */
+function EditField({ id, label, value, onChange, placeholder, type = 'text' }: {
+  id: string
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <div className="min-w-0 space-y-1">
+      <Label htmlFor={id} className="text-[11px] font-normal text-slate-500">{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-9 text-sm"
+      />
+    </div>
+  )
+}
