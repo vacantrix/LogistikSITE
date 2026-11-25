@@ -460,7 +460,7 @@ model EdoDocument {
   kind            String // POA | ORDER | ETRN | ACT
   party           String // EXPEDITOR | CARRIER
   number          String // номер документа (ДОВ-1042, ПОР-1042, ЭТрН 1042, АКТ-1042)
-  payload         String // JSON: реквизиты для рендера скрана и подписантов
+  payload         String // JSON: реквизиты для рендера скана и подписантов
   aemzSigned      Boolean   @default(false)
   aemzSignedAt    DateTime?
   aemzSigner      String?
