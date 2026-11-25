@@ -6,7 +6,7 @@
  *    сверка, реестр, справочники, отчёты;
  *  — кабинет перевозчика: участие в отборе рейсов, свои заявки и документы.
  *
- * Мобильная версия (ТЗ Task 67):
+ *  Мобильная версия (ТЗ Task 67):
  *  — шапка предельно компактная (один ряд 48px), закреплена сверху (sticky) и содержит
  *    только критичное: логотип, название, колокольчик уведомлений, профиль и выход;
  *  — основное меню перенесено в нижний Tab Bar (как в мобильных приложениях):
@@ -222,7 +222,7 @@ function TabItem({ tabKey, label, short, active, onClick, Icon, muted }: {
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       aria-label={label}
-      title={muted ? 'Раздел в подготовке' : undefined}
+      title={muted ? `${label} — в подготовке` : label}
       className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-0.5 px-0.5 pt-1.5 pb-1 transition-colors ${
         active ? 'text-slate-900' : muted ? 'text-slate-400/70 active:bg-slate-100' : 'text-slate-500 active:bg-slate-100'
       }`}
@@ -673,6 +673,7 @@ function AdminMenu({ nav, tab, onNavigate, compact }: {
           <button
             type="button"
             aria-current={active ? 'page' : undefined}
+            title="Управление платформой"
             className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm transition-colors ${
               active ? 'bg-white font-semibold text-[#0E1B2C]' : 'text-blue-100 hover:bg-white/10 hover:text-white'
             }`}
@@ -923,6 +924,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
                   type="button"
                   onClick={() => onNavigate(item.key)}
                   aria-current={tab === item.key ? 'page' : undefined}
+                  title={item.label}
                   className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-xs transition-colors ${
                     tab === item.key
                       ? 'bg-white font-semibold text-[#0E1B2C]'
@@ -981,7 +983,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
                       ? 'text-blue-200/45 hover:bg-white/5 hover:text-blue-100'
                       : 'text-blue-100 hover:bg-white/10 hover:text-white'
                 }`}
-                title={ROW_SHORT[item.key] ? item.label : item.muted ? 'Раздел в подготовке' : undefined}
+                title={item.muted ? `${item.label} — в подготовке` : item.label}
               >
                 {rowLabel(item.key, item.label)}
               </button>
@@ -990,10 +992,11 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
           </div>
         </nav>
         {/* ИИ-помощник и «Избранное» — у левого края между привлечённым и собственным
-            транспортом: без разделителей, ряд не тратит место и всегда на виду. */}
+            транспортом: плоские кнопки в общем стиле рядов (без капсул-«пузырей»),
+            акцент изумрудный, у каждой кнопки короткий тултип. */}
         {internal && aiNav.length > 0 && (
           <nav aria-label="ИИ-помощник" className="hidden border-t border-white/10 md:block">
-            <div className="flex w-full flex-wrap items-center gap-1.5 px-2 py-1.5 sm:px-6">
+            <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
               {aiNav.map((item) => {
                 const { Icon } = TAB_ICONS[item.key]
                 const active = tab === item.key
@@ -1003,11 +1006,12 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
                     type="button"
                     onClick={() => onNavigate(item.key)}
                     aria-current={active ? 'page' : undefined}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1 text-xs font-semibold transition-colors ${
+                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors ${
                       active
-                        ? 'border-emerald-300 bg-emerald-400 text-[#0E1B2C]'
-                        : 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/20 hover:text-white'
+                        ? 'bg-emerald-400 font-semibold text-[#0E1B2C]'
+                        : 'text-emerald-100 hover:bg-emerald-400/10 hover:text-white'
                     }`}
+                    title={item.label}
                   >
                     <Icon className="h-3.5 w-3.5" aria-hidden />
                     {item.label}
@@ -1036,7 +1040,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
                       ? 'bg-emerald-400 font-semibold text-[#0E1B2C]'
                       : 'text-emerald-100 hover:bg-emerald-400/10 hover:text-white'
                   }`}
-                  title={ROW_SHORT[item.key] ? item.label : undefined}
+                  title={item.muted ? `${item.label} — в подготовке` : item.label}
                 >
                   {rowLabel(item.key, item.label)}
                 </button>

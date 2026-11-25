@@ -1,4 +1,4 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# See https://help.github.com/articles/ignoring-files/ for more information about ignoring files.
 
 # dependencies
 node_modules
@@ -102,3 +102,6 @@ tools/ocr-probe/__pycache__/
 # локальные артефакты песочницы/стенда: pid-файл дев-сервера и журналы
 /dev.pid
 /logs/
+
+# скриншоты проверки (артефакты разработки, не исходники)
+/*.png
