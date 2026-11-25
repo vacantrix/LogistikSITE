@@ -271,7 +271,7 @@ const KIND_META: Record<ArchKind, { label: string; cls: string; Icon: typeof Box
   api: { label: 'API', cls: 'border-violet-200 bg-violet-50 text-violet-700', Icon: FileCode2 },
   lib: { label: 'Логика', cls: 'border-amber-200 bg-amber-50 text-amber-700', Icon: Brain },
   service: { label: 'Сервис', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700', Icon: Server },
-  db: { label: 'База', cls: 'border-teal-200 bg-teal-50 text-teal-700', Icon: Database },
+  db: { label: 'База', cls: 'border-teal-200 bg-teal-50 border-teal-700', Icon: Database },
   integration: { label: 'Интеграция', cls: 'border-orange-200 bg-orange-50 text-orange-700', Icon: Plug },
 }
 
@@ -326,7 +326,7 @@ function MapNode({ node, depth, open, onToggle }: { node: ArchNode; depth: numbe
 const TONE_CLS: Record<'slate' | 'emerald' | 'amber', { box: string; icon: string }> = {
   slate: { box: 'border-slate-200 bg-white', icon: 'border-slate-200 bg-slate-50 text-slate-500' },
   emerald: { box: 'border-emerald-200 bg-white', icon: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-  amber: { box: 'border-amber-200 bg-white', icon: 'border-amber-200 bg-amber-50 text-amber-700' },
+  amber: { box: 'border-amber-200 bg-white', icon: 'border-amber-200 bg-amber-50 bg-amber-700' },
 }
 
 /** Блок схемы: живой статус (точка из опроса), заголовок, подпись и деталь последнего опроса */
@@ -470,7 +470,7 @@ function SchematicMap({ status }: { status: StatusItem[] | null }) {
       <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
           <Cpu className="h-3.5 w-3.5" aria-hidden />
-          Нейросеть на серверах АЭМЗ — сейчас показательно на отдельном GPU-ПК (временный стенд)
+          Нейросеть Padleocr на серверах АЭМЗ — сейчас показательно на отдельном GPU-ПК (временный стенд)
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <SchemeBox status={status} statusId="neural" icon={BrainCircuit} label="PaddleOCR · порт 3031" sub="детекция + чтение документов" tone="amber" />
@@ -635,7 +635,11 @@ export default function ArchitectureTab(_: TabProps) {
 
   return (
     <section aria-labelledby="arch-title">
-      <SectionHeader title="Архитектура платформы" />
+      <SectionHeader
+        title="Архитектура платформы"
+        eyebrow="Администрирование"
+        desc="Карта системы: контуры платформы, шина реального времени, нейросети (Padleocr — локально, Облачная LLM — облако Сбер) и файловый проводник стенда."
+      />
 
       {/* ——— компактная строка живых статусов ——— */}
       <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
