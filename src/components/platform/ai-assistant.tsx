@@ -18,7 +18,9 @@
  *  — кнопка «добавить файл»: текстовые файлы читаются и попадают в контекст;
  *  — кнопки-вкладки «Чат», «Логи», «Список ИИ» убраны: всё отражается в самом
  *    чате; остался единственный переключатель «Права» — матрица доступа ИИ,
- *    которую редактирует администратор (AiRight), она действует сразу.
+ *    которую редактирует администратор (AiRight), она действует сразу;
+ *  — любой ответ агента можно сохранить кнопкой «В избранное» — он попадает
+ *    в календарь раздела «Избранное» (AiSavedMessage) вместе с вопросом.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -52,7 +54,7 @@ import { GIGA_MODELS, DEFAULT_GIGA_MODEL, gigaModelLabel } from '@/lib/ai/models
 import { useToast } from '@/hooks/use-toast'
 import {
   ArrowLeft, Ban, Cpu, Eye, FileText, Loader2, Lock, MessagesSquare, Paperclip, PenLine, RefreshCw, Send,
-  ShieldCheck, Stethoscope, Trash2, X,
+  ShieldCheck, Star, Stethoscope, Trash2, X,
 } from 'lucide-react'
 
 type SubKey = 'chat' | 'rights'
@@ -162,6 +164,10 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
   const [diagBusy, setDiagBusy] = useState(false)
   const [diag, setDiag] = useState<{ answer: string; engine: string; model: string; latencyMs: number } | null>(null)
   const [diagError, setDiagError] = useState<string | null>(null)
+  // ——— сохранение ответов в «Избранное» (календарь агента) ———
+  // id уже сохранённых сообщений (звезда заполнена) + какое сохраняем прямо сейчас
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
+  const [savingAnswer, setSavingAnswer] = useState<string | null>(null)
   const chatEndRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -232,6 +238,9 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
       const rows = (json.messages ?? []) as ChatMessage[]
       setMessages(rows)
+      // какие ответы уже в «Избранном» — звезда у них заполнена
+      const saved = Array.isArray(json.savedMessageIds) ? (json.savedMessageIds as string[]) : []
+      setSavedIds(new Set(saved))
     } catch (e) {
       setHistoryError(e instanceof Error ? e.message : String(e))
       setMessages([])
@@ -241,6 +250,48 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
   useEffect(() => {
     if (sub === 'chat') void loadHistory()
   }, [sub, loadHistory])
+
+  // ——— сохранить ответ агента в «Избранное» (календарь ответов) ———
+  const saveAnswer = useCallback(async (m: ChatMessage, question: string) => {
+    if (!m.id || savingAnswer || savedIds.has(m.id)) return
+    setSavingAnswer(m.id)
+    try {
+      const res = await aiFetch('/api/ai/saved-messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          messageId: m.id,
+          question,
+          answer: m.content,
+          modelKey: m.modelKey,
+          engine: m.engine,
+        }),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      setSavedIds((prev) => new Set(prev).add(m.id))
+      toast({
+        title: 'Ответ сохранён в избранное',
+        description: 'Календарь сохранённых ответов — раздел «Избранное».',
+      })
+    } catch (e) {
+      toast({
+        title: 'Не удалось сохранить',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'destructive',
+      })
+    } finally {
+      setSavingAnswer(null)
+    }
+  }, [savingAnswer, savedIds, toast])
+
+  /** вопрос, на который агент дал этот ответ: ближайшее сообщение человека выше в ленте */
+  const questionBefore = useCallback((idx: number): string => {
+    const list = messages ?? []
+    for (let i = idx - 1; i >= 0; i--) {
+      if (list[i].role === 'user') return list[i].content
+    }
+    return ''
+  }, [messages])
 
   const newChat = useCallback(async () => {
     if (!clearArmed) {
@@ -473,7 +524,7 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
       <SectionHeader
         eyebrow="Нейросеть-консультант"
         title="ИИ-помощник"
-        desc="Чат с нейросетью на чёрно-белом экране: ход работы она пишет простым текстом прямо в ленте — как в harness, ответ печатается медленно и постепенно. Уровень GigaChat выбирается рядом с кнопкой отправки, файлы прикрепляются скрепкой. Карточки, отчёты (Word) и переходы к разделам появляются в самом чате. Единственный переключатель — «Права»: матрицу редактирует администратор, действует сразу."
+        desc="Чат с нейросетью на чёрно-белом экране: ход работы она пишет простым текстом прямо в ленте — как в harness, ответ печатается медленно и постепенно. Уровень GigaChat выбирается рядом с кнопкой отправки, файлы прикрепляются скрепкой. Карточки, отчёты (Word) и переходы к разделам появляются в самом чате. Любой ответ можно сохранить кнопкой «В избранное» — он появится в календаре раздела «Избранное». Единственный переключатель — «Права»: матрицу редактирует администратор, действует сразу."
       >
         <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 text-sm">
           <button
@@ -550,7 +601,7 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
                   hint="История чата сохраняется. Прикрепите файл (txt, csv, json, md — до 3), выберите уровень GigaChat рядом с кнопкой «Спросить» и задайте вопрос: «груз Скопин → Ростов, тент, до 170 тысяч без НДС — на что смотреть?», «запиши перевозщика: Пётр, ООО Ромашка…» или «составь отчёт по рынку Краснодар → Москва». Ход работы будет виден текстом, ответ напечатается постепенно, карточки и отчёт появятся в чате."
                 />
               )}
-              {messages?.map((m) => (
+              {messages?.map((m, idx) => (
                 <div key={m.id} className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-2">
                   {/* ход работы — простой текст над ответом, как в harness */}
                   {m.role === 'assistant' && m.steps && m.steps.length > 0 && (
@@ -575,13 +626,36 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
                               </span>
                             </div>
                           )}
-                          {m.engine && (
-                            <div className="mt-1 text-[10px] uppercase tracking-wide text-zinc-500">
-                              {AI_ENGINE_LABELS[m.engine] ?? m.engine}
-                              {m.modelKey && ` · уровень: ${gigaModelLabel(m.modelKey)}`}
-                              {m.createdAt && ` · ${fmtTime(m.createdAt)}`}
+                          <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+                              {m.engine && (
+                                <>
+                                  {AI_ENGINE_LABELS[m.engine] ?? m.engine}
+                                  {m.modelKey && ` · уровень: ${gigaModelLabel(m.modelKey)}`}
+                                  {m.createdAt && ` · ${fmtTime(m.createdAt)}`}
+                                </>
+                              )}
                             </div>
-                          )}
+                            {/* сохранить ответ агента в «Избранное» — появится в календаре */}
+                            <button
+                              type="button"
+                              onClick={() => void saveAnswer(m, questionBefore(idx))}
+                              disabled={savingAnswer === m.id || savedIds.has(m.id)}
+                              aria-label={savedIds.has(m.id) ? 'Ответ уже в избранном' : 'Сохранить ответ в избранное'}
+                              title={savedIds.has(m.id) ? 'Ответ уже в избранном — календарь в разделе «Избранное»' : 'Сохранить ответ в избранное'}
+                              className={`inline-flex min-h-[28px] shrink-0 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
+                                savedIds.has(m.id)
+                                  ? 'border-zinc-500 bg-zinc-800 text-zinc-200'
+                                  : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                              }`}
+                            >
+                              <Star
+                                className={`h-3 w-3 ${savedIds.has(m.id) ? 'fill-zinc-300 text-zinc-300' : ''}`}
+                                aria-hidden
+                              />
+                              {savingAnswer === m.id ? 'Сохраняю…' : savedIds.has(m.id) ? 'В избранном' : 'В избранное'}
+                            </button>
+                          </div>
                         </div>
                       ) : (
                         <>
