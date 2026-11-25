@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic'
  * GET /api/ai/messages — история чата с нейросетью (AiChatMessage) для
  * вошедшего пользователя: полная переписка, ход работы текстом, прикреплённые
  * файлы и виджеты, чтобы после перезагрузки чат оставался на месте.
+ * Плюс savedMessageIds — какие ответы уже в «Избранном» (звезда заполнена).
  *
  * DELETE /api/ai/messages — «Новый чат»: очистить переписку этого пользователя.
  * Разборы в «Списке ИИ» не трогаются — это отдельный журнал работы нейросети.
@@ -24,6 +25,12 @@ export async function GET() {
       orderBy: { createdAt: 'desc' },
       take: 200,
     })
+    // какие ответы уже сохранены в «Избранное» — чтобы звезда была заполнена
+    const savedRows = await db.aiSavedMessage.findMany({
+      where: { userId: auth.id },
+      select: { messageId: true },
+    })
+    const savedMessageIds = savedRows.map((r) => r.messageId).filter((id): id is string => Boolean(id))
     const messages = rows.slice().reverse().map((r) => {
       let steps: { at: number; text: string }[] = []
       try {
@@ -65,7 +72,7 @@ export async function GET() {
         saved: Array.isArray(widgets.saved) ? widgets.saved : [],
       }
     })
-    return NextResponse.json({ messages })
+    return NextResponse.json({ messages, savedMessageIds })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Не удалось загрузить историю' }, { status: 500 })
   }
