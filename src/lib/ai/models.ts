@@ -5,7 +5,8 @@
 // Выбор уровня — только удобство человека: движок всегда GigaChat (Сбер),
 // сбои не переключают движок. Администратор может зафиксировать уровень
 // в .env.local (GIGACHAT_MODEL) — каталог здесь описывает все доступные
-// уровни личного тарифа GIGACHAT_API_PERS.
+// уровни личного тарифа GIGACHAT_API_PERS. В интерфейсе уровни показываются
+// короткими именами — Ультра / Про / Макс / Лайт; в API уходят полные ключи.
 
 export interface GigaModelInfo {
   /** имя модели в API GigaChat — то, что уходит в payload.model */
@@ -17,11 +18,10 @@ export interface GigaModelInfo {
 }
 
 export const GIGA_MODELS: GigaModelInfo[] = [
-  { key: 'GigaChat-2-Max', label: 'GigaChat-2-Max', hint: 'флагман — сложные разборы и отчёты' },
-  { key: 'GigaChat-2-Pro', label: 'GigaChat-2-Pro', hint: 'баланс глубины и скорости' },
-  { key: 'GigaChat-Max', label: 'GigaChat-Max', hint: 'прошлое поколение Max' },
-  { key: 'GigaChat-Plus', label: 'GigaChat-Plus', hint: 'быстрее и легче' },
-  { key: 'GigaChat', label: 'GigaChat', hint: 'базовый уровень' },
+  { key: 'GigaChat-2-Max', label: 'Ультра', hint: 'флагман — сложные разборы и отчёты' },
+  { key: 'GigaChat-2-Pro', label: 'Про', hint: 'баланс глубины и скорости' },
+  { key: 'GigaChat-Max', label: 'Макс', hint: 'прошлое поколение Max' },
+  { key: 'GigaChat-Plus', label: 'Лайт', hint: 'быстрее и легче' },
 ]
 
 export const GIGA_MODEL_KEYS: string[] = GIGA_MODELS.map((m) => m.key)

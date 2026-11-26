@@ -854,7 +854,6 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   // у внутреннего контура верхняя строка — привлечённый транспорт, нижняя — собственный;
   // у перевозчика собственного транспорта нет, поэтому нижняя панель — его разделы
   const mobileBottomNav = internal && ownNav.length > 0 ? ownNav : attractedNav
-  const userName = user.name
   // проформа для плашки аккаунта: ФИО, должность, организация (Task 111)
   const [profile, setProfile] = useState<ProfileDTO | null>(null)
   useEffect(() => {
@@ -1065,14 +1064,10 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
       <main className="w-full flex-1 px-4 py-6 sm:px-6">{children}</main>
 
       <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs">
-          <div>
-            АЭМЗ · {isAdmin ? 'Администрация платформы' : isLogist ? 'Отдел логистики' : 'Кабинет перевозчика'}
-            <span className="ml-2 rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
-              V 1.01
-            </span>
-          </div>
-          <div className="text-blue-300">{userName}</div>
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center px-4 py-4 text-xs">
+          <span className="rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
+            V 1.01
+          </span>
         </div>
       </footer>
 

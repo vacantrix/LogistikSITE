@@ -3,7 +3,10 @@
 /**
  * Раздел «ИИ-помощник» — чат с нейросетью-консультантом платформы.
  *
- * Экран нейросети — чёрно-белый (терминальная эстетика harness):
+ * Экран нейросети — чисто-чёрный (терминальная эстетика harness):
+ *  — заголовков раздела нет: сразу чат; вверху слева — вращающийся светящийся
+ *    индикатор активности нейросети с подписью («Готова» / текущий шаг),
+ *    справа — кнопки «Права» и «Новый чат»;
  *  — история переписки хранится на сервере (AiChatMessage) и не теряется;
  *    «Новый чат» начинает диалог с чистого листа;
  *  — ход работы нейросеть пишет ПРОСТЫМ ТЕКСТОМ прямо в ленте — как в harness:
@@ -17,7 +20,7 @@
  *    рядом с кнопкой «Спросить»;
  *  — кнопка «добавить файл»: текстовые файлы читаются и попадают в контекст;
  *  — кнопки-вкладки «Чат», «Логи», «Список ИИ» убраны: всё отражается в самом
- *    чате; остался единственный переключатель «Права» — матрица доступа ИИ,
+ *    чате; «Права» — кнопка в верхней панели: матрица доступа ИИ,
  *    которую редактирует администратор (AiRight), она действует сразу;
  *  — любой ответ агента можно сохранить кнопкой «В избранное» — он попадает
  *    в календарь раздела «Избранное» (AiSavedMessage) вместе с вопросом.
@@ -28,14 +31,6 @@ import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import {
   Select,
@@ -44,7 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { SectionHeader, EmptyState, LoadingBlock, ErrorBlock, type TabProps } from '@/components/platform/common'
+import { EmptyState, LoadingBlock, ErrorBlock, type TabProps } from '@/components/platform/common'
 import { AI_RIGHT_MODE_LABELS, AI_ENGINE_LABELS, type AiRightMode, type AiRight } from '@/lib/ai/rights'
 import { type AiBestOffer, type AiCard, type AiLinkRef, type AiReport } from '@/lib/ai/tools'
 import { AiOfferList } from '@/components/platform/ai-offer-list'
@@ -53,8 +48,8 @@ import { aiFetch } from '@/components/platform/ai-shared'
 import { GIGA_MODELS, DEFAULT_GIGA_MODEL, gigaModelLabel } from '@/lib/ai/models'
 import { useToast } from '@/hooks/use-toast'
 import {
-  ArrowLeft, Ban, Cpu, Eye, FileText, Loader2, Lock, MessagesSquare, Paperclip, PenLine, RefreshCw, Send,
-  ShieldCheck, Star, Stethoscope, Trash2, X,
+  ArrowLeft, Ban, Cpu, Eye, FileText, Loader2, Lock, MessagesSquare, Paperclip, PenLine, Send,
+  ShieldCheck, Star, X,
 } from 'lucide-react'
 
 type SubKey = 'chat' | 'rights'
@@ -157,13 +152,7 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
   const [liveSteps, setLiveSteps] = useState<ChatStep[]>([])
   // потоковый текст ответа — печатается плавно (тайперайтер ниже)
   const [liveAnswer, setLiveAnswer] = useState('')
-  // движок последнего ответа (для бейджа) и самотест модели
-  const [engineInfo, setEngineInfo] = useState<{ engine: string; model: string } | null>(null)
   const [clearArmed, setClearArmed] = useState(false)
-  const [diagOpen, setDiagOpen] = useState(false)
-  const [diagBusy, setDiagBusy] = useState(false)
-  const [diag, setDiag] = useState<{ answer: string; engine: string; model: string; latencyMs: number } | null>(null)
-  const [diagError, setDiagError] = useState<string | null>(null)
   // ——— сохранение ответов в «Избранное» (календарь агента) ———
   // id уже сохранённых сообщений (звезда заполнена) + какое сохраняем прямо сейчас
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
@@ -442,7 +431,6 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
           links: Array.isArray(done.links) ? done.links.slice(0, 5) : [],
         },
       ])
-      setEngineInfo({ engine: done.engine, model: done.model })
       setAttached([])
     } catch (e) {
       // вопрос остаётся в истории (сервер сохранил до вызова модели) — ошибка показывается честно
@@ -454,28 +442,6 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
       setLiveAnswer('')
     }
   }, [input, sending, attached, modelKey, waitTyped, stopTyper])
-
-  // ——— диагностика модели: что она видит и что реально может ———
-  const runDiagnose = useCallback(async () => {
-    setDiagBusy(true)
-    setDiagError(null)
-    setDiag(null)
-    try {
-      const res = await aiFetch('/api/ai/diagnose', { method: 'POST' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
-      setDiag({
-        answer: json.answer as string,
-        engine: json.engine as string,
-        model: json.model as string,
-        latencyMs: Number(json.latencyMs) || 0,
-      })
-    } catch (e) {
-      setDiagError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setDiagBusy(false)
-    }
-  }, [])
 
   // ——— права: действующая матрица + редактирование администратором ———
   const [rights, setRights] = useState<AiRight[] | null>(null)
@@ -521,44 +487,41 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
 
   return (
     <div className="space-y-5">
-      <SectionHeader
-        eyebrow="Нейросеть-консультант"
-        title="ИИ-помощник"
-        desc="Чат с нейросетью на чёрно-белом экране: ход работы она пишет простым текстом прямо в ленте — как в harness, ответ печатается медленно и постепенно. Уровень GigaChat выбирается рядом с кнопкой отправки, файлы прикрепляются скрепкой. Карточки, отчёты (Word) и переходы к разделам появляются в самом чате. Любой ответ можно сохранить кнопкой «В избранное» — он появится в календаре раздела «Избранное». Единственный переключатель — «Права»: матрицу редактирует администратор, действует сразу."
-      >
-        <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 text-sm">
-          <button
-            type="button"
-            onClick={() => setSub(sub === 'rights' ? 'chat' : 'rights')}
-            aria-pressed={sub === 'rights'}
-            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-md px-3.5 font-medium transition-colors ${
-              sub === 'rights' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-            Права
-          </button>
-        </div>
-      </SectionHeader>
-
-      {/* ——— Чат: чёрно-белый экран нейросети ——— */}
+      {/* ——— Чат: чисто-чёрный экран нейросети (заголовков раздела нет — сразу чат) ——— */}
       {sub === 'chat' && (
-        <Card className="border-zinc-800 bg-neutral-950 text-zinc-100 shadow-sm">
-          <CardContent className="flex h-[calc(100vh-15rem)] max-h-[820px] min-h-[480px] flex-col gap-3 p-3 sm:p-4">
-            {/* верхняя панель: движок + действия */}
+        <Card className="border-zinc-800 bg-black text-zinc-100 shadow-sm">
+          <CardContent className="flex h-[calc(100vh-12rem)] max-h-[860px] min-h-[480px] flex-col gap-3 p-3 sm:p-4">
+            {/* верхняя панель: статус нейросети + действия */}
             <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
-              <Badge
-                className={`border ${
-                  engineInfo
-                    ? 'border-zinc-600 bg-zinc-800 text-zinc-100'
-                    : 'border-zinc-700 bg-zinc-900 text-zinc-400'
-                }`}
-              >
-                {engineInfo
-                  ? `Отвечает: ${AI_ENGINE_LABELS[engineInfo.engine] ?? engineInfo.engine}${engineInfo.model ? ` · ${engineInfo.model}` : ''}`
-                  : 'GigaChat (Сбер)'}
-              </Badge>
+              {/* живой индикатор нейросети: вращается и светится — цвет зависит от
+                  режима (изумрудный — готова, янтарный — работает); рядом — подпись:
+                  «Готова» или последний шаг хода работы */}
+              <span className="inline-flex min-h-[36px] items-center gap-2 text-sm text-zinc-300" aria-live="polite">
+                <span
+                  aria-hidden
+                  className={`inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-transparent ${
+                    sending
+                      ? 'border-t-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.85)]'
+                      : 'border-t-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.85)]'
+                  }`}
+                />
+                <span className="truncate">
+                  {sending
+                    ? (liveSteps.length > 0 ? liveSteps[liveSteps.length - 1].text : 'Работаю…')
+                    : 'Готова'}
+                </span>
+              </span>
               <div className="ml-auto flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 border-zinc-700 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                  onClick={() => setSub('rights')}
+                  disabled={sending}
+                >
+                  <ShieldCheck className="mr-1 h-3.5 w-3.5" aria-hidden />
+                  Права
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -568,20 +531,8 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
                   onClick={() => void newChat()}
                   disabled={sending}
                 >
-                  <Trash2 className="mr-1 h-3.5 w-3.5" aria-hidden />
+                  <PenLine className="mr-1 h-3.5 w-3.5" aria-hidden />
                   {clearArmed ? 'Точно новый?' : 'Новый чат'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 border-zinc-700 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white"
-                  onClick={() => {
-                    setDiagOpen(true)
-                    if (!diag && !diagBusy) void runDiagnose()
-                  }}
-                >
-                  <Stethoscope aria-hidden className="mr-1 h-3.5 w-3.5" />
-                  Диагностика
                 </Button>
               </div>
             </div>
@@ -597,8 +548,8 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
               {messages != null && messages.length === 0 && (
                 <EmptyState
                   icon={<MessagesSquare className="h-8 w-8" aria-hidden />}
-                  title="Спросите нейросеть-консультанта"
-                  hint="История чата сохраняется. Прикрепите файл (txt, csv, json, md — до 3), выберите уровень GigaChat рядом с кнопкой «Спросить» и задайте вопрос: «груз Скопин → Ростов, тент, до 170 тысяч без НДС — на что смотреть?», «запиши перевозщика: Пётр, ООО Ромашка…» или «составь отчёт по рынку Краснодар → Москва». Ход работы будет виден текстом, ответ напечатается постепенно, карточки и отчёт появятся в чате."
+                  title="Задайте вопрос"
+                  hint="Переписка сохраняется на сервере"
                 />
               )}
               {messages?.map((m, idx) => (
@@ -908,41 +859,6 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
         </div>
       )}
 
-      {/* ——— Диагностика модели: что она видит и что реально может ——— */}
-      <Dialog open={diagOpen} onOpenChange={setDiagOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Stethoscope aria-hidden className="h-5 w-5 text-slate-500" />
-              Диагностика модели
-            </DialogTitle>
-            <DialogDescription>
-              Модель честно описывает, что она видит в интеграции и что реально может делать. Ответ показывается как есть.
-            </DialogDescription>
-          </DialogHeader>
-          {diagBusy && <LoadingBlock label="Модель проводит самодиагностику…" />}
-          {diagError && <ErrorBlock message={diagError} onRetry={() => void runDiagnose()} />}
-          {diag && (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <Badge className="border-0 bg-zinc-800 text-zinc-100">{AI_ENGINE_LABELS[diag.engine] ?? diag.engine}</Badge>
-                <Badge variant="outline" className="text-slate-600">{diag.model}</Badge>
-                <Badge variant="outline" className="text-slate-600">{`${(diag.latencyMs / 1000).toFixed(1)} с`}</Badge>
-              </div>
-              <div className="markdown-view rounded-lg border border-zinc-200 bg-white px-3.5 py-3 text-sm text-slate-800">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{diag.answer}</ReactMarkdown>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" className="h-10" onClick={() => void runDiagnose()} disabled={diagBusy}>
-              <RefreshCw aria-hidden className="mr-1 h-3.5 w-3.5" />
-              Повторить тест
-            </Button>
-            <Button className="h-10" onClick={() => setDiagOpen(false)}>Закрыть</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

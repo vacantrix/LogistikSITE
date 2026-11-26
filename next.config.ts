@@ -2,6 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // превью-панель песочницы и локальные заходы ходят на не-localhost хосты:
+  // без этого Next 16 блокирует cross-origin dev-ресурсы (HMR, шрифты)
+  allowedDevOrigins: ["127.0.0.1", "*.space-z.ai"],
   experimental: {
     // политика агентских обновлений Next.js: security-патчи ставятся автоматически
     agentUpgrade: "security",

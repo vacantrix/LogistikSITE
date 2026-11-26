@@ -307,7 +307,7 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
           {tab === 'arch' && <ArchitectureTab {...tabProps} />}
           {tab === 'driver-app' && <DriverAppTab liveTick={liveTick} />}
         </>
-      )
+      )}
 
       {/* потеря соединения (Task 52 + аудит №3): первые 8 секунд — оверлей (обычный
           рестарт шины укладывается в 1–3 с), при долгом простое — неблокирующий баннер */}
