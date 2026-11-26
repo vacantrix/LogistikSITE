@@ -105,7 +105,7 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
       <SectionHeader
         title="Настройки"
         eyebrow="Администрирование"
-        desc="Пороги уверенности и правила автопрохождения документов: что принимать автоматически, что проверять, а что возвращать агенту. Настройки распознавания движка — в разделе «Padleocr»."
+        desc="Пороги уверенности и правила автопрохождения документов: что принимать автоматически, что проверять, а что возвращать агенту. Настройки распознавания движка — в разделе «PaddleOCR»."
       />
 
       {error && settings && (
@@ -119,7 +119,7 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
         <CardHeader>
           <CardTitle className="text-base text-slate-900">Пороги уверенности</CardTitle>
           <CardDescription>
-            Padleocr даёт оценку уверенности по каждому полю — пороги решают, что принять автоматически,
+            PaddleOCR даёт оценку уверенности по каждому полю — пороги решают, что принять автоматически,
             что проверить подтвердениями, а что вернуть агенту
           </CardDescription>
         </CardHeader>
@@ -286,7 +286,7 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
           <ul className="space-y-3">
             <li className="flex items-start gap-3 text-sm">
               <Server className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" aria-hidden />
-              Padleocr работает на сервере завода — документы не уходят во внешние сервисы
+              PaddleOCR работает на сервере завода — документы не уходят во внешние сервисы
             </li>
             <li className="flex items-start gap-3 text-sm">
               <UserCog className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" aria-hidden />

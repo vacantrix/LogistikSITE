@@ -184,7 +184,7 @@ export const PERMS: PermItem[] = [
   { key: 'section:adminUsers', group: 'Разделы: управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Вкладка «Профили и доступы»: учётные записи, должности и исключения' },
   { key: 'section:adminDb', group: 'Разделы: управление', contours: A, risk: 'critical', label: 'База данных', hint: 'Вкладка «База данных»' },
   { key: 'section:arch', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Архитектура', hint: 'Вкладка «Архитектура»' },
-  { key: 'section:neural', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'Padleocr', hint: 'Вкладка «Padleocr»: настройки пропуска документов — движок распознавания на серверах АЭМЗ' },
+  { key: 'section:neural', group: 'Разделы: управление', contours: A, risk: 'normal', label: 'PaddleOCR', hint: 'Вкладка «PaddleOCR»: настройки пропуска документов — движок распознавания на серверах АЭМЗ' },
   { key: 'section:llm', group: 'Разделы: управление', contours: A, risk: 'important', label: 'Облачная LLM', hint: 'Вкладка «Облачная LLM»: права нейросети ИИ-помощника и состояние облачного движка GigaChat' },
 
   { key: 'admin:users', group: 'Управление', contours: A, risk: 'critical', label: 'Профили и доступы', hint: 'Учётные записи, должности и исключения' },

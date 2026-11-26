@@ -242,7 +242,7 @@ async function backfillDriverAppPerm(): Promise<void> {
  * Новый раздел «Облачная LLM» (права нейросети ИИ-помощника) — администрация.
  * Существующие должности уже хранят свои section:*, поэтому backfillSectionPerms их
  * не трогает — выдаём право адресно всем шаблонам контура «Администрация»,
- * у которых уже есть «Padleocr» (section:neural): кто управлял распознаванием,
+ * у которых уже есть «PaddleOCR» (section:neural): кто управлял распознаванием,
  * тот управляет и правами облачной LLM. Идемпотентно.
  */
 async function backfillLlmPerm(): Promise<void> {

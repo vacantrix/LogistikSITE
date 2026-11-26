@@ -83,7 +83,7 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup;
   { key: 'own-audit', label: 'Аудит контура', roles: ['admin'], group: 'own' },
   { key: 'driver-app', label: 'Приложение водителя', roles: ['admin'], group: 'own' },
 
-  { key: 'nn', label: 'Padleocr', roles: ['admin'], group: 'admin' },
+  { key: 'nn', label: 'PaddleOCR', roles: ['admin'], group: 'admin' },
   { key: 'llm', label: 'Облачная LLM', roles: ['admin'], group: 'admin' },
   { key: 'settings', label: 'Настройки', roles: ['admin'], group: 'admin' },
   { key: 'admin-users', label: 'Профили и доступы', roles: ['admin'], group: 'admin' },
@@ -105,7 +105,7 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   directory: { Icon: FolderOpen, short: 'Справочники' },
   reports: { Icon: BarChart3, short: 'Отчёты' },
   journal: { Icon: History, short: 'Журнал' },
-  nn: { Icon: Brain, short: 'Padleocr' },
+  nn: { Icon: Brain, short: 'PaddleOCR' },
   llm: { Icon: CloudCog, short: 'LLM' },
   settings: { Icon: SlidersHorizontal, short: 'Настройки' },
   'admin-users': { Icon: UserCog, short: 'Профили' },
@@ -651,7 +651,7 @@ function AccountMenu({ user, profile, compact, canEditProfile, onLogout, onAddAc
   )
 }
 
-/** Служебное меню администрации: профили, база, настройки, архитектура, Padleocr, Облачная LLM.
+/** Служебное меню администрации: профили, база, настройки, архитектура, PaddleOCR, Облачная LLM.
  *  Не занимает строку транспортных вкладок — управление вынесено в отдельное меню. */
 function AdminMenu({ nav, tab, onNavigate, compact }: {
   nav: { key: TabKey; label: string; muted?: boolean }[]
@@ -997,11 +997,15 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
           </div>
         </nav>
         {/* ИИ-помощник и «Избранное» — у левого края между привлечённым и собственным
-            транспортом: плоские кнопки в общем стиле рядов (без капсул-«пузырей»),
-            акцент изумрудный, у каждой кнопки короткий тултип. */}
+            транспортом: янтарная полоса нейросети. Ряды платформы читаются цветом —
+            синий привлечённый транспорт, янтарный ИИ, зелёный собственный; кнопки
+            плоские в общем стиле рядов, у каждой короткий тултип. */}
         {internal && aiNav.length > 0 && (
-          <nav aria-label="ИИ-помощник" className="hidden border-t border-white/10 md:block">
+          <nav aria-label="ИИ-помощник" className="hidden border-t border-amber-400/25 bg-amber-400/10 md:block">
             <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
+              <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300/80" aria-hidden>
+                ИИ
+              </span>
               {aiNav.map((item) => {
                 const { Icon } = TAB_ICONS[item.key]
                 const active = tab === item.key
@@ -1013,8 +1017,8 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
                     aria-current={active ? 'page' : undefined}
                     className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors ${
                       active
-                        ? 'bg-emerald-400 font-semibold text-[#0E1B2C]'
-                        : 'text-emerald-100 hover:bg-emerald-400/10 hover:text-white'
+                        ? 'bg-amber-400 font-semibold text-[#0E1B2C]'
+                        : 'text-amber-100 hover:bg-amber-400/15 hover:text-white'
                     }`}
                     title={item.label}
                   >

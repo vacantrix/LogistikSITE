@@ -470,7 +470,7 @@ function SchematicMap({ status }: { status: StatusItem[] | null }) {
       <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
           <Cpu className="h-3.5 w-3.5" aria-hidden />
-          Нейросеть Padleocr на серверах АЭМЗ — сейчас показательно на отдельном GPU-ПК (временный стенд)
+          Нейросеть PaddleOCR на серверах АЭМЗ — сейчас показательно на отдельном GPU-ПК (временный стенд)
         </p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <SchemeBox status={status} statusId="neural" icon={BrainCircuit} label="PaddleOCR · порт 3031" sub="детекция + чтение документов" tone="amber" />
@@ -638,7 +638,7 @@ export default function ArchitectureTab(_: TabProps) {
       <SectionHeader
         title="Архитектура платформы"
         eyebrow="Администрирование"
-        desc="Карта системы: контуры платформы, шина реального времени, нейросети (Padleocr — локально, Облачная LLM — облако Сбер) и файловый проводник стенда."
+        desc="Карта системы: контуры платформы, шина реального времени, нейросети (PaddleOCR — локально, Облачная LLM — облако Сбер) и файловый проводник стенда."
       />
 
       {/* ——— компактная строка живых статусов ——— */}
