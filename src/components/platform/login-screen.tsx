@@ -2,15 +2,17 @@
 
 /**
  * Экран входа на платформу: логин + пароль из созданного справочника
- * пользователей. Демо-доступы показываются только на демо-стенде —
- * когда задан NEXT_PUBLIC_DEMO_PASSWORD (тот же, что SEED_PASSWORD при заполнении базы).
+ * пользователей. Ниже — «Быстрый вход» демо-стенда: плашки учёток
+ * (администратор, логисты, перевозчики) с логином и паролем; клик по плашке
+ * входит сразу. Показывается, когда задан NEXT_PUBLIC_DEMO_PASSWORD
+ * (тот же, что SEED_PASSWORD при заполнении базы).
  *
  * Мультиаккаунт (Task 74): сохранённые в этом браузере аккаунты показываются
  * чипами «Продолжить как» — вход одним кликом без повторного набора пароля;
  * новый вход добавляется в реестр и не выбрасывает другие аккаунты.
  */
 import { useState } from 'react'
-import { Building2, ChevronRight, CircleAlert, Download, Eye, EyeOff, FileText, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
+import { Building2, ChevronRight, CircleAlert, Eye, EyeOff, KeyRound, Loader2, LogIn, ShieldCheck, UserCog } from 'lucide-react'
 import { activateAccount, listAccounts, saveSessionToken } from '@/lib/api'
 import type { SavedAccount } from '@/lib/accounts'
 import { LogoMark } from '@/components/platform/logo-mark'
@@ -42,56 +44,24 @@ const ROLE_LABEL: Record<'admin' | 'logist' | 'carrier', string> = {
   carrier: 'перевозчик',
 }
 
-/** Документация платформы — раздаётся статикой из public/downloads (Word/PDF). */
-const PLATFORM_DOCS: { title: string; sub: string; formats: { label: string; href: string }[] }[] = [
-  {
-    title: 'Проектный отчёт платформы',
-    sub: 'Система · MVP · архитектура · OCR · документы · риски и план',
-    formats: [
-      { label: 'Word', href: '/downloads/Проектный_отчет_Веб-платформа_АЭМЗ_Логистика.docx' },
-      { label: 'PDF', href: '/downloads/Проектный_отчет_Веб-платформа_АЭМЗ_Логистика.pdf' },
-    ],
-  },
-  {
-    title: 'Руководство пользователя',
-    sub: 'Роли, заявки, торги, документы, рейсы · 17 стр.',
-    formats: [
-      { label: 'Word', href: '/downloads/aemz-logistika-rukovodstvo-polzovatelya.docx' },
-      { label: 'PDF', href: '/downloads/aemz-logistika-rukovodstvo-polzovatelya.pdf' },
-    ],
-  },
-  {
-    title: 'Интеграция с 1С:Предприятие',
-    sub: 'REST API, ключи, модули 1С, curl · 17 стр.',
-    formats: [
-      { label: 'Word', href: '/downloads/aemz-logistika-integraciya-1c.docx' },
-      { label: 'PDF', href: '/downloads/aemz-logistika-integraciya-1c.pdf' },
-    ],
-  },
-]
-
 export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showDemo, setShowDemo] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   // Сохранённые аккаунты браузера (читаем один раз при открытии экрана)
   const [saved] = useState<SavedAccount[]>(() => listAccounts())
 
-  const submit = async () => {
-    if (!login.trim() || !password) {
-      setError('Укажите логин и пароль')
-      return
-    }
+  /** общий вход по логину и паролю — и из формы, и из плашки быстрого входа */
+  const doLogin = async (l: string, p: string) => {
     setBusy(true)
     setError(null)
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ login, password }),
+        body: JSON.stringify({ login: l, password: p }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
@@ -110,6 +80,14 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
     } finally {
       setBusy(false)
     }
+  }
+
+  const submit = async () => {
+    if (!login.trim() || !password) {
+      setError('Укажите логин и пароль')
+      return
+    }
+    await doLogin(login.trim(), password)
   }
 
   return (
@@ -221,87 +199,55 @@ export function LoginScreen({ onAuthed }: { onAuthed: () => void }) {
                 Войти
               </button>
             </form>
-
-            {DEMO_PASSWORD && (
-            <button
-              type="button"
-              onClick={() => setShowDemo((v) => !v)}
-              aria-expanded={showDemo}
-              className="mt-4 flex w-full items-center justify-center gap-1.5 text-xs font-medium text-slate-500 transition-colors hover:text-slate-800"
-            >
-              <KeyRound className="h-3.5 w-3.5" aria-hidden />
-              {showDemo ? 'Скрыть демо-доступы' : 'Демо-доступы для тестирования'}
-            </button>
-            )}
-            {DEMO_PASSWORD && showDemo && (
-              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3" role="note">
-                <p className="text-[11px] font-medium text-slate-500">
-                  Пароль для всех: <span className="font-mono text-slate-900">{DEMO_PASSWORD}</span>
-                </p>
-                <ul className="mt-2 space-y-1">
-                  {DEMO_ACCOUNTS.map((a) => (
-                    <li key={a.login}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLogin(a.login)
-                          setPassword(DEMO_PASSWORD)
-                          setError(null)
-                        }}
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-white"
-                        aria-label={`Подставить доступ ${a.name}`}
-                      >
-                        <RoleMark role={a.role} className="h-3.5 w-3.5 shrink-0" />
-                        <span className="font-mono font-semibold text-slate-800">{a.login}</span>
-                        <span className="truncate text-slate-500">{a.name}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </div>
 
-          {/* Документация платформы: прямые ссылки на скачивание (Word) */}
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
-              <FileText className="h-3.5 w-3.5" aria-hidden />
-              Документация платформы · Word / PDF
-            </p>
-            <ul className="mt-2 space-y-1.5">
-              {PLATFORM_DOCS.map((d) => (
-                <li key={d.formats[0].href}>
-                  <div className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5">
-                    <FileText className="h-4 w-4 shrink-0 text-teal-700" aria-hidden />
+          {/* Быстрый вход демо-стенда: плашки учёток — логин и пароль видны,
+              клик по плашке входит сразу (как «Продолжить как» для сохранённых) */}
+          {DEMO_PASSWORD && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+                <KeyRound className="h-3.5 w-3.5" aria-hidden />
+                Быстрый вход — демо-учётки стенда
+              </p>
+              <div className="mt-2 space-y-1.5">
+                {DEMO_ACCOUNTS.map((a) => (
+                  <button
+                    key={a.login}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setLogin(a.login)
+                      setPassword(DEMO_PASSWORD)
+                      setError(null)
+                      void doLogin(a.login, DEMO_PASSWORD)
+                    }}
+                    aria-label={`Войти как ${a.name} (${a.login})`}
+                    className="flex w-full items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/60 disabled:opacity-60"
+                  >
+                    <RoleMark role={a.role} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-slate-900">{d.title}</span>
-                      <span className="block truncate text-xs text-slate-500">{d.sub}</span>
+                      <span className="block truncate text-sm font-semibold text-slate-900">{a.name.split(' · ')[0]}</span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {ROLE_LABEL[a.role]} · <span className="font-mono">{a.login}</span> · <span className="font-mono">{DEMO_PASSWORD}</span>
+                      </span>
                     </span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      {d.formats.map((f) => (
-                        <a
-                          key={f.href}
-                          href={f.href}
-                          download
-                          className="flex h-7 items-center rounded-md border border-slate-200 bg-slate-50 px-2 font-mono text-[10px] font-semibold text-slate-600 transition-colors hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800"
-                          aria-label={`Скачать «${d.title}» в формате ${f.label}`}
-                        >
-                          {f.label}
-                          <Download className="ml-1 h-3 w-3" aria-hidden />
-                        </a>
-                      ))}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2.5 border-t border-slate-100 pt-2 text-[11px] text-slate-400">
+                Клик по плашке — вход сразу, без набора пароля
+              </p>
+            </div>
+          )}
+
+          {/* Документация платформы с экрана входа убрана: файлы остаются
+              в public/downloads, но стартовый экран — только вход */}
         </div>
       </div>
 
       <footer className="bg-[#0E1B2C] py-4 text-center text-xs text-blue-200">
-        АЭМЗ · Отдел логистики
-        <span className="ml-2 rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
+        <span className="rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
           V 1.01
         </span>
         {DEMO_PASSWORD && (
