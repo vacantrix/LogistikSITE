@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
  *
  * Ответ — NDJSON-стрим (строки JSON через \n), чтобы в окне чата отражалось
  * ВСЁ, что делает нейросеть, по мере того как она это делает (как в harness):
- *   {"type":"step","at":1732512000000,"text":"Собираю контекст…"}  — ход работы текстом;
+ *   {"type":"step","at":1732512000000,"text":"GigaChat · запрос…"}   — ход работы: только факт действия;
  *   {"type":"delta","text":"…"}                                    — ответ печатается чанками;
  *   {"type":"done",…}                                              — итог: виджеты, метаданные, id записи;
  *   {"type":"error","error":"…"}                                   — честная ошибка движка.
@@ -117,9 +117,9 @@ export async function POST(req: Request) {
         let latencyMs = 0
         let userMessageId: string | undefined
         try {
-          step(`Принял вопрос (${message.length} симв.) — уровень модели: ${modelKey}`)
+          step(`вопрос принят · ${message.length} симв · ${modelKey}`)
           if (files.length > 0) {
-            step(files.map((f) => `Прочитал файл «${f.name}» — ${f.text.length} симв.`).join('; '))
+            step(files.map((f) => `файл прочитан · ${f.name} · ${f.text.length} симв`).join(' · '))
           }
 
           // действующая матрица прав — администратор правит её в разделе «Права»
@@ -128,7 +128,7 @@ export async function POST(req: Request) {
           const ownListOn = aiRightMode(rights, 'own-list') === 'write'
           const ownLogOn = aiRightMode(rights, 'own-log') === 'write'
           const log = ownLogOn ? aiLog : null
-          step('Проверяю права — что мне разрешено на платформе')
+          step(`права загружены · ${rights.length}`)
 
           // история чата из БД: сервер — источник правды, клиент ничего не пересылает
           const historyRows = await db.aiChatMessage.findMany({
@@ -160,18 +160,15 @@ export async function POST(req: Request) {
             },
           })
           userMessageId = userMsg.id
-          step(`Вопрос сохранён в историю чата (предыдущих сообщений: ${history.length})`)
+          step(`история чата · ${history.length} сообщ · вопрос записан`)
 
           const ctx = await buildRestrictedContext(rights)
           const system = buildSystemPrompt(ctx, rights)
           const contactsMode = aiRightMode(rights, 'contacts-read')
-          step(`Контекст собран: память контактов — ${
-            contactsMode === 'denied'
-              ? 'закрыта администратором'
-              : contactsMode === 'write'
-                ? 'полная (с телефонами и почтой)'
-                : 'частичная (без телефонов и почты)'
-          }, свой список — ${ctx.ownList ? 'последние разборы' : 'пусто'}`)
+          const ownCount = ctx.ownList ? ctx.ownList.split('\n').length : 0
+          step(`контекст собран · контакты: ${
+            contactsMode === 'denied' ? 'закрыты' : contactsMode === 'write' ? 'полные' : 'частичные'
+          } · свой список: ${ownCount} записей`)
 
           const messages: EngineMessage[] = [
             { role: 'system', content: system },
@@ -185,7 +182,7 @@ export async function POST(req: Request) {
             historyMessages: history.length,
           })
 
-          step(`Спрашиваю GigaChat (${modelKey})…`)
+          step(`GigaChat · запрос (${modelKey})`)
           let completion
           try {
             completion = await aiChatStreamComplete(messages, {
@@ -195,7 +192,7 @@ export async function POST(req: Request) {
               onDelta: (chunk) => emit({ type: 'delta', text: chunk }),
             })
           } catch (streamErr) {
-            step(`Поток не пошёл (${streamErr instanceof Error ? streamErr.message.slice(0, 120) : 'ошибка'}) — повторяю обычным вызовом`)
+            step('стрим не пошёл · повтор обычным вызовом')
             await log?.('warn', 'chat_stream_fallback', `Поток ответа не пошёл — отвечено обычным вызовом: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`)
             completion = await aiChatComplete(messages, { temperature: 0.4, timeoutMs: 110_000, model: modelKey })
             emit({ type: 'delta', text: completion.answer })
@@ -204,11 +201,9 @@ export async function POST(req: Request) {
           engine = completion.engine
           model = completion.model
           latencyMs = completion.latencyMs
-          step(`Модель ответила за ${(latencyMs / 1000).toFixed(1)} с (${answer.length} симв.) — разбираю блоки карточек, отчётов и ссылок`)
-
-          // инструменты модели: ai-contact (запись перевозчиков), ai-best (лучшие
-          // предложения), ai-card (карточки фактов), ai-report (отчёт), ai-links (переходы)
+          // инструменты модели: ai-contact, ai-best, ai-card, ai-report, ai-links (с фильтрами)
           const { cleaned, contacts, best, cards, report, links } = extractAiTools(answer)
+          step(`GigaChat · ${(latencyMs / 1000).toFixed(1)} с · ${answer.length} симв · разбор: карточки ${cards.length} · подбор ${best.length} · отчёт ${report ? 'есть' : 'нет'} · ссылки ${links.length} · перевозчики ${contacts.length}`)
 
           const savedContacts: { id: string; name: string; company: string; kind: string }[] = []
           if (carriersWrite) {
@@ -230,14 +225,14 @@ export async function POST(req: Request) {
                   },
                 })
                 savedContacts.push({ id: contact.id, name: contact.name, company: contact.company, kind: contact.kind })
-                step(`Записал перевозчика в «Память контактов»: ${card.name}${card.company ? ` (${card.company})` : ''}`)
+                step(`память контактов · записан ${card.name}${card.company ? ` (${card.company})` : ''}`)
                 await log?.('info', 'contact_write', `Нейросеть записала в память: ${card.name}${card.company ? ` (${card.company})` : ''} — формат: ${card.format}`)
               } catch (e) {
                 await log?.('warn', 'contact_write_error', `Не удалось записать карточку «${card.name}»: ${e instanceof Error ? e.message : String(e)}`)
               }
             }
           } else if (contacts.length > 0) {
-            step(`Право записи перевозчиков закрыто администратором — ${contacts.length} карточк${contacts.length === 1 ? 'а' : 'и'} не сохранены`)
+            step(`память контактов · запись закрыта правом · ${contacts.length} карточк${contacts.length === 1 ? 'а' : 'и'} не сохранены`)
           }
 
           const finalAnswer =
@@ -264,9 +259,9 @@ export async function POST(req: Request) {
               },
             })
             itemId = item.id
-            step('Разбор сохранён в список ИИ')
+            step('список ИИ · разбор записан')
           } else {
-            step('Свой список закрыт администратором — разбор живёт только в чате')
+            step('список ИИ · закрыт правом · разбор только в чате')
           }
 
           const assistantMsg = await db.aiChatMessage.create({
@@ -286,7 +281,7 @@ export async function POST(req: Request) {
               }),
             },
           })
-          step('Ответ сохранён в историю чата и журнал')
+          step('журнал · ответ записан')
 
           await log?.('info', 'chat_done', `Ответ выдан (${answer.length} симв.), движок: ${engine}`, {
             engine,
@@ -314,7 +309,7 @@ export async function POST(req: Request) {
           })
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e)
-          step(`Ошибка: ${msg.slice(0, 200)}`)
+          step(`ошибка · ${msg.slice(0, 160)}`)
           await aiLog('error', 'chat_error', `Ошибка ответа: ${msg}`)
           emit({ type: 'error', error: `Нейросеть не ответила: ${msg}` })
         } finally {

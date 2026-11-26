@@ -431,7 +431,7 @@ function buildMapPoints(list: RequestDTO[], canBid: (r: RequestDTO) => boolean):
     )
 }
 
-export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }: TabProps) {
+export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, navFilters }: TabProps) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -464,6 +464,14 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick }
   useEffect(() => {
     if (isStaff && mode === 'MY_BIDS') setMode('ALL')
   }, [isStaff, mode])
+
+  // переход от нейросети с фильтрами: строка поиска выставляется в площадке сама
+  // (ai-links → filters.q: «заявки по Сочи» — человек видит уже отфильтрованную выдачу)
+  useEffect(() => {
+    if (navFilters?.tab !== 'board') return
+    const nextQ = navFilters.filters.q?.trim()
+    if (nextQ && nextQ !== q) setQ(nextQ)
+  }, [navFilters])
 
   // диалоги: держим только id, свежие данные берём из списка
   const [detailId, setDetailId] = useState<string | null>(null)

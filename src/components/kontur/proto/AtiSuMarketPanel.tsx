@@ -87,7 +87,7 @@ const PAY_LABEL: Record<string, string> = Object.fromEntries(PAYMENTS.map((p) =>
 const RUB = (n: number) => n.toLocaleString('ru-RU')
 const shortDate = (iso: string) => (iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}` : '—')
 
-export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onChanged, onOpenTrip }: {
+export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onChanged, onOpenTrip, appliedFilters }: {
   state: StateResponse
   mode: MarketMode
   onModeChange: (m: MarketMode) => void
@@ -96,6 +96,8 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
   onChanged?: () => void
   /** переход к карточке рейса запланированного груза в «Заявках» */
   onOpenTrip?: (tripId: string) => void
+  /** фильтры от нейросети (ai-links → filters): применяются к витрине и запускают поиск */
+  appliedFilters?: { filters: Record<string, string>; ts: number } | null
 }) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
@@ -178,6 +180,36 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
     void run(DEFAULT_FILTERS, DEFAULT_SETTINGS)
     // первичная загрузка витрины выполняется один раз
   }, [])
+
+  // фильтры от нейросети (ai-links → filters): применяются один раз по ts — выставляем
+  // фильтры витрины и сразу выполняем поиск, человек видит уже отфильтрованную выдачу
+  const appliedTsRef = useRef(0)
+  useEffect(() => {
+    if (!appliedFilters || appliedFilters.ts === appliedTsRef.current) return
+    appliedTsRef.current = appliedFilters.ts
+    const f = appliedFilters.filters
+    const patch: Partial<Filters> = {}
+    if (typeof f.from === 'string' && f.from.trim()) patch.from = f.from.trim().slice(0, 60)
+    if (typeof f.to === 'string' && f.to.trim()) patch.to = f.to.trim().slice(0, 60)
+    const w = Number(f.weight)
+    if (Number.isFinite(w) && w > 0) patch.weight = Math.min(100, w)
+    const v = Number(f.volume)
+    if (Number.isFinite(v) && v > 0) patch.volume = Math.min(300, v)
+    if (typeof f.bodies === 'string' && f.bodies) {
+      const list = f.bodies.split(',').map((s) => s.trim()).filter((b): b is (typeof BODIES)[number] => (BODIES as readonly string[]).includes(b))
+      if (list.length > 0) patch.bodies = list
+    }
+    if (typeof f.payments === 'string' && f.payments) {
+      const list = f.payments.split(',').map((s) => s.trim()).filter((p): p is (typeof PAYMENTS)[number]['id'] => (PAYMENTS as readonly { id: string }[]).some((x) => x.id === p))
+      if (list.length > 0) patch.payments = list
+    }
+    if (typeof f.minRate === 'string' && f.minRate.trim()) patch.minRate = f.minRate.trim().slice(0, 12)
+    if (Object.keys(patch).length > 0) {
+      setFilters((cur) => ({ ...cur, ...patch }))
+      void run({ ...filters, ...patch })
+    }
+    // применяем только новый переход нейросети (ts), не каждое изменение фильтров человека
+  }, [appliedFilters])
 
   // Заявки: на монтировании (бейдж вкладки и отметки в выдаче) и на входе в раздел
   const loadDeals = useCallback(async () => {

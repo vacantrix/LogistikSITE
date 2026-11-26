@@ -1,4 +1,4 @@
-// Каталог разделов платформы для ссылок нейросети (блок ai-links).
+// Каталог разделов платформы для ссылок нейросети (блок ai-links и инлайн-ссылки #nav:).
 // Модуль чистый (без React и серверных импортов) — импортируется и на клиенте
 // (валидация ссылок в UI), и на сервере (проверка блока, сборка промпта).
 //
@@ -10,6 +10,76 @@ export interface AiNavLinkMeta {
   tab: string
   label: string
   hint: string
+}
+
+/** Каким значениям верить при разборе фильтра (белые списки как в market-stubs) */
+export interface AiNavFilterSpec {
+  /** text — короткая строка; number — число; list — значения через запятую */
+  kind: 'text' | 'number' | 'list'
+  /** максимум: длина строки, величина числа или число элементов списка */
+  max: number
+  /** для kind=list — допустимые значения (пустое = любые короткие строки) */
+  values?: readonly string[]
+}
+
+/**
+ * Фильтры, которые нейросеть может применить к разделу (ai-links → filters).
+ * Нейросеть «выполняет работу по платформе»: переходит в раздел и сама
+ * выставляет фильтры/поиск. Ключи и значения — белые списки: всё лишнее
+ * сервер отбрасывает, интерфейс клампит ещё раз.
+ *
+ * own-atisu — фильтры витрины грузов (AtiSuMarketPanel: from/to/weight/
+ * volume/bodies/payments/minRate); board/requests/own-requests — поисковый
+ * запрос q (строка поиска раздела).
+ */
+export const AI_NAV_FILTERS: Partial<Record<string, Record<string, AiNavFilterSpec>>> = {
+  board: { q: { kind: 'text', max: 80 } },
+  requests: { q: { kind: 'text', max: 80 } },
+  'own-requests': { q: { kind: 'text', max: 80 } },
+  'own-atisu': {
+    from: { kind: 'text', max: 60 },
+    to: { kind: 'text', max: 60 },
+    weight: { kind: 'number', max: 100 },
+    volume: { kind: 'number', max: 300 },
+    bodies: { kind: 'list', max: 6, values: ['тент', 'изотерм', 'реф', 'бортовая', 'цельнометалл.', 'контейнер'] },
+    payments: { kind: 'list', max: 4, values: ['cashless_vat', 'cashless', 'cash', 'card'] },
+    minRate: { kind: 'text', max: 12 },
+  },
+}
+
+/** Проверенные фильтры для перехода: только белые ключи/значения, всё клампится */
+export function sanitizeNavFilters(tab: string, raw: unknown): Record<string, string> | undefined {
+  const specs = AI_NAV_FILTERS[tab]
+  if (!specs || !raw || typeof raw !== 'object') return undefined
+  const o = raw as Record<string, unknown>
+  const out: Record<string, string> = {}
+  for (const [key, spec] of Object.entries(specs)) {
+    const v = o[key]
+    if (v === undefined || v === null) continue
+    if (spec.kind === 'number') {
+      const n = typeof v === 'number' ? v : Number(v)
+      if (Number.isFinite(n)) out[key] = String(Math.max(0, Math.min(spec.max, n)))
+      continue
+    }
+    if (spec.kind === 'list') {
+      const list = (typeof v === 'string' ? v.split(',') : Array.isArray(v) ? v : [])
+        .map((s) => String(s).trim())
+        .filter((s) => (spec.values ? spec.values.includes(s) : s.length > 0 && s.length <= spec.max))
+        .slice(0, spec.max)
+      if (list.length > 0) out[key] = list.join(',')
+      continue
+    }
+    const s = String(v).trim().slice(0, spec.max)
+    if (s) out[key] = s
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/** Список фильтров раздела для системного промпта: «tab: key1, key2…» */
+export function aiNavFiltersPromptLines(): string {
+  return Object.entries(AI_NAV_FILTERS)
+    .map(([tab, specs]) => `${tab}: ${Object.keys(specs).join(', ')}`)
+    .join('\n')
 }
 
 export const AI_NAV_CATALOG: AiNavLinkMeta[] = [

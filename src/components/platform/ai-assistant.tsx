@@ -26,7 +26,7 @@
  *  — любой ответ агента можно сохранить кнопкой «В избранное» — он попадает
  *    в календарь раздела «Избранное» (AiSavedMessage) вместе с вопросом.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
@@ -40,8 +40,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { EmptyState, LoadingBlock, ErrorBlock, type TabProps } from '@/components/platform/common'
+import { EmptyState, LoadingBlock, ErrorBlock, type TabProps, type TabKey } from '@/components/platform/common'
 import { AI_ENGINE_LABELS } from '@/lib/ai/rights'
+import { aiNavLink } from '@/lib/ai/nav-catalog'
 import { type AiBestOffer, type AiCard, type AiLinkRef, type AiReport } from '@/lib/ai/tools'
 import { AiOfferList } from '@/components/platform/ai-offer-list'
 import { AiCardList, AiLinkChips, AiReportCard } from '@/components/platform/ai-widgets'
@@ -98,7 +99,37 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} МБ`
 }
 
-/** строки хода работы — простой текст, как в harness: «› что делаю сейчас» */
+/** Гиперссылка в тексте ответа: [фраза](#nav:tab) — быстрая адресация на раздел
+ *  платформы; клик открывает раздел сразу. Обычные внешние ссылки — как есть. */
+function markdownLink(onNavigate?: (tab: TabKey) => void) {
+  return function AiMarkdownLink({ href, children }: ComponentPropsWithoutRef<'a'>): ReactNode {
+    const m = /^#nav:([a-z0-9-]+)$/i.exec(href ?? '')
+    if (m && onNavigate) {
+      const key = m[1]
+      const meta = aiNavLink(key)
+      if (meta) {
+        return (
+          <button
+            type="button"
+            onClick={() => onNavigate(key as TabKey)}
+            title={`Открыть раздел «${meta.label}»`}
+            aria-label={`Открыть раздел «${meta.label}»`}
+            className="cursor-pointer font-medium text-emerald-300 underline decoration-emerald-400/50 underline-offset-2 transition-colors hover:text-emerald-200 hover:decoration-emerald-300"
+          >
+            {children}
+          </button>
+        )
+      }
+    }
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-white">
+        {children}
+      </a>
+    )
+  }
+}
+
+/** строки хода работы — простой текст, как в harness: «› что сделано» */
 function StepsLines({ steps, busy }: { steps: ChatStep[]; busy?: boolean }) {
   if (steps.length === 0 && !busy) return null
   return (
@@ -125,6 +156,8 @@ function StepsLines({ steps, busy }: { steps: ChatStep[]; busy?: boolean }) {
 /** Чат с нейросетью: история, модель, файлы, живой ход работы и медленно печатающийся ответ */
 export default function AiAssistantTab({ onNavigate }: TabProps) {
   const { toast } = useToast()
+  // рендер ссылок в тексте ответа: #nav:tab — быстрая адресация на раздел платформы
+  const mdComponents = useMemo(() => ({ a: markdownLink(onNavigate) }), [onNavigate])
 
   // ——— чат: история из БД ———
   const [messages, setMessages] = useState<ChatMessage[] | null>(null)
@@ -505,7 +538,7 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
                     >
                       {m.role === 'assistant' ? (
                         <div className="markdown-view markdown-view-dark text-sm text-zinc-100">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{m.content}</ReactMarkdown>
                           {m.saved && m.saved.length > 0 && (
                             <div className="mt-2 rounded-lg border border-zinc-700 bg-zinc-800/60 px-2.5 py-2 text-xs text-zinc-300">
                               <span className="font-semibold">Записано в «Память контактов»:</span> {m.saved.join(', ')}
@@ -597,7 +630,7 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
                     <div className="max-w-[min(46rem,92%)] rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100">
                       <div className="markdown-view markdown-view-dark">
                         {liveAnswer ? (
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{liveAnswer}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{liveAnswer}</ReactMarkdown>
                         ) : (
                           <span className="inline-flex items-center gap-2 text-zinc-400">
                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />

@@ -104,9 +104,29 @@ export function AiCardList({ cards }: { cards: AiCard[] }) {
   )
 }
 
-/* ——— ссылки на разделы платформы (ai-links) ——— */
+/* ——— ссылки на разделы платформы (ai-links, опционально с фильтрами) ——— */
 
-export function AiLinkChips({ links, onNavigate }: { links: AiLinkRef[]; onNavigate?: (tab: TabKey) => void }) {
+/** Сводка фильтров ссылки для подписи: «Абинск → Сочи · тент» — коротко и по-русски */
+function filtersSummary(filters: Record<string, string>): string {
+  const LABEL: Record<string, string> = { q: 'поиск', from: 'из', to: 'в', weight: 'т', volume: 'м³', bodies: '', payments: '', minRate: 'от' }
+  const parts: string[] = []
+  if (filters.from && filters.to) parts.push(`${filters.from} → ${filters.to}`)
+  else {
+    if (filters.from) parts.push(`из ${filters.from}`)
+    if (filters.to) parts.push(`в ${filters.to}`)
+  }
+  if (filters.bodies) parts.push(filters.bodies)
+  if (filters.weight) parts.push(`${filters.weight} ${LABEL.weight}`)
+  if (filters.volume) parts.push(`${filters.volume} м³`)
+  if (filters.minRate) parts.push(`от ${filters.minRate} ₽`)
+  if (filters.q) parts.push(`«${filters.q}»`)
+  return parts.join(' · ')
+}
+
+export function AiLinkChips({ links, onNavigate }: {
+  links: AiLinkRef[]
+  onNavigate?: (tab: TabKey, opts?: { filters?: Record<string, string> }) => void
+}) {
   if (links.length === 0) return null
   return (
     <div className="mt-2 flex flex-col gap-1.5">
@@ -117,14 +137,15 @@ export function AiLinkChips({ links, onNavigate }: { links: AiLinkRef[]; onNavig
       <div className="flex flex-col gap-1.5">
         {links.map((link, i) => {
           const meta = aiNavLink(link.tab)
+          const summary = link.filters ? filtersSummary(link.filters) : ''
           return (
             <button
               key={`${link.tab}-${i}`}
               type="button"
               disabled={!onNavigate}
-              onClick={onNavigate ? () => onNavigate(link.tab as TabKey) : undefined}
+              onClick={onNavigate ? () => onNavigate(link.tab as TabKey, link.filters ? { filters: link.filters } : undefined) : undefined}
               className="group flex min-h-[44px] w-full items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-left shadow-sm transition-all hover:border-emerald-300 hover:bg-emerald-50/50 hover:shadow disabled:cursor-default disabled:opacity-60"
-              aria-label={`Открыть раздел «${meta?.label ?? link.tab}»: ${link.label}`}
+              aria-label={`Открыть раздел «${meta?.label ?? link.tab}»${link.filters ? ` с фильтрами: ${summary}` : ''}`}
             >
               <span
                 aria-hidden
@@ -133,8 +154,18 @@ export function AiLinkChips({ links, onNavigate }: { links: AiLinkRef[]; onNavig
                 <ArrowRight className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-slate-800">{meta?.label ?? link.tab}</span>
+                <span className="block text-sm font-semibold text-slate-800">
+                  {meta?.label ?? link.tab}
+                  {link.filters && (
+                    <span className="ml-1.5 inline-flex items-center rounded-md bg-emerald-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-emerald-700">
+                      с фильтрами
+                    </span>
+                  )}
+                </span>
                 <span className="block truncate text-xs text-slate-500">{link.label}</span>
+                {summary && (
+                  <span className="mt-0.5 block truncate text-[11px] text-emerald-700">{summary}</span>
+                )}
               </span>
             </button>
           )

@@ -220,7 +220,7 @@ function RequestFilesList({ files }: { files: RequestDTO['files'] }) {
   )
 }
 
-export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
+export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick, navFilters }: TabProps) {
   const { toast } = useToast()
   const can = useCan()
   const [requests, setRequests] = useState<RequestDTO[] | null>(null)
@@ -251,6 +251,13 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // переход от нейросети с фильтрами: поиск реестра выставляется сам (filters.q)
+  useEffect(() => {
+    if (navFilters?.tab !== 'requests') return
+    const nextQ = navFilters.filters.q?.trim()
+    if (nextQ && nextQ !== q) setQ(nextQ)
+  }, [navFilters])
 
   // real-time (Task 49): событие из шины WS мгновенно догружает реестр
   useEffect(() => {

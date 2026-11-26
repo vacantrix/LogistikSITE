@@ -233,7 +233,7 @@ export default function Page() {
 }
 
 /** Интерфейс платформы для вошедшего пользователя (внутри PermProvider — здесь доступны права) */
-function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAccount }: {
+function PlatformView(props: {
   user: SessionUserDTO
   tab: TabKey
   setTab: (t: TabKey) => void
@@ -242,11 +242,24 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
   onLogout: () => void
   onAddAccount: () => void
 }) {
+  const { user, tab } = props
+  const setTab: (t: TabKey) => void = props.setTab
+  const { liveTick, connLost, onLogout, onAddAccount } = props
   const can = useCan()
   const { ready: permsReady } = usePerms()
   const role = roleOf(user)
   const activeCarrierId = role.kind === 'carrier' ? role.carrierId ?? null : null
-  const tabProps = { activeCarrierId, role: role.kind, onNavigate: setTab, liveTick }
+  // цель последней навигации с фильтрами (от нейросети): раздел применяет их сам
+  const [navFilters, setNavFilters] = useState<{ tab: TabKey; filters: Record<string, string>; ts: number } | null>(null)
+  // переход с фильтрами: нейросеть из чата отправляет человека в раздел с уже
+  // выставленным поиском/фильтрами (ai-links → filters, инлайн-ссылки #nav:)
+  const go = (t: TabKey, opts?: { filters?: Record<string, string> }) => {
+    if (opts?.filters && Object.keys(opts.filters).length > 0) {
+      setNavFilters({ tab: t, filters: opts.filters, ts: Date.now() })
+    }
+    setTab(t)
+  }
+  const tabProps = { activeCarrierId, role: role.kind, onNavigate: go, liveTick, navFilters }
   // права загрузились, а текущий раздел закрыт — уводим на первый доступный:
   // так после смены должности логист не остаётся на «пустом» экране
   useEffect(() => {
@@ -276,11 +289,11 @@ function PlatformView({ user, tab, setTab, liveTick, connLost, onLogout, onAddAc
   const allowed = navFor(role.kind).some((n) => n.key === tab) && sectionAllowed(tab, can)
 
   return (
-    <Shell tab={tab} onNavigate={setTab} role={role} user={user} onLogout={onLogout} onAddAccount={onAddAccount} liveTick={liveTick}>
+    <Shell tab={tab} onNavigate={go} role={role} user={user} onLogout={onLogout} onAddAccount={onAddAccount} liveTick={liveTick}>
       {!allowed ? (
         <RoleNotice role={role.kind} />
       ) : isOwnTab(tab) ? (
-        <KonturWorkspace tab={tab} onNavigate={setTab} liveTick={liveTick} />
+        <KonturWorkspace tab={tab} onNavigate={go} liveTick={liveTick} navFilters={navFilters} />
       ) : (
         <>
           {tab === 'board' && <BoardTab {...tabProps} />}

@@ -15,7 +15,7 @@
 // вокруг JSON может быть вводная фраза. Блоки удаляются из показываемого
 // текста всегда — человек видит только очищенный ответ и виджеты.
 
-import { aiNavLink } from './nav-catalog'
+import { aiNavLink, sanitizeNavFilters } from './nav-catalog'
 
 export type AiContactKind = 'carrier' | 'shipper' | 'driver' | 'other'
 export type AiRecordFormat = 'card' | 'list' | 'table' | 'text'
@@ -94,10 +94,14 @@ export interface AiReport {
   sections: AiReportSection[]
 }
 
-/** Ссылка на раздел платформы (ai-links): кнопка-переход в чате; ключ проверяется по каталогу */
+/** Ссылка на раздел платформы (ai-links): кнопка-переход в чате; ключ проверяется
+ *  по каталогу. filters — параметры, которые платформа сама применит в разделе
+ *  (поиск/фильтры): нейросеть выполняет работу, человеку остаётся смотреть. */
 export interface AiLinkRef {
   tab: string
   label: string
+  /** применяемые при переходе фильтры (белые списки — nav-catalog) */
+  filters?: Record<string, string>
 }
 
 export interface AiToolParseResult {
@@ -328,7 +332,9 @@ export function toAiReport(v: unknown): AiReport | null {
   }
 }
 
-/** Ссылка на раздел платформы (ai-links): ключ проверяется по каталогу, ярлык подставляется при пустом */
+/** Ссылка на раздел платформы (ai-links): ключ проверяется по каталогу, ярлык подставляется при пустом;
+ *  фильтры — по белым спискам раздела (own-atisu: from/to/weight/volume/bodies/payments/minRate;
+ *  board/requests/own-requests: q) */
 function toLinkRef(v: unknown): AiLinkRef | null {
   if (!v || typeof v !== 'object') return null
   const o = v as Record<string, unknown>
@@ -336,7 +342,8 @@ function toLinkRef(v: unknown): AiLinkRef | null {
   const meta = aiNavLink(tab)
   if (!meta) return null // раздела с таким ключом на платформе нет — ссылка отбрасывается
   const label = clampStr(o.label ?? o.text, 90) || meta.label
-  return { tab, label }
+  const filters = sanitizeNavFilters(tab, o.filters)
+  return filters ? { tab, label, filters } : { tab, label }
 }
 
 /** Похоже ли на карточку фактов (для встроенных в текст массивов) */

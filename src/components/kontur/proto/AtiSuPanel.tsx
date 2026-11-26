@@ -40,7 +40,7 @@ function fmtDay(iso: string | null): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
 }
 
-export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip, onOpenAi }: {
+export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip, onOpenAi, marketFilters }: {
   state: StateResponse
   /** стартовый подраздел: 'deals' — когда ведём пользователя к сделке из других разделов */
   initialSub?: 'search' | 'deals'
@@ -50,6 +50,8 @@ export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip
   onOpenTrip?: (tripId: string) => void
   /** переход к разделу «ИИ-помощник» (список нейросети) из окна поиска */
   onOpenAi?: () => void
+  /** фильтры от нейросети (ai-links → filters): витрина применяет их сама по ts */
+  marketFilters?: { filters: Record<string, string>; ts: number } | null
 }) {
   const [sub, setSub] = useState<Sub>(initialSub)
   const [status, setStatus] = useState<AtiStatus | null>(null)
@@ -185,7 +187,7 @@ export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip
       {sub === 'backhaul' ? (
         <BackhaulDemo state={state} />
       ) : (
-        <AtiSuMarketPanel state={state} mode={sub} onModeChange={setSub} onDealsCount={setDealsCount} onChanged={onChanged} onOpenTrip={onOpenTrip} />
+        <AtiSuMarketPanel state={state} mode={sub} onModeChange={setSub} onDealsCount={setDealsCount} onChanged={onChanged} onOpenTrip={onOpenTrip} appliedFilters={marketFilters} />
       )}
     </div>
   )

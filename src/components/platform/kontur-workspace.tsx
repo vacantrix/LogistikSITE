@@ -187,10 +187,12 @@ function ContourAuditPanel() {
   )
 }
 
-export function KonturWorkspace({ tab, onNavigate, liveTick }: {
+export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
   tab: TabKey
   onNavigate: (t: TabKey) => void
   liveTick: number
+  /** цель навигации от нейросети: filters.q — поиск заявок 1С; own-atisu — фильтры биржи */
+  navFilters?: { tab: TabKey; filters: Record<string, string>; ts: number } | null
 }) {
   const can = useCan()
   const { toast } = useToast()
@@ -201,6 +203,15 @@ export function KonturWorkspace({ tab, onNavigate, liveTick }: {
   const [focusDevice, setFocusDevice] = useState<{ id: string; ts: number } | null>(null)
   const [atisuSub, setAtisuSub] = useState<'search' | 'deals'>('search')
   const [error, setError] = useState('')
+  // переход от нейросети с фильтрами (ai-links → filters): own-requests — поиск q,
+  // own-atisu — фильтры витрины грузов (применяет AtiSuMarketPanel по ts)
+  useEffect(() => {
+    if (!navFilters || navFilters.tab !== 'own-requests') return
+    const nextQ = navFilters.filters.q?.trim()
+    if (nextQ && nextQ !== query) setQuery(nextQ)
+  }, [navFilters])
+  const atisuFilters =
+    navFilters && navFilters.tab === 'own-atisu' ? { filters: navFilters.filters, ts: navFilters.ts } : null
 
   const refresh = useCallback(async () => {
     try {
@@ -371,7 +382,7 @@ export function KonturWorkspace({ tab, onNavigate, liveTick }: {
             />
           )}
           {tab === 'own-atisu' && (
-            <AtiSuPanel state={state} initialSub={atisuSub} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAi={() => onNavigate('ai')} />
+            <AtiSuPanel state={state} initialSub={atisuSub} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAi={() => onNavigate('ai')} marketFilters={atisuFilters} />
           )}
           {tab === 'own-occupancy' && (
             <OccupancyPanel state={state} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAtiDeals={openAtiDeals} />
