@@ -25,6 +25,7 @@
  */
 import type { DocType, OcrOutput } from '@/lib/verify'
 import { nnSettings, scanKey, shrinkImage } from '@/lib/nn'
+import { templateFor } from '@/lib/ocr-templates'
 
 /** Виды документов, которые проверяет платформа */
 const KNOWN_TYPES = new Set<DocType>(['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA'])
@@ -191,6 +192,9 @@ export async function ocrServiceOcr(
   try {
     // сжатие перед отправкой в нейросеть (настройка maxSide): меньше пикселей и мегабайт — быстрее движок
     const payload = await shrinkImage(dataUri, settings.maxSide)
+    // шаблон документа (конструктор администратора): какие поля движку искать; null — вид отключён
+    const template = await templateFor(type).catch(() => null)
+    if (!template) return { kind: 'unsupported' }
     const res = await fetch(`${BASE}/ocr`, {
       method: 'POST',
       headers: headers(),
@@ -198,6 +202,16 @@ export async function ocrServiceOcr(
         type,
         dataUri: payload,
         intake,
+        // поля шаблона: имя + как искать (kind/подсказка) — движок ищет ровно их
+        fields: template.fields.map((f) => ({ label: f.label, kind: f.kind, optional: f.optional, hint: f.hint ?? undefined })),
+        // параметры движка из конструктора: пороги/поворот/язык/модели — применяются к этому запросу
+        engine: {
+          detConf: settings.detConf,
+          recConf: settings.recConf,
+          autoRotate: settings.autoRotate,
+          lang: settings.lang,
+          modelSet: settings.modelSet,
+        },
         ...(opts.minQuality && opts.minQuality > 0 ? { minQuality: opts.minQuality } : {}),
       }),
       signal: AbortSignal.timeout(settings.timeoutSec * 1000),

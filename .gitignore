@@ -105,3 +105,10 @@ tools/ocr-probe/__pycache__/
 
 # скриншоты проверки (артефакты разработки, не исходники)
 /*.png
+
+# локальные артефакты стенда (не пушатся)
+/dev-stand.sh
+/worklog.md
+/bun.lock
+/.zscripts/.db-init-done
+/.zscripts/*.log

@@ -4,9 +4,10 @@
  * Раздел «ИИ-помощник» — чат с нейросетью-консультантом платформы.
  *
  * Экран нейросети — чисто-чёрный (терминальная эстетика harness):
- *  — заголовков раздела нет: сразу чат; вверху слева — вращающийся светящийся
- *    индикатор активности нейросети с подписью («Готова» / текущий шаг),
- *    справа — кнопки «Права» и «Новый чат»;
+ *  — заголовков раздела нет: сразу чат; вверху слева — индикатор состояния
+ *    нейросети с подписью («Готова» / текущий шаг): когда нейросеть не занята —
+ *    спокойная изумрудная точка с мягким свечением (не спиннер!),
+ *    когда отвечает — янтарный вращающийся луч; справа — кнопка «Новый чат»;
  *  — история переписки хранится на сервере (AiChatMessage) и не теряется;
  *    «Новый чат» начинает диалог с чистого листа;
  *  — ход работы нейросеть пишет ПРОСТЫМ ТЕКСТОМ прямо в ленте — как в harness:
@@ -20,8 +21,8 @@
  *    рядом с кнопкой «Спросить»;
  *  — кнопка «добавить файл»: текстовые файлы читаются и попадают в контекст;
  *  — кнопки-вкладки «Чат», «Логи», «Список ИИ» убраны: всё отражается в самом
- *    чате; «Права» — кнопка в верхней панели: матрица доступа ИИ,
- *    которую редактирует администратор (AiRight), она действует сразу;
+ *    чате; матрица прав нейросети редактируется администратором в разделе
+ *    «Управление → Облачная LLM» — здесь кнопка «Права» не дублируется;
  *  — любой ответ агента можно сохранить кнопкой «В избранное» — он попадает
  *    в календарь раздела «Избранное» (AiSavedMessage) вместе с вопросом.
  */
@@ -40,7 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { EmptyState, LoadingBlock, ErrorBlock, type TabProps } from '@/components/platform/common'
-import { AI_RIGHT_MODE_LABELS, AI_ENGINE_LABELS, type AiRightMode, type AiRight } from '@/lib/ai/rights'
+import { AI_ENGINE_LABELS } from '@/lib/ai/rights'
 import { type AiBestOffer, type AiCard, type AiLinkRef, type AiReport } from '@/lib/ai/tools'
 import { AiOfferList } from '@/components/platform/ai-offer-list'
 import { AiCardList, AiLinkChips, AiReportCard } from '@/components/platform/ai-widgets'
@@ -48,11 +49,8 @@ import { aiFetch } from '@/components/platform/ai-shared'
 import { GIGA_MODELS, DEFAULT_GIGA_MODEL, gigaModelLabel } from '@/lib/ai/models'
 import { useToast } from '@/hooks/use-toast'
 import {
-  ArrowLeft, Ban, Cpu, Eye, FileText, Loader2, Lock, MessagesSquare, Paperclip, PenLine, Send,
-  ShieldCheck, Star, X,
+  Cpu, FileText, Loader2, MessagesSquare, Paperclip, PenLine, Send, Star, X,
 } from 'lucide-react'
-
-type SubKey = 'chat' | 'rights'
 
 /** шаг хода работы — строка текста (harness-лог: «что я сейчас делаю») */
 type ChatStep = { at: number; text: string }
@@ -77,13 +75,6 @@ type ChatMessage = {
   cards?: AiCard[]
   report?: AiReport | null
   links?: AiLinkRef[]
-}
-
-const RIGHT_ICON: Record<AiRightMode, typeof Ban> = { 'write': PenLine, 'read-partial': Eye, 'denied': Ban }
-const RIGHT_BADGE: Record<AiRightMode, string> = {
-  'write': 'bg-emerald-100 text-emerald-700',
-  'read-partial': 'bg-amber-100 text-amber-700',
-  'denied': 'bg-red-100 text-red-700',
 }
 
 /** прикреплять можно текстовые файлы — их содержимое попадает в контекст модели */
@@ -132,10 +123,8 @@ function StepsLines({ steps, busy }: { steps: ChatStep[]; busy?: boolean }) {
 }
 
 /** Чат с нейросетью: история, модель, файлы, живой ход работы и медленно печатающийся ответ */
-export default function AiAssistantTab({ onNavigate, role }: TabProps) {
-  const [sub, setSub] = useState<SubKey>('chat')
+export default function AiAssistantTab({ onNavigate }: TabProps) {
   const { toast } = useToast()
-  const isAdmin = role === 'admin'
 
   // ——— чат: история из БД ———
   const [messages, setMessages] = useState<ChatMessage[] | null>(null)
@@ -237,8 +226,8 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
   }, [])
 
   useEffect(() => {
-    if (sub === 'chat') void loadHistory()
-  }, [sub, loadHistory])
+    void loadHistory()
+  }, [loadHistory])
 
   // ——— сохранить ответ агента в «Избранное» (календарь ответов) ———
   const saveAnswer = useCallback(async (m: ChatMessage, question: string) => {
@@ -443,66 +432,24 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
     }
   }, [input, sending, attached, modelKey, waitTyped, stopTyper])
 
-  // ——— права: действующая матрица + редактирование администратором ———
-  const [rights, setRights] = useState<AiRight[] | null>(null)
-  const [lockedRights, setLockedRights] = useState<string[]>([])
-  const [rightsError, setRightsError] = useState<string | null>(null)
-  const [rightsSavingKey, setRightsSavingKey] = useState<string | null>(null)
-
-  const loadRights = useCallback(async () => {
-    setRightsError(null)
-    try {
-      const res = await aiFetch('/api/ai/rights')
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
-      setRights(json.rights as AiRight[])
-      setLockedRights(Array.isArray(json.locked) ? (json.locked as string[]) : [])
-    } catch (e) {
-      setRightsError(e instanceof Error ? e.message : String(e))
-      setRights(null)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (sub === 'rights') void loadRights()
-  }, [sub, loadRights])
-
-  const changeRight = useCallback(async (right: AiRight, mode: AiRightMode) => {
-    setRightsSavingKey(right.key)
-    try {
-      const res = await aiFetch('/api/ai/rights', { method: 'PUT', body: JSON.stringify({ key: right.key, mode }) })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
-      setRights(json.rights as AiRight[])
-      toast({
-        title: 'Право обновлено',
-        description: `«${right.title}» → ${AI_RIGHT_MODE_LABELS[mode]}. Матрица действует для следующих вопросов.`,
-      })
-    } catch (e) {
-      toast({ title: 'Право не сохранено', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
-    } finally {
-      setRightsSavingKey(null)
-    }
-  }, [toast])
-
   return (
     <div className="space-y-5">
       {/* ——— Чат: чисто-чёрный экран нейросети (заголовков раздела нет — сразу чат) ——— */}
-      {sub === 'chat' && (
-        <Card className="border-zinc-800 bg-black text-zinc-100 shadow-sm">
+      <Card className="border-zinc-800 bg-black text-zinc-100 shadow-sm">
           <CardContent className="flex h-[calc(100vh-12rem)] max-h-[860px] min-h-[480px] flex-col gap-3 p-3 sm:p-4">
             {/* верхняя панель: статус нейросети + действия */}
             <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
-              {/* живой индикатор нейросети: вращается и светится — цвет зависит от
-                  режима (изумрудный — готова, янтарный — работает); рядом — подпись:
-                  «Готова» или последний шаг хода работы */}
+              {/* живой индикатор нейросети: пока не занята — спокойная
+                  изумрудная точка с мягким свечением (НЕ спиннер — не выглядит
+                  вечной загрузкой); при ответе — янтарный вращающийся луч
+                  и последний шаг хода работы в подписи */}
               <span className="inline-flex min-h-[36px] items-center gap-2 text-sm text-zinc-300" aria-live="polite">
                 <span
                   aria-hidden
-                  className={`inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-transparent ${
+                  className={`inline-block h-3.5 w-3.5 shrink-0 ${
                     sending
-                      ? 'border-t-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.85)]'
-                      : 'border-t-emerald-300 shadow-[0_0_12px_rgba(110,231,183,0.85)]'
+                      ? 'animate-spin rounded-full border-2 border-transparent border-t-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.85)]'
+                      : 'animate-pulse rounded-full bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,0.9)]'
                   }`}
                 />
                 <span className="truncate">
@@ -512,16 +459,6 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
                 </span>
               </span>
               <div className="ml-auto flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 border-zinc-700 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white"
-                  onClick={() => setSub('rights')}
-                  disabled={sending}
-                >
-                  <ShieldCheck className="mr-1 h-3.5 w-3.5" aria-hidden />
-                  Права
-                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -779,85 +716,7 @@ export default function AiAssistantTab({ onNavigate, role }: TabProps) {
               </div>
             </div>
           </CardContent>
-        </Card>
-      )}
-
-      {/* ——— Права: матрица, редактируемая администратором ——— */}
-      {sub === 'rights' && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9"
-              onClick={() => setSub('chat')}
-            >
-              <ArrowLeft aria-hidden className="mr-1 h-3.5 w-3.5" />
-              К чату
-            </Button>
-            <span className="text-sm text-slate-600">
-              Права нейросети задаёт администратор платформы: режимы ниже редактируются и применяются
-              к следующим вопросам сразу — контекст для модели собирает сервер по действующей матрице.
-            </span>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700">
-            Права «Заявки, рейсы, ЭДО, 1С» и «Персональные данные» зашиты в платформу и не редактируются.
-            {!isAdmin && ' Ваша роль — только просмотр; изменения вносит администрация.'}
-          </div>
-          {rightsError && <ErrorBlock message={rightsError} onRetry={() => void loadRights()} />}
-          {rights === null && !rightsError && <LoadingBlock label="Загружаем матрицу прав…" />}
-          {rights !== null && (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {rights.map((r) => {
-                const Icon = RIGHT_ICON[r.mode]
-                const locked = lockedRights.includes(r.key)
-                return (
-                  <Card key={r.key} className="border-slate-200 shadow-sm">
-                    <CardContent className="p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Icon
-                          className={`h-4 w-4 shrink-0 ${r.mode === 'denied' ? 'text-red-500' : r.mode === 'read-partial' ? 'text-amber-600' : 'text-emerald-600'}`}
-                          aria-hidden
-                        />
-                        <span className="text-sm font-semibold text-slate-900">{r.title}</span>
-                        <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                          {locked && (
-                            <Badge variant="outline" className="gap-1 border-slate-300 text-slate-500">
-                              <Lock className="h-3 w-3" aria-hidden />
-                              зашито
-                            </Badge>
-                          )}
-                          {isAdmin && !locked ? (
-                            <Select
-                              value={r.mode}
-                              onValueChange={(v) => void changeRight(r, v as AiRightMode)}
-                              disabled={rightsSavingKey === r.key}
-                            >
-                              <SelectTrigger className="h-8 w-[210px] text-xs" aria-label={`Режим права «${r.title}»`}>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {(['write', 'read-partial', 'denied'] as AiRightMode[]).map((mode) => (
-                                  <SelectItem key={mode} value={mode} className="text-xs">
-                                    {AI_RIGHT_MODE_LABELS[mode]}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : (
-                            <Badge className={`border-0 ${RIGHT_BADGE[r.mode]}`}>{AI_RIGHT_MODE_LABELS[r.mode]}</Badge>
-                          )}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-xs leading-relaxed text-slate-600">{r.detail}</p>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      </Card>
 
     </div>
   )

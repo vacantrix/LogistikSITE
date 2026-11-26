@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  AccessDataDTO, AccessUserInput, AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, FileNodeDTO, FileReadDTO, IntakeDocVerdict, IntakeResult, NnLimitsDTO, NnStatusDTO, NnSettingsDTO, NnTestResultDTO, NnUpstreamDTO, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
+  AccessDataDTO, AccessUserInput, AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, FileNodeDTO, FileReadDTO, IntakeDocVerdict, IntakeResult, NnLimitsDTO, NnStatusDTO, NnSettingsDTO, NnTestResultDTO, NnUpstreamDTO, OcrFieldDTO, OcrTemplateDTO, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
 import type { ReportId, ReportPreview, ReportSettings } from '@/lib/reports/catalog'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
@@ -380,6 +380,13 @@ export const api = {
     fetch('/api/admin/nn', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings) })).then(json<{ settings: NnSettingsDTO; limits: NnLimitsDTO }>),
   nnAction: (body: { action: 'upstream' | 'test' | 'clear-cache'; docType?: string; fresh?: boolean }) =>
     fetch('/api/admin/nn', withAuth({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).then(json<NnUpstreamDTO & NnTestResultDTO & { ok: boolean; cache?: NnStatusDTO['cache'] }>),
+
+  /** Шаблоны документов PaddleOCR (конструктор администратора) */
+  nnTemplates: () => fetch('/api/admin/nn/templates', withAuth({ cache: 'no-store' })).then(json<{ templates: OcrTemplateDTO[] }>),
+  saveNnTemplate: (template: OcrTemplateDTO) =>
+    fetch('/api/admin/nn/templates', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(template) })).then(json<{ template: OcrTemplateDTO }>),
+  deleteNnTemplate: (docType: string) =>
+    fetch(`/api/admin/nn/templates?docType=${encodeURIComponent(docType)}`, withAuth({ method: 'DELETE' })).then(json<{ ok: boolean }>),
 
   /** Файловый проводник «Архитектуры» (админ): дерево, чтение, сохранение */
   fileTree: () => fetch('/api/admin/files?op=tree', withAuth({ cache: 'no-store' })).then(json<{ root: string; tree: FileNodeDTO[]; truncated: boolean }>),

@@ -5,7 +5,10 @@
  * по HTTP. Единственный движок — PaddleOCR (self-hosted Python, mini-services/paddle-ocr):
  *
  *   PADDLE_OCR_URL, по умолчанию http://127.0.0.1:3031/ocr
- *      (контракт: POST { image, docType, fields[] } → { quality, fields, confidences, docType, side?, confirmations })
+ *      (контракт: POST { image, docType, fields[], options? { detConf, recConf, autoRotate, lang, modelSet } } →
+ *       { quality, fields, confidences, docType, side?, confirmations })
+ *      Платформа передаёт поля из шаблона (конструктор администратора) и параметры
+ *      движка — движок применяет их к запросу (пороги детекции/чтения, поворот, язык, модели).
  *      Принимает изображения и PDF (первая страница); 422 — вид документа не распознаётся автоматически.
  *      Одна сильная модель (Task 86): детекция PP-OCRv5_server_det, чтение eslav_PP-OCRv5_mobile_rec.
  *      Облачный резерв (GLM-4.6V) удалён (Task 79): фото хранятся на серверах АЭМЗ,
@@ -64,10 +67,22 @@ interface OcrOutput {
 /** Ответ PaddleOCR: распознано или вид документа без шаблона (422); недоступен — null */
 type PaddleResult = { kind: 'ok'; ocr: OcrOutput } | { kind: 'unsupported' } | null
 
+interface EngineOptions {
+  detConf?: number
+  recConf?: number
+  autoRotate?: boolean
+  lang?: string
+  modelSet?: string
+}
+
 interface OcrRequestBody {
   type?: string
   dataUri?: string
   intake?: boolean
+  /** поля из шаблона (конструктор администратора): [{ label, kind, optional, hint? }] */
+  fields?: { label: string; kind?: string; optional?: boolean; hint?: string }[]
+  /** параметры движка (конструктор): пороги/поворот/язык/модели — передаются движку */
+  engine?: EngineOptions
 }
 
 // ---------------- утилиты ----------------
@@ -89,7 +104,12 @@ const DOC_TYPE_VALUES = DOC_TYPES
  *   PADDLE_OCR_URL=http://127.0.0.1:3031/ocr
  * Контракт: POST { image (dataUri), docType, fields[] } → { quality, fields, confidences, docType?, side? }
  */
-async function paddleOcr(dataUri: string, type: DocType): Promise<PaddleResult> {
+async function paddleOcr(
+  dataUri: string,
+  type: DocType,
+  templateFields: { label: string; kind?: string; optional?: boolean; hint?: string }[],
+  engineOpts: EngineOptions,
+): Promise<PaddleResult> {
   const url = PADDLE_URL
   if (!url) return null
   try {
@@ -100,7 +120,20 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<PaddleResult> 
         ...(UPSTREAM_TOKEN ? { 'X-OCR-Token': UPSTREAM_TOKEN } : {}),
         ...(url.includes('ngrok') ? { 'ngrok-skip-browser-warning': '1' } : {}),
       },
-      body: JSON.stringify({ image: dataUri, docType: type, fields: DOC_FIELDS[type] }),
+      body: JSON.stringify({
+        image: dataUri,
+        docType: type,
+        // поля шаблона (конструктор админа): движок ищет ровно их; без шаблона — заводской набор
+        fields: templateFields.length > 0 ? templateFields : DOC_FIELDS[type],
+        // параметры движка (конструктор админа) — движок применяет к запросу
+        options: {
+          detConf: engineOpts.detConf,
+          recConf: engineOpts.recConf,
+          autoRotate: engineOpts.autoRotate,
+          lang: engineOpts.lang,
+          modelSet: engineOpts.modelSet,
+        },
+      }),
       signal: AbortSignal.timeout(PADDLE_TIMEOUT_MS),
     })
     if (res.status === 422) return { kind: 'unsupported' }
@@ -118,13 +151,26 @@ async function paddleOcr(dataUri: string, type: DocType): Promise<PaddleResult> 
     const detectedType = DOC_TYPE_VALUES.includes(rawType as DocType)
       ? (rawType as DocType)
       : rawType === 'UNKNOWN' ? 'UNKNOWN' as const : undefined
+    // порог уверенности чтения (конструктор админа): поле ниже порога — не принимается,
+    // уходит «на проверку» человеку: движок его видел, но не уверен — платформа не показывает значение
+    const recConf = typeof engineOpts.recConf === 'number' ? engineOpts.recConf : 0
+    const fields: Record<string, string> = {}
+    const confidences: Record<string, number> = j.confidences ?? {}
+    for (const [k, v] of Object.entries(j.fields)) {
+      const conf = confidences[k]
+      if (recConf > 0 && typeof conf === 'number' && conf < recConf && String(v).trim() !== '') {
+        fields[k] = ''
+      } else {
+        fields[k] = v
+      }
+    }
     return {
       kind: 'ok',
       ocr: {
         engine: 'PaddleOCR (self-hosted)',
         quality: Math.round(j.quality),
-        fields: j.fields,
-        confidences: j.confidences ?? {},
+        fields,
+        confidences,
         ...(detectedType ? { detectedType } : {}),
         ...(j.side === 'front' || j.side === 'back' ? { side: j.side } : {}),
         ...(j.confirmations ? { confirmations: j.confirmations } : {}),
@@ -211,8 +257,8 @@ Bun.serve({
 
       const chain: string[] = []
 
-      // PaddleOCR: одна сильная модель (Task 86)
-      const paddle = await paddleOcr(dataUri, type)
+      // PaddleOCR: одна сильная модель (Task 86); поля — из шаблона (конструктор админа)
+      const paddle = await paddleOcr(dataUri, type, body?.fields ?? [], body?.engine ?? {})
       if (paddle?.kind === 'ok') {
         chain.push('paddleocr')
         lastEngine = paddle.ocr.engine

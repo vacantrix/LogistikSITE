@@ -6,6 +6,7 @@ import {
   NN_LIMITS, DEFAULT_NN, invalidateNnSettings, nnSettings, rowToNn, sanitizeNn,
 } from '@/lib/nn'
 import { db } from '@/lib/db'
+import { ocrTemplates } from '@/lib/ocr-templates'
 import { clearNnCache, nnCacheStats, nnQueueStats, ocrServiceOcr, ocrServiceStatus } from '@/lib/ocr-service'
 import type { DocType } from '@/lib/verify'
 
@@ -16,18 +17,23 @@ export async function GET() {
   const auth = await requireUser('admin')
   if (auth instanceof NextResponse) return auth
 
-  const [row, service] = await Promise.all([
+  const [row, service, templates] = await Promise.all([
     db.setting.findUnique({
       where: { id: 'main' },
-      select: { nnParallel: true, nnTimeoutSec: true, nnCacheMin: true, nnMaxSide: true },
+      select: {
+        nnParallel: true, nnTimeoutSec: true, nnCacheMin: true, nnMaxSide: true,
+        nnDetConf: true, nnRecConf: true, nnAutoRotate: true, nnLang: true, nnModelSet: true,
+      },
     }),
     ocrServiceStatus(),
+    ocrTemplates().catch(() => []),
   ])
   const saved = rowToNn(row)
   return NextResponse.json({
     settings: saved,
     defaults: DEFAULT_NN,
     limits: NN_LIMITS,
+    templates,
     service,
     queue: nnQueueStats(),
     cache: nnCacheStats(),
@@ -51,6 +57,11 @@ export async function PUT(req: NextRequest) {
     nnTimeoutSec: next.timeoutSec,
     nnCacheMin: next.cacheMin,
     nnMaxSide: next.maxSide,
+    nnDetConf: next.detConf,
+    nnRecConf: next.recConf,
+    nnAutoRotate: next.autoRotate,
+    nnLang: next.lang,
+    nnModelSet: next.modelSet,
   }
   const saved = await db.setting.upsert({ where: { id: 'main' }, update: data, create: { id: 'main', ...data } })
   invalidateNnSettings()
@@ -135,15 +146,23 @@ export async function POST(req: NextRequest) {
         quality: result.ocr.quality, engine: result.ocr.engine,
         detectedType: result.ocr.detectedType ?? null,
         fieldsCount, fieldsTotal: Object.keys(result.ocr.fields).length,
-        settings: { parallel: settings.parallel, timeoutSec: settings.timeoutSec, cacheMin: settings.cacheMin, maxSide: settings.maxSide },
+        settings: {
+            parallel: settings.parallel, timeoutSec: settings.timeoutSec, cacheMin: settings.cacheMin, maxSide: settings.maxSide,
+            detConf: settings.detConf, recConf: settings.recConf, autoRotate: settings.autoRotate,
+            lang: settings.lang, modelSet: settings.modelSet,
+          },
       })
     }
     return NextResponse.json({
       ok: false, ms, docType, label: demo.label,
       error: result.kind === 'unsupported'
-        ? 'Вид документа не распознаётся движком (422)'
+        ? 'Вид документа не распознаётся движком (шаблон отключён или вид незнаком)'
         : 'PaddleOCR не ответил — проверьте узел распознавания и связь с ним',
-      settings: { parallel: settings.parallel, timeoutSec: settings.timeoutSec, cacheMin: settings.cacheMin, maxSide: settings.maxSide },
+      settings: {
+            parallel: settings.parallel, timeoutSec: settings.timeoutSec, cacheMin: settings.cacheMin, maxSide: settings.maxSide,
+            detConf: settings.detConf, recConf: settings.recConf, autoRotate: settings.autoRotate,
+            lang: settings.lang, modelSet: settings.modelSet,
+          },
     })
   }
 

@@ -255,6 +255,16 @@ export interface NnSettingsDTO {
   cacheMin: number
   /** длинная сторона фото после сжатия, px (0 — без сжатия) */
   maxSide: number
+  /** порог уверенности детекции текста (0.2–0.9) */
+  detConf: number
+  /** порог уверенности чтения поля (0.3–0.99) — ниже: «на проверку» человеку */
+  recConf: number
+  /** авто-поворот/выравнивание документа перед распознаванием */
+  autoRotate: boolean
+  /** язык модели чтения: ru | en | ch */
+  lang: string
+  /** набор моделей детекции: server (точность) | mobile (скорость) */
+  modelSet: string
 }
 
 export interface NnLimitsDTO {
@@ -262,12 +272,38 @@ export interface NnLimitsDTO {
   timeoutSec: { min: number; max: number }
   cacheMin: { min: number; max: number }
   maxSide: { min: number; max: number }
+  detConf: { min: number; max: number }
+  recConf: { min: number; max: number }
+  lang: string[]
+  modelSet: string[]
+}
+
+/** Поле шаблона документа PaddleOCR (конструктор администратора) */
+export interface OcrFieldDTO {
+  id?: string
+  label: string
+  kind: string
+  optional: boolean
+  pattern?: string | null
+  hint?: string | null
+  order: number
+}
+
+/** Шаблон документа PaddleOCR: какие поля движок ищет и как */
+export interface OcrTemplateDTO {
+  id?: string
+  docType: string
+  title: string
+  enabled: boolean
+  order: number
+  fields: OcrFieldDTO[]
 }
 
 export interface NnStatusDTO {
   settings: NnSettingsDTO
   defaults: NnSettingsDTO
   limits: NnLimitsDTO
+  templates?: OcrTemplateDTO[]
   service: {
     running: boolean
     version?: string

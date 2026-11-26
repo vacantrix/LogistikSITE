@@ -569,6 +569,12 @@ model Setting {
   nnTimeoutSec Int    @default(180) // таймаут ожидания распознавания одного документа, сек (30–300)
   nnCacheMin   Int    @default(30)  // кэш повторных сканов по хэшу, минут (0 — выключен, 5–1440)
   nnMaxSide    Int    @default(0)   // уменьшение длинной стороны фото до N px перед отправкой (0 — как есть, 1200–3000)
+  // --- PaddleOCR: параметры движка (конструктор администратора, применяются к каждому запросу) ---
+  nnDetConf    Float  @default(0.3)   // порог уверенности детекции текста (0.2–0.9) — ниже: фрагмент не считается текстом
+  nnRecConf    Float  @default(0.75)   // порог уверенности чтения поля (0.3–0.99) — ниже: значение уходит «на проверку» человека
+  nnAutoRotate Boolean @default(true) // авто-поворот/выравнивание документа перед распознаванием
+  nnLang       String @default("ru")  // язык модели чтения: ru | en | ch — выбирает recognition-модель движка
+  nnModelSet   String @default("server") // набор моделей детекции: server (точность) | mobile (скорость)
 }
 
 /**
@@ -732,6 +738,43 @@ model AiChatMessage {
   createdAt   DateTime @default(now())
 
   @@index([userId, createdAt])
+}
+
+// ============ PaddleOCR: конструктор шаблонов документов (админ, UI «Управление → PaddleOCR») ============
+
+/** Шаблон документа для распознавания: какие поля движок ищет и как.
+ *  Администратор правит шаблоны из интерфейса — очередь распознавания берёт
+ *  поля из БД перед каждым документом (кэш 5 с), поэтому правки применяются сразу.
+ *  docType совпадает с видами документов платформы (PASSPORT_PHOTO, STS, …). */
+model OcrTemplate {
+  id        String     @id @default(cuid())
+  docType   String     @unique
+  title     String
+  enabled   Boolean    @default(true)
+  order     Int        @default(0)
+  fields    OcrField[]
+  updatedAt DateTime   @updatedAt
+  createdAt DateTime   @default(now())
+}
+
+/** Поле шаблона: как нейросеть ищет значение в документе. */
+model OcrField {
+  id        String      @id @default(cuid())
+  template  OcrTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  templateId String
+  /** имя поля в документе — передаётся движку (совпадает с подписью в документе) */
+  label     String
+  /** как искать и проверять значение: fio | date | passport | plate | vin | code | text */
+  kind      String      @default("text")
+  /** необязательное поле: не найдено — не повод для ручной проверки */
+  optional  Boolean     @default(false)
+  /** подсказка извлечения (регулярное выражение) — применяется после движка */
+  pattern   String?
+  /** как нейросеть должна искать поле (пояснение движку/оператору) */
+  hint      String?
+  order     Int         @default(0)
+
+  @@index([templateId, order])
 }
 
 /** Права ИИ-помощника — переопределения администратора. Ключ совпадает с AI_RIGHTS
