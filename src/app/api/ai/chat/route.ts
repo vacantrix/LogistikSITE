@@ -168,7 +168,7 @@ export async function POST(req: Request) {
           const ownCount = ctx.ownList ? ctx.ownList.split('\n').length : 0
           step(`контекст собран · контакты: ${
             contactsMode === 'denied' ? 'закрыты' : contactsMode === 'write' ? 'полные' : 'частичные'
-          } · свой список: ${ownCount} записей`)
+          } · свой список: ${ownCount} записей · платформа: ${ctx.platformSummary}`)
 
           const messages: EngineMessage[] = [
             { role: 'system', content: system },

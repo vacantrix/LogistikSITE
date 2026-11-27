@@ -68,6 +68,25 @@ export async function aiLog(level: 'info' | 'warn' | 'error', action: string, me
 const CONTACT_KIND_LABELS: Record<string, string> = { carrier: 'перевозчик', shipper: 'грузовладелец', driver: 'водитель', other: 'другое' }
 const DEAL_STATUS_LABELS: Record<string, string> = { talks: 'переговоры', done: 'заключена', refuse: 'отказ', lost: 'не вышло' }
 const DEAL_DIRECTION_LABELS: Record<string, string> = { load: 'груз', truck: 'машина' }
+const REQUEST_STATUS_LABELS: Record<string, string> = {
+  DRAFT: 'черновик',
+  PUBLISHED: 'на площадке',
+  AWARDED: 'перевозчик выбран',
+  DOCS_REVIEW: 'документы проверяются',
+  AT_LOGIST: 'у логиста — сверка',
+  QUARANTINE: 'карантин',
+  CONFIRMED: 'рейс выполняется',
+  CLOSED: 'рейс закрыт',
+  DELETED: 'удалена',
+}
+const CARRIER_ROLE_LABELS: Record<string, string> = { CARRIER: 'перевозит сам', FORWARDER: 'экспедитор' }
+
+const fmtRub = (v: number): string => `${new Intl.NumberFormat('ru-RU').format(Math.round(v))} ₽`
+const pluralRu = (n: number, one: string, few: string, many: string): string => {
+  const m10 = n % 10
+  const m100 = n % 100
+  return `${n} ${m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? few : many}`
+}
 
 /** Память контактов в контексте — по режиму права contacts-read:
  *  denied — контактов нет; read-partial — имена/компании/роли без телефонов и почты;
@@ -100,20 +119,143 @@ async function ownListContext(): Promise<string> {
     .join('\n')
 }
 
+/** Данные платформы в контексте — по праву platform-read:
+ *  denied — данные не передаются; read-partial — бизнес-данные (справочник
+ *  перевозчиков, заявки, ставки, победители, сводные показатели) без личных
+ *  и служебных полей; write — плюс комментарии, создатели и все ставки.
+ *  Личные данные людей (телефоны водителей, документы, доступы) не передаются
+ *  ни в одном режиме — только бизнес-показатели. */
+async function platformDataContext(mode: AiRightMode): Promise<{ text: string; summary: string }> {
+  if (mode === 'denied') return { text: '', summary: 'закрыты правом' }
+  const full = mode === 'write'
+  const [carriers, requests] = await Promise.all([
+    db.carrier.findMany({
+      where: { access: true },
+      include: { _count: { select: { drivers: true, trucks: true, trailers: true } } },
+      orderBy: { name: 'asc' },
+    }),
+    db.request.findMany({
+      where: { status: { notIn: ['DRAFT', 'DELETED'] } },
+      include: { bids: { where: { withdrawn: false }, include: { carrier: true } }, winner: true },
+      orderBy: { number: 'asc' },
+      take: 60,
+    }),
+  ])
+  if (carriers.length === 0 && requests.length === 0) {
+    return { text: 'В платформе пока нет перевозчиков и заявок.', summary: 'нет данных' }
+  }
+
+  // сводка по перевозчикам: победы, ставки, объём и доход (лучшая ставка × тоннаж)
+  const byCarrier = new Map(carriers.map((c) => [c.id, { name: c.name, wins: 0, bids: 0, tonnage: 0, revenue: 0 }]))
+  for (const r of requests) {
+    for (const b of r.bids) {
+      const agg = byCarrier.get(b.carrierId)
+      if (agg) agg.bids += 1
+    }
+    if (r.winner) {
+      const agg = byCarrier.get(r.winner.id)
+      if (agg) {
+        agg.wins += 1
+        agg.tonnage += r.tonnage || 0
+        if (r.bestRate != null) agg.revenue += r.bestRate * (r.tonnage || 0)
+      }
+    }
+  }
+
+  const statusCount = new Map<string, number>()
+  for (const r of requests) statusCount.set(r.status, (statusCount.get(r.status) ?? 0) + 1)
+  const won = requests.filter((r) => r.winner)
+  const totalRevenue = won.reduce((s, r) => s + (r.bestRate != null ? r.bestRate * (r.tonnage || 0) : 0), 0)
+  const totalTonnage = won.reduce((s, r) => s + (r.tonnage || 0), 0)
+  const bidsCount = requests.reduce((s, r) => s + r.bids.length, 0)
+
+  const lines: string[] = []
+  lines.push('Сводные показатели (посчитаны сервером на момент вопроса):')
+  lines.push(
+    `- перевозчики: ${carriers.length} (${carriers.filter((c) => c.role === 'CARRIER').length} перевозит сам, ${carriers.filter((c) => c.role !== 'CARRIER').length} экспедитор)`,
+  )
+  lines.push(
+    `- заявки (без черновиков и удалённых): ${requests.length} — ${[...statusCount.entries()]
+      .map(([s, n]) => `${REQUEST_STATUS_LABELS[s] ?? s}: ${n}`)
+      .join(', ')}`,
+  )
+  lines.push(
+    `- разыграно заявок: ${won.length} · объём перевозок: ${new Intl.NumberFormat('ru-RU').format(totalTonnage)} т · доход по лучшим ставкам (ставка ₽/т × тоннаж): ${fmtRub(totalRevenue)}`,
+  )
+  lines.push(`- ставок подано (без отозванных): ${bidsCount}`)
+
+  lines.push('')
+  lines.push('Доходы перевозчиков (по разыгранным заявкам — лучшая ставка × тоннаж):')
+  for (const agg of byCarrier.values()) {
+    if (agg.wins === 0 && agg.bids === 0) continue
+    lines.push(
+      `- ${agg.name}: побед ${agg.wins} · ставок ${agg.bids} · объём ${new Intl.NumberFormat('ru-RU').format(agg.tonnage)} т · доход ${fmtRub(agg.revenue)}`,
+    )
+  }
+
+  lines.push('')
+  lines.push('Справочник перевозчиков:')
+  for (const c of carriers) {
+    lines.push(
+      `- ${c.name} · ИНН ${c.inn} · ${CARRIER_ROLE_LABELS[c.role] ?? c.role} · договор №${c.contractNo} от ${c.contractDate} · парк: ${c._count.drivers} водителей, ${c._count.trucks} машин, ${c._count.trailers} прицепов`,
+    )
+  }
+
+  lines.push('')
+  lines.push(`Заявки (площадка — по одной строке${requests.length >= 60 ? ', показаны первые 60' : ''}):`)
+  for (const r of requests) {
+    const parts = [
+      `${r.number} · ${r.fromPoint} → ${r.toPoint}`,
+      `${r.cargo} · ${String(r.tonnage).replace('.', ',')} т · ${r.truckType}`,
+      `старт ${fmtRub(r.startRate)}/т`,
+      r.bestRate != null ? `лучшая ${fmtRub(r.bestRate)}/т` : 'ставок нет',
+      `погрузка ${r.loadDate}`,
+      REQUEST_STATUS_LABELS[r.status] ?? r.status,
+      r.winner ? `победитель ${r.winner.name}` : null,
+      r.bids.length > 0 ? `ставок ${r.bids.length}` : null,
+    ].filter(Boolean)
+    if (full) {
+      if (r.comment) parts.push(`комментарий: ${r.comment.slice(0, 120)}`)
+      parts.push(`создал ${r.createdBy}`)
+    }
+    lines.push(`- ${parts.join(' · ')}`)
+  }
+  if (full) {
+    lines.push('')
+    lines.push('Ставки по заявкам (без отозванных):')
+    for (const r of requests) {
+      if (r.bids.length === 0) continue
+      lines.push(
+        `- ${r.number}: ${r.bids.map((b) => `${b.carrier.name} — ${fmtRub(b.amount)}/т${b.isWinner ? ' (победа)' : ''}`).join('; ')}`,
+      )
+    }
+  }
+
+  return {
+    text: lines.join('\n'),
+    summary: `${pluralRu(carriers.length, 'перевозчик', 'перевозчика', 'перевозчиков')} · ${pluralRu(requests.length, 'заявка', 'заявки', 'заявок')}`,
+  }
+}
+
 export interface AiContextParts {
   contacts: string
   ownList: string
+  /** данные платформы (справочник, заявки, ставки, сводка) — по праву platform-read */
+  platform?: string
   /** витрина ATI.SU (демо-выдача грузов, машины фирмы) — только для поиска */
   market?: string
 }
 
 /** Сборка read-only контекста — по действующей матрице прав. */
-export async function buildRestrictedContext(rights: AiRight[] = AI_RIGHTS): Promise<{ contacts: string; ownList: string }> {
-  const [contacts, ownList] = await Promise.all([
+export async function buildRestrictedContext(
+  rights: AiRight[] = AI_RIGHTS,
+): Promise<{ contacts: string; ownList: string; platform: string; platformSummary: string }> {
+  const [contacts, ownList, platform] = await Promise.all([
     contactsContext(aiRightMode(rights, 'contacts-read')),
     aiRightMode(rights, 'own-list') === 'denied' ? Promise.resolve('') : ownListContext(),
+    platformDataContext(aiRightMode(rights, 'platform-read')),
   ])
-  return { contacts, ownList }
+  return { contacts, ownList, platform: platform.text, platformSummary: platform.summary }
 }
 
 /** Системный промпт: роль, жёсткие права (действующая матрица), инструменты записи, стиль и частичный контекст */
@@ -130,9 +272,16 @@ export function buildSystemPrompt(parts: AiContextParts, rights: AiRight[] = AI_
     'Конфиденциальность и безопасность (без исключений):',
     '- не запрашивай и не обрабатывай персональные документы людей (паспорт, права, СНИЛС), пароли и доступы;',
     '- если человек прислал такое в чат — откажись обрабатывать и посоветуй удалить сообщение;',
-    '- у тебя нет доступа к интернету, коду и базе платформы: ты не можешь менять сайт, сборку, заявки, ЭДО и 1С — и не обещай этого;',
+    '- интернета и кода у тебя нет; данные платформы приходят тебе в контексте «Данные платформы» и только для чтения: менять сайт, сборку, заявки, рейсы, ЭДО и 1С ты не можешь — и не обещай этого;',
     '- прикреплённые человеком файлы приходят к тебе ТЕКСТОМ прямо в сообщении (раздел «Файлы, прикреплённые человеком») — читай, анализируй и ссылайся на их содержимое как на данные человека; своих файлов и файловой системы у тебя нет;',
     '- запись в память платформы — только блоки ai-contact; отображение для человека — блоки ai-best / ai-card / ai-report / ai-links; иного способа записи у тебя нет, сервер проверяет всё сам.',
+    '',
+    'Данные платформы (для таблиц, сводок и отчётов):',
+    '- перевозчики, заявки, ставки и сводные показатели платформы приходят в контексте «Данные платформы» ниже — это реальные данные платформы;',
+    '- когда человек просит таблицу, отчёт или сводку по платформе — строй их ТОЛЬКО на этих данных: настоящие названия перевозчиков, номера заявок, ставки и объёмы; ничего не выдумывай;',
+    '- не переспрашивай человека о том, что уже есть в контексте (список перевозчиков, ставки, объёмы, доходы) — бери оттуда сразу;',
+    '- если нужного показателя в контексте нет — скажи прямо и предложи, что построить из имеющегося;',
+    '- личные данные людей (телефоны водителей, документы, доступы) в контекст не попадают — не обещай их показать.',
     '',
     'Инструменты записи (единственные):',
     '1) Записать перевозчика. Когда человек просит записать/запомнить/сохранить контакты, оформи карточки блоком:',
@@ -182,6 +331,9 @@ export function buildSystemPrompt(parts: AiContextParts, rights: AiRight[] = AI_
     '### Контекст: память контактов (частичное чтение — телефоны и почта скрыты)',
     parts.contacts,
   ]
+  if (parts.platform) {
+    blocks.push('', '### Контекст: данные платформы (только чтение — реальные перевозчики, заявки, ставки и сводные показатели)', parts.platform)
+  }
   if (parts.ownList) {
     blocks.push('', '### Контекст: собственный список нейросети — последние разборы', parts.ownList)
   }
