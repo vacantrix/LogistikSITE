@@ -10,11 +10,17 @@
  *    когда отвечает — янтарный вращающийся луч; справа — кнопка «Новый чат»;
  *  — история переписки хранится на сервере (AiChatMessage) и не теряется;
  *    «Новый чат» начинает диалог с чистого листа;
- *  — ход работы нейросеть пишет ПРОСТЫМ ТЕКСТОМ прямо в ленте — как в harness:
- *    каждая строка («Проверяю права…», «Спрашиваю GigaChat…») появляется вживую
- *    и остаётся над ответом в истории;
+ *  — ход работы — harness, как в Claude Code / Codex: во время ответа вживую
+ *    виден каждый шаг с таймингом («✓ права загружены · 0.1 с»), активный шаг
+ *    отмечен «⏺» и его секундомер тикает; закончив, журнал сворачивается в одну
+ *    строку «✓ ход работы · 7 шагов · 4.2 с» — раскрывается кликом;
+ *  — время у каждого сообщения: когда отправлено (человек) и когда отвечено,
+ *    плюс полное время работы нейросети над ответом; во время работы в шапке
+ *    тикает живой секундомер;
  *  — ответ печатается медленно и постепенно: сервер стримит чанки, а клиент
  *    «печатает» их с плавным темпом (rAF-тайперайтер) + мигающая каретка;
+ *  — экран чата открывается с анимацией: карточка всплывает и проявляется,
+ *    панель, лента и композер появляются по очереди — не мгновенно;
  *  — новые сообщения, строки хода работы и виджеты появляются с мягкими
  *    анимациями (fade/slide-in);
  *  — выбор уровня модели GigaChat — компактный переключатель в композере,
@@ -40,7 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { EmptyState, LoadingBlock, ErrorBlock, type TabProps, type TabKey } from '@/components/platform/common'
+import { LoadingBlock, ErrorBlock, type TabProps, type TabKey } from '@/components/platform/common'
 import { AI_ENGINE_LABELS } from '@/lib/ai/rights'
 import { aiNavLink } from '@/lib/ai/nav-catalog'
 import { type AiBestOffer, type AiCard, type AiLinkRef, type AiReport } from '@/lib/ai/tools'
@@ -50,7 +56,7 @@ import { aiFetch } from '@/components/platform/ai-shared'
 import { GIGA_MODELS, DEFAULT_GIGA_MODEL, gigaModelLabel } from '@/lib/ai/models'
 import { useToast } from '@/hooks/use-toast'
 import {
-  Cpu, FileText, Loader2, MessagesSquare, Paperclip, PenLine, Send, Star, X,
+  ChevronRight, Cpu, FileText, Loader2, Paperclip, PenLine, Send, Star, X,
 } from 'lucide-react'
 
 /** шаг хода работы — строка текста (harness-лог: «что я сейчас делаю») */
@@ -90,13 +96,44 @@ const TYPE_LAG_SEC = 3
 
 function fmtTime(iso: string): string {
   const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  if (Number.isNaN(d.getTime())) return ''
+  // сегодня — только время (14:05); в другой день — с датой (27.11, 14:05)
+  const sameDay = d.toDateString() === new Date().toDateString()
+  if (sameDay) return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} Б`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`
   return `${(n / 1024 / 1024).toFixed(1)} МБ`
+}
+
+/** длительность шага/работы: «0.4 с»; меньше секунды — в миллисекундах */
+function fmtDur(ms: number): string {
+  if (ms < 1000) return `${Math.max(1, Math.round(ms))} мс`
+  return `${(ms / 1000).toFixed(1)} с`
+}
+
+/** русская плюрализация: 1 шаг / 2 шага / 5 шагов */
+function pluralRu(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10
+  const m100 = n % 100
+  if (m10 === 1 && m100 !== 11) return one
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few
+  return many
+}
+
+/** полное время работы над ответом: от «вопрос принят» до последнего шага */
+function stepsWorkMs(steps: ChatStep[]): number {
+  if (steps.length < 2) return 0
+  return Math.max(0, steps[steps.length - 1].at - steps[0].at)
+}
+
+/** длительность шага: до начала следующего; у последнего шага истории — неизвестна (null) */
+function stepMs(steps: ChatStep[], i: number): number | null {
+  if (i + 1 >= steps.length) return null
+  return Math.max(0, steps[i + 1].at - steps[i].at)
 }
 
 /** Гиперссылка в тексте ответа: [фраза](#nav:tab) — быстрая адресация на раздел
@@ -129,24 +166,75 @@ function markdownLink(onNavigate?: (tab: TabKey) => void) {
   }
 }
 
-/** строки хода работы — простой текст, как в harness: «› что сделано» */
-function StepsLines({ steps, busy }: { steps: ChatStep[]; busy?: boolean }) {
-  if (steps.length === 0 && !busy) return null
+/** одна строка harness-лога: «✓ права загружены   0.1 с» — моноширинно */
+function HarnessLine({ done, text, ms }: { done: boolean; text: string; ms: number | null }) {
   return (
-    <div className="space-y-0.5" aria-label="Ход работы нейросети">
-      {steps.map((s, i) => (
-        <div
-          key={i}
-          className="animate-in fade-in slide-in-from-bottom-1 duration-700 text-[13px] leading-relaxed text-zinc-500"
-        >
-          <span className="mr-1.5 select-none text-zinc-600" aria-hidden>›</span>
-          <span>{s.text}</span>
-        </div>
-      ))}
-      {busy && (
-        <div className="animate-pulse text-[13px] leading-relaxed text-zinc-600" aria-hidden>
-          <span className="mr-1.5 select-none text-zinc-600">›</span>
-          работаю…
+    <div className="animate-in fade-in slide-in-from-left-2 duration-300 flex items-baseline gap-2">
+      <span
+        className={`shrink-0 select-none ${done ? 'text-zinc-600' : 'animate-pulse text-zinc-100'}`}
+        aria-hidden
+      >
+        {done ? '✓' : '⏺'}
+      </span>
+      <span className={`min-w-0 flex-1 break-words ${done ? 'text-zinc-500' : 'text-zinc-200'}`}>
+        {text}
+      </span>
+      {ms != null && <span className="shrink-0 tabular-nums text-zinc-600">{fmtDur(ms)}</span>}
+    </div>
+  )
+}
+
+/** живой harness-журнал во время ответа: каждый шаг с таймингом,
+ *  активный шаг «⏺» тикает (now обновляется каждые 0.1 с) */
+function HarnessLive({ steps, now }: { steps: ChatStep[]; now: number }) {
+  if (steps.length === 0) return null
+  return (
+    <div
+      role="log"
+      aria-label="Ход работы нейросети"
+      className="space-y-0.5 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[12px] leading-relaxed"
+    >
+      {steps.map((s, i) => {
+        const active = i === steps.length - 1
+        return (
+          <HarnessLine
+            key={i}
+            done={!active}
+            text={s.text}
+            ms={active ? Math.max(0, now - s.at) : stepMs(steps, i)}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+/** harness-журнал в истории: свёрнут в строку «✓ ход работы · 7 шагов · 4.2 с»
+ *  (как свёрнутые вызовы инструментов в Claude Code), раскрывается кликом */
+function HarnessLog({ steps, open, onToggle }: { steps: ChatStep[]; open: boolean; onToggle: () => void }) {
+  if (steps.length === 0) return null
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="inline-flex max-w-full items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 font-mono text-[12px] text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
+      >
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform duration-300 ${open ? 'rotate-90' : ''}`}
+          aria-hidden
+        />
+        <span aria-hidden className="text-zinc-500">✓</span>
+        <span className="truncate">
+          ход работы · {steps.length} {pluralRu(steps.length, 'шаг', 'шага', 'шагов')} · {fmtDur(stepsWorkMs(steps))}
+        </span>
+      </button>
+      {open && (
+        <div className="animate-in fade-in slide-in-from-top-1 duration-300 mt-1.5 space-y-0.5 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[12px] leading-relaxed">
+          {steps.map((s, i) => (
+            <HarnessLine key={i} done text={s.text} ms={stepMs(steps, i)} />
+          ))}
         </div>
       )}
     </div>
@@ -175,6 +263,24 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
   // потоковый текст ответа — печатается плавно (тайперайтер ниже)
   const [liveAnswer, setLiveAnswer] = useState('')
   const [clearArmed, setClearArmed] = useState(false)
+  // время работы над ответом: тикает каждые 0.1 с — видно в шапке и у активного шага
+  const [liveMs, setLiveMs] = useState(0)
+  const sentAtRef = useRef(0)
+  useEffect(() => {
+    if (!sending) return
+    const t = window.setInterval(() => setLiveMs(Date.now() - sentAtRef.current), 100)
+    return () => window.clearInterval(t)
+  }, [sending])
+  // какие harness-журналы истории раскрыты (id сообщений с ходом работы)
+  const [openStepsIds, setOpenStepsIds] = useState<Set<string>>(new Set())
+  const toggleSteps = useCallback((id: string): void => {
+    setOpenStepsIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
   // ——— сохранение ответов в «Избранное» (календарь агента) ———
   // id уже сохранённых сообщений (звезда заполнена) + какое сохраняем прямо сейчас
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
@@ -360,12 +466,17 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
     setChatError(null)
     setLiveSteps([])
     setLiveAnswer('')
+    sentAtRef.current = Date.now()
+    setLiveMs(0)
     typerRef.current = { target: '', shown: 0, rendered: 0, last: null }
     activeRef.current = true
     if (rafRef.current == null) rafRef.current = requestAnimationFrame((ts) => tickRef.current(ts))
     const localId = `local-${Date.now()}`
     const filesMeta = attached.map((f) => ({ name: f.name, size: f.size }))
-    setMessages((m) => [...(m ?? []), { id: localId, role: 'user', content: text, files: filesMeta }])
+    setMessages((m) => [
+      ...(m ?? []),
+      { id: localId, role: 'user', content: text, createdAt: new Date().toISOString(), files: filesMeta },
+    ])
     setInput('')
     const files = attached.map((f) => ({ name: f.name, size: f.size, type: f.type, text: f.text }))
     try {
@@ -468,10 +579,10 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
   return (
     <div className="space-y-5">
       {/* ——— Чат: чисто-чёрный экран нейросети (заголовков раздела нет — сразу чат) ——— */}
-      <Card className="border-zinc-800 bg-black text-zinc-100 shadow-sm">
+      <Card className="animate-in fade-in zoom-in-95 slide-in-from-bottom-6 fill-mode-both duration-500 ease-out border-zinc-800 bg-black text-zinc-100 shadow-sm">
           <CardContent className="flex h-[calc(100vh-12rem)] max-h-[860px] min-h-[480px] flex-col gap-3 p-3 sm:p-4">
             {/* верхняя панель: статус нейросети + действия */}
-            <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
+            <div className="animate-in fade-in slide-in-from-top-2 fill-mode-both delay-100 duration-500 flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
               {/* живой индикатор нейросети: пока не занята — спокойная
                   изумрудная точка с мягким свечением (НЕ спиннер — не выглядит
                   вечной загрузкой); при ответе — янтарный вращающийся луч
@@ -487,10 +598,21 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
                 />
                 <span className="truncate">
                   {sending
-                    ? (liveSteps.length > 0 ? liveSteps[liveSteps.length - 1].text : 'Работаю…')
+                    ? (liveAnswer
+                        ? 'печатаю ответ…'
+                        : liveSteps.length > 0 ? liveSteps[liveSteps.length - 1].text : 'Работаю…')
                     : 'Готова'}
                 </span>
               </span>
+              {/* живой секундомер работы — тикает, пока нейросеть отвечает */}
+              {sending && (
+                <span
+                  className="shrink-0 rounded-md border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-amber-200/90"
+                  title="Время работы над ответом"
+                >
+                  {(liveMs / 1000).toFixed(1)} с
+                </span>
+              )}
               <div className="ml-auto flex items-center gap-2">
                 <Button
                   variant="outline"
@@ -509,24 +631,31 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
 
             {/* лента сообщений: ч/б, всё отражается здесь же (grayscale — строго монохром) */}
             <div
-              className="grayscale min-h-0 flex-1 animate-in fade-in duration-700 space-y-3 overflow-y-auto pr-1"
+              className="grayscale min-h-0 flex-1 animate-in fade-in fill-mode-both delay-150 duration-700 space-y-3 overflow-y-auto pr-1"
               style={{ scrollbarWidth: 'thin' }}
               aria-label="Лента чата с нейросетью"
             >
               {messages === null && !historyError && <LoadingBlock label="Загружаем историю чата…" />}
               {historyError && <ErrorBlock message={historyError} onRetry={() => void loadHistory()} />}
               {messages != null && messages.length === 0 && (
-                <EmptyState
-                  icon={<MessagesSquare className="h-8 w-8" aria-hidden />}
-                  title="Задайте вопрос"
-                  hint="Переписка сохраняется на сервере"
-                />
+                <div className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both delay-300 duration-700 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3.5 font-mono text-[12.5px] leading-relaxed">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-zinc-100" aria-hidden>⏺</span>
+                    <span className="text-zinc-200">нейросеть платформы на линии</span>
+                  </div>
+                  <div className="pl-[22px] text-zinc-500">
+                    спросите про перевозчиков, ставки, заявки, доходы или риски — данные берутся из платформы
+                  </div>
+                  <div className="mt-1 pl-[22px] text-zinc-600">
+                    {`модель: ${gigaModelLabel(modelKey)} · Enter — отправить · Shift+Enter — новая строка`}
+                  </div>
+                </div>
               )}
               {messages?.map((m, idx) => (
                 <div key={m.id} className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-2">
-                  {/* ход работы — простой текст над ответом, как в harness */}
+                  {/* ход работы — свёрнутый harness-журнал, раскрывается кликом */}
                   {m.role === 'assistant' && m.steps && m.steps.length > 0 && (
-                    <StepsLines steps={m.steps} />
+                    <HarnessLog steps={m.steps} open={openStepsIds.has(m.id)} onToggle={() => toggleSteps(m.id)} />
                   )}
                   <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div
@@ -548,14 +677,15 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
                             </div>
                           )}
                           <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-                              {m.engine && (
-                                <>
-                                  {AI_ENGINE_LABELS[m.engine] ?? m.engine}
-                                  {m.modelKey && ` · уровень: ${gigaModelLabel(m.modelKey)}`}
-                                  {m.createdAt && ` · ${fmtTime(m.createdAt)}`}
-                                </>
-                              )}
+                            <div className="font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                              {[
+                                m.engine ? (AI_ENGINE_LABELS[m.engine] ?? m.engine) : '',
+                                m.modelKey ? `уровень: ${gigaModelLabel(m.modelKey)}` : '',
+                                m.steps && m.steps.length >= 2 ? `работа: ${fmtDur(stepsWorkMs(m.steps))}` : '',
+                                m.createdAt ? fmtTime(m.createdAt) : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
                             </div>
                             {/* сохранить ответ агента в «Избранное» — появится в календаре */}
                             <button
@@ -581,6 +711,11 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
                       ) : (
                         <>
                           <p className="whitespace-pre-wrap text-sm">{m.content}</p>
+                          {m.createdAt && (
+                            <div className="mt-1 text-right font-mono text-[10px] uppercase tracking-wide text-neutral-400">
+                              отправлено {fmtTime(m.createdAt)}
+                            </div>
+                          )}
                           {m.files && m.files.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {m.files.map((f) => (
@@ -622,23 +757,23 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
                 </div>
               ))}
 
-              {/* живой ответ: ход работы текстом + медленно печатающийся текст */}
+              {/* живой ответ: harness-журнал с таймингом + медленно печатающийся текст */}
               {sending && (
                 <div className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-2">
-                  <StepsLines steps={liveSteps} busy />
+                  <HarnessLive steps={liveSteps} now={sentAtRef.current + liveMs} />
                   <div className="flex justify-start">
                     <div className="max-w-[min(46rem,92%)] rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm text-zinc-100">
                       <div className="markdown-view markdown-view-dark">
                         {liveAnswer ? (
                           <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{liveAnswer}</ReactMarkdown>
                         ) : (
-                          <span className="inline-flex items-center gap-2 text-zinc-400">
-                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                            {liveSteps.length > 0 ? liveSteps[liveSteps.length - 1].text : 'Нейросеть начинает…'}
+                          <span className="inline-flex items-center gap-2 font-mono text-[12.5px] text-zinc-400">
+                            <span className="animate-pulse text-zinc-100" aria-hidden>⏺</span>
+                            {liveSteps.length > 0 ? liveSteps[liveSteps.length - 1].text : 'нейросеть начинает…'}
                           </span>
                         )}
                         {liveAnswer && (
-                          <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-zinc-400 align-middle" aria-hidden />
+                          <span className="ml-0.5 inline-block h-4 w-[2px] animate-caret-blink bg-zinc-400 align-middle" aria-hidden />
                         )}
                       </div>
                     </div>
@@ -655,7 +790,7 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
             )}
 
             {/* композер: файлы + вопрос + модель (у кнопки отправить) */}
-            <div className="space-y-2 border-t border-zinc-800 pt-2">
+            <div className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both delay-200 duration-500 space-y-2 border-t border-zinc-800 pt-2">
               {attached.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {attached.map((f) => (

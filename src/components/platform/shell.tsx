@@ -1014,7 +1014,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
                     type="button"
                     onClick={() => onNavigate(item.key)}
                     aria-current={active ? 'page' : undefined}
-                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors ${
+                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-all duration-200 active:scale-95 ${
                       active
                         ? 'bg-amber-400 font-semibold text-[#0E1B2C]'
                         : 'text-amber-100 hover:bg-amber-400/15 hover:text-white'
