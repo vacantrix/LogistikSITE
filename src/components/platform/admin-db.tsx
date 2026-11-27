@@ -230,6 +230,7 @@ export default function AdminDbTab(_props: TabProps) {
       <SectionHeader
         title="База данных"
         eyebrow="Администрирование"
+        tone="slate"
         desc="Прямое редактирование любых таблиц платформы. Изменения вступают в силу сразу и не отменяются — действуйте аккуратно."
       />
 

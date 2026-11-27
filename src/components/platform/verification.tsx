@@ -464,6 +464,8 @@ export default function VerificationTab({ activeCarrierId: _activeCarrierId, onN
   return (
     <div>
       <SectionHeader
+        eyebrow="Привлечённый транспорт"
+        tone="blue"
         title="Проверка документов"
         desc="Пакеты документов по выигранным рейсам: автопроверка нейросетью уже выполнена — остаётся сверить со сканами и принять решение"
       >

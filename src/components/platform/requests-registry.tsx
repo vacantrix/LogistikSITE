@@ -344,7 +344,7 @@ export default function RequestsRegistryTab({ activeCarrierId: _activeCarrierId,
 
   return (
     <div>
-      <SectionHeader title="Реестр заявок">
+      <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Реестр заявок">
         <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
           Заявок: {filtered.length}{filtered.length !== (requests?.length ?? 0) ? ` из ${requests?.length ?? 0}` : ''}
         </Badge>

@@ -183,17 +183,35 @@ export function WithTip({ tip, children }: { tip: ReactNode; children: ReactNode
   )
 }
 
-export function SectionHeader({ eyebrow, title, desc, children }: { eyebrow?: string; title: string; desc?: ReactNode; children?: ReactNode }) {
+/** Цвет надзаголовка раздела — код контура, как в рядах навигации шапки:
+ *  синий привлечённый транспорт, янтарный ИИ, зелёный собственный, серый — управление. */
+export type SectionTone = 'blue' | 'amber' | 'emerald' | 'slate'
+
+const EYEBROW_TONE: Record<SectionTone, string> = {
+  blue: 'text-blue-700',
+  amber: 'text-amber-700',
+  emerald: 'text-emerald-700',
+  slate: 'text-slate-500',
+}
+
+export function SectionHeader({ eyebrow, tone = 'slate', title, desc, children }: {
+  eyebrow?: string
+  tone?: SectionTone
+  title: string
+  desc?: ReactNode
+  children?: ReactNode
+}) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        {eyebrow && <div className="text-xs font-medium text-slate-500">{eyebrow}</div>}
+        {eyebrow && <div className={`text-[11px] font-semibold uppercase tracking-wide ${EYEBROW_TONE[tone]}`}>{eyebrow}</div>}
         <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
           {title}
           {/* описание раздела — только по наведению на «i» */}
           {desc && <InfoTip label={`О разделе «${title}»`}>{desc}</InfoTip>}
         </h2>
       </div>
+      {/* children — действия шапки: «Обновить», счётчики, главная кнопка раздела */}
       {children}
     </div>
   )
@@ -213,13 +231,92 @@ export function KpiCard({ icon, label, value, hint, tone = 'blue' }: { icon: Rea
         <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full ${tones[tone]}`} aria-hidden>
           {icon}
         </div>
-        <div className="text-2xl font-bold leading-tight text-slate-900">{value}</div>
+        <div className="text-2xl font-bold leading-tight tabular-nums text-slate-900">{value}</div>
         <div className="mt-0.5 flex items-center gap-1 text-sm font-medium text-slate-700">
           {label}
           {hint && <InfoTip label={label}>{hint}</InfoTip>}
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Компактная KPI-плитка-счётчик: число с точкой-индикатором (или значком) и подпись,
+ * без круга-иконки. Клик работает фильтром, active — плитка выбрана. Единая
+ * анатомия плиток обоих контуров: сводка «Заявок 1С», KPI «Мониторинга», «Занятость».
+ */
+export function KpiTile({ value, label, dot, icon, hint, active = false, onClick }: {
+  value: ReactNode
+  label: string
+  /** класс точки-индикатора цвета показателя (bg-emerald-500 и т.п.) */
+  dot?: string
+  /** значок вместо точки (правый верхний угол плитки) */
+  icon?: ReactNode
+  hint?: string
+  active?: boolean
+  onClick?: () => void
+}) {
+  const body = (
+    <>
+      <span className="flex w-full items-center justify-between gap-1">
+        <span className="text-xl font-bold tabular-nums text-slate-900">{value}</span>
+        {icon ?? (dot ? <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden /> : null)}
+      </span>
+      <span className="text-[11px] font-medium leading-tight text-slate-500">{label}</span>
+    </>
+  )
+  const cls = `flex flex-col gap-0.5 rounded-xl border bg-white px-3 py-2.5 text-left shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+    active ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200'
+  } ${onClick ? 'hover:shadow' : ''}`
+  if (!onClick) return <div className={cls} title={hint}>{body}</div>
+  return (
+    <button type="button" onClick={onClick} title={hint ?? (active ? 'Сбросить фильтр' : undefined)} aria-pressed={active} className={cls}>
+      {body}
+    </button>
+  )
+}
+
+/**
+ * Чип-переход из ленты «Требует внимания»: рамка, значок, текст и жирный счётчик;
+ * клик ведёт к проблеме. Единый вид лент внимания обоих контуров — «Площадка
+ * заявок» и «Собственный транспорт».
+ */
+export function AttentionChip({ icon, label, count, trailing, onClick, title }: {
+  icon?: ReactNode
+  label: ReactNode
+  /** счётчик после текста: «новые заявки — 3» (жирный) */
+  count?: ReactNode
+  /** значок справа (например, стрелка перехода) */
+  trailing?: ReactNode
+  onClick?: () => void
+  title?: string
+}) {
+  const cls = 'inline-flex max-w-full items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50'
+  const inner = (
+    <>
+      {icon}
+      <span className="min-w-0 truncate">{label}</span>
+      {count != null && (
+        <>
+          {'\u2009'}—{'\u2009'}
+          <b className="shrink-0 font-bold tabular-nums">{count}</b>
+        </>
+      )}
+      {trailing}
+    </>
+  )
+  if (!onClick) return <span className={cls} title={title}>{inner}</span>
+  return <button type="button" onClick={onClick} title={title} className={cls}>{inner}</button>
+}
+
+/** Пилюля-метка события/флага: мягкая заливка без рамки — как бейджи уведомлений.
+ *  Единая пилюля статусов и меток обоих контуров (px-2 py-0.5 text-[11px]). */
+export function Pill({ className = '', children, title }: { className?: string; children: ReactNode; title?: string }) {
+  return (
+    <span title={title} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${className}`}>
+      {children}
+    </span>
   )
 }
 

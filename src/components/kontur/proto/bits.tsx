@@ -1,64 +1,18 @@
 'use client'
 
-import type { ReactNode } from 'react'
-import { Info } from 'lucide-react'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/kontur/ui/tooltip'
+/**
+ * Словарь статусов диспетчерского контура. Базовые кирпичи — точка-и-слово
+ * (DotWord), пилюля (Pill) и подсказка «i» (InfoTip) — живут в общем слое
+ * платформы (platform/common): один источник правды для обоих контуров.
+ */
 import { STATUS_LABELS, OUTCOME_LABELS } from '@/lib/kontur/constants'
 import type { StatusEventDto } from '@/lib/kontur/client-types'
 import { fmtDateTime } from '@/lib/kontur/client-types'
+import { InfoTip, Pill, StatusDot } from '@/components/platform/common'
 
-/**
- * Пояснение по наведению (стиль LogistikSITE): на экране только значок «i»,
- * текст — во всплывающей подсказке. Постоянных информационных надписей нет.
- */
-export function InfoTip({ children, label = 'Подробнее', className = '' }: { children: ReactNode; label?: string; className?: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={label}
-          className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full align-middle text-slate-400 transition-colors hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${className}`}
-        >
-          <Info className="h-4 w-4" aria-hidden />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-sm text-left text-xs font-normal normal-case leading-snug tracking-normal">
-        {children}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-/**
- * Единый вид статусов платформы (стиль LogistikSITE): цвет несёт маленькая
- * точка, слово — обычным текстом без плашки, рамки и капса. Цветной текст —
- * только у того, что требует действия (warning) или означает отказ (danger).
- */
-export function DotWord({ dot, tone, children, className = '' }: {
-  dot: string
-  tone?: 'warning' | 'danger'
-  children: ReactNode
-  className?: string
-}) {
-  const text = tone === 'danger' ? 'text-red-700' : tone === 'warning' ? 'text-amber-700' : 'text-slate-700'
-  return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm ${text} ${className}`}>
-      <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
-      {children}
-    </span>
-  )
-}
-
-/** Пилюля-метка события/флага: мягкая заливка без рамки (как бейджи уведомлений) */
-export function Pill({ className = '', children, title }: { className?: string; children: ReactNode; title?: string }) {
-  return (
-    <span title={title} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${className}`}>
-      {children}
-    </span>
-  )
-}
+// Единый вид статусов платформы: DotWord = StatusDot общего слоя
+export { InfoTip, Pill }
+export { StatusDot as DotWord }
 
 // Лестница статусов плеча (B5.1): точка и слово
 const STATUS_META: Record<string, { dot: string; tone?: 'warning' | 'danger' }> = {
@@ -76,9 +30,9 @@ const STATUS_META: Record<string, { dot: string; tone?: 'warning' | 'danger' }> 
 export function StatusChip({ status }: { status: string }) {
   const meta = STATUS_META[status] ?? { dot: 'bg-slate-400' }
   return (
-    <DotWord dot={meta.dot} tone={meta.tone}>
+    <StatusDot dot={meta.dot} tone={meta.tone}>
       {STATUS_LABELS[status] || status}
-    </DotWord>
+    </StatusDot>
   )
 }
 
@@ -93,9 +47,9 @@ const STATE_META: Record<string, { dot: string; label: string; tone?: 'warning' 
 export function StateBadge({ state }: { state: string }) {
   const meta = STATE_META[state] ?? { dot: 'bg-slate-400', label: state }
   return (
-    <DotWord dot={meta.dot} tone={meta.tone}>
+    <StatusDot dot={meta.dot} tone={meta.tone}>
       {meta.label}
-    </DotWord>
+    </StatusDot>
   )
 }
 

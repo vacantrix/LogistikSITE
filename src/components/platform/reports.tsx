@@ -319,7 +319,7 @@ export default function ReportsTab({ liveTick }: TabProps) {
 
   return (
     <div>
-      <SectionHeader title="Отчёты" desc="Выберите отчёт, настройте, что в него попадёт, и сформируйте документ DOCX. Excel-книга показывает исходные данные и методику расчёта всех отчётов.">
+      <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Отчёты" desc="Выберите отчёт, настройте, что в него попадёт, и сформируйте документ DOCX. Excel-книга показывает исходные данные и методику расчёта всех отчётов.">
         <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void downloadExcel()} disabled={exportingExcel || !s}>
           {exportingExcel ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileSpreadsheet className="h-4 w-4 text-emerald-600" aria-hidden />}
           {exportingExcel ? 'Собираем книгу…' : 'Скачать Excel'}

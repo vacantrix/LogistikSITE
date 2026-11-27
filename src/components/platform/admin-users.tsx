@@ -204,6 +204,7 @@ export default function AdminUsersTab({ liveTick }: TabProps) {
       <SectionHeader
         title="Профили и доступы"
         eyebrow="Администрирование"
+        tone="slate"
         desc="Роль определяет, какие права у человека вообще могут быть. Должность задаёт набор прав, а личные исключения — редкие правки одного права с причиной и сроком. Изменения доходят до пользователя сразу, без перезагрузки."
       >
         <Button onClick={() => setDraft({ ...emptyDraft(), templateId: defaultTemplate('carrier') })} className="min-h-10">

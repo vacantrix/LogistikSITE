@@ -33,6 +33,7 @@ import type { StateResponse } from '@/lib/kontur/client-types'
 import { fmtDateTime } from '@/lib/kontur/client-types'
 import { bearingDeg, haversineKm, interpolate, progressOnSegment, type LatLng } from '@/lib/kontur/geo'
 import { DotWord, InfoTip, Pill, StatusChip } from './bits'
+import { KpiTile } from '@/components/platform/common'
 import { CallButton } from './CallButton'
 import {
   AlertTriangle, Beaker, BookOpen, ClipboardList, Clock, Coffee, Compass, Flag, Gauge, Loader2, LocateFixed,
@@ -385,30 +386,21 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
         </CardContent>
       </Card>
 
-      {/* 2. KPI-плитки парка (клик — фильтр) */}
+      {/* 2. KPI-плитки парка (клик — фильтр): единая KpiTile платформы */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
         {MONITOR_KPIS.map((kpi) => {
           const active = activeKpi === kpi.id
+          const Icon = KPI_ICONS[kpi.id]
           return (
-            <button
+            <KpiTile
               key={kpi.id}
-              type="button"
+              value={kpiCounts[kpi.id] ?? 0}
+              label={kpi.label}
+              icon={<Icon className={`h-4 w-4 opacity-60 ${KPI_TEXT[kpi.tone]}`} aria-hidden />}
+              active={active}
               onClick={() => setActiveKpi(active ? null : kpi.id)}
-              aria-pressed={active}
-              title={active ? 'Сбросить фильтр' : `Показать только: ${kpi.label}`}
-              className={`flex flex-col gap-0.5 rounded-xl border bg-white px-3 py-2.5 text-left shadow-sm transition-all hover:shadow ${
-                active ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200'
-              }`}
-            >
-              <span className="flex w-full items-center justify-between">
-                <span className="text-xl font-bold tabular-nums text-slate-900">{kpiCounts[kpi.id] ?? 0}</span>
-                {(() => {
-                  const Icon = KPI_ICONS[kpi.id]
-                  return <Icon className={`h-4 w-4 opacity-60 ${KPI_TEXT[kpi.tone]}`} aria-hidden />
-                })()}
-              </span>
-              <span className="text-[11px] font-medium leading-tight text-slate-500">{kpi.label}</span>
-            </button>
+              hint={active ? 'Сбросить фильтр' : `Показать только: ${kpi.label}`}
+            />
           )
         })}
       </div>

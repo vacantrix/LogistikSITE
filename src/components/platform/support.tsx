@@ -612,7 +612,8 @@ export default function SupportTab({ role, liveTick, activeCarrierId: _activeCar
   return (
     <div>
       <SectionHeader
-        eyebrow="Поддержка платформы"
+        eyebrow="Привлечённый транспорт"
+        tone="blue"
         title="Обращения"
         desc={role === 'carrier'
           ? 'Опишите проблему — логист или администрация ответят прямо здесь. К обращению можно приложить документы и медиа до 10 МБ.'

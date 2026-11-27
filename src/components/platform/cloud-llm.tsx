@@ -95,6 +95,7 @@ export default function CloudLlmTab(_: TabProps) {
       <SectionHeader
         title="Облачная LLM"
         eyebrow="Администрирование"
+        tone="slate"
         desc="Права нейросети ИИ-помощника и состояние облачного движка GigaChat (Сбер). Локальное распознавание документов — в разделе «PaddleOCR»."
       >
         <Button variant="outline" className="h-9" onClick={() => void load()}>

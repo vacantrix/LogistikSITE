@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, FilePen, Pencil, Plus, Send, Trash2, Truck } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, NoticeLine, OneCMark, SectionHeader, StatusDot, type TabProps,
+  EmptyState, ErrorBlock, InfoTip, LoadingBlock, ModeBadge, NoticeLine, OneCMark, Pill, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
 import { useCan } from '@/components/platform/perms'
 import { RoutePointsInline } from '@/components/platform/route-dialog'
@@ -134,6 +134,8 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
   return (
     <section aria-label="Черновики заявок">
       <SectionHeader
+        eyebrow="Привлечённый транспорт"
+        tone="blue"
         title="Черновики заявок"
         desc="Заявки, которые не на площадке: сохранённые без публикации и торги, по которым за время приёма ставок не было ни одной ставки. Перевозчики черновики не видят."
       >
@@ -167,13 +169,13 @@ export default function DraftsTab({ onNavigate, liveTick }: TabProps) {
                       <span className="font-semibold text-slate-900">{r.number}</span>
                       {/* заявка пришла из 1С через интеграцию (Task: onec-stub-install) */}
                       {r.onecRef && (
-                        <span
-                          className="inline-flex max-w-[240px] items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600"
+                        <Pill
+                          className="max-w-[240px] border border-slate-200 bg-slate-50 text-slate-600"
                           title={`Заявка из 1С, документ: ${r.onecRef}`}
                         >
                           <OneCMark className="h-3 w-3 text-[7px]" />
                           <span className="truncate">из 1С</span>
-                        </span>
+                        </Pill>
                       )}
                       {origin.unanswered ? (
                         <StatusDot dot="bg-amber-500" tone="warning">Торги без ставок</StatusDot>

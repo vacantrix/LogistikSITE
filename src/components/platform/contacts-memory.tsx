@@ -585,10 +585,16 @@ export default function ContactsMemoryTab({ liveTick }: TabProps) {
   return (
     <div className="flex flex-col gap-5">
       <SectionHeader
-        eyebrow="Рабочая тетрадь"
+        eyebrow="Привлечённый транспорт"
+        tone="blue"
         title="Память контактов"
         desc="С кем работали и какие сделки заключались: перевозчики, грузовладельцы, водители и менеджеры биржи — включая тех, с кем не сложилось, чтобы не звонить повторно в пустоту"
-      />
+      >
+        <Button variant="outline" size="sm" className="h-9" onClick={() => void load()} disabled={refreshing}>
+          <RefreshCw aria-hidden className={`mr-1 h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          Обновить
+        </Button>
+      </SectionHeader>
 
       {loading ? (
         <LoadingBlock label="Загружаем рабочую тетрадь…" />
@@ -641,10 +647,6 @@ export default function ContactsMemoryTab({ liveTick }: TabProps) {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" className="h-11 flex-1 sm:flex-none" onClick={() => void load()} disabled={refreshing}>
-                    <RefreshCw aria-hidden className={refreshing ? 'animate-spin' : ''} />
-                    Обновить
-                  </Button>
                   <Button className="h-11 flex-1 sm:flex-none" onClick={() => openContact(null)}>
                     <Plus aria-hidden />
                     Контакт

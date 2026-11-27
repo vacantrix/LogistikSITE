@@ -327,7 +327,7 @@ export default function RegistryTab({ activeCarrierId: _activeCarrierId, liveTic
 
   return (
     <div>
-      <SectionHeader title="Реестр рейсов">
+      <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Реестр рейсов">
         <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
           Рейсов: {filtered.length}{filtered.length !== base.length ? ` из ${base.length}` : ''}
         </Badge>

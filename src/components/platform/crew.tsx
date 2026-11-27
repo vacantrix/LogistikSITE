@@ -547,7 +547,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   if (loadError) {
     return (
       <div>
-        <SectionHeader title="Назначение экипажей" />
+        <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Назначение экипажей" />
         <ErrorBlock message={loadError} onRetry={() => { setLoadError(null); void load() }} />
       </div>
     )
@@ -555,7 +555,7 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   if (requests === null) {
     return (
       <div>
-        <SectionHeader title="Назначение экипажей" />
+        <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Назначение экипажей" />
         <LoadingBlock label="Загружаем выигранные заявки и базу аккаунта…" />
       </div>
     )
@@ -564,6 +564,8 @@ export default function CrewTab({ activeCarrierId, role, liveTick }: TabProps) {
   return (
     <div>
       <SectionHeader
+        eyebrow="Привлечённый транспорт"
+        tone="blue"
         title="Назначение экипажей"
         desc="По каждой выигранной заявке выберите водителя, тягач и прицеп и утвердите состав — заявка уйдёт из раздела в «Мои заявки»."
       />

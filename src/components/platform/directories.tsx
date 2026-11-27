@@ -561,6 +561,8 @@ export default function DirectoriesTab({ activeCarrierId, role, onNavigate, live
   return (
     <div>
       <SectionHeader
+        eyebrow="Привлечённый транспорт"
+        tone="blue"
         title="Справочники"
       />
 

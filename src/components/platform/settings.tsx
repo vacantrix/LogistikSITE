@@ -105,6 +105,7 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
       <SectionHeader
         title="Настройки"
         eyebrow="Администрирование"
+        tone="slate"
         desc="Пороги уверенности и правила автопрохождения документов: что принимать автоматически, что проверять, а что возвращать агенту. Настройки распознавания движка — в разделе «PaddleOCR»."
       />
 

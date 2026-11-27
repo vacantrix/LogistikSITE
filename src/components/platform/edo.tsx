@@ -99,9 +99,8 @@ export default function EdoTab({ role, liveTick }: TabProps) {
   const [etrnFor, setEtrnFor] = useState<{ requestId: string; requestNumber: string; doc: EdoDocDTO } | null>(null)
   const [syncing, setSyncing] = useState(false)
 
-  // роль — только для подписи контура в шапке раздела; подписи и отправки — по гранулярным правам (Task 111)
-  const isLogist = role === 'logist'
-  const isAdmin = role === 'admin'
+  // роли в шапке раздела больше не подписываются — контур виден в надзаголовке;
+  // подписи и отправки — по гранулярным правам (Task 111), сверка Диадока — edo:sync
   // права платформы (Task 111): сверка статусов Диадока — edo:sync (сервер проверяет то же самое);
   // без права кнопка «Обновить статусы» не отображается — остаётся пояснение «сверяет логист»
   const can = useCan()
@@ -163,7 +162,8 @@ export default function EdoTab({ role, liveTick }: TabProps) {
   return (
     <div>
       <SectionHeader
-        eyebrow={isLogist ? 'Внутренний контур АЭМЗ' : isAdmin ? 'Администрация платформы' : 'Кабинет перевозчика'}
+        eyebrow="Привлечённый транспорт"
+        tone="blue"
         title="Подписать ЭДО"
         desc={
           <ul className="list-disc space-y-1 pl-4">
@@ -184,12 +184,12 @@ export default function EdoTab({ role, liveTick }: TabProps) {
               {/* время последней сверки — по наведению на кнопку */}
               <WithTip tip={diadoc.lastSyncAt ? `Статусы ЭТрН сверены с Диадоком ${fmtDateTime(diadoc.lastSyncAt)}` : 'Сверить статусы ЭТрН с Диадоком'}>
                 {can('edo:sync') ? (
-                  <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-7 gap-1.5">
+                  <Button size="sm" variant="outline" disabled={syncing} onClick={() => void syncDiadoc()} className="h-9 gap-1.5">
                     <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} aria-hidden />
                     Обновить статусы
                   </Button>
                 ) : (
-                  <span tabIndex={0} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-500">
+                  <span tabIndex={0} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-500">
                     <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                     Обновить статусы — сверяет логист
                   </span>

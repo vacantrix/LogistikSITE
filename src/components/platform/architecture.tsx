@@ -638,6 +638,7 @@ export default function ArchitectureTab(_: TabProps) {
       <SectionHeader
         title="Архитектура платформы"
         eyebrow="Администрирование"
+        tone="slate"
         desc="Карта системы: контуры платформы, шина реального времени, нейросети (PaddleOCR — локально, Облачная LLM — облако Сбер) и файловый проводник стенда."
       />
 

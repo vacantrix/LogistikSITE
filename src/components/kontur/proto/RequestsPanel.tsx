@@ -24,6 +24,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/kontur/ui/table'
 import { useToast } from '@/hooks/use-toast'
+import { KpiTile } from '@/components/platform/common'
 import { TRIP_STATUS_LABELS, ACK_LABELS, MONITOR_STATUSES } from '@/lib/kontur/constants'
 import type { Leg, MatchCandidate, MatchResponse, Order, StateResponse, Trip } from '@/lib/kontur/client-types'
 import { DotWord, InfoTip, Pill, StatusChip } from './bits'
@@ -61,35 +62,6 @@ const DATE_FILTERS: { value: DateFilter; label: string }[] = [
   { value: 'tomorrow', label: 'Завтра' },
   { value: 'week', label: 'Неделя' },
 ]
-
-/** Плитка сводки: счётчик + подпись, клик = фильтр реестра */
-function StatTile({ count, label, dot, hint, active, onClick }: {
-  count: number
-  label: string
-  dot: string
-  hint: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={hint}
-      aria-pressed={active}
-      className={`rounded-xl border bg-white p-4 text-left shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-        active ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200'
-      }`}
-    >
-      {/* точка-индикатор — в правом верхнем углу, как в KPI-плитках «Мониторинга» */}
-      <div className="flex w-full items-center justify-between">
-        <span className="text-2xl font-bold tabular-nums text-slate-900">{count}</span>
-        <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
-      </div>
-      <div className="mt-1 text-sm font-medium text-slate-700">{label}</div>
-    </button>
-  )
-}
 
 const fmtDate = (iso?: string | null): string => {
   if (!iso) return '—'
@@ -580,48 +552,48 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
 
       {/* Сводка: счётчики по стадиям заявки (клик = фильтр реестра) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6" role="group" aria-label="Сводка по заявкам">
-        <StatTile
-          count={counts.get('new') ?? 0}
+        <KpiTile
+          value={counts.get('new') ?? 0}
           label="Новые"
           dot="bg-sky-500"
           hint="Пришли из 1С и ждут проверки логиста"
           active={statusFilter === 'new'}
           onClick={() => setStatusFilter(statusFilter === 'new' ? 'all' : 'new')}
         />
-        <StatTile
-          count={counts.get('ready_to_plan') ?? 0}
+        <KpiTile
+          value={counts.get('ready_to_plan') ?? 0}
           label="К планированию"
           dot="bg-emerald-500"
           hint="Проверены — можно назначать состав"
           active={statusFilter === 'ready_to_plan'}
           onClick={() => setStatusFilter(statusFilter === 'ready_to_plan' ? 'all' : 'ready_to_plan')}
         />
-        <StatTile
-          count={counts.get('planned') ?? 0}
+        <KpiTile
+          value={counts.get('planned') ?? 0}
           label="Запланирована"
           dot="bg-blue-500"
           hint="Состав назначен — ожидает подтверждения водителя и выезда"
           active={statusFilter === 'planned'}
           onClick={() => setStatusFilter(statusFilter === 'planned' ? 'all' : 'planned')}
         />
-        <StatTile
-          count={counts.get('in_trip') ?? 0}
+        <KpiTile
+          value={counts.get('in_trip') ?? 0}
           label="В рейсе"
           dot="bg-amber-500"
           hint="Рейсы выполняются — детали на карточках рейсов"
           active={statusFilter === 'in_trip'}
           onClick={() => setStatusFilter(statusFilter === 'in_trip' ? 'all' : 'in_trip')}
         />
-        <StatTile
-          count={counts.get('done') ?? 0}
+        <KpiTile
+          value={counts.get('done') ?? 0}
           label="Выполнена"
           dot="bg-slate-400"
           hint="Рейсы завершены — документы закрываются"
           active={statusFilter === 'done'}
           onClick={() => setStatusFilter(statusFilter === 'done' ? 'all' : 'done')}
         />
-        <StatTile
-          count={counts.get('quarantine') ?? 0}
+        <KpiTile
+          value={counts.get('quarantine') ?? 0}
           label="Карантин"
           dot="bg-red-500"
           hint="Пришли с ошибкой — требуют исправления в 1С"

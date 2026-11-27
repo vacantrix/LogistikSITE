@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast'
 import { Input } from '@/components/kontur/ui/input'
 import { InfoTip, Pill, StatusChip } from '@/components/kontur/proto/bits'
+import { KpiTile } from '@/components/platform/common'
 import { CallButton } from '@/components/kontur/proto/CallButton'
 import { PlanDealDialog } from '@/components/kontur/proto/PlanDealDialog'
 import { tripFrees } from '@/lib/kontur/availability'
@@ -297,21 +298,21 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
 
       {/* Плитки-счётчики: панель «Данные авто» из Excel, но живая */}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-8" role="group" aria-label="Сводка занятости">
-        <OccTile count={counts.total} label="Водителей" dot="bg-slate-900" hint="Все водители справочника парка АЭМЗ"
+        <KpiTile value={counts.total} label="Водителей" dot="bg-slate-900" hint="Все водители справочника парка АЭМЗ"
           active={filter === 'all'} onClick={() => setFilter('all')} />
-        <OccTile count={counts.on_trip} label="На линии" dot="bg-emerald-500" hint="Водят активные рейсы — план загрузки на смену"
+        <KpiTile value={counts.on_trip} label="На линии" dot="bg-emerald-500" hint="Водят активные рейсы — план загрузки на смену"
           active={filter === 'on_trip'} onClick={() => setFilter('on_trip')} />
-        <OccTile count={counts.assigned} label="Назначены" dot="bg-sky-500" hint="Рейс составлен (включая грузы ATI.SU из плана), выезд по плану"
+        <KpiTile value={counts.assigned} label="Назначены" dot="bg-sky-500" hint="Рейс составлен (включая грузы ATI.SU из плана), выезд по плану"
           active={filter === 'assigned'} onClick={() => setFilter('assigned')} />
-        <OccTile count={counts.free} label="Свободны" dot="bg-amber-500" hint="В строю и без рейса — резерв для планирования"
+        <KpiTile value={counts.free} label="Свободны" dot="bg-amber-500" hint="В строю и без рейса — резерв для планирования"
           active={filter === 'free'} onClick={() => setFilter('free')} />
-        <OccTile count={state.drivers.filter((d) => d.status === 'sick').length} label="Больничные" dot="bg-red-500" hint="Отметка справочника — временно недоступен"
+        <KpiTile value={state.drivers.filter((d) => d.status === 'sick').length} label="Больничные" dot="bg-red-500" hint="Отметка справочника — временно недоступен"
           active={filter === 'off'} onClick={() => setFilter('off')} />
-        <OccTile count={state.drivers.filter((d) => d.status === 'vacation').length} label="Отпуска" dot="bg-slate-400" hint="Отметка справочника — плановое отсутствие"
+        <KpiTile value={state.drivers.filter((d) => d.status === 'vacation').length} label="Отпуска" dot="bg-slate-400" hint="Отметка справочника — плановое отсутствие"
           active={filter === 'off'} onClick={() => setFilter('off')} />
-        <OccTile count={repairVehicles.length} label="ТС в ремонте" dot="bg-red-500" hint="Тягачи с флагом ремонта — составы из них не назначаются"
+        <KpiTile value={repairVehicles.length} label="ТС в ремонте" dot="bg-red-500" hint="Тягачи с флагом ремонта — составы из них не назначаются"
           active={filter === 'all'} onClick={() => setFilter('all')} />
-        <OccTile count={plan.plannedDeals.length} label="ATI в плане" dot="bg-violet-500" hint="Согласованные грузы ATI.SU, назначенные составом, — карточка «ATI.SU · согласовано» справа и график в «Планировании»"
+        <KpiTile value={plan.plannedDeals.length} label="ATI в плане" dot="bg-violet-500" hint="Согласованные грузы ATI.SU, назначенные составом, — карточка «ATI.SU · согласовано» справа и график в «Планировании»"
           active={false} onClick={onOpenAtiDeals} />
       </div>
 
@@ -663,34 +664,6 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
         </DialogContent>
       </Dialog>
     </div>
-  )
-}
-
-/** Плитка-счётчик сводки: та же анатомия, что KPI «Мониторинга» и сводка «Заявок» */
-function OccTile({ count, label, dot, hint, active, onClick }: {
-  count: number
-  label: string
-  dot: string
-  hint: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={hint}
-      aria-pressed={active}
-      className={`flex flex-col gap-0.5 rounded-xl border bg-white px-3 py-2.5 text-left shadow-sm transition-all hover:shadow ${
-        active ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200'
-      }`}
-    >
-      <span className="flex w-full items-center justify-between">
-        <span className="text-xl font-bold tabular-nums text-slate-900">{count}</span>
-        <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
-      </span>
-      <span className="text-[11px] font-medium leading-tight text-slate-500">{label}</span>
-    </button>
   )
 }
 

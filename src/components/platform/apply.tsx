@@ -254,7 +254,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
   if (!isCarrier) {
     return (
       <section aria-labelledby="apply-title">
-        <SectionHeader title="Подать документы" desc="Раздел доступен агентам-перевозчикам: база водителей и техники пополняется по документам с нейропроверкой" />
+        <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Подать документы" desc="Раздел доступен агентам-перевозчикам: база водителей и техники пополняется по документам с нейропроверкой" />
         <Card>
           <CardContent className="p-6 text-sm text-muted-foreground">
             Раздел доступен перевозчикам
@@ -266,7 +266,7 @@ export default function ApplyTab({ activeCarrierId, role, onNavigate }: TabProps
 
   return (
     <section aria-labelledby="apply-title" className="space-y-4">
-      <SectionHeader title="Подать документы" />
+      <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Подать документы" />
 
       {/* ——— «замыливание» экрана с лупой, пока идёт «Проверить все» (Task 83) ——— */}
       <ScanOverlay

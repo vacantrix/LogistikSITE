@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { useCan } from '@/components/platform/perms'
-import type { TabKey } from '@/components/platform/common'
+import { AttentionChip, Pill, SectionHeader, type TabKey } from '@/components/platform/common'
 import type { Alert, StateResponse } from '@/lib/kontur/client-types'
 import { authFetch } from '@/lib/kontur/session-token'
 import { RequestsPanel } from '@/components/kontur/proto/RequestsPanel'
@@ -69,16 +69,13 @@ const ALERT_ICONS: Record<Alert['kind'], ReactNode> = {
 function AlertButton({ a, onGo }: { a: Alert; onGo: (a: Alert) => void }) {
   const iconColor = a.level === 'red' ? 'text-red-600' : a.level === 'amber' ? 'text-amber-600' : 'text-slate-400'
   return (
-    <button
-      type="button"
+    <AttentionChip
+      icon={<span className={`shrink-0 ${iconColor}`} aria-hidden>{ALERT_ICONS[a.kind] ?? <CircleAlert className="h-3.5 w-3.5" />}</span>}
+      label={a.text}
+      trailing={<ArrowRight className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />}
       onClick={() => onGo(a)}
       title={`Перейти к проблеме: ${a.text}`}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
-    >
-      <span className={`shrink-0 ${iconColor}`} aria-hidden>{ALERT_ICONS[a.kind] ?? <CircleAlert className="h-3.5 w-3.5" />}</span>
-      {a.text}
-      <ArrowRight className="h-3 w-3 text-slate-400" aria-hidden />
-    </button>
+    />
   )
 }
 
@@ -161,9 +158,9 @@ function ContourAuditPanel() {
                   {e.at ? new Date(e.at).toLocaleString('ru-RU') : '—'}
                 </TableCell>
                 <TableCell className="text-xs">
-                  <span className={`rounded-full px-2 py-0.5 font-medium ${e.contour === 'platform' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                  <Pill className={e.contour === 'platform' ? 'bg-blue-50 text-blue-700' : 'bg-emerald-50 text-emerald-700'}>
                     {e.contour === 'platform' ? 'Платформа' : 'Собственный транспорт'}
-                  </span>
+                  </Pill>
                 </TableCell>
                 <TableCell className="text-xs text-slate-600">
                   {[e.actorName, e.actorRole].filter(Boolean).join(' · ') || e.actorLogin || 'система'}
@@ -285,15 +282,13 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Собственный транспорт</div>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">{title}</h2>
-        </div>
-        <Button variant="outline" size="sm" className="h-8" onClick={() => void refresh()}>
+      {/* шапка — общий SectionHeader платформы: надзаголовок контура тем же
+          словарём, что и привлечённый транспорт (синий) и ИИ (янтарный) */}
+      <SectionHeader eyebrow="Собственный транспорт" tone="emerald" title={title}>
+        <Button variant="outline" size="sm" className="h-9" onClick={() => void refresh()}>
           <RefreshCw className="mr-1 h-3.5 w-3.5" />Обновить
         </Button>
-      </div>
+      </SectionHeader>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -305,24 +300,16 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-slate-500">Требует внимания:</span>
           {newOrders > 0 && (
-            <button type="button" onClick={() => onNavigate('own-requests')} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50">
-              <Inbox className="h-3 w-3 text-blue-600" />новые заявки — <b>{newOrders}</b>
-            </button>
+            <AttentionChip icon={<Inbox className="h-3.5 w-3.5 shrink-0 text-blue-600" aria-hidden />} label="новые заявки" count={newOrders} onClick={() => onNavigate('own-requests')} />
           )}
           {ackPending > 0 && (
-            <button type="button" onClick={() => onNavigate('own-requests')} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50">
-              <UserX className="h-3 w-3 text-amber-600" />не подтверждено — <b>{ackPending}</b>
-            </button>
+            <AttentionChip icon={<UserX className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />} label="не подтверждено" count={ackPending} onClick={() => onNavigate('own-requests')} />
           )}
           {docsPending > 0 && (
-            <button type="button" onClick={() => onNavigate('own-requests')} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50">
-              <Camera className="h-3 w-3 text-blue-600" />фото ожидается — <b>{docsPending}</b>
-            </button>
+            <AttentionChip icon={<Camera className="h-3.5 w-3.5 shrink-0 text-blue-600" aria-hidden />} label="фото ожидается" count={docsPending} onClick={() => onNavigate('own-requests')} />
           )}
           {docsLost > 0 && (
-            <button type="button" onClick={() => onNavigate('own-requests')} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50">
-              <CameraOff className="h-3 w-3 text-red-600" />фото утрачено — <b>{docsLost}</b>
-            </button>
+            <AttentionChip icon={<CameraOff className="h-3.5 w-3.5 shrink-0 text-red-600" aria-hidden />} label="фото утрачено" count={docsLost} onClick={() => onNavigate('own-requests')} />
           )}
         </div>
       )}

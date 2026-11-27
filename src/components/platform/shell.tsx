@@ -41,7 +41,7 @@ import { NotificationBell } from '@/components/platform/notification-bell'
 import { LogoMark } from '@/components/platform/logo-mark'
 import { useCan } from '@/components/platform/perms'
 import type { PermKey } from '@/lib/perm-catalog'
-import { OneCMark, type RoleKind, type TabKey } from '@/components/platform/common'
+import { OneCMark, Pill, type RoleKind, type TabKey } from '@/components/platform/common'
 import type { ProfileDTO, SessionUserDTO } from '@/lib/types'
 import { activateAccount, api, getSessionToken, listAccounts } from '@/lib/api'
 
@@ -564,10 +564,10 @@ function AccountMenu({ user, profile, compact, canEditProfile, onLogout, onAddAc
                 </span>
                 <span className="mt-2.5 block break-words text-base font-bold leading-snug text-slate-900">{pill.title}</span>
                 {justUpdated && (
-                  <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                  <Pill className="mt-1 bg-emerald-50 text-emerald-700">
                     <UserRoundCheck className="h-3 w-3" aria-hidden />
                     Профиль обновлён
-                  </span>
+                  </Pill>
                 )}
                 {(pill.position || pill.company) && (
                   <span className="mt-0.5 block break-words text-center text-xs leading-snug text-slate-500">

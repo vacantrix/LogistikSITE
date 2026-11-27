@@ -649,7 +649,7 @@ export default function MyRequestsTab({ activeCarrierId, onNavigate, liveTick }:
 
   return (
     <section aria-label="Мои заявки — кабинет агента">
-      <SectionHeader title={`Мои заявки · ${carrierName}`} />
+      <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title={`Мои заявки · ${carrierName}`} />
 
       {!activeCarrierId && (
         <NoticeLine tone="warning" className="mb-4">Выберите перевозчика в шапке, чтобы действовать от его имени</NoticeLine>

@@ -51,6 +51,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
+  AttentionChip,
   EmptyState,
   ErrorBlock,
   LoadingBlock,
@@ -816,7 +817,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, 
   // ——— полоса «Требует внимания»: только реальная работа (вместо удалённой «Сводки») ———
   const attention = useMemo(() => {
     if (!isStaff || !requests) return []
-    const items: { key: string; icon: LucideIcon; text: string; onClick: () => void }[] = []
+    const items: { key: string; icon: LucideIcon; label: string; count?: number; onClick: () => void }[] = []
     const published = requests.filter((r) => r.status === 'PUBLISHED')
     const closingSoon = published.filter((r) => {
       if (!r.deadline || now === null) return false
@@ -826,7 +827,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, 
     if (closingSoon.length > 0) {
       items.push({
         key: 'closing', icon: Clock,
-        text: `Закрываются в ближайший час — ${closingSoon.length}`,
+        label: 'Закрываются в ближайший час', count: closingSoon.length,
         onClick: () => setExpandedId(closingSoon[0].id),
       })
     }
@@ -834,21 +835,21 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, 
     if (noBids.length > 0) {
       items.push({
         key: 'nobids', icon: TrendingUp,
-        text: `Без ставок, стоит поднять цену — ${noBids.length}`,
+        label: 'Без ставок, стоит поднять цену', count: noBids.length,
         onClick: () => setExpandedId(noBids[0].id),
       })
     }
     const drafts = requests.filter((r) => r.status === 'DRAFT').length
     if (drafts > 0) {
-      items.push({ key: 'drafts', icon: FilePen, text: `В черновиках — ${drafts}`, onClick: () => onNavigate('drafts') })
+      items.push({ key: 'drafts', icon: FilePen, label: 'В черновиках', count: drafts, onClick: () => onNavigate('drafts') })
     }
     const atLogist = requests.filter((r) => r.status === 'AT_LOGIST').length
     if (atLogist > 0) {
-      items.push({ key: 'verify', icon: ScanSearch, text: `На сверке — ${atLogist}`, onClick: () => onNavigate('verify') })
+      items.push({ key: 'verify', icon: ScanSearch, label: 'На сверке', count: atLogist, onClick: () => onNavigate('verify') })
     }
     const needFix = requests.filter((r) => r.status === 'DOCS_REVIEW').length
     if (needFix > 0) {
-      items.push({ key: 'fix', icon: Undo2, text: `У агента на исправлении — ${needFix}`, onClick: () => onNavigate('verify') })
+      items.push({ key: 'fix', icon: Undo2, label: 'У агента на исправлении', count: needFix, onClick: () => onNavigate('verify') })
     }
     return items
   }, [requests, isStaff, now, onNavigate])
@@ -857,7 +858,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, 
     <section aria-label="Площадка заявок">
       {/* Создание заявок — только из «Черновиков заявок» (кнопка «Новая заявка» там);
           на площадке — только приём ставок и управление уже опубликованными */}
-      <SectionHeader title="Площадка заявок" />
+      <SectionHeader eyebrow="Привлечённый транспорт" tone="blue" title="Площадка заявок" />
 
       {!isStaff && !activeCarrierId && (
         <NoticeLine tone="warning" className="mb-4">Выберите перевозчика в шапке, чтобы действовать от его имени</NoticeLine>
@@ -877,15 +878,13 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, 
             >
               <span className="mr-1 text-xs font-medium text-amber-700">Требует внимания:</span>
               {attention.map((a) => (
-                <button
+                <AttentionChip
                   key={a.key}
-                  type="button"
+                  icon={<a.icon className="h-3.5 w-3.5 shrink-0" aria-hidden />}
+                  label={a.label}
+                  count={a.count}
                   onClick={a.onClick}
-                  className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                >
-                  <a.icon className="h-3.5 w-3.5" aria-hidden />
-                  {a.text}
-                </button>
+                />
               ))}
             </div>
           )}
@@ -1146,7 +1145,7 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, 
                   >
                     {events.map((ev) => (
                       <li key={ev.id} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-50">
-                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600" aria-hidden />
+                        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-600" aria-hidden />
                         <div className="min-w-0 flex-1 text-sm leading-snug text-slate-800">{ev.message}</div>
                         <time dateTime={ev.createdAt} className="shrink-0 text-xs text-muted-foreground">{fmtDateTime(ev.createdAt)}</time>
                       </li>
