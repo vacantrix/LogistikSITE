@@ -168,3 +168,20 @@
 .markdown-view table { border-collapse: collapse; margin: 0.8em 0; width: 100%; display: block; overflow-x: auto; }
 .markdown-view th, .markdown-view td { border: 1px solid #e2e8f0; padding: 0.4em 0.7em; text-align: left; vertical-align: top; font-size: 0.88em; }
 .markdown-view th { background: #f8fafc; font-weight: 600; color: #334155; }
+
+/* Тёмная тема markdown — чат ИИ-помощника (класс markdown-view-dark).
+   Чат оформлен как чёрный терминал, а базовые правила .markdown-view выше
+   светлые: жирный текст (#0f172a), ссылки (#047857), заголовки, шапки таблиц
+   и фон code — на чёрном фоне всё это растворяется. Здесь переопределяем
+   палитру тёмной zinc-темой с изумрудными ссылками (как кнопки #nav:). */
+.markdown-view.markdown-view-dark h1 { color: #f4f4f5; border-bottom-color: #27272a; }
+.markdown-view.markdown-view-dark h2 { color: #f4f4f5; }
+.markdown-view.markdown-view-dark h3 { color: #e4e4e7; }
+.markdown-view.markdown-view-dark h4 { color: #d4d4d8; }
+.markdown-view.markdown-view-dark a { color: #6ee7b7; }
+.markdown-view.markdown-view-dark strong { color: #fafafa; }
+.markdown-view.markdown-view-dark code { background: #18181b; border-color: #27272a; color: #e4e4e7; }
+.markdown-view.markdown-view-dark blockquote { border-left-color: #3f3f46; color: #a1a1aa; }
+.markdown-view.markdown-view-dark hr { border-top-color: #27272a; }
+.markdown-view.markdown-view-dark th, .markdown-view.markdown-view-dark td { border-color: #27272a; }
+.markdown-view.markdown-view-dark th { background: #18181b; color: #d4d4d8; }
