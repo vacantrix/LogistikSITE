@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { aiLog } from '@/lib/ai/core'
@@ -6,22 +6,75 @@ import { aiLog } from '@/lib/ai/core'
 export const dynamic = 'force-dynamic'
 
 /**
- * GET /api/ai/messages — история чата с нейросетью (AiChatMessage) для
- * вошедшего пользователя: полная переписка, ход работы текстом, прикреплённые
+ * GET /api/ai/messages?sessionId=… — история чата с нейросетью (AiChatMessage):
+ * переписка одного диалога (AiChatSession), ход работы текстом, прикреплённые
  * файлы и виджеты, чтобы после перезагрузки чат оставался на месте.
+ * Без sessionId — самый свежий чат пользователя. В ответе также session (текущий
+ * чат) и sessions (все чаты — для панели «Прошлые чаты»).
+ * Старые записи без чата (до появления сессий) при первом чтении переносятся
+ * в архивный чат «Чат до обновления» — история не теряется.
  * Плюс savedMessageIds — какие ответы уже в «Избранном» (звезда заполнена).
  *
- * DELETE /api/ai/messages — «Новый чат»: очистить переписку этого пользователя.
- * Разборы в «Списке ИИ» не трогаются — это отдельный журнал работы нейросети.
+ * DELETE /api/ai/messages?sessionId=… — удалить один чат с его сообщениями
+ * (используется редко; основной путь — /api/ai/sessions). Без sessionId —
+ * удаление ВСЕХ чатов пользователя (полная очистка).
  */
 
-export async function GET() {
+/** список чатов пользователя: свежие сверху, с числом сообщений */
+async function listSessions(userId: string) {
+  const rows = await db.aiChatSession.findMany({
+    where: { userId },
+    orderBy: { updatedAt: 'desc' },
+    include: { _count: { select: { messages: true } } },
+    take: 100,
+  })
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    updatedAt: r.updatedAt.toISOString(),
+    count: r._count.messages,
+  }))
+}
+
+export async function GET(req: NextRequest) {
   const auth = await requireUser('logist', 'admin')
   if (auth instanceof NextResponse) return auth
 
   try {
+    // одноразовая миграция: сообщения до появления чатов — в архивный чат,
+    // чтобы история не потерялась и была доступна в «Прошлых чатах»
+    const orphans = await db.aiChatMessage.count({
+      where: { userId: auth.id, sessionId: null },
+    })
+    if (orphans > 0) {
+      const archive = await db.aiChatSession.create({
+        data: { userId: auth.id, title: 'Чат до обновления' },
+      })
+      await db.aiChatMessage.updateMany({
+        where: { userId: auth.id, sessionId: null },
+        data: { sessionId: archive.id },
+      })
+    }
+
+    // чат, который открыть: свой?sessionId (если он пользовательский) или самый свежий
+    const wantedId = req.nextUrl.searchParams.get('sessionId')
+    let session =
+      wantedId
+        ? await db.aiChatSession.findFirst({ where: { id: wantedId, userId: auth.id } })
+        : null
+    if (!session) {
+      session = await db.aiChatSession.findFirst({
+        where: { userId: auth.id },
+        orderBy: { updatedAt: 'desc' },
+      })
+    }
+    if (!session) {
+      // самого первого чата ещё нет — начинаем: пустой «Новый чат»
+      session = await db.aiChatSession.create({ data: { userId: auth.id } })
+    }
+
     const rows = await db.aiChatMessage.findMany({
-      where: { userId: auth.id },
+      where: { userId: auth.id, sessionId: session.id },
       orderBy: { createdAt: 'desc' },
       take: 200,
     })
@@ -72,20 +125,39 @@ export async function GET() {
         saved: Array.isArray(widgets.saved) ? widgets.saved : [],
       }
     })
-    return NextResponse.json({ messages, savedMessageIds })
+    return NextResponse.json({
+      session: { id: session.id, title: session.title },
+      messages,
+      savedMessageIds,
+      sessions: await listSessions(auth.id),
+    })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Не удалось загрузить историю' }, { status: 500 })
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
   const auth = await requireUser('logist', 'admin')
   if (auth instanceof NextResponse) return auth
 
   try {
+    const sessionId = req.nextUrl.searchParams.get('sessionId')
+    if (sessionId) {
+      // удаляем один чат (только свой) — сообщения каскадом
+      const own = await db.aiChatSession.findFirst({
+        where: { id: sessionId, userId: auth.id },
+        select: { id: true },
+      })
+      if (!own) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 })
+      await db.aiChatSession.delete({ where: { id: sessionId } })
+      await aiLog('info', 'chat_history_clear', `Чат удалён (${auth.login})`)
+      return NextResponse.json({ ok: true, sessions: await listSessions(auth.id) })
+    }
+    // без чата — полная очистка: все чаты и сообщения пользователя
+    await db.aiChatSession.deleteMany({ where: { userId: auth.id } })
     await db.aiChatMessage.deleteMany({ where: { userId: auth.id } })
-    await aiLog('info', 'chat_history_clear', `Чат очищен (${auth.login}) — начат новый диалог`)
-    return NextResponse.json({ ok: true })
+    await aiLog('info', 'chat_history_clear', `Все чаты очищены (${auth.login})`)
+    return NextResponse.json({ ok: true, sessions: [] })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Не удалось очистить чат' }, { status: 500 })
   }

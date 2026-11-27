@@ -3,13 +3,21 @@
 /**
  * Раздел «ИИ-помощник» — чат с нейросетью-консультантом платформы.
  *
- * Экран нейросети — чисто-чёрный (терминальная эстетика harness):
+ * Экран нейросети — ПОЛНОЭКРАННЫЙ (терминальная эстетика harness):
+ *  — чат занимает весь экран под шапкой платформы: без рамок, отступов
+ *    и светлой «прослойки» по периметру (Shell открывает раздел ИИ на всю
+ *    ширину, подвал платформы на этом разделе скрыт);
  *  — заголовков раздела нет: сразу чат; вверху слева — индикатор состояния
  *    нейросети с подписью («Готова» / текущий шаг): когда нейросеть не занята —
  *    спокойная изумрудная точка с мягким свечением (не спиннер!),
- *    когда отвечает — янтарный вращающийся луч; справа — кнопка «Новый чат»;
+ *    когда отвечает — янтарный вращающийся луч; справа — кнопки
+ *    «Прошлые чаты» и «Новый чат»;
+ *  — каждый диалог — отдельный чат (AiChatSession): «Новый чат» начинает
+ *    новый диалог, не удаляя прежние; первый вопрос становится названием;
+ *    кнопка «Прошлые чаты» открывает панель со всеми чатами — переключение
+ *    на любой прошлый чат и удаление ненужного (сообщения удаляются вместе
+ *    с чатом; копии ответов в «Избранном» остаются — это отдельные записи);
  *  — история переписки хранится на сервере (AiChatMessage) и не теряется;
- *    «Новый чат» начинает диалог с чистого листа;
  *  — ход работы — harness, как в Claude Code / Codex: во время ответа вживую
  *    виден каждый шаг с таймингом («✓ права загружены · 0.1 с»), активный шаг
  *    отмечен «⏺» и его секундомер тикает; закончив, журнал сворачивается в одну
@@ -56,8 +64,11 @@ import { aiFetch } from '@/components/platform/ai-shared'
 import { GIGA_MODELS, DEFAULT_GIGA_MODEL, gigaModelLabel } from '@/lib/ai/models'
 import { useToast } from '@/hooks/use-toast'
 import {
-  ChevronRight, Cpu, FileText, Loader2, Paperclip, PenLine, Send, Star, X,
+  ChevronRight, Cpu, FileText, History, Loader2, Paperclip, PenLine, Send, Star, Trash2, X,
 } from 'lucide-react'
+
+/** метаданные чата-диалога для панели «Прошлые чаты» */
+type ChatSessionMeta = { id: string; title: string; updatedAt: string; count: number }
 
 /** шаг хода работы — строка текста (harness-лог: «что я сейчас делаю») */
 type ChatStep = { at: number; text: string }
@@ -253,6 +264,11 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
   const [sending, setSending] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  // ——— чаты-диалоги (AiChatSession): текущий + список для «Прошлых чатов» ———
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<ChatSessionMeta[]>([])
+  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null)
   // выбранная модель чата (уровень GigaChat) — переключатель у кнопки отправить
   const [modelKey, setModelKey] = useState<string>(DEFAULT_GIGA_MODEL)
   // прикреплённые файлы (текст уже прочитан)
@@ -262,7 +278,6 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
   const [liveSteps, setLiveSteps] = useState<ChatStep[]>([])
   // потоковый текст ответа — печатается плавно (тайперайтер ниже)
   const [liveAnswer, setLiveAnswer] = useState('')
-  const [clearArmed, setClearArmed] = useState(false)
   // время работы над ответом: тикает каждые 0.1 с — видно в шапке и у активного шага
   const [liveMs, setLiveMs] = useState(0)
   const sentAtRef = useRef(0)
@@ -347,14 +362,18 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
     typerRef.current.last = null
   }, [])
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (sid?: string | null) => {
     setHistoryError(null)
+    // переключение чата — сразу терминальное «подключение…», без старой ленты
+    setMessages(null)
     try {
-      const res = await aiFetch('/api/ai/messages')
+      const res = await aiFetch(`/api/ai/messages${sid ? `?sessionId=${encodeURIComponent(sid)}` : ''}`)
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
       const rows = (json.messages ?? []) as ChatMessage[]
       setMessages(rows)
+      setSessionId((json.session?.id as string | undefined) ?? null)
+      setSessions(Array.isArray(json.sessions) ? (json.sessions as ChatSessionMeta[]) : [])
       // какие ответы уже в «Избранном» — звезда у них заполнена
       const saved = Array.isArray(json.savedMessageIds) ? (json.savedMessageIds as string[]) : []
       setSavedIds(new Set(saved))
@@ -410,25 +429,70 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
     return ''
   }, [messages])
 
+  // ——— чаты-диалоги: новый чат / переключение / удаление ———
+  /** «Новый чат»: отдельный пустой диалог; прежние чаты остаются в «Прошлых» */
   const newChat = useCallback(async () => {
-    if (!clearArmed) {
-      setClearArmed(true)
-      window.setTimeout(() => setClearArmed(false), 4000)
-      return
-    }
-    setClearArmed(false)
+    if (sending) return
     try {
-      const res = await aiFetch('/api/ai/messages', { method: 'DELETE' })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const res = await aiFetch('/api/ai/sessions', { method: 'POST' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      const s = json.session as ChatSessionMeta | undefined
+      if (!s) throw new Error('Сервер не вернул чат')
+      setSessions((prev) => [s, ...prev])
+      setSessionId(s.id)
       setMessages([])
       setLiveSteps([])
       setLiveAnswer('')
       setChatError(null)
-      toast({ title: 'Новый чат начат', description: 'Предыдущая переписка очищена — только у вас.' })
+      setSessionsOpen(false)
+      setArmedDeleteId(null)
     } catch (e) {
-      toast({ title: 'Не удалось очистить чат', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
+      toast({ title: 'Не удалось начать новый чат', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
     }
-  }, [clearArmed, toast])
+  }, [sending, toast])
+
+  /** переключиться на прошлый чат (его лента подгружается с сервера) */
+  const switchSession = useCallback((id: string) => {
+    setSessionsOpen(false)
+    setArmedDeleteId(null)
+    if (sending || id === sessionId) return
+    void loadHistory(id)
+  }, [sending, sessionId, loadHistory])
+
+  /** удалить чат: первый клик взводит подтверждение, второй — удаляет */
+  const deleteSession = useCallback(async (id: string) => {
+    if (armedDeleteId !== id) {
+      setArmedDeleteId(id)
+      window.setTimeout(() => setArmedDeleteId((cur) => (cur === id ? null : cur)), 4000)
+      return
+    }
+    setArmedDeleteId(null)
+    try {
+      const res = await aiFetch(`/api/ai/sessions?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error ?? `HTTP ${res.status}`)
+      const rest = Array.isArray(json.sessions) ? (json.sessions as ChatSessionMeta[]) : []
+      setSessions(rest)
+      // удалён текущий чат — открываем самый свежий из оставшихся (или новый пустой)
+      if (id === sessionId) void loadHistory()
+    } catch (e) {
+      toast({ title: 'Не удалось удалить чат', description: e instanceof Error ? e.message : String(e), variant: 'destructive' })
+    }
+  }, [armedDeleteId, sessionId, loadHistory, toast])
+
+  // Esc закрывает панель «Прошлых чатов»
+  useEffect(() => {
+    if (!sessionsOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        setSessionsOpen(false)
+        setArmedDeleteId(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sessionsOpen])
 
   // ——— прикрепление файлов: читаем текст на клиенте ———
   const pickFiles = useCallback(async (fileList: FileList | null): Promise<void> => {
@@ -482,7 +546,7 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
     try {
       const res = await aiFetch('/api/ai/chat', {
         method: 'POST',
-        body: JSON.stringify({ message: text, model: modelKey, files }),
+        body: JSON.stringify({ message: text, model: modelKey, files, sessionId: sessionId ?? undefined }),
       })
       if (!res.ok) {
         const json = await res.json().catch(() => ({}))
@@ -497,7 +561,7 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
         steps: ChatStep[]
         answer: string
         done?: {
-          answer: string; engine: string; model: string; modelKey?: string; latencyMs: number
+          answer: string; engine: string; model: string; modelKey?: string; latencyMs: number; sessionId?: string
           savedContacts?: { name: string; company: string }[]
           best?: AiBestOffer[]; cards?: AiCard[]; report?: AiReport | null; links?: AiLinkRef[]
           assistantMessageId?: string
@@ -565,6 +629,20 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
         },
       ])
       setAttached([])
+      // чат обновляется локально: поднимается наверх «Прошлых чатов»,
+      // первый вопрос становится названием, счётчик растёт (без перезагрузки)
+      const sid = done.sessionId ?? sessionId
+      if (sid) {
+        setSessionId(sid)
+        const title = text.replace(/\s+/g, ' ').trim().slice(0, 60)
+        setSessions((prev) => {
+          const cur = prev.find((s) => s.id === sid)
+          return [
+            { id: sid, title: cur?.title && cur.title !== 'Новый чат' ? cur.title : title, updatedAt: new Date().toISOString(), count: (cur?.count ?? 0) + 2 },
+            ...prev.filter((s) => s.id !== sid),
+          ]
+        })
+      }
     } catch (e) {
       // вопрос остаётся в истории (сервер сохранил до вызова модели) — ошибка показывается честно
       stopTyper()
@@ -574,13 +652,14 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
       setLiveSteps([])
       setLiveAnswer('')
     }
-  }, [input, sending, attached, modelKey, waitTyped, stopTyper])
+  }, [input, sending, attached, modelKey, sessionId, waitTyped, stopTyper])
 
   return (
-    <div className="space-y-5">
-      {/* ——— Чат: чисто-чёрный экран нейросети (заголовков раздела нет — сразу чат) ——— */}
-      <Card className="animate-in fade-in zoom-in-95 slide-in-from-bottom-6 fill-mode-both duration-500 ease-out border-zinc-800 bg-black text-zinc-100 shadow-sm">
-          <CardContent className="flex h-[calc(100vh-12rem)] max-h-[860px] min-h-[480px] flex-col gap-3 p-3 sm:p-4">
+    <>
+      {/* ——— Чат: полноэкранный чисто-чёрный экран нейросети — без рамок и
+          светлых полей по периметру, во всю высоту под шапкой платформы ——— */}
+      <Card className="relative overflow-hidden rounded-none border-0 bg-black text-zinc-100 shadow-none animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-500 ease-out">
+          <CardContent className="flex h-[calc(100vh-var(--header-h)-3.75rem-env(safe-area-inset-bottom,0px))] md:h-[calc(100vh-var(--header-h))] flex-col gap-3 p-3 sm:p-4">
             {/* верхняя панель: статус нейросети + действия */}
             <div className="animate-in fade-in slide-in-from-top-2 fill-mode-both delay-100 duration-500 flex flex-wrap items-center gap-2 border-b border-zinc-800 pb-2">
               {/* живой индикатор нейросети: пока не занята — спокойная
@@ -614,17 +693,35 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
                 </span>
               )}
               <div className="ml-auto flex items-center gap-2">
+                {/* «Прошлые чаты»: панель со всеми диалогами — переключение и удаление */}
                 <Button
                   variant="outline"
                   size="sm"
-                  className={`h-9 border-zinc-700 bg-transparent hover:bg-zinc-800 hover:text-white ${
-                    clearArmed ? 'border-zinc-400 text-white' : 'text-zinc-400'
-                  }`}
+                  className="h-9 border-zinc-700 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white"
+                  onClick={() => { setSessionsOpen(true); setArmedDeleteId(null) }}
+                  disabled={sending}
+                  aria-label="Прошлые чаты — список диалогов с нейросетью"
+                  title="Прошлые чаты — переключиться на любой прошлый диалог или удалить ненужный"
+                >
+                  <History className="mr-1 h-3.5 w-3.5" aria-hidden />
+                  <span className="hidden sm:inline">Прошлые чаты</span>
+                  {sessions.length > 1 && (
+                    <span className="ml-0.5 rounded border border-zinc-700 bg-zinc-900 px-1 font-mono text-[10px] tabular-nums text-zinc-300">
+                      {sessions.length}
+                    </span>
+                  )}
+                </Button>
+                {/* «Новый чат»: начинает отдельный диалог; прежние остаются в «Прошлых» */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 border-zinc-700 bg-transparent text-zinc-400 hover:bg-zinc-800 hover:text-white"
                   onClick={() => void newChat()}
                   disabled={sending}
+                  title="Начать новый диалог — прошлые чаты останутся в списке"
                 >
                   <PenLine className="mr-1 h-3.5 w-3.5" aria-hidden />
-                  {clearArmed ? 'Точно новый?' : 'Новый чат'}
+                  Новый чат
                 </Button>
               </div>
             </div>
@@ -884,8 +981,102 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
               </div>
             </div>
           </CardContent>
+
+          {/* ——— Панель «Прошлые чаты»: все диалоги нейросети — переключение,
+              удаление, начать новый; открывается поверх чата с анимацией ——— */}
+          {sessionsOpen && (
+            <div
+              className="absolute inset-0 z-30 flex flex-col bg-black/95 backdrop-blur-sm animate-in fade-in duration-300"
+              role="dialog"
+              aria-label="Прошлые чаты"
+              aria-modal="true"
+            >
+              <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2.5 sm:px-4">
+                <History className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden />
+                <span className="text-sm font-medium text-zinc-100">Прошлые чаты</span>
+                <span className="font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                  {sessions.length} {pluralRu(sessions.length, 'диалог', 'диалога', 'диалогов')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setSessionsOpen(false); setArmedDeleteId(null) }}
+                  aria-label="Закрыть панель прошлых чатов"
+                  className="ml-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-white"
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+              <div
+                className="grayscale min-h-0 flex-1 space-y-1 overflow-y-auto p-2 sm:p-3"
+                style={{ scrollbarWidth: 'thin' }}
+                aria-label="Список прошлых чатов"
+              >
+                {sessions.length === 0 && (
+                  <div className="px-3 py-4 font-mono text-[12.5px] text-zinc-500">
+                    <span className="text-zinc-300" aria-hidden>⏺ </span>
+                    пока нет ни одного чата — начните первый вопросом ниже
+                  </div>
+                )}
+                {sessions.map((s) => {
+                  const active = s.id === sessionId
+                  const armed = armedDeleteId === s.id
+                  return (
+                    <div
+                      key={s.id}
+                      className={`animate-in fade-in slide-in-from-bottom-1 duration-300 group flex items-center gap-1 rounded-lg border px-2.5 py-2 transition-colors ${
+                        active
+                          ? 'border-amber-400/40 bg-amber-400/10'
+                          : 'border-zinc-800 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900'
+                      } ${armed ? 'border-red-400/50' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => switchSession(s.id)}
+                        className="flex min-w-0 flex-1 flex-col items-start gap-0.5 py-0.5 text-left"
+                        aria-label={`Открыть чат «${s.title}»`}
+                        aria-current={active ? 'true' : undefined}
+                      >
+                        <span className={`truncate text-sm ${active ? 'font-medium text-amber-200' : 'text-zinc-100'}`}>
+                          <span aria-hidden className="mr-1.5 font-mono text-[11px] text-zinc-500">{active ? '⏺' : '›'}</span>
+                          {s.title}
+                        </span>
+                        <span className="font-mono text-[10px] tabular-nums text-zinc-500">
+                          {fmtTime(s.updatedAt)} · {s.count} {pluralRu(s.count, 'сообщение', 'сообщения', 'сообщений')}
+                          {active ? ' · открыт' : ''}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteSession(s.id)}
+                        aria-label={armed ? `Точно удалить чат «${s.title}»?` : `Удалить чат «${s.title}»`}
+                        title={armed ? 'Нажмите ещё раз — чат удалится вместе с сообщениями' : 'Удалить чат (вместе с сообщениями)'}
+                        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors ${
+                          armed
+                            ? 'bg-red-500/15 text-red-300 hover:bg-red-500/25'
+                            : 'text-zinc-600 hover:bg-zinc-800 hover:text-zinc-200'
+                        }`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="border-t border-zinc-800 p-2 sm:p-3">
+                <Button
+                  onClick={() => void newChat()}
+                  disabled={sending}
+                  className="h-10 w-full border border-zinc-700 bg-zinc-900 text-zinc-100 hover:bg-zinc-800 hover:text-white"
+                  variant="outline"
+                >
+                  <PenLine className="mr-1.5 h-4 w-4" aria-hidden />
+                  Начать новый чат
+                </Button>
+              </div>
+            </div>
+          )}
       </Card>
 
-    </div>
+    </>
   )
 }

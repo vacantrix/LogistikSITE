@@ -894,7 +894,7 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   }, [])
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-50">
+    <div className={`flex min-h-screen flex-col ${tab === 'ai' ? 'bg-black' : 'bg-slate-50'}`}>
       <header ref={headerRef} className="sticky top-0 z-40 bg-[#0E1B2C] text-white shadow-lg shadow-slate-900/10">
         {/* Мобильная шапка (ТЗ Task 67): один ряд, минимальная высота, только критичные
             элементы — логотип, название, профиль и выход. Меню ушло в нижний Tab Bar. */}
@@ -1061,22 +1061,29 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
       {/* Боковое меню (открывается справа по клику): все разделы + ИИ-помощник */}
       <SideMenuSheet nav={nav} tab={tab} onNavigate={onNavigate} />
 
-      <main className="w-full flex-1 px-4 py-6 sm:px-6">{children}</main>
+      {/* ИИ-помощник — полноэкранный раздел: чат занимает весь экран под шапкой,
+          без отступов и светлой «прослойки» по периметру; подвал на этом разделе скрыт */}
+      <main className={tab === 'ai' ? 'w-full flex-1' : 'w-full flex-1 px-4 py-6 sm:px-6'}>{children}</main>
 
-      <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center px-4 py-4 text-xs">
-          <span className="rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
-            V 1.01
-          </span>
-        </div>
-      </footer>
+      {tab !== 'ai' && (
+        <footer className="mt-auto bg-[#0E1B2C] text-blue-100" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center px-4 py-4 text-xs">
+            <span className="rounded border border-blue-100/20 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-blue-200">
+              V 1.01
+            </span>
+          </div>
+        </footer>
+      )}
 
       {/* Нижний Tab Bar (только мобильные): фиксирован поверх контента — под ним
-          оставляем отбеливающий отступ, чтобы подвал не перекрывался панелью */}
-      <div
-        aria-hidden
-        className="h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] bg-[#0E1B2C] md:hidden"
-      />
+          оставляем отбеливающий отступ, чтобы подвал не перекрывался панелью.
+          В полноэкранном ИИ-чате высота чата уже учитывает панель — отступ не нужен */}
+      {tab !== 'ai' && (
+        <div
+          aria-hidden
+          className="h-[calc(3.75rem+env(safe-area-inset-bottom,0px))] bg-[#0E1B2C] md:hidden"
+        />
+      )}
       <BottomTabBar tab={tab} onNavigate={onNavigate} nav={mobileBottomNav} />
     </div>
   )

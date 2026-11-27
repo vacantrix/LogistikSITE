@@ -722,12 +722,30 @@ model AiLog {
   @@index([createdAt])
 }
 
+/** Чат с нейросетью: отдельный диалог («Новый чат» начинает новый, прошлые остаются —
+ *  переключение между ними в панели «Прошлые чаты»; удаление чата удаляет и его сообщения,
+ *  сохранённые в «Избранное» копии ответов остаются — это отдельные записи). */
+model AiChatSession {
+  id        String          @id @default(cuid())
+  userId    String // чей чат (auth.id)
+  title     String           @default("Новый чат") // название = первый вопрос (первые 60 симв)
+  messages  AiChatMessage[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([userId, updatedAt])
+}
+
 /** Чат с нейросетью: полная история переписки per-пользователя (в отличие от AiListItem —
  *  это именно диалог: сообщения человека и модели, шаги работы, прикреплённые файлы
- *  и виджеты, чтобы после перезагрузки страницы чат оставался на месте). */
+ *  и виджеты, чтобы после перезагрузки страницы чат оставался на месте).
+ *  Сообщения сгруппированы по чатам (AiChatSession); sessionId NULL — только у старых
+ *  записей до появления чатов, они переносятся в архивный чат при первом чтении. */
 model AiChatMessage {
-  id          String   @id @default(cuid())
+  id          String          @id @default(cuid())
   userId      String // чей вопрос/ответ (auth.id)
+  sessionId   String? // чат, к которому принадлежит сообщение (AiChatSession.id)
+  session     AiChatSession?  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   role        String // user | assistant
   content     String // текст сообщения (у assistant — итоговый разбор после вырезания блоков)
   modelKey    String? // выбранный уровень модели: GigaChat-2-Max | GigaChat-2-Pro | GigaChat-Max | GigaChat-Plus | GigaChat
@@ -735,9 +753,10 @@ model AiChatMessage {
   stepsJson   String? // ход работы текстом (harness-лог): [{at, text}] — «что я сейчас делаю»
   filesJson   String? // прикреплённые файлы: [{name, size, excerpt}] — метаданные для показа в истории
   widgetsJson String? // виджеты ответа для повторного показа истории: {best, cards, report, links, saved}
-  createdAt   DateTime @default(now())
+  createdAt   DateTime        @default(now())
 
   @@index([userId, createdAt])
+  @@index([sessionId, createdAt])
 }
 
 // ============ PaddleOCR: конструктор шаблонов документов (админ, UI «Управление → PaddleOCR») ============

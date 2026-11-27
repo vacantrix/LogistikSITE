@@ -76,12 +76,14 @@ export async function POST(req: Request) {
   if (auth instanceof NextResponse) return auth
 
   const body = (await req.json().catch(() => null)) as
-    | { message?: unknown; history?: unknown; model?: unknown; files?: unknown }
+    | { message?: unknown; history?: unknown; model?: unknown; files?: unknown; sessionId?: unknown }
     | null
   const message = typeof body?.message === 'string' ? body.message.trim().slice(0, 4000) : ''
   if (!message) return NextResponse.json({ error: 'Пустой вопрос' }, { status: 400 })
   const files = sanitizeFiles(body?.files)
   const modelKey = validGigaModel(body?.model)
+  // чат (диалог), в который пишем: свой sessionId из запроса, иначе самый свежий
+  const wantedSessionId = typeof body?.sessionId === 'string' ? body.sessionId : ''
   const filesChars = files.reduce((s, f) => s + f.text.length, 0)
   if (filesChars > 16_000) {
     return NextResponse.json({ error: 'Файлы слишком большие: суммарно до 16 000 символов' }, { status: 413 })
@@ -130,9 +132,23 @@ export async function POST(req: Request) {
           const log = ownLogOn ? aiLog : null
           step(`права загружены · ${rights.length}`)
 
-          // история чата из БД: сервер — источник правды, клиент ничего не пересылает
+          // чат-диалог, в который пишется переписка: свой sessionId или самый свежий
+          // (его создаёт «Новый чат» / первое открытие /api/ai/messages)
+          let session = wantedSessionId
+            ? await db.aiChatSession.findFirst({ where: { id: wantedSessionId, userId: auth.id } })
+            : null
+          if (!session) {
+            session = await db.aiChatSession.findFirst({
+              where: { userId: auth.id },
+              orderBy: { updatedAt: 'desc' },
+            })
+          }
+          if (!session) session = await db.aiChatSession.create({ data: { userId: auth.id } })
+
+          // история чата из БД: сервер — источник правды, клиент ничего не пересылает;
+          // контекст модели — только текущий диалог, без других чатов
           const historyRows = await db.aiChatMessage.findMany({
-            where: { userId: auth.id },
+            where: { userId: auth.id, sessionId: session.id },
             orderBy: { createdAt: 'desc' },
             take: 8,
           })
@@ -151,6 +167,7 @@ export async function POST(req: Request) {
           const userMsg = await db.aiChatMessage.create({
             data: {
               userId: auth.id,
+              sessionId: session.id,
               role: 'user',
               content: message,
               filesJson:
@@ -160,6 +177,16 @@ export async function POST(req: Request) {
             },
           })
           userMessageId = userMsg.id
+          // чат поднимается наверх списка: первый вопрос становится названием,
+          // каждое сообщение обновляет updatedAt (порядок «Прошлых чатов»)
+          await db.aiChatSession.update({
+            where: { id: session.id },
+            data: {
+              title: !session.title || session.title === 'Новый чат'
+                ? message.replace(/\s+/g, ' ').trim().slice(0, 60)
+                : session.title,
+            },
+          })
           step(`история чата · ${history.length} сообщ · вопрос записан`)
 
           const ctx = await buildRestrictedContext(rights)
@@ -267,6 +294,7 @@ export async function POST(req: Request) {
           const assistantMsg = await db.aiChatMessage.create({
             data: {
               userId: auth.id,
+              sessionId: session.id,
               role: 'assistant',
               content: finalAnswer.slice(0, 12_000),
               modelKey,
@@ -297,6 +325,7 @@ export async function POST(req: Request) {
             model,
             modelKey,
             latencyMs,
+            sessionId: session.id,
             savedContacts,
             itemId,
             userMessageId,
