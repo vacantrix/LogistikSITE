@@ -275,6 +275,22 @@ async function backfillAiPerms(): Promise<void> {
   if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
 }
 
+/**
+ * Новые разделы «Журнал событий» и «Логи платформы» переехали в янтарную строку «Функции»
+ * (Task: функции-журналы). Право section:logs выдаётся адресно: кто видел журнал
+ * событий, тот видит и логи платформы. Идемпотентно.
+ */
+async function backfillLogsPerm(): Promise<void> {
+  const templates = await db.accessTemplate.findMany({
+    where: { contour: { in: ['logist', 'admin'] } },
+    select: { id: true, perms: { where: { key: { in: ['section:journal', 'section:logs'] } }, select: { key: true } } },
+  })
+  const rows = templates
+    .filter((t) => t.perms.some((p) => p.key === 'section:journal') && !t.perms.some((p) => p.key === 'section:logs'))
+    .map((t) => ({ templateId: t.id, key: 'section:logs' }))
+  if (rows.length > 0) await db.templatePerm.createMany({ data: rows })
+}
+
 let ensured = false
 let ensuring: Promise<void> | null = null
 
@@ -289,6 +305,7 @@ export async function ensureAccess(): Promise<void> {
     await backfillOwnTransportPerms()
     await backfillAiPerms()
     await backfillLlmPerm()
+    await backfillLogsPerm()
     // пользователи без должности с прежними правами (после обновления) получают ближайшую должность;
     // новые учётки создаются сразу с должностью, поэтому повторно это почти ничего не делает
     const pending = await db.user.count({ where: { templateId: null, OR: [{ permOverrides: { not: null } }, { profileEditOwn: { not: null } }] } })

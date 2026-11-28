@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { plog } from '@/lib/platform-log'
 import {
   AI_RIGHTS_LOCKED, aiLog, getAiRights, invalidateAiRightsCache,
 } from '@/lib/ai/core'
@@ -52,6 +53,12 @@ export async function PUT(req: Request) {
   const target = rights.find((r) => r.key === key)
   if (!target) return NextResponse.json({ error: 'Неизвестное право' }, { status: 404 })
   if (AI_RIGHTS_LOCKED.has(key)) {
+    await plog({
+      level: 'WARN', type: 'AI_RIGHTS_DENIED', source: 'api/ai/rights',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Попытка изменить право ИИ «${target.title}» отклонена: право зашито в платформу`,
+      objectType: 'ai_right', objectId: key,
+    })
     return NextResponse.json({ error: 'Право зашито в платформу и не редактируется' }, { status: 403 })
   }
   if (target.mode === mode) {
@@ -66,6 +73,14 @@ export async function PUT(req: Request) {
     })
     invalidateAiRightsCache()
     await aiLog('info', 'rights_update', `Администратор ${auth.login} изменил право «${target.title}»: ${AI_RIGHT_MODE_LABELS[target.mode]} → ${AI_RIGHT_MODE_LABELS[mode as keyof typeof AI_RIGHT_MODE_LABELS]}`)
+    await plog({
+      type: 'AI_RIGHTS_CHANGED', source: 'api/ai/rights',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Право ИИ «${target.title}» изменено: ${AI_RIGHT_MODE_LABELS[target.mode]} → ${AI_RIGHT_MODE_LABELS[mode as keyof typeof AI_RIGHT_MODE_LABELS]}`,
+      objectType: 'ai_right', objectId: key,
+      before: target.mode, after: mode,
+      meta: { key, mode, previousMode: target.mode },
+    })
     const fresh = await getAiRights()
     return NextResponse.json({ rights: fresh.map((r) => ({ ...r })) })
   } catch (e) {

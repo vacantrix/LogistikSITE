@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -149,6 +150,13 @@ export async function POST(req: NextRequest) {
         notes: str(body.notes, 2000),
       },
       include: { deals: true },
+    })
+    await plog({
+      type: 'CONTACT_CREATED', source: 'api/contacts',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Контакт «${contact.name}»${contact.company ? ` (${contact.company})` : ''} добавлен`,
+      objectType: 'contact', objectId: contact.id,
+      meta: { kind, source, rating: contact.rating },
     })
     return NextResponse.json({ contact: toContactDTO(contact) }, { status: 201 })
   } catch (e) {

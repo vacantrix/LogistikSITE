@@ -27,7 +27,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/kontur/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import {
-  ACK_LABELS, CONSTANTS, MONITOR_KPIS, MONITOR_STATUSES, MONITOR_STATUS_TONE, STATUS_LABELS,
+  ACK_LABELS, CONSTANTS, MONITOR_KPIS, MONITOR_STATUSES, MONITOR_STATUS_DOT, MONITOR_STATUS_TONE, STATUS_LABELS,
 } from '@/lib/kontur/constants'
 import type { StateResponse } from '@/lib/kontur/client-types'
 import { fmtDateTime } from '@/lib/kontur/client-types'
@@ -180,7 +180,7 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
     if (res.ok) {
       toast({
         title: action === 'reset-skew' ? 'Счётчик сдвига сброшен' : 'Профиль устройства изменён',
-        description: action === 'reset-skew' ? 'Инструкция поддержки: синхронизировать время на устройстве (B7.2.13)' : undefined,
+        description: action === 'reset-skew' ? 'Синхронизируйте время на устройстве' : undefined,
       })
       onChanged?.()
     }
@@ -503,7 +503,7 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
                         {r.waitingReturn && <Pill className="mt-0.5 bg-slate-100 text-slate-600">ждёт обратку</Pill>}
                       </td>
                       <td className="py-2 pr-3">
-                        <DotWord dot={DOT_TW[r.status] ?? 'bg-slate-400'} tone={MONITOR_STATUS_TONE[r.status]}>
+                        <DotWord dot={MONITOR_STATUS_DOT[r.status] ?? 'bg-slate-400'} tone={MONITOR_STATUS_TONE[r.status]}>
                           {MONITOR_STATUSES[r.status] ?? r.status}
                         </DotWord>
                         <div className="text-[10px] text-slate-400">{fmtInStatus(r.statusSetAt, nowTick)}</div>
@@ -591,7 +591,6 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
             { label: 'stale (>24 ч без ответа)', value: outbox.stale, tone: outbox.stale > 0 ? 'warn' : 'ok' },
             { label: 'failed (не доставлено)', value: outbox.failed, tone: outbox.failed > 0 ? 'danger' : 'ok' },
           ] : []}
-          note="Pull-модель: 1С забирает события статусов и ТТН. stale/failed требуют разбора."
         />
         <SystemCard
           title="Устройства и покрытие"
@@ -602,7 +601,6 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
             { label: 'систематический сдвиг часов', value: skewDevices, tone: skewDevices > 0 ? 'warn' : 'ok' },
             { label: 'нет приложения', value: summary?.notInstalled ?? 0, tone: (summary?.notInstalled ?? 0) > 0 ? 'slate' : 'ok' },
           ]}
-          note="Детальный разбор и действия — в таблице устройств ниже."
         />
         <SystemCard
           title="SLA и документы"
@@ -613,7 +611,6 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
             { label: 'фото ТТН утрачено', value: docsLostCount, tone: docsLostCount > 0 ? 'danger' : 'ok' },
             { label: 'эскалация SLA', value: `${CONSTANTS.ACK_SLA_MIN} мин`, tone: 'slate' },
           ]}
-          note="Разбор проблемных рейсов — раздел «Заявки»."
           action={onOpenRequests ? { label: 'Открыть заявки', onClick: onOpenRequests } : undefined}
         />
       </div>
@@ -627,12 +624,6 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
             <span className="text-xs text-slate-400">({state?.devices.length ?? 0})</span>
             {legacyDevices > 0 && <Pill className="bg-slate-100 text-slate-600"><span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />legacy: {legacyDevices}</Pill>}
             {skewDevices > 0 && <Pill className="bg-slate-100 text-slate-600"><span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden />systematic_skew: {skewDevices}</Pill>}
-          </div>
-          <div className="text-[11px] leading-relaxed text-slate-500">
-            Правила контура: clock_skew ≥ {CONSTANTS.CLOCK_SKEW_FLAG_MIN} мин → флаг события; ≥ {CONSTANTS.CLOCK_SKEW_ALERT_COUNT} событий
-            с clock_skew за {CONSTANTS.CLOCK_SKEW_WINDOW_HOURS} ч → systematic_skew: client_ts признаётся недостоверным,
-            порядок по seq/server_ts (ARC-011). Legacy &gt; {CONSTANTS.LEGACY_ALERT_COUNT} событий — алерт и сигнал обновления,
-            но приём не блокируется никогда (ARC-006).
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -708,9 +699,7 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
               <Pill className="bg-slate-100 text-slate-600">тестовый режим</Pill>
             </DialogTitle>
             <DialogDescription>
-              Приложение водителя в разработке: симулятор играет его роль и шлёт телеметрию тем же
-              контрактом (<code className="rounded bg-slate-100 px-1">source=test_sim</code>). После релиза
-              приложения симулятор отключается — раздел продолжает работать без изменений.
+              Отправляет телеметрию от имени выбранного водителя — как будущее приложение водителя.
             </DialogDescription>
           </DialogHeader>
 
@@ -731,7 +720,7 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
 
             {simRow && (
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2 text-xs">
-                <DotWord dot={DOT_TW[simRow.status] ?? 'bg-slate-400'} tone={MONITOR_STATUS_TONE[simRow.status]}>
+                <DotWord dot={MONITOR_STATUS_DOT[simRow.status] ?? 'bg-slate-400'} tone={MONITOR_STATUS_TONE[simRow.status]}>
                   {MONITOR_STATUSES[simRow.status] ?? simRow.status}
                 </DotWord>
                 {simRow.kmLeft != null && <span className="text-slate-500">до выгрузки ~<b>{simRow.kmLeft} км</b></span>}
@@ -819,7 +808,6 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
             </div>
 
             <div className="flex items-center justify-between gap-2 border-t pt-3">
-              <span className="text-[11px] text-slate-400">Демо-состояние: один «потерялся», один отдыхает, один сломался</span>
               <Button size="sm" variant="outline" className="h-8" onClick={() => void resetDemo()}>
                 <RotateCcw className="mr-1 h-3.5 w-3.5" />Сбросить демо-телеметрию
               </Button>
@@ -843,7 +831,7 @@ export function MonitoringPanel({ state, onOpenTrip, onOpenRequests, onChanged, 
             <div className="text-xs leading-relaxed text-slate-600">
               Сервер сам выводит системные статусы: <b>нет связи</b> (&gt; {CONSTANTS.ONLINE_STALE_MIN} мин без
               телеметрии), <b>скоро завершит рейс</b> (&lt; {CONSTANTS.NEAR_UNLOAD_KM} км до выгрузки),
-              <b> в ремонте</b> (флаг машины), <b>приложение не установлено</b>. Статусы лестницы рейса (B5.1)
+              <b> в ремонте</b> (флаг машины), <b>приложение не установлено</b>. Статусы лестницы рейса
               через <code className="rounded bg-slate-100 px-1">/api/driver/sync</code> автоматически отражаются
               в мониторинге. ETA до выгрузки — оценочный: GPS-дистанция × {data.meta.etaKmK} (извилистость дорог),
               средняя скорость {data.meta.etaAvgKmh} км/ч + обязательные отдыхы (правило {CONSTANTS.ETA_BREAK_DRIVE_H} ч / {CONSTANTS.ETA_BREAK_MIN} мин).
@@ -915,7 +903,7 @@ function ObjectCard({ row, nowTick, follow, onFollow, onLocate, onOpenTrip, etaM
             </div>
           </div>
           <div className="text-right">
-            <DotWord dot={DOT_TW[row.status] ?? 'bg-slate-400'} tone={MONITOR_STATUS_TONE[row.status]}>
+            <DotWord dot={MONITOR_STATUS_DOT[row.status] ?? 'bg-slate-400'} tone={MONITOR_STATUS_TONE[row.status]}>
               {MONITOR_STATUSES[row.status] ?? row.status}
             </DotWord>
             <div className="text-[10px] text-slate-400">{fmtInStatus(row.statusSetAt, nowTick)}</div>
@@ -1078,7 +1066,7 @@ function SystemCard({ title, icon, items, note, action }: {
   title: string
   icon: React.ReactNode
   items: { label: string; value: number | string; tone: 'ok' | 'warn' | 'danger' | 'slate' }[]
-  note: string
+  note?: string
   action?: { label: string; onClick: () => void }
 }) {
   const TONE: Record<string, string> = {
@@ -1107,14 +1095,16 @@ function SystemCard({ title, icon, items, note, action }: {
           ))}
           {items.length === 0 && <div className="text-xs text-slate-400">Данные загружаются…</div>}
         </div>
-        <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
-          <span className="text-[10px] leading-snug text-slate-400">{note}</span>
-          {action && (
-            <Button size="sm" variant="ghost" className="h-6 shrink-0 px-2 text-[11px] text-blue-700" onClick={action.onClick}>
-              {action.label}
-            </Button>
-          )}
-        </div>
+        {(note || action) && (
+          <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2">
+            {note && <span className="text-[10px] leading-snug text-slate-400">{note}</span>}
+            {action && (
+              <Button size="sm" variant="ghost" className="h-6 shrink-0 px-2 text-[11px] text-blue-700" onClick={action.onClick}>
+                {action.label}
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   )
@@ -1351,7 +1341,7 @@ function MonitorMap({ rows, selectedId, pickMode, onPick, follow, centerReq, gen
 
       {/* Режим «точка кликом» (симулятор) */}
       {pickMode && (
-        <div className="absolute left-1/2 top-3 z-[500] -translate-x-1/2 rounded-full bg-[#0E1B2C] px-3 py-1.5 text-xs font-medium text-white shadow-lg">
+        <div className="absolute left-1/2 top-3 z-[500] -translate-x-1/2 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white shadow-lg">
           Кликните по карте — точка уйдёт водителю из симулятора
         </div>
       )}
@@ -1376,23 +1366,15 @@ function MonitorMap({ rows, selectedId, pickMode, onPick, follow, centerReq, gen
 // Утилиты отображения
 // ---------------------------------------------------------------------------
 
-// Цвета статусов для карты (hex — маркеры Leaflet вне Tailwind)
+// Цвета статусов мониторинга для карты (hex — маркеры Leaflet вне Tailwind);
+// дублируют MONITOR_STATUS_DOT из constants.ts — тот же словарь, в hex для Leaflet
 const MONITOR_HEX: Record<string, string> = {
   not_installed: '#cbd5e1', offline: '#94a3b8', idle: '#64748b',
   assigned: '#f59e0b', en_route_loading: '#0ea5e9', at_loading: '#3b82f6',
   loaded: '#2563eb', en_route: '#8b5cf6', near_unload: '#06b6d4',
   at_unload: '#0891b2', unloaded: '#10b981', trip_completed: '#059669',
-  empty_return: '#818cf8', waiting_backhaul: '#a855f7',
+  empty_return: '#0d9488', waiting_backhaul: '#8b5cf6',
   breakdown: '#ef4444', repair: '#f87171', rest: '#fbbf24',
-}
-
-const DOT_TW: Record<string, string> = {
-  not_installed: 'bg-slate-300', offline: 'bg-slate-400', idle: 'bg-slate-500',
-  assigned: 'bg-amber-500', en_route_loading: 'bg-sky-500', at_loading: 'bg-blue-500',
-  loaded: 'bg-blue-600', en_route: 'bg-violet-500', near_unload: 'bg-cyan-500',
-  at_unload: 'bg-cyan-600', unloaded: 'bg-emerald-500', trip_completed: 'bg-emerald-600',
-  empty_return: 'bg-indigo-400', waiting_backhaul: 'bg-purple-500',
-  breakdown: 'bg-red-500', repair: 'bg-red-400', rest: 'bg-amber-400',
 }
 
 const TRUCK_SVG =
@@ -1410,13 +1392,12 @@ const KPI_ICONS: Record<string, typeof Truck> = {
   on_map: MapPin,
 }
 
-// Тон числа KPI-плитки
+// Тон числа KPI-плитки (navy — тёмный сланец основного показателя)
 const KPI_TEXT: Record<string, string> = {
-  navy: 'text-[#0E1B2C]',
+  navy: 'text-slate-900',
   violet: 'text-violet-600',
   blue: 'text-blue-600',
   cyan: 'text-cyan-600',
-  purple: 'text-purple-600',
   red: 'text-red-600',
   emerald: 'text-emerald-600',
   slate: 'text-slate-500',

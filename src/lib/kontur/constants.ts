@@ -135,7 +135,10 @@ export const LADDER_TO_MONITOR: Record<string, string> = {
   completed: 'trip_completed',
 }
 
-// Цвета статусов мониторинга для точки-маркера (стиль DotWord: цвет несёт точка)
+// Цвета статусов мониторинга для точки-маркера (стиль DotWord: цвет несёт точка).
+// Семантика согласована с остальными разделами: sky — выезд, blue — погрузка,
+// violet — рейс/ATI.SU, cyan — у выгрузки, emerald — успех, teal — возврат на базу,
+// amber — требует внимания, red — поломка, slate — служебные состояния.
 export const MONITOR_STATUS_DOT: Record<string, string> = {
   not_installed: 'bg-slate-300',
   offline: 'bg-slate-400',
@@ -149,8 +152,8 @@ export const MONITOR_STATUS_DOT: Record<string, string> = {
   at_unload: 'bg-cyan-600',
   unloaded: 'bg-emerald-500',
   trip_completed: 'bg-emerald-600',
-  empty_return: 'bg-indigo-400',
-  waiting_backhaul: 'bg-purple-500',
+  empty_return: 'bg-teal-600',
+  waiting_backhaul: 'bg-violet-500',
   breakdown: 'bg-red-500',
   repair: 'bg-red-400',
   rest: 'bg-amber-400',
@@ -170,17 +173,34 @@ export const MONITOR_KPIS: {
   id: string
   label: string
   statuses: string[]
-  tone: 'slate' | 'navy' | 'violet' | 'blue' | 'cyan' | 'purple' | 'red' | 'emerald'
+  tone: 'slate' | 'navy' | 'violet' | 'blue' | 'cyan' | 'red' | 'emerald'
 }[] = [
   { id: 'on_trip', label: 'в рейсе', statuses: ['assigned', 'en_route_loading', 'at_loading', 'loaded', 'en_route', 'near_unload', 'at_unload', 'empty_return'], tone: 'navy' },
   { id: 'in_motion', label: 'в движении', statuses: ['en_route', 'near_unload', 'en_route_loading', 'empty_return'], tone: 'violet' },
   { id: 'cargo_ops', label: 'грузовые операции', statuses: ['at_loading', 'loaded', 'at_unload'], tone: 'blue' },
   { id: 'near_unload', label: 'скоро завершат', statuses: ['near_unload'], tone: 'cyan' },
-  { id: 'waiting_backhaul', label: 'ожидают обратку', statuses: ['waiting_backhaul'], tone: 'purple' },
+  { id: 'waiting_backhaul', label: 'ожидают обратку', statuses: ['waiting_backhaul'], tone: 'violet' },
   { id: 'attention', label: 'требуют внимания', statuses: ['breakdown', 'repair', 'rest'], tone: 'red' },
   { id: 'offline', label: 'нет связи', statuses: ['offline'], tone: 'slate' },
   { id: 'on_map', label: 'на карте', statuses: ['on_map'], tone: 'emerald' }, // особая группа: виден на карте
 ]
+
+// —— Статусы заявки 1С (раздел «Заявки 1С»): единый словарь контура ——
+// В БД хранится стадия new/ready_to_plan/planned/quarantine; «planned» уточняется
+// по состоянию рейса (in_trip/done) — так реестр показывает честный жизненный цикл.
+// Цвета согласованы со словарём привлечённого транспорта (src/lib/status.ts):
+// sky — новое, violet — в работе, blue — у логиста, emerald — в рейсе/успех,
+// orange — карантин (не ошибка: красный в платформе — только отказ/удаление).
+export type OrderDisplayStatus = 'new' | 'ready_to_plan' | 'planned' | 'in_trip' | 'done' | 'quarantine'
+
+export const ORDER_STATUS_META: Record<OrderDisplayStatus, { dot: string; label: string }> = {
+  new: { dot: 'bg-sky-500', label: 'Новая' },
+  ready_to_plan: { dot: 'bg-violet-500', label: 'К планированию' },
+  planned: { dot: 'bg-blue-600', label: 'Запланирована' },
+  in_trip: { dot: 'bg-emerald-500', label: 'В рейсе' },
+  done: { dot: 'bg-emerald-600', label: 'Выполнена' },
+  quarantine: { dot: 'bg-orange-500', label: 'Карантин' },
+}
 
 export const OUTCOME_LABELS: Record<string, string> = {
   applied: 'Применено',

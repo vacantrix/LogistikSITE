@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { buildReport } from '@/lib/reports-data'
 import { buildProforma1Docx, buildProforma2Docx } from '@/lib/docx-proforma'
+import { plog } from '@/lib/platform-log'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -36,6 +37,26 @@ export async function GET(request: NextRequest) {
   const doc = type === 1
     ? await buildProforma1Docx(data, user.name)
     : await buildProforma2Docx(data, user.name)
+
+  // в журнал: выгружена бумажная проформа с параметрами отчёта
+  const period = sp.get('from') && sp.get('to')
+    ? `период ${sp.get('from')} — ${sp.get('to')}`
+    : sp.get('month')
+      ? `месяц ${sp.get('month')}`
+      : 'текущий месяц'
+  await plog({
+    type: 'REPORT_EXPORTED', source: 'api/reports/docx',
+    actor: { login: user.login, name: user.name, role: user.role },
+    message: `Выгружен DOCX-отчёт «${doc.displayName}» (тип ${type}, ${period})`,
+    meta: {
+      format: 'docx',
+      type,
+      from: sp.get('from'),
+      to: sp.get('to'),
+      month: sp.get('month'),
+      fileName: doc.fileName,
+    },
+  })
 
   return new NextResponse(new Uint8Array(doc.buffer), {
     headers: {

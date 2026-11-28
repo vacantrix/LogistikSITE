@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { allowedFor, permDenied } from '@/lib/permissions'
 import { REQUEST_STATUS_META, requestGroupOf, type RequestGroup } from '@/lib/status'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -66,6 +67,13 @@ export async function GET(request: NextRequest) {
   const auth = await requireUser('admin', 'logist')
   if (auth instanceof NextResponse) return auth
   if (!(await allowedFor(auth, 'reports:view'))) {
+    // в журнал: попытка выгрузки отчёта без права «Отчёты»
+    await plog({
+      level: 'WARN', type: 'REPORT_EXPORTED_DENIED', source: 'api/reports/excel',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: 'Отказ в выгрузке Excel-отчёта: нет права на раздел «Отчёты»',
+      meta: { format: 'excel', reason: 'reports:view' },
+    })
     return NextResponse.json({ error: permDenied('reports:view') }, { status: 403 })
   }
 
@@ -366,6 +374,21 @@ export async function GET(request: NextRequest) {
 
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' }) as Buffer
   const fileName = `АЭМЗ_отчёты_${lo}_${hi}.xlsx`
+  // в журнал: выгружена книга Excel с параметрами отчёта
+  await plog({
+    type: 'REPORT_EXPORTED', source: 'api/reports/excel',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Выгружен Excel-отчёт за период ${ruDay(lo)} — ${ruDay(hi)} (заявок: ${periodRequests.length}, рейсов: ${doneTrips.length})`,
+    meta: {
+      format: 'excel',
+      from: lo,
+      to: hi,
+      requests: periodRequests.length,
+      trips: doneTrips.length,
+      carriers: carriers.length,
+      fileName,
+    },
+  })
   return new NextResponse(new Uint8Array(buf), {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

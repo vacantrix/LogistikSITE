@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { toSettingsDTO } from '@/lib/settings'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,5 +46,35 @@ export async function PUT(req: NextRequest) {
 
   const data = { confReupload, confReject, confAuto, minQuality, rules: JSON.stringify(rules) }
   const saved = await db.setting.upsert({ where: { id: 'main' }, update: data, create: { id: 'main', ...data } })
+
+  // журнал: какие ключи изменились и значения основных порогов до/после
+  const changedRules = Object.keys(rules).filter((k) => rules[k] !== current.rules[k])
+  const keys = [
+    ...(confReupload !== current.confReupload ? ['confReupload'] : []),
+    ...(confReject !== current.confReject ? ['confReject'] : []),
+    ...(confAuto !== current.confAuto ? ['confAuto'] : []),
+    ...(minQuality !== current.minQuality ? ['minQuality'] : []),
+    ...changedRules.map((k) => `rules.${k}`),
+  ]
+  const parts = [
+    confReupload !== current.confReupload ? `порог перезагрузки ${current.confReupload} → ${confReupload}` : null,
+    confReject !== current.confReject ? `порог отказа ${current.confReject} → ${confReject}` : null,
+    confAuto !== current.confAuto ? `порог автоприёмки ${current.confAuto} → ${confAuto}` : null,
+    minQuality !== current.minQuality ? `минимальное качество скана ${current.minQuality} → ${minQuality}` : null,
+    changedRules.length > 0 ? `правила проверки (${changedRules.length})` : null,
+  ].filter(Boolean)
+  await plog({
+    type: 'SETTINGS_CHANGED', source: 'api/settings',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: keys.length > 0
+      ? `Настройки платформы изменены: ${parts.join(', ')}`
+      : 'Настройки платформы сохранены без изменений',
+    meta: {
+      keys,
+      before: { confReupload: current.confReupload, confReject: current.confReject, confAuto: current.confAuto, minQuality: current.minQuality },
+      after: { confReupload, confReject, confAuto, minQuality },
+    },
+  })
+
   return NextResponse.json(toSettingsDTO(saved))
 }

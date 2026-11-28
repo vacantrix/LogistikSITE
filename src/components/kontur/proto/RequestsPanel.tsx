@@ -11,21 +11,25 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { authFetch } from '@/lib/kontur/session-token'
 import { withBasePath } from '@/lib/kontur/base-path'
 import {
-  ArrowDownUp, CalendarDays, Check, ClipboardList, ExternalLink, MapPin, Pin, RefreshCw, Route, ScanLine,
-  Smartphone, Sparkles, TriangleAlert, Truck, UserX, Warehouse,
+  CalendarDays, Check, CircleCheck, ClipboardList, ExternalLink, Eye, MapPin, Pin, Route,
+  ShieldAlert, ShieldCheck, Smartphone, Sparkles, TriangleAlert, Truck, UserX, Warehouse,
 } from 'lucide-react'
 import { Button } from '@/components/kontur/ui/button'
 import { Card, CardContent } from '@/components/kontur/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/kontur/ui/dialog'
-import { Input } from '@/components/kontur/ui/input'
 import { Label } from '@/components/kontur/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/kontur/ui/select'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/kontur/ui/table'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
-import { KpiTile } from '@/components/platform/common'
-import { TRIP_STATUS_LABELS, ACK_LABELS, MONITOR_STATUSES } from '@/lib/kontur/constants'
+import { OneCMark } from '@/components/platform/common'
+import {
+  TRIP_STATUS_LABELS, ACK_LABELS, MONITOR_STATUSES, ORDER_STATUS_META, STATUS_LABELS,
+  type OrderDisplayStatus,
+} from '@/lib/kontur/constants'
 import type { Leg, MatchCandidate, MatchResponse, Order, StateResponse, Trip } from '@/lib/kontur/client-types'
 import { DotWord, InfoTip, Pill, StatusChip } from './bits'
 import { TripView } from './TripView'
@@ -33,18 +37,20 @@ import { CallButton } from './CallButton'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-// Система статусов заявки: точка + слово (как статусы рейсов в bits.tsx).
-// В БД хранится стадия new/ready_to_plan/planned/quarantine; «planned» уточняется
-// по состоянию рейса — так реестр показывает честный жизненный цикл.
-type DisplayStatus = 'new' | 'ready_to_plan' | 'planned' | 'in_trip' | 'done' | 'quarantine'
+// Система статусов заявки: единый словарь контура (constants.ts) — точка + слово,
+// как статусы рейсов в bits.tsx и реестр заявок привлечённого транспорта.
+type DisplayStatus = OrderDisplayStatus
 
-const ORDER_STATUS: Record<DisplayStatus, { dot: string; tone?: 'danger'; label: string }> = {
-  new: { dot: 'bg-sky-500', label: 'Новая' },
-  ready_to_plan: { dot: 'bg-emerald-500', label: 'К планированию' },
-  planned: { dot: 'bg-blue-500', label: 'Запланирована' },
-  in_trip: { dot: 'bg-amber-500', label: 'В рейсе' },
-  done: { dot: 'bg-slate-400', label: 'Выполнена' },
-  quarantine: { dot: 'bg-red-500', tone: 'danger', label: 'Карантин' },
+const ORDER_STATUS = ORDER_STATUS_META
+
+// Подсказки табов статусов (по наведению — вместо постоянных надписей)
+const STATUS_HINTS: Record<DisplayStatus, string> = {
+  new: 'Пришли из 1С и ждут проверки логиста',
+  ready_to_plan: 'Проверены — можно назначать состав',
+  planned: 'Состав назначен — ожидает подтверждения водителя и выезда',
+  in_trip: 'Рейсы выполняются — детали на карточках рейсов',
+  done: 'Рейсы завершены — документы закрываются',
+  quarantine: 'Пришли с ошибкой — требуют исправления в 1С',
 }
 
 // Стадии лестницы B5.1, на которых рейс уже выполняется
@@ -439,7 +445,7 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
 
   async function applyPlan() {
     if (!planOrder || !planVehicle || !planDriver) {
-      toast({ title: 'Выберите ТС и водителя', description: 'Состав назначается из собственного парка АЭМЗ', variant: 'destructive' })
+      toast({ title: 'Выберите ТС и водителя', variant: 'destructive' })
       return
     }
     setBusy(true)
@@ -522,103 +528,28 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
 
   return (
     <div className="space-y-4">
-      {/* Вводная строка раздела */}
-      <div className="flex flex-wrap items-center gap-2 border-y border-slate-200 py-2.5 text-sm text-slate-700" role="status">
-        <ScanLine className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
-        <span className="min-w-0 flex-1">
-          Заявки приходят из 1С автоматически: появился документ «Заказы грузоотправителей» — он же заявка здесь.
-          Логист ведёт заявку до рейса: проверка → планирование состава из собственного парка → карточка рейса.
-        </span>
-        <Button size="sm" variant="outline" onClick={onChanged}>
-          <RefreshCw className="h-3.5 w-3.5" />Обновить
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => window.open(withBasePath('/1c-simulator/index.html'), '_blank', 'noopener')}
-          title="Демо-форма 1С «Заказы грузоотправителей»: отмеченные рейсы уходят в этот раздел"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />Симулятор 1С
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => window.open(withBasePath('/phone-bridge/index.html'), '_blank', 'noopener')}
-          title="Демо лёгкого приложения-моста: клик «Позвонить» в кабинете передаёт заявку на телефон логиста — там кнопка вызова без ввода номера"
-        >
-          <Smartphone className="h-3.5 w-3.5" />Мост на телефон
-        </Button>
-      </div>
-
-      {/* Сводка: счётчики по стадиям заявки (клик = фильтр реестра) */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6" role="group" aria-label="Сводка по заявкам">
-        <KpiTile
-          value={counts.get('new') ?? 0}
-          label="Новые"
-          dot="bg-sky-500"
-          hint="Пришли из 1С и ждут проверки логиста"
-          active={statusFilter === 'new'}
-          onClick={() => setStatusFilter(statusFilter === 'new' ? 'all' : 'new')}
-        />
-        <KpiTile
-          value={counts.get('ready_to_plan') ?? 0}
-          label="К планированию"
-          dot="bg-emerald-500"
-          hint="Проверены — можно назначать состав"
-          active={statusFilter === 'ready_to_plan'}
-          onClick={() => setStatusFilter(statusFilter === 'ready_to_plan' ? 'all' : 'ready_to_plan')}
-        />
-        <KpiTile
-          value={counts.get('planned') ?? 0}
-          label="Запланирована"
-          dot="bg-blue-500"
-          hint="Состав назначен — ожидает подтверждения водителя и выезда"
-          active={statusFilter === 'planned'}
-          onClick={() => setStatusFilter(statusFilter === 'planned' ? 'all' : 'planned')}
-        />
-        <KpiTile
-          value={counts.get('in_trip') ?? 0}
-          label="В рейсе"
-          dot="bg-amber-500"
-          hint="Рейсы выполняются — детали на карточках рейсов"
-          active={statusFilter === 'in_trip'}
-          onClick={() => setStatusFilter(statusFilter === 'in_trip' ? 'all' : 'in_trip')}
-        />
-        <KpiTile
-          value={counts.get('done') ?? 0}
-          label="Выполнена"
-          dot="bg-slate-400"
-          hint="Рейсы завершены — документы закрываются"
-          active={statusFilter === 'done'}
-          onClick={() => setStatusFilter(statusFilter === 'done' ? 'all' : 'done')}
-        />
-        <KpiTile
-          value={counts.get('quarantine') ?? 0}
-          label="Карантин"
-          dot="bg-red-500"
-          hint="Пришли с ошибкой — требуют исправления в 1С"
-          active={statusFilter === 'quarantine'}
-          onClick={() => setStatusFilter(statusFilter === 'quarantine' ? 'all' : 'quarantine')}
-        />
-      </div>
+      {/* Статусы заявки — табы-чипы с точками и счётчиками (как в реестре заявок привлечённого транспорта) */}
+      <Tabs value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+        <TabsList className="h-auto flex-wrap justify-start gap-1 bg-slate-100 p-1">
+          <TabsTrigger value="all" className="gap-1.5 data-[state=active]:bg-white">
+            Все заявки
+            <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{state.orders.length}</Badge>
+          </TabsTrigger>
+          {(Object.keys(ORDER_STATUS) as DisplayStatus[]).map((s) => (
+            <TabsTrigger key={s} value={s} className="gap-1.5 data-[state=active]:bg-white" title={STATUS_HINTS[s]}>
+              <span className="flex items-center gap-1.5">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${ORDER_STATUS[s].dot}`} aria-hidden />
+                {ORDER_STATUS[s].label}
+              </span>
+              <Badge variant="outline" className="h-5 border-slate-200 bg-white px-1.5 text-[10px] text-slate-500">{counts.get(s) ?? 0}</Badge>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {/* Фильтры реестра */}
       <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-            <SelectTrigger className="h-9 w-[190px]" aria-label="Фильтр по статусу заявки">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все статусы</SelectItem>
-              <SelectItem value="new">Новые</SelectItem>
-              <SelectItem value="ready_to_plan">К планированию</SelectItem>
-              <SelectItem value="planned">Запланированные</SelectItem>
-              <SelectItem value="in_trip">В рейсе</SelectItem>
-              <SelectItem value="done">Выполнены</SelectItem>
-              <SelectItem value="quarantine">Карантин</SelectItem>
-            </SelectContent>
-          </Select>
           <Select value={dateFilter} onValueChange={(v) => setDateFilter(v as DateFilter)}>
             <SelectTrigger className="h-9 w-[190px]" aria-label="Фильтр по дате погрузки">
               <SelectValue />
@@ -634,8 +565,24 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
               Сбросить
             </Button>
           )}
-          <div className="ml-auto text-xs text-slate-500">
-            Заявок: <b className="text-slate-700">{orders.length}</b> из {state.orders.length}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="text-xs text-slate-500">
+              Заявок: <b className="text-slate-700">{orders.length}</b> из {state.orders.length}
+            </div>
+            <Button
+              size="sm" variant="ghost" className="h-8 text-slate-500"
+              onClick={() => window.open(withBasePath('/1c-simulator/index.html'), '_blank', 'noopener')}
+              title="Демо-режим: форма документа 1С"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />Симулятор 1С
+            </Button>
+            <Button
+              size="sm" variant="ghost" className="h-8 text-slate-500"
+              onClick={() => window.open(withBasePath('/phone-bridge/index.html'), '_blank', 'noopener')}
+              title="Демо-режим: звонок с телефона логиста"
+            >
+              <Smartphone className="h-3.5 w-3.5" />Мост на телефон
+            </Button>
           </div>
         </div>
       </div>
@@ -677,7 +624,7 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                         <div className="font-mono text-xs font-semibold text-slate-900">{o.number}</div>
                         <div className="truncate font-mono text-[10px] text-slate-400" title={o.externalId}>{o.externalId}</div>
                         {o.status === 'quarantine' && o.quarantineReason && (
-                          <div className="mt-0.5 max-w-[120px] text-[10px] leading-tight text-red-600" title={o.quarantineReason}>
+                          <div className="mt-0.5 max-w-[120px] text-[10px] leading-tight text-orange-600" title={o.quarantineReason}>
                             {o.quarantineReason}
                           </div>
                         )}
@@ -719,26 +666,63 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                           <span className="text-xs text-slate-400">— не назначен</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <DotWord dot={meta.dot} tone={meta.tone}>{meta.label}</DotWord>
+                      <TableCell className="whitespace-nowrap">
+                        {/* статус: точка + слово; под ним — живая деталь рейса */}
+                        <div className="flex flex-col items-start gap-0.5">
+                          <DotWord dot={meta.dot}>{meta.label}</DotWord>
+                          {d === 'planned' && link && link.trip.ackStatus === 'pending' && (
+                            <span className="text-xs leading-tight text-slate-500">ожидает подтверждения</span>
+                          )}
+                          {d === 'in_trip' && link && (
+                            <span className="text-xs leading-tight text-slate-500">{STATUS_LABELS[link.leg.status] ?? link.leg.status}</span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
-                        <div className="flex justify-end gap-1.5">
+                        <div className="flex items-center justify-end gap-1">
                           {d === 'new' && (
-                            <Button size="sm" variant="ghost" onClick={() => markReady(o.id)}>В план</Button>
+                            <Button
+                              size="icon" variant="ghost"
+                              className="h-8 w-8 text-slate-500 hover:bg-emerald-50 hover:text-emerald-700"
+                              onClick={() => markReady(o.id)}
+                              aria-label={`Перевести заявку ${o.number} в план`}
+                              title="Перевести в план"
+                            >
+                              <CircleCheck className="h-4 w-4" aria-hidden />
+                            </Button>
                           )}
                           {d === 'ready_to_plan' && (
-                            <Button size="sm" variant="outline" onClick={() => openPlan(o)}>
-                              <Truck className="h-3.5 w-3.5" />Состав
+                            <Button
+                              size="icon" variant="ghost"
+                              className="h-8 w-8 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+                              onClick={() => openPlan(o)}
+                              aria-label={`Назначить состав на заявку ${o.number}`}
+                              title="Назначить состав"
+                            >
+                              <Truck className="h-4 w-4" aria-hidden />
                             </Button>
                           )}
                           {(d === 'planned' || d === 'in_trip' || d === 'done') && link && (
-                            <Button size="sm" variant="outline" onClick={() => setTripViewId(link.trip.id)}>
-                              <ClipboardList className="h-3.5 w-3.5" />Рейс
+                            <Button
+                              size="icon" variant="ghost"
+                              className="h-8 w-8 text-slate-500 hover:bg-blue-50 hover:text-blue-700"
+                              onClick={() => setTripViewId(link.trip.id)}
+                              aria-label={`Карточка рейса заявки ${o.number}`}
+                              title="Карточка рейса"
+                            >
+                              <Eye className="h-4 w-4" aria-hidden />
                             </Button>
                           )}
                           {d === 'quarantine' && (
-                            <Button size="sm" variant="outline" onClick={() => markReady(o.id)}>Исправлено</Button>
+                            <Button
+                              size="icon" variant="ghost"
+                              className="h-8 w-8 text-orange-600 hover:bg-emerald-50 hover:text-emerald-700"
+                              onClick={() => markReady(o.id)}
+                              aria-label={`Снять карантин с заявки ${o.number}`}
+                              title="Снять карантин и вернуть в работу"
+                            >
+                              <ShieldCheck className="h-4 w-4" aria-hidden />
+                            </Button>
                           )}
                         </div>
                       </TableCell>
@@ -748,17 +732,12 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                 {orders.length === 0 && (
                   <TableRow className="hover:bg-transparent">
                     <TableCell colSpan={9} className="py-10 text-center text-sm font-medium text-slate-600">
-                      Заявок по фильтру нет {statusFilter === 'all' && '— отправьте рейс из симулятора 1С'}
+                      Заявок по фильтру нет
                     </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 px-3 py-2 text-[11px] text-slate-400">
-            <span>Клик по строке — карточка заявки</span>
-            <span>Жизненный цикл: Новая → К планированию → Запланирована → В рейсе → Выполнена · Карантин — ошибка приёма из 1С</span>
-            <span className="ml-auto">Обновление: {fmtCreated(state.orders[0]?.updatedAt)}</span>
           </div>
         </CardContent>
       </Card>
@@ -781,8 +760,12 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                 <DialogHeader>
                   <DialogTitle className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-lg font-bold">
                     Заявка {o.number}
-                    <DotWord dot={meta.dot} tone={meta.tone}>{meta.label}</DotWord>
-                    <Pill className="bg-slate-100 text-slate-600">источник: {o.source === '1c' ? '1С' : o.source === 'manual' ? 'ручной ввод' : o.source}</Pill>
+                    <DotWord dot={meta.dot}>{meta.label}</DotWord>
+                    {o.source === '1c' ? (
+                      <span title="Источник: 1С — «Заказы грузоотправителей»"><OneCMark /></span>
+                    ) : (
+                      <Pill className="bg-slate-100 text-slate-600">{o.source === 'manual' ? 'ручной ввод' : o.source}</Pill>
+                    )}
                   </DialogTitle>
                 </DialogHeader>
 
@@ -823,8 +806,9 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
 
                 {/* Карантин: причина и порядок действий */}
                 {o.status === 'quarantine' && o.quarantineReason && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">
-                    <b>Карантин:</b> {o.quarantineReason}. Исправьте документ в 1С и отправьте повторно — заявка обновится.
+                  <div className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 p-2.5 text-xs text-orange-700">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span><b>Карантин:</b> {o.quarantineReason}. Исправьте документ в 1С и отправьте повторно — заявка обновится.</span>
                   </div>
                 )}
 
@@ -872,10 +856,11 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                   </div>
                 ) : null}
 
-                {/* Рейс: состав из собственного парка или подсказка к планированию */}
-                <div className="rounded-lg border border-slate-200 p-3">
-                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Рейс</div>
-                  {link ? (
+                {/* Рейс: карточка связанного рейса (до назначения состава блока нет —
+                    действие подскажет кнопка в подвале и умный подбор) */}
+                {link && (
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Рейс</div>
                     <div className="space-y-2.5">
                       <div className="flex flex-wrap items-center gap-2 text-sm">
                         <DotWord dot={link.trip.status === 'active' ? 'bg-emerald-500' : link.trip.status === 'completed' ? 'bg-emerald-600' : link.trip.status === 'cancelled' ? 'bg-red-500' : 'bg-slate-400'} tone={link.trip.status === 'cancelled' ? 'danger' : undefined}>
@@ -918,23 +903,8 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                         ))}
                       </div>
                     </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      <p className="text-sm text-slate-600">
-                        {d === 'quarantine'
-                          ? 'Заявка в карантине: сначала исправьте документ в 1С.'
-                          : d === 'new'
-                            ? 'Проверьте заявку и переведите её в план — после этого можно назначать состав.'
-                            : 'Заявка проверена. Назначьте состав из собственного парка АЭМЗ — создастся рейс.'}
-                      </p>
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-[11px] text-slate-600">
-                        <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle" aria-hidden />
-                        Состав назначается только из собственного парка АЭМЗ — тягачи, прицепы и штатные водители
-                        из «Справочников». Привлечённый транспорт в контуре не используется.
-                      </div>
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Умный подбор: кто и какой рейс подойдёт под заявку */}
                 {(d === 'new' || d === 'ready_to_plan') && (
@@ -949,18 +919,10 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                         освобождения до пункта погрузки), весу груза из строк 1С против ёмкости тягача, срокам ВУ
                         и техосмотра на весь период рейса, онлайн-статусу водителя из «Мониторинга» и закреплению
                         состава (водитель ↔ тягач ↔ прицеп — «родная» машина в приоритете). Балл 100 — идеальное
-                        совпадение. Состав — только из собственного парка АЭМЗ.
+                        совпадение.
                       </InfoTip>
                       {matchLoading && <span className="text-xs text-slate-400">считаем варианты…</span>}
                     </div>
-
-                    {d === 'new' && (
-                      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-600">
-                        <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />
-                        Заявка ещё не проверена. Переведите её в план — и подходящий состав назначится из подсказки в один клик.
-                        <Button size="sm" variant="outline" className="ml-auto h-7" onClick={() => markReady(o.id)}>В план</Button>
-                      </div>
-                    )}
 
                     {match && (
                       <div className="space-y-3">
@@ -1041,17 +1003,17 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                     <Button size="sm" variant="outline" onClick={() => markReady(o.id)}>Перевести в план</Button>
                   )}
                   {d === 'ready_to_plan' && (
-                    <Button size="sm" className="bg-[#0E1B2C] text-white hover:bg-[#16304f]" onClick={() => openPlan(o)}>
+                    <Button size="sm" onClick={() => openPlan(o)}>
                       <Truck className="h-3.5 w-3.5" />Назначить состав
                     </Button>
                   )}
                   {(d === 'planned' || d === 'in_trip' || d === 'done') && link && (
-                    <Button size="sm" className="bg-[#0E1B2C] text-white hover:bg-[#16304f]" onClick={() => { setOpenCardId(null); setTripViewId(link.trip.id) }}>
+                    <Button size="sm" onClick={() => { setOpenCardId(null); setTripViewId(link.trip.id) }}>
                       <ClipboardList className="h-3.5 w-3.5" />Карточка рейса
                     </Button>
                   )}
                   {d === 'quarantine' && (
-                    <Button size="sm" variant="outline" onClick={() => markReady(o.id)}>Исправлено</Button>
+                    <Button size="sm" variant="outline" onClick={() => markReady(o.id)}>Снять карантин</Button>
                   )}
                 </DialogFooter>
               </>
@@ -1064,7 +1026,7 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
       <Dialog open={!!planOrder} onOpenChange={(v) => !v && setPlanOrder(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Назначение состава из собственного парка АЭМЗ</DialogTitle>
+            <DialogTitle>Назначение состава</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             {planOrder && (
@@ -1074,7 +1036,7 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
               </div>
             )}
             <div className="space-y-2">
-              <Label>Тягач (собственный парк, не в ремонте)</Label>
+              <Label>Тягач</Label>
               <Select value={planVehicle} onValueChange={setPlanVehicle}>
                 <SelectTrigger><SelectValue placeholder="Выберите ТС" /></SelectTrigger>
                 <SelectContent>
@@ -1090,7 +1052,7 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Прицеп (собственный парк, необязательно)</Label>
+              <Label>Прицеп</Label>
               <Select value={planTrailer} onValueChange={setPlanTrailer}>
                 <SelectTrigger><SelectValue placeholder="Без прицепа" /></SelectTrigger>
                 <SelectContent>
@@ -1106,7 +1068,7 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Водитель (штатный состав)</Label>
+              <Label>Водитель</Label>
               <Select value={planDriver} onValueChange={pickPlanDriver}>
                 <SelectTrigger><SelectValue placeholder="Выберите водителя" /></SelectTrigger>
                 <SelectContent>
@@ -1200,12 +1162,6 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
                 </div>
               )
             })()}
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-              <ArrowDownUp className="mr-1 inline h-3.5 w-3.5 text-emerald-600" aria-hidden />
-              Состав назначается только из собственного парка АЭМЗ — транспорт, прицепы и водители штатные.
-              После назначения создаётся рейс, заявка получает статус «Запланирована», а с выездом
-              на погрузку — «В рейсе».
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPlanOrder(null)}>Отмена</Button>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,6 +53,13 @@ export async function POST() {
     const session = await db.aiChatSession.create({
       data: { userId: auth.id },
     })
+    await plog({
+      type: 'AI_SESSION_CREATED', source: 'api/ai/sessions',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: 'Начат новый чат с ИИ-помощником',
+      objectType: 'ai_session', objectId: session.id,
+      meta: { sessionId: session.id },
+    })
     return NextResponse.json({
       session: { id: session.id, title: session.title, updatedAt: session.updatedAt.toISOString(), count: 0 },
     })
@@ -70,9 +78,15 @@ export async function DELETE(req: NextRequest) {
   if (!id) return NextResponse.json({ error: 'Не указан чат' }, { status: 400 })
   try {
     // чужой чат не удаляется: ищем только среди своих
-    const own = await db.aiChatSession.findFirst({ where: { id, userId: auth.id }, select: { id: true } })
+    const own = await db.aiChatSession.findFirst({ where: { id, userId: auth.id }, select: { id: true, title: true } })
     if (!own) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 })
     await db.aiChatSession.delete({ where: { id } }) // сообщения чата — каскадом
+    await plog({
+      type: 'AI_SESSION_DELETED', source: 'api/ai/sessions',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Чат ИИ «${own.title}» удалён (вместе с сообщениями)`,
+      objectType: 'ai_session', objectId: id,
+    })
     return NextResponse.json({ ok: true, sessions: await listSessions(auth.id) })
   } catch (e) {
     return NextResponse.json(

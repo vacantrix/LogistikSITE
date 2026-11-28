@@ -5,12 +5,21 @@ import type { DocType } from '@/lib/verify'
 import type { IntakeDocVerdict, IntakeResult } from '@/lib/types'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
 import { startOcrJob } from '@/lib/ocr-jobs'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
 const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
 /** страницы паспорта: перепутанные слотами меняются местами */
 const PASSPORT_PAGES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG']
+/** названия документов для журнала платформы */
+const DOC_LABELS: Record<DocType, string> = {
+  PASSPORT_PHOTO: 'паспорт (страница с фото)',
+  PASSPORT_REG: 'регистрация',
+  STS: 'СТС',
+  REQUEST_DOC: 'документ заявки',
+  POA: 'доверенность',
+}
 
 /**
  * POST /api/drivers/intake — добавление водителя с распознаванием документов.
@@ -92,5 +101,12 @@ export async function POST(req: NextRequest) {
   }, { login: auth.login, staff: isStaff(auth.role) })
 
   if (!started) return NextResponse.json({ error: 'Очередь распознавания переполнена — подождите немного и повторите' }, { status: 429 })
+  await plog({
+    type: 'INTAKE_SAVED', source: 'api/drivers/intake',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Отправлены документы водителя на распознавание: ${provided.map((t) => DOC_LABELS[t]).join(', ')}`,
+    objectType: 'driver',
+    meta: { jobId: started.id, docs: provided },
+  })
   return NextResponse.json({ jobId: started.id }, { status: 202 })
 }

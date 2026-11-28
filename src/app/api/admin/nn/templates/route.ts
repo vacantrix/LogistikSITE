@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { deleteOcrTemplate, ocrTemplates, saveOcrTemplate, type OcrTemplateDTO } from '@/lib/ocr-templates'
 import { clearNnCache } from '@/lib/ocr-service'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +48,15 @@ export async function PUT(req: NextRequest) {
     })
     // шаблон изменился — прежние кэшированные результаты этого вида больше не актуальны
     clearNnCache()
+    // журнал: шаблон распознавания сохранён (создан или перезаписан)
+    await plog({
+      type: 'NN_TEMPLATE_SAVED', source: 'api/admin/nn/templates',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Сохранён шаблон распознавания «${saved.title}» (${saved.docType}, полей: ${saved.fields.length}${saved.enabled ? '' : ', отключён'})`,
+      meta: { docType: saved.docType, title: saved.title, enabled: saved.enabled, fields: saved.fields.length },
+      objectType: 'nn-template',
+      objectId: saved.docType,
+    })
     return NextResponse.json({ template: saved })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Не удалось сохранить шаблон' }, { status: 400 })
@@ -63,6 +73,15 @@ export async function DELETE(req: NextRequest) {
   try {
     await deleteOcrTemplate(docType.trim())
     clearNnCache()
+    // журнал: шаблон распознавания удалён — вид перестаёт распознаваться
+    await plog({
+      type: 'NN_TEMPLATE_DELETED', source: 'api/admin/nn/templates',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Удалён шаблон распознавания (${docType.trim()}) — вид больше не распознаётся`,
+      meta: { docType: docType.trim() },
+      objectType: 'nn-template',
+      objectId: docType.trim(),
+    })
     return NextResponse.json({ ok: true })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Не удалось удалить шаблон' }, { status: 500 })

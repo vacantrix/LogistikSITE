@@ -210,7 +210,7 @@ export function PlanEntryDialog({ open, initialDate, initialDriverId, state, onO
           <Button variant="outline" size="sm" className="h-9" onClick={() => onOpenChange(false)} disabled={busy}>
             Отмена
           </Button>
-          <Button size="sm" className="h-9 bg-[#0E1B2C] text-white hover:bg-[#16304f]" onClick={submit} disabled={!canSubmit}>
+          <Button size="sm" className="h-9" onClick={submit} disabled={!canSubmit}>
             {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden /> : <CalendarPlus className="mr-1 h-3.5 w-3.5" aria-hidden />}
             В календарь
           </Button>

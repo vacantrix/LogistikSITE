@@ -121,16 +121,16 @@ function segCls(kind: SegKind, state: SegState): string {
   }
 }
 
-/** Метка плана логиста: индиго-пунктир (впереди) · красный пульс (просрочка) · серое (выполнено) */
+/** Метка плана логиста: синий пунктир (впереди) · красный пульс (просрочка) · серое (выполнено) */
 function manualCls(state: SegState): string {
   if (state === 'overdue') return 'border-red-400 bg-red-50 text-red-700 shadow-sm anim-overdue'
   if (state === 'done') return 'border-slate-300 bg-slate-50 text-slate-400'
-  return 'border-dashed border-indigo-400 bg-white/95 text-indigo-800 shadow-sm'
+  return 'border-dashed border-blue-400 bg-white/95 text-blue-800 shadow-sm'
 }
 
 const LANE_STATUS: Record<string, { dot: string; label: string }> = {
   on_trip: { dot: 'bg-emerald-500', label: 'на линии' },
-  assigned: { dot: 'bg-sky-500', label: 'по плану' },
+  assigned: { dot: 'bg-blue-600', label: 'по плану' },
   free: { dot: 'bg-slate-300', label: 'на базе' },
 }
 
@@ -509,15 +509,14 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
   const tiles: { count: number; label: string; dot: string; hint: string }[] = [
     { count: overdueTotal, label: 'Просрочено', dot: 'bg-red-500', hint: 'События, чей срок прошёл, а факт не закрыт: погрузки/выгрузки рейсов, планы логиста, грузы без состава. В графике пульсируют красным' },
     { count: s.busy, label: 'В работе', dot: 'bg-emerald-500', hint: 'Составы на линии: активные рейсы из «Заявок»' },
-    { count: s.assigned, label: 'Назначены', dot: 'bg-sky-500', hint: 'Рейсы составлены (включая грузы ATI.SU из плана), выезд по плану' },
-    { count: s.atBase, label: 'На базе', dot: 'bg-amber-500', hint: 'Свободный резерв на базе АЭМЗ — зелёные строки в графике' },
+    { count: s.assigned, label: 'Назначены', dot: 'bg-blue-600', hint: 'Рейсы составлены (включая грузы ATI.SU из плана), выезд по плану' },
+    { count: s.atBase, label: 'На базе', dot: 'bg-slate-400', hint: 'Свободный резерв на базе АЭМЗ — строки без рейса в графике' },
     { count: s.loadsToday, label: 'Погрузок сегодня', dot: 'bg-blue-500', hint: 'Плановые погрузки сегодня — заявки 1С, грузы ATI.SU и ручной план' },
     { count: s.unloadsToday, label: 'Выгрузок сегодня', dot: 'bg-amber-500', hint: 'Плановые выгрузки сегодня по всем рейсам' },
     { count: s.returnsToday, label: 'Вернутся сегодня', dot: 'bg-teal-600', hint: 'Составы, которые вернутся на базу АЭМЗ до конца дня' },
     { count: s.returnsTomorrow, label: 'Вернутся завтра', dot: 'bg-teal-400', hint: 'Составы с возвратом на базу АЭМЗ завтра' },
   ]
 
-  const plannedCount = plan.rows.filter((r) => r.status !== 'free').length
   const waitingCount = plan.waitingDeals.length + plan.waitingOrders.length
   const freeLaneCount = lanes.filter((l) => l.status === 'free').length
   const overdueLaneCount = lanes.filter((l) => l.overdueCount > 0).length
@@ -552,7 +551,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
     return rank(a) - rank(b) || (a.date + (a.time ?? '')).localeCompare(b.date + (b.time ?? ''))
   })
   const segClsSpan = (active: boolean) =>
-    `h-8 px-3 text-xs font-medium transition-colors ${active ? 'bg-[#0E1B2C] text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`
+    `h-8 px-3 text-xs font-medium transition-colors ${active ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`
 
   const nowMs = nowTick
   const showNow = nowMs >= startMs && nowMs < winEnd
@@ -611,7 +610,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
             </div>
             <Button
               size="sm"
-              className="h-8 bg-[#0E1B2C] px-3 text-xs text-white hover:bg-[#16304f]"
+              className="h-8 bg-slate-900 px-3 text-xs text-white hover:bg-slate-700"
               onClick={() => openEntry(startIso)}
               title="Запланировать работу состава на любую дату"
             >
@@ -666,7 +665,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
               <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] bg-amber-500" aria-hidden />выгрузка</span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full bg-teal-600" aria-hidden />на базу</span>
               <span className="inline-flex items-center gap-1"><span className="h-2 w-4 rounded-full border border-dashed border-slate-400 bg-slate-200" aria-hidden />порожняк</span>
-              <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] border border-dashed border-indigo-400 bg-indigo-50" aria-hidden />план логиста</span>
+              <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] border border-dashed border-blue-400 bg-blue-50" aria-hidden />план логиста</span>
               <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] bg-red-500 anim-overdue" aria-hidden />просрочка</span>
               <span className="inline-flex items-center gap-1"><span className="h-3 w-2.5 rounded-[3px] bg-slate-300" aria-hidden />прошло · закрыто</span>
             </span>
@@ -894,7 +893,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
                           {m.state === 'done' ? (
                             <Check className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />
                           ) : (
-                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.state === 'overdue' ? 'bg-red-500' : 'bg-indigo-500'}`} aria-hidden />
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${m.state === 'overdue' ? 'bg-red-500' : 'bg-blue-600'}`} aria-hidden />
                           )}
                           {m.time && <b className="tabular-nums">{m.time}</b>}
                           <span className={`max-w-[170px] truncate ${m.state === 'done' ? 'line-through decoration-slate-300' : ''}`}>{m.label}</span>
@@ -919,7 +918,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
                             className={`flex items-center rounded p-px transition-colors ${
                               m.state === 'done'
                                 ? 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'
-                                : 'text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700'
+                                : 'text-blue-500 hover:bg-blue-100 hover:text-blue-700'
                             }`}
                           >
                             <X className="h-3 w-3" aria-hidden />
@@ -941,15 +940,6 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
               </div>
             </div>
           </div>
-
-          <p className="text-[11px] leading-relaxed text-slate-500">
-            Строка — состав, полоса — рейс от погрузки до возврата на базу АЭМЗ. Красный пульс —
-            просрочка (срок прошёл, факт не закрыт): закройте факт в карточке рейса или нажмите ✓
-            у метки плана логиста. Серое — прошло и закрыто. Клик по полосе — карточка рейса, клик
-            по свободному месту строки — план на этот день, «+» в шапке дня — план на день.
-            В графике {plannedCount} {pluralSostav(plannedCount)} · резерв на базе {s.atBase}
-            {(laneQuery || laneFilter !== 'all') ? ` · показано ${shownLanes.length} из ${lanes.length}` : ''} · ждут состава {waitingCount}.
-          </p>
         </CardContent>
       </Card>
 
@@ -996,7 +986,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
                         <div className="mt-1.5 flex gap-1.5">
                           <Button
                             size="sm"
-                            className="h-7 bg-[#0E1B2C] px-2.5 text-xs text-white hover:bg-[#16304f]"
+                            className="h-7 bg-slate-900 px-2.5 text-xs text-white hover:bg-slate-700"
                             onClick={() => setPlanDeal(w.deal)}
                             title="Назначить состав: свободный или освобождающийся — общий подбор с «Занятостью»"
                           >
@@ -1052,7 +1042,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
               <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
                 <ListChecks className="h-4 w-4 text-slate-400" aria-hidden />
                 Планы логиста
-                <Pill className="bg-indigo-100 text-indigo-700">{state.planEntries.length}</Pill>
+                <Pill className="bg-blue-100 text-blue-700">{state.planEntries.length}</Pill>
                 {overdueManuals > 0 && (
                   <span
                     className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700 anim-overdue"
@@ -1092,11 +1082,11 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
                       <div
                         key={p.id}
                         className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
-                          overdue ? 'border-red-200 bg-red-50/60' : closed ? 'border-slate-200 bg-slate-50' : 'border-indigo-100 bg-indigo-50/40'
+                          overdue ? 'border-red-200 bg-red-50/60' : closed ? 'border-slate-200 bg-slate-50' : 'border-blue-100 bg-blue-50/40'
                         }`}
                       >
                         <span className="flex w-11 shrink-0 flex-col leading-tight" title={`${p.date}${p.time ? ` в ${p.time}` : ' — в течение дня'}`}>
-                          <span className={`text-[11px] font-semibold tabular-nums ${overdue ? 'text-red-700' : closed ? 'text-slate-400' : 'text-indigo-700'}`}>{fmtDM(p.date)}</span>
+                          <span className={`text-[11px] font-semibold tabular-nums ${overdue ? 'text-red-700' : closed ? 'text-slate-400' : 'text-blue-700'}`}>{fmtDM(p.date)}</span>
                           <span className="text-[10px] tabular-nums text-slate-500">{p.time ?? 'день'}</span>
                         </span>
                         <span className="w-24 shrink-0 truncate text-[11px] font-medium text-slate-800" title={d?.fullName ?? ''}>
@@ -1133,7 +1123,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
                           title="Снять с плана"
                           disabled={removeBusy === p.id}
                           onClick={() => void removeEntry(p.id)}
-                          className="flex shrink-0 items-center rounded p-1 text-slate-400 transition-colors hover:bg-indigo-100 hover:text-indigo-700"
+                          className="flex shrink-0 items-center rounded p-1 text-slate-400 transition-colors hover:bg-blue-100 hover:text-blue-700"
                         >
                           <X className="h-3.5 w-3.5" aria-hidden />
                         </button>
@@ -1204,9 +1194,6 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
                       </span>
                     </div>
                   ))}
-                <p className="text-[11px] leading-relaxed text-slate-500">
-                  Возврат на АЭМЗ для них не планируется — сначала подберите обратный груз.
-                </p>
               </CardContent>
             </Card>
           )}

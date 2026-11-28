@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { plog } from '@/lib/platform-log'
 import { aiChatComplete, aiLog, buildRestrictedContext, buildSystemPrompt, type EngineMessage } from '@/lib/ai/core'
 import { extractAiTools, type AiBestOffer } from '@/lib/ai/tools'
 import { generateMarketPage, type MarketQuery } from '@/lib/kontur/atisu/market-stubs'
@@ -160,6 +161,13 @@ export async function POST(req: Request) {
       model,
       latencyMs,
       best: best.length,
+    })
+    await plog({
+      type: 'AI_SEARCH', source: 'api/ai/search',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `ИИ-поиск по бирже (${AI_KIND_LABELS[mode] ?? mode}): «${query.slice(0, 80)}»`,
+      objectType: 'ai_list', objectId: item.id,
+      meta: { mode, from, to, itemId: item.id, engine, best: best.length, cards: cards.length },
     })
     const bestOut: AiBestOffer[] = best
     return NextResponse.json({ item, answer: cleaned, best: bestOut, cards, report, links, engine, model, latencyMs })

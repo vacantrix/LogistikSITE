@@ -76,10 +76,15 @@ export async function GET() {
   }))
 
   const now = Date.now()
-  // B8.2: алерты — структура (kind + цель), лицевая панель рисует их кнопками-ссылками:
+  // Алерты — структура (kind + цель), лицевая панель рисует их кнопками-ссылками:
   // клик ведёт к проблеме — карточка рейса в «Заявках», устройства/сводка — «Мониторинг».
+  // В тексте — человекочитаемое (водитель), без сырых id записей.
   const alerts: Alert[] = []
-  const shortId = (id: string) => id.slice(0, 8)
+  const tripDriver = (tripId: string): string => {
+    const t = trips.find((x) => x.id === tripId)
+    const name = t ? driverMap.get(t.driverId)?.fullName : undefined
+    return name ?? 'Рейс'
+  }
 
   // B8.2/B6.6: не подтверждено N (эскалация при pending > ACK_SLA_MIN)
   for (const trip of trips) {
@@ -90,7 +95,7 @@ export async function GET() {
           level: 'red',
           kind: 'trip_ack',
           tripId: trip.id,
-          text: `Рейс ${shortId(trip.id)} · нет подтверждения ${CONSTANTS.ACK_SLA_MIN}+ мин`,
+          text: `${driverMap.get(trip.driverId)?.fullName ?? 'Рейс'} · нет подтверждения ${CONSTANTS.ACK_SLA_MIN}+ мин`,
         })
       }
     }
@@ -105,7 +110,7 @@ export async function GET() {
           kind: 'leg_docs',
           tripId: leg.tripId,
           legId: leg.id,
-          text: `Плечо ${shortId(leg.id)} · документы не доставлены ${CONSTANTS.DOC_PENDING_ALERT_HOURS}+ ч`,
+          text: `${tripDriver(leg.tripId)} · документы не доставлены ${CONSTANTS.DOC_PENDING_ALERT_HOURS}+ ч`,
         })
       }
     }
@@ -115,7 +120,7 @@ export async function GET() {
         kind: 'leg_docs_lost',
         tripId: leg.tripId,
         legId: leg.id,
-        text: `Плечо ${shortId(leg.id)} · документ утрачен`,
+        text: `${tripDriver(leg.tripId)} · документ утрачен`,
       })
     }
   }

@@ -4,11 +4,24 @@ import { analyzeIntakeDoc } from '@/lib/verify'
 import type { DocType } from '@/lib/verify'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
 import { startOcrJob } from '@/lib/ocr-jobs'
+import { plog } from '@/lib/platform-log'
 import type { IntakeDocVerdict } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
 const DOC_TYPES: DocType[] = ['PASSPORT_PHOTO', 'PASSPORT_REG', 'STS', 'REQUEST_DOC', 'POA']
+
+/** Человекочитаемые названия для журнала событий */
+const DOC_TYPE_LABEL: Record<string, string> = {
+  PASSPORT_PHOTO: 'паспорт (страница с фото)',
+  PASSPORT_REG: 'паспорт (регистрация)',
+  STS: 'СТС',
+  REQUEST_DOC: 'документ по заявке',
+  POA: 'доверенность',
+}
+const DOC_STATUS_LABEL: Record<string, string> = {
+  PENDING: 'на проверке', PASSED: 'принят', REUPLOAD: 'перезагрузить', REJECTED: 'отказ', MANUAL: 'ручная проверка',
+}
 
 /**
  * POST /api/documents/check — мгновенная проверка одного документа при загрузке.
@@ -37,6 +50,24 @@ export async function POST(req: NextRequest) {
 
   const started = startOcrJob<{ verdict: IntakeDocVerdict }>(async () => {
     const v = await analyzeIntakeDoc(fileName, type, dataUri as string, await loadVerifySettings())
+    // журнал: документ проверен вручную при загрузке — фиксируем вид и результат вердикта
+    const wrongType = v.detectedType && v.detectedType !== 'UNKNOWN' && v.detectedType !== type
+      ? `, распознан другой вид: ${DOC_TYPE_LABEL[v.detectedType] ?? v.detectedType}`
+      : ''
+    await plog({
+      type: 'DOC_CHECKED', source: 'api/documents/check',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Проверен документ «${DOC_TYPE_LABEL[type] ?? type}» (файл ${fileName || 'без имени'}): ${DOC_STATUS_LABEL[v.status] ?? v.status}, качество ${v.quality}${wrongType}`,
+      meta: {
+        docType: type,
+        fileName: fileName || null,
+        status: v.status,
+        quality: v.quality,
+        engine: v.engine,
+        detectedType: v.detectedType ?? null,
+        issues: v.issues,
+      },
+    })
     return {
       verdict: {
         type,

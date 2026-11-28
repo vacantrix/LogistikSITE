@@ -5,6 +5,7 @@ import { notifyLive } from '@/lib/notify'
 import { notifyLogists } from '@/lib/notify-users'
 import { applyCrew, inTx, validateCrew } from '@/lib/requests'
 import { allowedFor, permDenied } from '@/lib/permissions'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth
   // права (Task 111): массовое назначение — то же право crew:assign, что и по одной заявке
   if (!(await allowedFor(auth, 'crew:assign'))) {
+    await plog({
+      level: 'WARN', type: 'REQUESTS_BULK_ASSIGNED_DENIED', source: 'api/requests/bulk-assign',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: 'Попытка массового назначения экипажей отклонена: нет права «Назначить экипаж»',
+      meta: { carrierId: auth.carrierId },
+    })
     return NextResponse.json({ error: permDenied('crew:assign') }, { status: 403 })
   }
   const carrierId = auth.carrierId!
@@ -104,5 +111,17 @@ export async function POST(req: NextRequest) {
   }
 
   const assigned = results.filter((r) => r.ok).length
+  await plog({
+    type: 'REQUESTS_BULK_ASSIGNED', source: 'api/requests/bulk-assign',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Массовое назначение экипажей из Excel: назначено ${assigned} из ${rows.length} заявок`,
+    meta: {
+      assigned,
+      total: rows.length,
+      failed: rows.length - assigned,
+      requests: results.filter((r) => r.ok).map((r) => r.number),
+      carrierId,
+    },
+  })
   return NextResponse.json({ assigned, total: rows.length, results })
 }

@@ -1,10 +1,10 @@
 'use client'
 
 /** «База данных» — прямой редактор таблиц платформы (только администрация, Task 109) */
-import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Database, Loader2, Plus, Search, Trash2 } from 'lucide-react'
 import {
-  EmptyState, ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, StatusDot, type TabProps,
+  EmptyState, ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, StatusDot, useLiveTab, type TabProps,
 } from '@/components/platform/common'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -53,7 +53,7 @@ const rowToValues = (columns: AdminDbColumn[], row: Record<string, AdminDbCell>)
   return out
 }
 
-export default function AdminDbTab(_props: TabProps) {
+export default function AdminDbTab({ liveTick }: TabProps) {
   const { toast } = useToast()
   const [tables, setTables] = useState<AdminDbTableDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -81,25 +81,44 @@ export default function AdminDbTab(_props: TabProps) {
     }
   }, [])
 
-  const loadRows = useCallback(async (key: string, q: string) => {
+  // тихий режим (автообновление): без спиннера и тостов — строки обновляются на месте;
+  // карточка редактирования открыта — данные не трогаем, человек правит поля
+  const loadRows = useCallback(async (key: string, q: string, opts?: { silent?: boolean }) => {
     if (!key) return
-    setTableLoading(true)
+    const silent = !!opts?.silent
+    if (!silent) setTableLoading(true)
     try {
       const res = await api.adminDbTable(key, q ? { q } : {})
       setData(res.data ?? null)
       setError(null)
     } catch (e) {
+      if (silent) return // тихое обновление молчит: прежние строки остаются
       toast({
         title: 'Не удалось загрузить таблицу',
         description: e instanceof Error ? e.message : 'Попробуйте ещё раз',
         variant: 'destructive',
       })
     } finally {
-      setTableLoading(false)
+      if (!silent) setTableLoading(false)
     }
   }, [toast])
 
   useEffect(() => { void loadTables() }, [loadTables])
+
+  // живое окно: список таблиц и строки открытой таблицы остаются свежими — общий
+  // «пульс» платформы + страховочный интервал; всё тихо и без спиннеров
+  const editingRef = useRef<Editing | null>(null)
+  const tableKeyRef = useRef('')
+  const queryRef = useRef('')
+  useEffect(() => { editingRef.current = editing }, [editing])
+  useEffect(() => { tableKeyRef.current = tableKey }, [tableKey])
+  useEffect(() => { queryRef.current = query }, [query])
+  const silentRefresh = useCallback(() => {
+    if (editingRef.current) return // открыт редактор записи — не мешаем
+    void loadTables()
+    if (tableKeyRef.current) void loadRows(tableKeyRef.current, queryRef.current, { silent: true })
+  }, [loadTables, loadRows])
+  useLiveTab(silentRefresh, liveTick, 20_000)
 
   const selectTable = (key: string) => {
     setTableKey(key)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -103,7 +104,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
   if (!body) return NextResponse.json({ error: 'Неверный формат запроса' }, { status: 400 })
 
-  const existing = await db.memoryContact.findUnique({ where: { id }, select: { id: true } })
+  const existing = await db.memoryContact.findUnique({ where: { id }, select: { id: true, name: true, company: true } })
   if (!existing) return NextResponse.json({ error: 'Контакт не найден' }, { status: 404 })
 
   const data: {
@@ -142,6 +143,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   try {
     const contact = await db.memoryContact.update({ where: { id }, data, include: { deals: true } })
+    await plog({
+      type: 'CONTACT_UPDATED', source: 'api/contacts',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Контакт «${contact.name}»${contact.company ? ` (${contact.company})` : ''} изменён`,
+      objectType: 'contact', objectId: contact.id,
+      meta: { fields: Object.keys(data) },
+    })
     return NextResponse.json({ contact: toContactDTO(contact) })
   } catch (e) {
     console.error('[api/contacts/id] PATCH:', e)
@@ -156,11 +164,17 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
   const { id } = await params
 
-  const existing = await db.memoryContact.findUnique({ where: { id }, select: { id: true } })
+  const existing = await db.memoryContact.findUnique({ where: { id }, select: { id: true, name: true, company: true } })
   if (!existing) return NextResponse.json({ error: 'Контакт не найден' }, { status: 404 })
 
   try {
     await db.memoryContact.delete({ where: { id } })
+    await plog({
+      type: 'CONTACT_DELETED', source: 'api/contacts',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Контакт «${existing.name}»${existing.company ? ` (${existing.company})` : ''} удалён вместе со сделками`,
+      objectType: 'contact', objectId: id,
+    })
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('[api/contacts/id] DELETE:', e)

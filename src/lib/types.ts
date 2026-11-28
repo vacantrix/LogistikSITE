@@ -703,17 +703,27 @@ export interface TicketThreadDTO {
 
 export type PlatformLogLevel = 'INFO' | 'WARN' | 'ERROR'
 
-/** Запись журнала платформы (GET /api/platform-log, только логист) */
+/** Запись журнала платформы (GET /api/platform-log, логист и администрация) */
 export interface PlatformLogEntryDTO {
   id: string
   level: PlatformLogLevel
   type: string
   source: string
+  /** где произошло действие: платформа или диспетчерская (собственный транспорт) */
+  contour: 'platform' | 'dispatcher' | string
   actorName: string | null
   actorLogin: string | null
   actorRole: string | null
+  requestId: string | null
   requestNumber: string | null
   carrierName: string | null
+  objectType: string | null
+  objectId: string | null
+  before: string | null
+  after: string | null
+  ip: string | null
+  userAgent: string | null
+  correlationId: string | null
   message: string
   meta: Record<string, unknown> | null
   createdAt: string
@@ -724,8 +734,58 @@ export interface PlatformLogDTO {
   entries: PlatformLogEntryDTO[]
   stats: {
     counts24h: Record<PlatformLogLevel, number>
+    /** попытки входа за 24 часа: успешные и отклонённые */
+    logins24h: { success: number; failed: number }
     lastErrorAt: string | null
     lastErrorMessage: string | null
+  }
+}
+
+// ——— Техническая консоль платформы («Логи», Task: функции-журналы) ———
+// В отличие от «Журнала событий» (аудит действий людей в БД), «Логи» —
+// журнал работы кода: вызовы API, коды ответов, задержки, сбои. Короткие
+// строки, живёт в памяти процесса — как docker logs.
+
+export type TechLogKind = 'api' | 'server' | 'client' | 'system'
+export type TechLogLevel = 'INFO' | 'WARN' | 'ERROR'
+
+/** Строка технической консоли: короткий факт о работе кода */
+export interface TechLogEntryDTO {
+  id: string
+  /** epoch ms — когда прошёл вызов/событие */
+  ts: number
+  kind: TechLogKind
+  level: TechLogLevel
+  /** HTTP-метод вызова (kind='api') */
+  method: string | null
+  /** путь вызова или источник события */
+  path: string | null
+  /** HTTP-код ответа; null — сетевой сбой (kind='api') */
+  status: number | null
+  /** длительность вызова, мс */
+  ms: number | null
+  /** короткая строка одним предложением */
+  message: string
+  /** логин сессии, из которой шёл вызов (кем открыт браузер) */
+  origin: string | null
+}
+
+/** Ответ GET /api/platform-log/tech — лента + статистика за окно */
+export interface TechLogDTO {
+  entries: TechLogEntryDTO[]
+  stats: {
+    /** окно статистики в минутах */
+    windowMin: number
+    /** вызовов API в окне */
+    calls: number
+    /** средняя длительность вызова, мс */
+    avgMs: number | null
+    /** сбои в окне: HTTP ≥ 400, сетевые, ошибки сервера/клиента */
+    errors: number
+    /** самый медленный вызов окна */
+    slowest: { path: string; ms: number } | null
+    /** активных сессий в окне (разные логины) */
+    sessions: number
   }
 }
 

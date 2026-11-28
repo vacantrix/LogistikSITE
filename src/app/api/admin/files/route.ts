@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -187,6 +188,15 @@ export async function PUT(req: NextRequest) {
   try {
     await writeFile(abs, content, 'utf-8')
     const after = await stat(abs)
+    // журнал: файл сохранён через файловый редактор раздела «Архитектура»
+    await plog({
+      type: 'FILE_SAVED', source: 'api/admin/files',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Сохранён файл ${rel} (${after.size} Б)`,
+      meta: { path: rel, size: after.size },
+      objectType: 'file',
+      objectId: rel,
+    })
     return NextResponse.json({ ok: true, path: rel, size: after.size, mtime: after.mtime.toISOString() })
   } catch {
     return NextResponse.json({ error: 'Не удалось записать файл' }, { status: 500 })

@@ -112,3 +112,4 @@ tools/ocr-probe/__pycache__/
 /bun.lock
 /.zscripts/.db-init-done
 /.zscripts/*.log
+.stand-watchdog.sh

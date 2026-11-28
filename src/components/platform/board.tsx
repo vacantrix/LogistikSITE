@@ -512,11 +512,10 @@ export default function BoardTab({ activeCarrierId, role, onNavigate, liveTick, 
     }
   }, [isStaff])
 
-  // первичная загрузка + автообновление каждые 15 секунд (кнопки «Обновить» больше нет — Task 63)
+  // первичная загрузка; дальше окно живое само — события шины WS и общий
+  // «пульс» платформы (page.tsx, каждые 15 с) догружают заявки без кнопки
   useEffect(() => {
     void load()
-    const t = setInterval(() => void load(), 15_000)
-    return () => clearInterval(t)
   }, [load])
 
   // real-time (Task 49): событие из шины WS мгновенно догружает заявки и журнал

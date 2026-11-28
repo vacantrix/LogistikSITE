@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -101,6 +102,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   try {
     const deal = await db.memoryDeal.update({ where: { id }, data })
+    await plog({
+      type: 'DEAL_UPDATED', source: 'api/deals',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Сделка${deal.route ? ` «${deal.route}»${deal.cargo ? ` (${deal.cargo})` : ''}` : ''} изменена`,
+      objectType: 'deal', objectId: deal.id,
+      meta: { fields: Object.keys(data), status: deal.status },
+    })
     return NextResponse.json({ deal: toDealDTO(deal) })
   } catch (e) {
     console.error('[api/deals/id] PATCH:', e)
@@ -115,11 +123,18 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
   const { id } = await params
 
-  const existing = await db.memoryDeal.findUnique({ where: { id }, select: { id: true } })
+  const existing = await db.memoryDeal.findUnique({ where: { id }, select: { id: true, route: true, cargo: true, status: true } })
   if (!existing) return NextResponse.json({ error: 'Сделка не найдена' }, { status: 404 })
 
   try {
     await db.memoryDeal.delete({ where: { id } })
+    await plog({
+      type: 'DEAL_DELETED', source: 'api/deals',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Сделка${existing.route ? ` «${existing.route}»${existing.cargo ? ` (${existing.cargo})` : ''}` : ''} удалена`,
+      objectType: 'deal', objectId: id,
+      meta: { status: existing.status },
+    })
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('[api/deals/id] DELETE:', e)

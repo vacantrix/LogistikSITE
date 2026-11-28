@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { plog } from '@/lib/platform-log'
 import {
   aiChatComplete, aiChatStreamComplete, aiLog, aiRightMode,
   buildRestrictedContext, buildSystemPrompt, getAiRights,
@@ -188,6 +189,14 @@ export async function POST(req: Request) {
             },
           })
           step(`история чата · ${history.length} сообщ · вопрос записан`)
+
+          await plog({
+            type: 'AI_QUERY', source: 'api/ai/chat',
+            actor: { login: auth.login, name: auth.name, role: auth.role },
+            message: `Запрос к ИИ-помощнику: «${message.slice(0, 80)}»`,
+            objectType: 'ai_session', objectId: session.id,
+            meta: { sessionId: session.id, model: modelKey, files: files.length, historyMessages: history.length },
+          })
 
           const ctx = await buildRestrictedContext(rights)
           const system = buildSystemPrompt(ctx, rights)

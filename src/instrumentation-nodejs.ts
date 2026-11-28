@@ -21,6 +21,10 @@ export async function register(): Promise<void> {
   // на сервере в UTC с 00:00 до 03:00 МСК вчерашняя дата ещё считалась бы сегодняшней.
   // Платформа работает по Москве — часовой пояс процесса задаём явно (APP_TZ — если нужен другой)
   process.env.TZ = process.env.APP_TZ || 'Europe/Moscow'
+  // техническая консоль («Логи»): старт сервера — первая строка ленты после запуска
+  void import('@/lib/tech-log')
+    .then(({ logTech }) => logTech({ kind: 'system', message: 'Сервер платформы запущен' }))
+    .catch(() => { /* консоль не должна ломать старт */ })
   // старые «Завод → Порт» и грузы без справочника — к справочникам (идемпотентно)
   await import('@/lib/data-fixes')
     .then(({ normalizeLegacyData }) => normalizeLegacyData())

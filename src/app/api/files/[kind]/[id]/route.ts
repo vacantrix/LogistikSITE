@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isStaff, requireUserViaRequest } from '@/lib/auth'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
+
+/** Человекочитаемые названия типов файлов для журнала событий */
+const KIND_LABEL: Record<string, string> = {
+  document: 'документ рейса',
+  directory: 'фото справочника',
+  'request-file': 'файл обмена по заявке',
+  'ticket-attachment': 'вложение обращения',
+}
 
 /** data:<mime>[;base64],<payload> → байты и тип; null — не файл (любой допустимый mime) */
 function decodeDataUri(uri: string): { mime: string; bytes: Buffer } | null {
@@ -87,6 +96,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ kind
   const inlineType = pdf || file.mime.startsWith('image/')
   // не-медиа файлы (docx, xlsx…) всегда отдаются скачиванием — безопаснее и удобнее
   const download = req.nextUrl.searchParams.get('download') === '1' || !inlineType
+  // в журнал: только фактические скачивания (attachment); inline-предпросмотр фото в списках не пишем,
+  // иначе каждая отрисовка страницы давала бы десятки записей
+  if (download) {
+    await plog({
+      type: 'FILE_DOWNLOADED', source: 'api/files',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Скачан файл (${KIND_LABEL[kind] ?? kind}): «${fileName}» (${file.bytes.length} Б)`,
+      meta: { kind, id, fileName, size: file.bytes.length, mime: file.mime },
+      objectType: 'file',
+      objectId: id,
+    })
+  }
   return new NextResponse(new Uint8Array(file.bytes), {
     headers: {
       'Content-Type': file.mime,

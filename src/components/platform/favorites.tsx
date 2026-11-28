@@ -31,6 +31,7 @@ import {
   KpiCard,
   LoadingBlock,
   SectionHeader,
+  useLiveTab,
   type TabProps,
 } from '@/components/platform/common'
 import {
@@ -136,7 +137,7 @@ function savedText(s: SavedMessageDTO): string {
   return [s.question && `Вопрос: ${s.question}`, `Ответ: ${s.answer}`].filter(Boolean).join('\n\n')
 }
 
-export default function FavoritesTab({ onNavigate }: TabProps) {
+export default function FavoritesTab({ onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [items, setItems] = useState<FavoriteDTO[] | null>(null)
   const [answers, setAnswers] = useState<SavedMessageDTO[] | null>(null)
@@ -172,6 +173,10 @@ export default function FavoritesTab({ onNavigate }: TabProps) {
   useEffect(() => {
     void load()
   }, [load])
+
+  // живое окно: избранное и сохранённые ответы обновляются сами — общий «пульс»
+  // платформы (события WS + такт page.tsx) и страховочный интервал; тихо, на месте
+  useLiveTab(load, liveTick, 20_000)
 
   const removeFavorite = useCallback(
     async (id: string) => {

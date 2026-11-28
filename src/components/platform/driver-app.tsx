@@ -96,11 +96,17 @@ export function DriverAppTab({ liveTick = 0 }: { liveTick?: number }) {
     }
   }, [])
 
+  // первичная загрузка + свой быстрый такт (10 с — мониторинг приложения водителя);
+  // общий «пульс» платформы (события WS + page.tsx) догружает мгновенно, без ожидания
   useEffect(() => {
     void load()
     const timer = setInterval(() => void load(), 10_000)
     return () => clearInterval(timer)
-  }, [load, liveTick])
+  }, [load])
+
+  useEffect(() => {
+    if (liveTick > 0) void load()
+  }, [liveTick, load])
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const webUrl = `${origin}/driver`

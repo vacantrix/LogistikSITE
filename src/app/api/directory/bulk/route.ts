@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
 import { notifyLive } from '@/lib/notify'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -131,6 +132,19 @@ export async function POST(req: NextRequest) {
 
     // справочники и экипажи у всех открытых вкладок (логист видит базу перевозчика) — без перезагрузки
     notifyLive({ type: 'DIRECTORY_CHANGED' })
+    await plog({
+      type: 'DIRECTORY_BULK_IMPORT', source: 'api/directory/bulk',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      carrierName: carrier.name,
+      message: `Импорт из Excel в базу «${carrier.name}»: водителей — ${driversCreated} новых, ${driversUpdated} обновлено; тягачей — ${trucksCreated} новых, ${trucksUpdated} обновлено; прицепов — ${trailersCreated} новых, ${trailersUpdated} обновлено`,
+      objectType: 'carrier', objectId: carrierId,
+      meta: {
+        carrierId,
+        driversCreated, driversUpdated,
+        trucksCreated, trucksUpdated,
+        trailersCreated, trailersUpdated,
+      },
+    })
     return NextResponse.json({
       ok: true,
       drivers: { created: driversCreated, updated: driversUpdated },

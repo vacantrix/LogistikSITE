@@ -4,9 +4,15 @@
  * Пишет те же JSONL-строки, что и платформа, в общий файл CONTOUR_AUDIT_FILE.
  * Вызывается из движка и маршрутов: каждое действие диспетчерской попадает
  * в сквозную историю контура.
+ *
+ * Зеркало в базу платформы: каждое действие диспетчерской дополнительно
+ * пишется в PlatformLog (контур = dispatcher) — так разделы «Журнал событий»
+ * и «Логи платформы» показывают вообще все действия на платформе,
+ * включая собственный транспорт, без отдельной интеграции.
  */
 import { appendFile, mkdir, readFile } from 'fs/promises'
 import { dirname, join } from 'path'
+import { db as platformDb } from '@/lib/db'
 
 export type ContourSource = 'platform' | 'dispatcher'
 
@@ -45,6 +51,7 @@ function safeMeta(value: unknown): unknown {
 }
 
 export async function writeContourAudit(entry: ContourAuditEntry): Promise<void> {
+  let meta: unknown
   try {
     const target = auditFile()
     const dir = dirname(target)
@@ -53,10 +60,38 @@ export async function writeContourAudit(entry: ContourAuditEntry): Promise<void>
       dirReady = dir
     }
     const at = entry.at ?? new Date().toISOString()
-    const line = JSON.stringify({ ...entry, at, meta: safeMeta(entry.meta) })
+    meta = safeMeta(entry.meta)
+    const line = JSON.stringify({ ...entry, at, meta })
     await appendFile(target, `${line.slice(0, 32_000)}\n`, 'utf8')
   } catch (e) {
     console.error('[contour-audit] write failed', e)
+  }
+  // Зеркало в журнал платформы: не должно ломать операцию — только печать в stderr
+  try {
+    const message = entry.message ?? `${entry.action}: ${entry.objectType ?? ''} ${entry.objectId ?? ''}`.trim()
+    await platformDb.platformLog.create({
+      data: {
+        level: 'INFO',
+        type: entry.action,
+        source: `kontur/${entry.objectType ?? 'dispatcher'}`,
+        actorLogin: entry.actorLogin ?? null,
+        actorName: entry.actorName ?? null,
+        actorRole: entry.actorRole ?? null,
+        requestNumber: entry.requestNumber ?? null,
+        message: message.slice(0, 2000),
+        meta: meta === undefined ? null : JSON.stringify(meta).slice(0, 8000),
+        contour: 'dispatcher',
+        objectType: entry.objectType ?? null,
+        objectId: entry.objectId ?? null,
+        before: entry.before ?? null,
+        after: entry.after ?? null,
+        ip: entry.ip ?? null,
+        userAgent: entry.userAgent ?? null,
+        ...(entry.at ? { createdAt: new Date(entry.at) } : {}),
+      },
+    })
+  } catch (e) {
+    console.error('[contour-audit] platform mirror failed', e)
   }
 }
 

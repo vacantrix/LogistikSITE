@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { aiLog } from '@/lib/ai/core'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -146,17 +147,30 @@ export async function DELETE(req: NextRequest) {
       // удаляем один чат (только свой) — сообщения каскадом
       const own = await db.aiChatSession.findFirst({
         where: { id: sessionId, userId: auth.id },
-        select: { id: true },
+        select: { id: true, title: true },
       })
       if (!own) return NextResponse.json({ error: 'Чат не найден' }, { status: 404 })
       await db.aiChatSession.delete({ where: { id: sessionId } })
       await aiLog('info', 'chat_history_clear', `Чат удалён (${auth.login})`)
+      await plog({
+        type: 'AI_SESSION_DELETED', source: 'api/ai/messages',
+        actor: { login: auth.login, name: auth.name, role: auth.role },
+        message: `Чат ИИ «${own.title}» удалён (вместе с сообщениями)`,
+        objectType: 'ai_session', objectId: own.id,
+      })
       return NextResponse.json({ ok: true, sessions: await listSessions(auth.id) })
     }
     // без чата — полная очистка: все чаты и сообщения пользователя
-    await db.aiChatSession.deleteMany({ where: { userId: auth.id } })
-    await db.aiChatMessage.deleteMany({ where: { userId: auth.id } })
+    const removedSessions = await db.aiChatSession.deleteMany({ where: { userId: auth.id } })
+    const removedMessages = await db.aiChatMessage.deleteMany({ where: { userId: auth.id } })
     await aiLog('info', 'chat_history_clear', `Все чаты очищены (${auth.login})`)
+    await plog({
+      type: 'AI_SESSION_DELETED', source: 'api/ai/messages',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Все чаты ИИ удалены: ${removedSessions.count} чат(ов), ${removedMessages.count} сообщений`,
+      objectType: 'ai_session', objectId: auth.id,
+      meta: { sessions: removedSessions.count, messages: removedMessages.count },
+    })
     return NextResponse.json({ ok: true, sessions: [] })
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'Не удалось очистить чат' }, { status: 500 })

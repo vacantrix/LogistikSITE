@@ -54,7 +54,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { LoadingBlock, ErrorBlock, type TabProps, type TabKey } from '@/components/platform/common'
+import { LoadingBlock, ErrorBlock, useLiveTab, type TabProps, type TabKey } from '@/components/platform/common'
 import { AI_ENGINE_LABELS } from '@/lib/ai/rights'
 import { aiNavLink } from '@/lib/ai/nav-catalog'
 import { type AiBestOffer, type AiCard, type AiLinkRef, type AiReport } from '@/lib/ai/tools'
@@ -253,7 +253,7 @@ function HarnessLog({ steps, open, onToggle }: { steps: ChatStep[]; open: boolea
 }
 
 /** Чат с нейросетью: история, модель, файлы, живой ход работы и медленно печатающийся ответ */
-export default function AiAssistantTab({ onNavigate }: TabProps) {
+export default function AiAssistantTab({ onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   // рендер ссылок в тексте ответа: #nav:tab — быстрая адресация на раздел платформы
   const mdComponents = useMemo(() => ({ a: markdownLink(onNavigate) }), [onNavigate])
@@ -386,6 +386,24 @@ export default function AiAssistantTab({ onNavigate }: TabProps) {
   useEffect(() => {
     void loadHistory()
   }, [loadHistory])
+
+  // живое окно прошлых чатов: список обновляется сам (общий «пульс» платформы +
+  // страховочный интервал). Сам диалог не трогаем — лента, печать ответа и ввод
+  // неприкосновенны; чат, созданный в другом окне, просто появляется в списке
+  const sendingRef = useRef(false)
+  useEffect(() => { sendingRef.current = sending }, [sending])
+  const refreshSessions = useCallback(async () => {
+    if (sendingRef.current) return // ответ печатается — не дёргаем даже список
+    try {
+      const res = await aiFetch('/api/ai/sessions')
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) return
+      if (Array.isArray(json.sessions)) setSessions(json.sessions as ChatSessionMeta[])
+    } catch {
+      /* тихое обновление молчит */
+    }
+  }, [])
+  useLiveTab(refreshSessions, liveTick, 30_000)
 
   // ——— сохранить ответ агента в «Избранное» (календарь ответов) ———
   const saveAnswer = useCallback(async (m: ChatMessage, question: string) => {

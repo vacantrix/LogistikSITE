@@ -144,13 +144,6 @@ export function PlanDealDialog({ deal, state, nowTick, onOpenChange, onDone }: {
             )}
           </div>
         )}
-
-        <p className="text-[11px] leading-relaxed text-slate-400">
-          Назначенный груз сразу виден во всех разделах одной картиной: карточка рейса в «Заявках»,
-          строка «Назначены» на доске «Занятость» и график работ в «Планировании» (погрузка,
-          ход, выгрузка и возврат на базу АЭМЗ). Момент «освободится» считается общей формулой
-          с умным подбором — разделы не расходятся.
-        </p>
       </DialogContent>
     </Dialog>
   )
@@ -195,7 +188,6 @@ function CandRow({ c, nowTick, busyKey, onPlan }: {
         </div>
         <Button
           size="sm"
-          className="h-8 shrink-0 bg-[#0E1B2C] text-white hover:bg-[#16304f]"
           disabled={!!busyKey}
           onClick={onPlan}
           title={c.kind === 'composition' ? 'Создать рейс под груз: статус «назначен», выезд по плану' : 'Добавить груз следующим плечом к текущему рейсу'}

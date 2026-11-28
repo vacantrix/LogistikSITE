@@ -37,6 +37,11 @@ export async function POST(req: NextRequest) {
   const lock = fails.get(key)
   if (lock && lock.count >= MAX_FAILS && lock.until > Date.now()) {
     const min = Math.ceil((lock.until - Date.now()) / 60_000)
+    // журнал платформы: вход заблокирован защитой от подбора пароля
+    await plog({
+      level: 'WARN', type: 'LOGIN_LOCKOUT', source: 'auth/login',
+      actor: { login }, message: `Вход заблокирован: слишком много неудачных попыток для «${login}» — повторите через ${min} мин`,
+    })
     return NextResponse.json({ error: `Слишком много неудачных попыток входа — повторите через ${min} мин` }, { status: 429 })
   }
 

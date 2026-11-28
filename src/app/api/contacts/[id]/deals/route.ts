@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireUser } from '@/lib/auth'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { id } = await params
 
-  const contact = await db.memoryContact.findUnique({ where: { id }, select: { id: true } })
+  const contact = await db.memoryContact.findUnique({ where: { id }, select: { id: true, name: true, company: true } })
   if (!contact) return NextResponse.json({ error: 'Контакт не найден' }, { status: 404 })
 
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
@@ -89,6 +90,13 @@ export async function POST(req: NextRequest, { params }: Params) {
         dealDate: str(body.dealDate, 20) || null,
         notes: str(body.notes, 2000),
       },
+    })
+    await plog({
+      type: 'DEAL_CREATED', source: 'api/contacts',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Сделка по контакту «${contact.name}»${contact.company ? ` (${contact.company})` : ''} добавлена${deal.route ? `: ${deal.route}` : ''}${deal.cargo ? ` (${deal.cargo})` : ''}`,
+      objectType: 'deal', objectId: deal.id,
+      meta: { contactId: id, direction: deal.direction, status: deal.status, amount: deal.amount },
     })
     return NextResponse.json({ deal: toDealDTO(deal) }, { status: 201 })
   } catch (e) {

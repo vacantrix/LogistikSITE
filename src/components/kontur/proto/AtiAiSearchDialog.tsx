@@ -146,7 +146,7 @@ export function AtiAiSearchDialog({ onOpenAi }: { onOpenAi?: () => void }) {
               ))}
             </div>
             <p className="text-[11px] leading-snug text-slate-500">
-              Нейросеть видит оба вида: демо-выдачу грузов витрины и (при подключённом ATI.SU) машины фирмы.
+              Нейросеть видит оба вида поиска: грузы витрины и (при подключённом ATI.SU) машины фирмы.
             </p>
           </div>
 

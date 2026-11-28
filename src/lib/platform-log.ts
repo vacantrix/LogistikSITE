@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto'
 import { headers } from 'next/headers'
 import { db } from '@/lib/db'
 import { writeContourAudit } from '@/lib/contour-audit'
+import { logTech } from '@/lib/tech-log'
 
 export type PlatformLogLevel = 'INFO' | 'WARN' | 'ERROR'
 
@@ -106,6 +107,19 @@ export async function plog(entry: PlatformLogEntry): Promise<void> {
     correlationId,
     meta: entry.meta,
   })
+
+  // техническая консоль («Логи»): предупреждения и сбои — короткой строкой,
+  // чтобы в консоли была вся техника платформы, а не только вызовы API.
+  // Обычные действия (INFO) — территория «Журнала событий», без дублей.
+  if (entry.level === 'WARN' || entry.level === 'ERROR') {
+    logTech({
+      kind: entry.type === 'CLIENT_ERROR' ? 'client' : 'server',
+      level: entry.level,
+      path: (entry.source ?? '').slice(0, 200),
+      message: `[${entry.type}] ${entry.message}`,
+      origin: entry.actor?.login ?? null,
+    })
+  }
 }
 
 /** Ошибка: уровень ERROR + текст и стек в подробностях meta. */

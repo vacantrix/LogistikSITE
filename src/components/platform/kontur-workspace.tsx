@@ -11,14 +11,14 @@
  * Видимость и действия ограничены правами section:* и own:*: панели не показывают
  * чужие разделы, а API диспетчерской дублирует проверку на сервере.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowRight, Camera, CameraOff, CircleAlert, Clock3, Inbox, RefreshCw, RotateCcw, Search, Smartphone, Timer, UserX,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { useCan } from '@/components/platform/perms'
-import { AttentionChip, Pill, SectionHeader, type TabKey } from '@/components/platform/common'
+import { AttentionChip, Pill, SectionHeader, useLiveTab, type TabKey } from '@/components/platform/common'
 import type { Alert, StateResponse } from '@/lib/kontur/client-types'
 import { authFetch } from '@/lib/kontur/session-token'
 import { RequestsPanel } from '@/components/kontur/proto/RequestsPanel'
@@ -55,6 +55,11 @@ const TITLES: Partial<Record<TabKey, string>> = {
   'own-audit': 'Аудит контура',
 }
 
+// Описания разделов — под значком «i» заголовка (постоянных надписей в интерфейсе нет)
+const TITLES_DESC: Partial<Record<TabKey, string>> = {
+  'own-requests': 'Заявки приходят из 1С автоматически (документ «Заказы грузоотправителей»). Логист ведёт заявку до рейса: проверка → состав из собственного парка → карточка рейса.',
+}
+
 const ALERT_ICONS: Record<Alert['kind'], ReactNode> = {
   trip_ack: <UserX className="h-3.5 w-3.5" />,
   leg_docs: <Camera className="h-3.5 w-3.5" />,
@@ -67,10 +72,10 @@ const ALERT_ICONS: Record<Alert['kind'], ReactNode> = {
 }
 
 function AlertButton({ a, onGo }: { a: Alert; onGo: (a: Alert) => void }) {
-  const iconColor = a.level === 'red' ? 'text-red-600' : a.level === 'amber' ? 'text-amber-600' : 'text-slate-400'
+  // значок без покраски — единый вид ленты внимания, как в «Площадке заявок»
   return (
     <AttentionChip
-      icon={<span className={`shrink-0 ${iconColor}`} aria-hidden>{ALERT_ICONS[a.kind] ?? <CircleAlert className="h-3.5 w-3.5" />}</span>}
+      icon={ALERT_ICONS[a.kind] ?? <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden />}
       label={a.text}
       trailing={<ArrowRight className="h-3 w-3 shrink-0 text-slate-400" aria-hidden />}
       onClick={() => onGo(a)}
@@ -80,15 +85,18 @@ function AlertButton({ a, onGo }: { a: Alert; onGo: (a: Alert) => void }) {
 }
 
 /** Сквозной журнал платформы и диспетчерской — только для администрации. */
-function ContourAuditPanel() {
+function ContourAuditPanel({ liveTick }: { liveTick: number }) {
   const [entries, setEntries] = useState<ContourAuditEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [contour, setContour] = useState<'all' | 'platform' | 'dispatcher'>('all')
   const [error, setError] = useState('')
+  // живой журнал: после первой загрузки обновления идут тихо — спиннер не мигает,
+  // прежние строки остаются на месте, пока летит новый ответ
+  const hasDataRef = useRef(false)
 
   const load = useCallback(async () => {
-    setLoading(true)
+    if (!hasDataRef.current) setLoading(true)
     setError('')
     try {
       const sp = new URLSearchParams({ contour, limit: '300' })
@@ -97,15 +105,19 @@ function ContourAuditPanel() {
       const json = await res.json().catch(() => null)
       if (!res.ok) throw new Error(json?.error?.message ?? `HTTP ${res.status}`)
       setEntries(Array.isArray(json?.entries) ? json.entries : [])
+      hasDataRef.current = true
     } catch (e) {
+      // тихое обновление не сносит таблицу: строки остаются, ошибка — строкой выше
       setError(e instanceof Error ? e.message : 'Журнал недоступен')
-      setEntries([])
     } finally {
       setLoading(false)
     }
   }, [contour, query])
 
   useEffect(() => { void load() }, [load])
+  // постоянное тихое автообновление: общий «пульс» платформы (события WS + page.tsx)
+  // и страховочный интервал — окно журнала всегда живое, без кнопки «Обновить»
+  useLiveTab(load, liveTick)
 
   return (
     <div className="space-y-3">
@@ -179,7 +191,6 @@ function ContourAuditPanel() {
           </TableBody>
         </Table>
       </div>
-      <div className="text-xs text-slate-500">Показаны последние {entries.length} записей. Журнал общий для платформы и диспетчерской.</div>
     </div>
   )
 }
@@ -224,11 +235,10 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
     }
   }, [])
 
+  // общая картинка собственного транспорта постоянно живая: события шины WS и общий
+  // «пульс» платформы (page.tsx, каждые 15 с) перечитывают /api/state — единый
+  // источник данных для всех панелей. Свой интервал больше не нужен: один такт
   useEffect(() => { void refresh() }, [refresh, reloadKey, liveTick])
-  useEffect(() => {
-    const t = setInterval(() => void refresh(), 30_000)
-    return () => clearInterval(t)
-  }, [refresh])
 
   const onChanged = useCallback(() => setReloadKey((k) => k + 1), [])
 
@@ -284,7 +294,7 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
     <div className="space-y-4">
       {/* шапка — общий SectionHeader платформы: надзаголовок контура тем же
           словарём, что и привлечённый транспорт (синий) и ИИ (янтарный) */}
-      <SectionHeader eyebrow="Собственный транспорт" tone="emerald" title={title}>
+      <SectionHeader eyebrow="Собственный транспорт" tone="emerald" title={title} desc={TITLES_DESC[tab]}>
         <Button variant="outline" size="sm" className="h-9" onClick={() => void refresh()}>
           <RefreshCw className="mr-1 h-3.5 w-3.5" />Обновить
         </Button>
@@ -297,19 +307,23 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
       )}
 
       {state && showRequestAttention && attentionTotal > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-slate-500">Требует внимания:</span>
+        <div
+          className="flex flex-wrap items-center gap-2 border-y border-slate-200 py-2.5"
+          role="status"
+          aria-label="Требует внимания"
+        >
+          <span className="mr-1 text-xs font-medium text-amber-700">Требует внимания:</span>
           {newOrders > 0 && (
-            <AttentionChip icon={<Inbox className="h-3.5 w-3.5 shrink-0 text-blue-600" aria-hidden />} label="новые заявки" count={newOrders} onClick={() => onNavigate('own-requests')} />
+            <AttentionChip icon={<Inbox className="h-3.5 w-3.5 shrink-0" aria-hidden />} label="новые заявки" count={newOrders} onClick={() => onNavigate('own-requests')} />
           )}
           {ackPending > 0 && (
-            <AttentionChip icon={<UserX className="h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden />} label="не подтверждено" count={ackPending} onClick={() => onNavigate('own-requests')} />
+            <AttentionChip icon={<UserX className="h-3.5 w-3.5 shrink-0" aria-hidden />} label="не подтверждено" count={ackPending} onClick={() => onNavigate('own-requests')} />
           )}
           {docsPending > 0 && (
-            <AttentionChip icon={<Camera className="h-3.5 w-3.5 shrink-0 text-blue-600" aria-hidden />} label="фото ожидается" count={docsPending} onClick={() => onNavigate('own-requests')} />
+            <AttentionChip icon={<Camera className="h-3.5 w-3.5 shrink-0" aria-hidden />} label="фото ожидается" count={docsPending} onClick={() => onNavigate('own-requests')} />
           )}
           {docsLost > 0 && (
-            <AttentionChip icon={<CameraOff className="h-3.5 w-3.5 shrink-0 text-red-600" aria-hidden />} label="фото утрачено" count={docsLost} onClick={() => onNavigate('own-requests')} />
+            <AttentionChip icon={<CameraOff className="h-3.5 w-3.5 shrink-0" aria-hidden />} label="фото утрачено" count={docsLost} onClick={() => onNavigate('own-requests')} />
           )}
         </div>
       )}
@@ -388,7 +402,7 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
             />
           )}
           {tab === 'own-directory' && <DirectoriesPanel state={state} onChanged={onChanged} />}
-          {tab === 'own-audit' && <ContourAuditPanel />}
+          {tab === 'own-audit' && <ContourAuditPanel liveTick={liveTick} />}
         </>
       )}
     </div>

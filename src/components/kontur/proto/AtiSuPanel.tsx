@@ -90,7 +90,7 @@ export function AtiSuPanel({ state, initialSub = 'search', onChanged, onOpenTrip
             ) : lostLink ? (
               <Pill className="bg-slate-100 text-slate-700"><span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />Нет связи</Pill>
             ) : (
-              <Pill className="bg-slate-100 text-slate-600" title="Показываем примерные данные биржи">Демо-данные</Pill>
+              <Pill className="bg-slate-100 text-slate-600" title="Демо-режим">Демо-данные</Pill>
             )}
           </div>
 

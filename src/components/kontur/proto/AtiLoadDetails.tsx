@@ -66,7 +66,7 @@ export function CarrierBadgesRow({ b, goslogRef }: { b: CarrierBadges; goslogRef
       {b.goslog && (
         <span
           className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700"
-          title={`Фирма в «белом списке» ГосЛога (реестр Минтранса)${goslogRef ? `, запись ${goslogRef}` : ''} — демо-заглушка`}
+          title={`Фирма в «белом списке» ГосЛога (реестр Минтранса)${goslogRef ? `, запись ${goslogRef}` : ''}`}
         >
           <Landmark className="h-3.5 w-3.5 text-emerald-600" aria-hidden />
           БГ Гослог{goslogRef ? ` ${goslogRef}` : ''}
@@ -99,7 +99,7 @@ export function CarrierBadgesRow({ b, goslogRef }: { b: CarrierBadges; goslogRef
 /** Заголовок блока внутри окна: фирменный тёмно-синий текст + значок */
 function SectionTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 text-sm font-bold text-[#0E1B2C]">
+    <div className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
       <span className="text-slate-400" aria-hidden>{icon}</span>
       {children}
     </div>
@@ -111,7 +111,7 @@ function Tile({ label, value, hint, sub }: { label: string; value: string; hint?
   return (
     <div className="rounded-lg bg-slate-50 px-3 py-2" title={hint}>
       <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-      <div className="whitespace-nowrap text-sm font-bold text-[#0E1B2C]">{value}</div>
+      <div className="whitespace-nowrap text-sm font-bold text-slate-900">{value}</div>
       {sub && <div className="mt-0.5 text-[10px] leading-snug text-slate-400">{sub}</div>}
     </div>
   )
@@ -166,8 +166,8 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
       }}
     >
       <div className="my-6 w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        {/* Шапка — фирменный тёмно-синий, как в скриншоте карточки груза */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-[#0E1B2C] px-5 py-4 text-white">
+        {/* Шапка — фирменный тёмный, как в скриншоте карточки груза */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-slate-900 px-5 py-4 text-white">
           <div className="text-base font-bold">Подробнее о грузе</div>
           <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-xs font-semibold" title="Код груза на бирже ATI.SU">#{l.code}</span>
           <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-blue-100" title="Страна перевозки">RUS</span>
@@ -268,12 +268,11 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
                   sub={l.km_owner != null && l.km_owner !== l.km ? `грузовладелец: ${RUB(l.km_owner)} км` : undefined}
                 />
                 <Tile label="Время в пути" value={`~${hoursFmt(l.hours_est)}`} hint="Оценка плеча при 80 км/ч без учёта отдыха" sub="расчёт 80 км/ч" />
-                <Tile label="Топливо ~" value={`${RUB(fuelL)} л`} hint="Демо-оценка прототипа: 28 л на 100 км, дизель" sub="28 л/100 км — оценка" />
-                <Tile label="«Платон» ~" value={`${RUB(platonR)} ₽`} hint="Демо-оценка прототипа: тариф 1,53 ₽ за км по дорогам" sub="1,53 ₽/км — оценка" />
+                <Tile label="Топливо ~" value={`${RUB(fuelL)} л`} hint="Оценка: 28 л на 100 км, дизель" sub="28 л/100 км — оценка" />
+                <Tile label="«Платон» ~" value={`${RUB(platonR)} ₽`} hint="Оценка: тариф 1,53 ₽ за км по дорогам" sub="1,53 ₽/км — оценка" />
               </div>
               <div className="text-[10px] leading-relaxed text-slate-400">
-                Топливо и «Платон» — оценки демо-расчёта прототипа; точный маршрут с картой, расстоянием и временем строит
-                кнопка «Маршрут» (Яндекс.Карты, грузовой профиль) в новой вкладке.
+                Топливо и «Платон» — оценки; точный маршрут с картой и временем строит кнопка «Маршрут» (Яндекс.Карты).
               </div>
             </section>
 
@@ -283,7 +282,7 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-b border-slate-100 pb-1.5">
                   <span className="text-xs text-slate-500">с НДС {l.nds_pct}%</span>
-                  <span className="text-[15px] font-bold leading-none text-[#0E1B2C]">
+                  <span className="text-[15px] font-bold leading-none text-slate-900">
                     {RUB(l.rate)} ₽ <span className="text-[11px] font-semibold text-slate-400">· {perKmFmt(l.per_km)} ₽/км</span>
                   </span>
                 </div>
@@ -300,7 +299,7 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
                 <RateRow
                   label="Ориентир ТрейРадар"
                   value={`${RUB(l.radar_rate)} ₽ за погрузку`}
-                  hint="Демо-заглушка «ТрейРадар»: рекомендованная ставка по направлению и дате погрузки"
+                  hint="«ТрейРадар»: рекомендованная ставка по направлению и дате погрузки"
                 />
                 <div className="flex flex-wrap gap-1.5 pt-0.5">
                   {l.guaranteed && (
@@ -324,7 +323,7 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
             <section className="space-y-2">
               <SectionTitle icon={<Building2 className="h-4 w-4" />}>Заказчик перевозки</SectionTitle>
               <div className="space-y-2 rounded-lg border border-slate-200 p-3">
-                <div className="text-[15px] font-bold leading-tight text-[#0E1B2C]">{l.carrier.firm}</div>
+                <div className="text-[15px] font-bold leading-tight text-slate-900">{l.carrier.firm}</div>
                 <div className="text-[11px] text-slate-500">
                   <span className="font-mono">Код:{l.carrier.firm_ati}</span> · {l.carrier.city}
                 </div>
@@ -339,7 +338,7 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
                   </span>
                 </div>
                 {l.medals > 0 && (
-                  <span className="flex items-center gap-0.5" title={`Медали ATI.SU за активность и отзывы (демо-заглушка): ${l.medals}`}>
+                  <span className="flex items-center gap-0.5" title={`Медали ATI.SU за активность и отзывы: ${l.medals}`}>
                     {Array.from({ length: l.medals }).map((_, i) => (
                       <Medal key={i} className="h-3.5 w-3.5 fill-amber-300 text-amber-500" aria-hidden />
                     ))}
@@ -370,8 +369,8 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
                       size="sm"
                       variant="outline"
                       className="h-7"
-                      onClick={() => toast({ title: 'Демо-заглушка', description: 'Мессенджер ATI.SU «Написать» — после подключения API выполняется реально' })}
-                      title="Демо-заглушка: сообщение через мессенджер ATI.SU"
+                      onClick={() => toast({ title: 'Демо-режим', description: 'Мессенджер ATI.SU «Написать»' })}
+                      title="Демо-режим: сообщение через мессенджер ATI.SU"
                     >
                       <Mail className="mr-1 h-3 w-3" aria-hidden />Написать
                     </Button>
@@ -397,9 +396,9 @@ export function LoadDetailsModal({ l, deal, dealBusy, onMatch, onDeal, onClose }
           <Button
             type="button"
             size="sm"
-            className="h-8 bg-[#0E1B2C] text-white hover:bg-[#16304f]"
+            className="h-8"
             onClick={() => { onClose(); onMatch(l) }}
-            title="Откроется подбор водителя под этот груз — расчёт запустится по кнопке «Произвести расчёт» в открывшемся окне"
+            title="Подбор водителя из парка под этот груз — расчёт по кнопке в открывшемся окне"
           >
             <Calculator className="mr-1 h-3.5 w-3.5" />
             Подбор водителя

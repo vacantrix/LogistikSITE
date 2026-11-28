@@ -32,9 +32,10 @@ import type { AtiDealDto, Driver, Leg, StateResponse, Trip } from '@/lib/kontur/
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
-// Отметки недоступности из справочника водителей (цвет — как в Excel-панели «Данные авто»)
+// Отметки недоступности из справочника водителей — цвета согласованы со «Справочниками»:
+// больничный — amber (внеплановая недоступность, требует замены), отпуск/отгул — slate
 const OFF_META: Record<string, { label: string; dot: string }> = {
-  sick: { label: 'Больничный', dot: 'bg-red-500' },
+  sick: { label: 'Больничный', dot: 'bg-amber-500' },
   vacation: { label: 'Отпуск', dot: 'bg-slate-400' },
   other: { label: 'Отгул', dot: 'bg-slate-300' },
 }
@@ -284,7 +285,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
                   onClick={() => setFilter(active ? 'all' : f.id)}
                   aria-pressed={active}
                   className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                    active ? 'bg-[#0E1B2C] text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    active ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   {f.label}
@@ -302,11 +303,11 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
           active={filter === 'all'} onClick={() => setFilter('all')} />
         <KpiTile value={counts.on_trip} label="На линии" dot="bg-emerald-500" hint="Водят активные рейсы — план загрузки на смену"
           active={filter === 'on_trip'} onClick={() => setFilter('on_trip')} />
-        <KpiTile value={counts.assigned} label="Назначены" dot="bg-sky-500" hint="Рейс составлен (включая грузы ATI.SU из плана), выезд по плану"
+        <KpiTile value={counts.assigned} label="Назначены" dot="bg-blue-600" hint="Рейс составлен (включая грузы ATI.SU из плана), выезд по плану"
           active={filter === 'assigned'} onClick={() => setFilter('assigned')} />
-        <KpiTile value={counts.free} label="Свободны" dot="bg-amber-500" hint="В строю и без рейса — резерв для планирования"
+        <KpiTile value={counts.free} label="Свободны" dot="bg-slate-400" hint="В строю и без рейса — резерв для планирования"
           active={filter === 'free'} onClick={() => setFilter('free')} />
-        <KpiTile value={state.drivers.filter((d) => d.status === 'sick').length} label="Больничные" dot="bg-red-500" hint="Отметка справочника — временно недоступен"
+        <KpiTile value={state.drivers.filter((d) => d.status === 'sick').length} label="Больничные" dot="bg-amber-500" hint="Отметка справочника — временно недоступен"
           active={filter === 'off'} onClick={() => setFilter('off')} />
         <KpiTile value={state.drivers.filter((d) => d.status === 'vacation').length} label="Отпуска" dot="bg-slate-400" hint="Отметка справочника — плановое отсутствие"
           active={filter === 'off'} onClick={() => setFilter('off')} />
@@ -338,7 +339,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
             {showGroup('assigned') && (
               <Group
                 icon={<ClipboardList className="h-4 w-4 text-slate-400" aria-hidden />}
-                dot="bg-sky-500"
+                dot="bg-blue-600"
                 title="Назначены"
                 count={counts.assigned}
                 hint="Рейс составлен в «Заявках», выезд ещё по плану — состав занят под заявку."
@@ -353,7 +354,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
             {showGroup('free') && (
               <Group
                 icon={<UserCheck className="h-4 w-4 text-slate-400" aria-hidden />}
-                dot="bg-amber-500"
+                dot="bg-slate-400"
                 title="Свободны · резерв для планирования"
                 count={counts.free}
                 hint="Водители в строю без рейса. Состав — из закреплений; «—» значит состав не закреплён, технику подберёт умный подбор в «Заявках»."
@@ -369,7 +370,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
                   const rr = repairReason(d.id)
                   return (
                     <div key={d.id} className="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-50">
-                      <span className="h-2 w-2 shrink-0 rounded-full bg-amber-400" aria-hidden />
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" aria-hidden />
                       <span className="w-56 shrink-0 truncate text-sm font-medium text-slate-800" title={d.fullName}>{d.fullName}</span>
                       <span className={`min-w-0 flex-1 truncate text-xs ${rr ? 'text-red-600' : 'text-slate-500'}`} title={rr ?? (b ? `Закреплён: ${b.vehicle?.brand} · ${b.vehicle?.plate}${b.trailer ? ` + ${b.trailer.plate}` : ''}` : 'Состав не закреплён — подберёт умный подбор')}>
                         {rr ? (
@@ -401,7 +402,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
             {showGroup('off') && (
               <Group
                 icon={<UserX className="h-4 w-4 text-slate-400" aria-hidden />}
-                dot="bg-red-500"
+                dot="bg-amber-500"
                 title="Недоступны"
                 count={counts.off}
                 hint="Отметки больничный/отпуск/отгул из справочника и водители на сломанной технике. «В строй» снимает отметку."
@@ -447,7 +448,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
             {/* Пустой результат поиска */}
             {!Object.values(visible).some(Boolean) && (
               <div className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
-                {q ? `По запросу «${query}» никого не найдено` : 'Водители появятся после пересоздания демо-данных'}
+                {q ? `По запросу «${query}» никого не найдено` : 'Водителей нет'}
               </div>
             )}
           </CardContent>
@@ -551,10 +552,6 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
                   </div>
                 ))}
               </div>
-              <p className="text-[11px] leading-relaxed text-slate-500">
-                Зелёное — возврат составов из рейсов, фиолетовая полоска — плановые погрузки дня
-                (заявки 1С и грузы ATI.SU). График работ на 3 дня — в разделе «Планирование».
-              </p>
             </CardContent>
           </Card>
 
@@ -627,7 +624,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
                     className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-700 transition-colors hover:bg-slate-50"
                     onClick={() => setMarkDriver(d)}
                   >
-                    <span className="h-2 w-2 rounded-full bg-amber-400" aria-hidden />
+                    <span className="h-2 w-2 rounded-full bg-slate-400" aria-hidden />
                     <span className="min-w-0 flex-1 truncate">{d.fullName}</span>
                     <span className="shrink-0 text-xs text-slate-400">{bindingByDriver.get(d.id)?.vehicle?.plate ?? '—'}</span>
                   </button>
@@ -654,7 +651,7 @@ export function OccupancyPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals }:
               </div>
               <div className="flex items-center justify-end gap-2 pt-1">
                 <Button size="sm" variant="ghost" onClick={() => { setMarkOpen(false); setMarkDriver(null); setMarkComment(''); setMarkQuery('') }}>Отмена</Button>
-                <Button size="sm" className="h-8 bg-[#0E1B2C] text-white hover:bg-[#16304f]" disabled={markBusy}
+                <Button size="sm" className="h-8" disabled={markBusy}
                   onClick={() => markDriver && void patchDriverStatus(markDriver.id, markKind, markComment, markDriver.fullName)}>
                   <CalendarClock className="mr-1 h-3.5 w-3.5" />Отметить
                 </Button>
@@ -741,8 +738,8 @@ function AssignedRow({ row, nowTick, onOpenTrip }: { row: BusyRow; nowTick: numb
   const { trip, curLeg } = row
   const load = curLeg?.loadDatePlan ? new Date(curLeg.loadDatePlan) : null
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-sky-100 bg-sky-50/40 px-3 py-2">
-      <span className="h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden />
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2">
+      <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" aria-hidden />
       <div className="min-w-0 flex-1 basis-56">
         <div className="truncate text-sm font-medium text-slate-900">{trip.driver?.fullName ?? '—'}</div>
         <div className="truncate text-xs text-slate-500">
@@ -752,7 +749,7 @@ function AssignedRow({ row, nowTick, onOpenTrip }: { row: BusyRow; nowTick: numb
       </div>
       <div className="min-w-0 flex-1 basis-64 text-xs text-slate-600">
         <div className="flex items-center gap-1.5">
-          <CalendarClock className="shrink-0 h-3 w-3 text-sky-600" aria-hidden />
+          <CalendarClock className="shrink-0 h-3 w-3 text-blue-600" aria-hidden />
           <span className="truncate">
             погрузка {load ? fmtFrees(load, nowTick) : 'по окну заявки'} · {curLeg ? `${curLeg.loadPoint} → ${curLeg.unloadPoint}` : '—'}
           </span>

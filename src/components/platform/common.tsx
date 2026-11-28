@@ -1,7 +1,7 @@
 'use client'
 
 /** Общие строительные блоки разделов платформы */
-import { useState, type ComponentType, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import {
   AlertTriangle,
   CircleAlert,
@@ -18,7 +18,7 @@ import { AGENT_STATUS_LABEL, DOC_STATUS_META, MODE_META, REQUEST_STATUS_META } f
 import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
-export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'edo' | 'support' | 'contacts' | 'nn' | 'llm' | 'settings' | 'admin-users' | 'admin-db' | 'arch'
+export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'logs' | 'edo' | 'support' | 'contacts' | 'nn' | 'llm' | 'settings' | 'admin-users' | 'admin-db' | 'arch'
   | 'own-requests' | 'own-atisu' | 'own-occupancy' | 'own-planning' | 'own-monitor' | 'own-directory' | 'own-audit' | 'ai'
   | 'favorites'
   | 'driver-app'
@@ -41,6 +41,34 @@ export interface TabProps {
   /** цель навигации от нейросети: раздел + фильтры (ts растёт при каждом переходе);
    *  разделы с поиском/фильтрами применяют его сами, остальные игнорируют */
   navFilters?: { tab: TabKey; filters: Record<string, string>; ts: number } | null
+}
+
+/**
+ * Живое окно раздела: постоянное тихое автообновление поверх первичной загрузки
+ * (первичный `load` раздел делает сам, при монтировании). Механика та же, что у
+ * «привлечённого транспорта»: liveTick — мгновенные события шины WS и общий
+ * «пульс» платформы (page.tsx), интервал — страховка, когда шина молчит.
+ *
+ * Плавность: вызовы идут через ref последнего load — смена фильтров не «дёргает»
+ * эффект заново, данные обновляются на месте, без перезагрузки страницы. Пока
+ * вкладка браузера скрыта — интервал на паузе: без пустых запросов.
+ */
+export function useLiveTab(load: () => unknown, liveTick: number, ms = 15_000) {
+  // ref на свежий load: интервал и live-события всегда вызывают актуальную версию
+  const loadRef = useRef(load)
+  useEffect(() => { loadRef.current = load }, [load])
+  // мгновенная догрузка: событие шины WS или общий «пульс» платформы
+  useEffect(() => {
+    if (liveTick > 0) void loadRef.current()
+  }, [liveTick])
+  // страховочный интервал: шина молчит, а окно должно оставаться свежим
+  useEffect(() => {
+    if (!ms) return
+    const t = window.setInterval(() => {
+      if (!document.hidden) void loadRef.current()
+    }, ms)
+    return () => window.clearInterval(t)
+  }, [ms])
 }
 
 /** Раздел, доступный только определённой роли (защитная заглушка) */

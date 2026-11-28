@@ -23,7 +23,7 @@
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import {
   ArrowLeft, BarChart3, BookOpen, BookUser, Bot, Brain, Building2, CalendarDays, ChevronDown, CircleUserRound, ClipboardList, CloudCog, Database, FilePen, FileSignature, FileUp, FolderOpen,
-  Gavel, History, Inbox, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Radar, Save, ScanSearch, ScrollText, ShieldCheck, SlidersHorizontal, Smartphone, Star, Truck,
+  Gavel, History, Inbox, LayoutGrid, ListChecks, Loader2, LogOut, Mail, MessagesSquare, MoreHorizontal, Network, Phone, Radar, Save, ScanSearch, ScrollText, ShieldCheck, SlidersHorizontal, Smartphone, Star, Terminal, Truck,
   UserCog, UserPen, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react'
 import {
@@ -52,9 +52,11 @@ import { activateAccount, api, getSessionToken, listAccounts } from '@/lib/api'
  *  Task 113: внутри разделов функции скрываются по гранулярным правам (useCan).
  *
  *  Двухуровневая навигация: group = attracted — верхний уровень «Привлечённый транспорт»,
- *  own — нижний уровень «Собственный транспорт», admin — служебное меню «Управление».
- *  Видимость каждого раздела дополнительно закрыта правом section:* (SECTION_PERM). */
-type NavGroup = 'attracted' | 'own' | 'admin'
+ *  own — нижний уровень «Собственный транспорт», funcs — служебные функции платформы
+ *  (ИИ-помощник, избранное, журнал событий и логи) в янтарной строке между ними,
+ *  admin — служебное меню «Управление». Видимость каждого раздела дополнительно
+ *  закрыта правом section:* (SECTION_PERM). */
+type NavGroup = 'attracted' | 'own' | 'funcs' | 'admin'
 
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup; muted?: boolean }[] = [
   { key: 'board', label: 'Площадка заявок', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
@@ -68,20 +70,24 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup;
   { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier', 'admin'], group: 'attracted', muted: true },
   { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
   { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'], group: 'attracted' },
-  { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'], group: 'attracted' },
   { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
   { key: 'contacts', label: 'Память контактов', roles: ['logist', 'admin'], group: 'attracted' },
 
   { key: 'own-requests', label: 'Заявки 1С', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-atisu', label: 'ATI.SU', roles: ['logist', 'admin'], group: 'own' },
-  { key: 'ai', label: 'ИИ-помощник', roles: ['logist', 'admin'], group: 'own' },
-  { key: 'favorites', label: 'Избранное', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-occupancy', label: 'Занятость', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-planning', label: 'Планирование', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-monitor', label: 'Мониторинг', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-directory', label: 'Справочники парка', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-audit', label: 'Аудит контура', roles: ['admin'], group: 'own' },
   { key: 'driver-app', label: 'Приложение водителя', roles: ['admin'], group: 'own' },
+
+  // — «Функции» — янтарная строка между транспортными рядами: ИИ-помощник,
+  // избранное, журнал событий и логи платформы (не транспортные разделы) —
+  { key: 'ai', label: 'ИИ-помощник', roles: ['logist', 'admin'], group: 'funcs' },
+  { key: 'favorites', label: 'Избранное', roles: ['logist', 'admin'], group: 'funcs' },
+  { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'], group: 'funcs' },
+  { key: 'logs', label: 'Логи платформы', roles: ['logist', 'admin'], group: 'funcs' },
 
   { key: 'nn', label: 'PaddleOCR', roles: ['admin'], group: 'admin' },
   { key: 'llm', label: 'Облачная LLM', roles: ['admin'], group: 'admin' },
@@ -105,6 +111,7 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   directory: { Icon: FolderOpen, short: 'Справочники' },
   reports: { Icon: BarChart3, short: 'Отчёты' },
   journal: { Icon: History, short: 'Журнал' },
+  logs: { Icon: Terminal, short: 'Логи' },
   nn: { Icon: Brain, short: 'PaddleOCR' },
   llm: { Icon: CloudCog, short: 'LLM' },
   settings: { Icon: SlidersHorizontal, short: 'Настройки' },
@@ -164,6 +171,7 @@ const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
   directory: 'section:directory',
   reports: 'section:reports',
   journal: 'section:journal',
+  logs: 'section:logs',
   support: 'section:support',
   contacts: 'section:contacts',
   ai: 'section:ai',
@@ -737,7 +745,8 @@ function SideMenuSheet({ nav, tab, onNavigate }: {
   const hasAi = nav.some((n) => n.key === 'ai')
   const groups: { title: string; items: { key: TabKey; label: string; muted?: boolean }[] }[] = [
     { title: 'Привлечённый транспорт', items: nav.filter((n) => n.group === 'attracted') },
-    { title: 'Собственный транспорт', items: nav.filter((n) => n.group === 'own' && n.key !== 'ai') },
+    { title: 'Функции', items: nav.filter((n) => n.group === 'funcs' && n.key !== 'ai') },
+    { title: 'Собственный транспорт', items: nav.filter((n) => n.group === 'own') },
     { title: 'Управление', items: nav.filter((n) => n.group === 'admin') },
   ].filter((g) => g.items.length > 0)
   return (
@@ -756,7 +765,7 @@ function SideMenuSheet({ nav, tab, onNavigate }: {
         <SheetContent side="right" className="w-80 overflow-y-auto sm:w-96">
           <SheetHeader className="pb-1 text-left">
             <SheetTitle>Меню</SheetTitle>
-            <SheetDescription>Все разделы платформы и ИИ-помощник</SheetDescription>
+            <SheetDescription>Все разделы платформы, ИИ-помощник и журналы</SheetDescription>
           </SheetHeader>
 
           {/* ИИ-помощник: отдельный блок наверху + последний разбор нейросети */}
@@ -845,15 +854,18 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   const nav = navFor(role.kind).filter((n) => sectionAllowed(n.key, can))
   const attractedNav = nav.filter((n) => n.group === 'attracted')
   const ownNav = nav.filter((n) => n.group === 'own')
-  // ИИ-помощник и «Избранное» — не транспортные разделы: на десктопе выносим
-  // их в отдельную полосу у левого края между двумя рядами навигации.
-  const aiNav = ownNav.filter((n) => n.key === 'ai' || n.key === 'favorites')
-  const ownTransportNav = ownNav.filter((n) => n.key !== 'ai' && n.key !== 'favorites')
+  // ИИ-помощник, «Избранное», «Журнал событий» и «Логи» — не транспортные разделы:
+  // на десктопе выносим их в янтарную полосу «Функции» между двумя рядами навигации.
+  const funcsNav = nav.filter((n) => n.group === 'funcs')
+  const ownTransportNav = ownNav
   const adminNav = nav.filter((n) => n.group === 'admin')
   const internal = role.kind !== 'carrier'
-  // у внутреннего контура верхняя строка — привлечённый транспорт, нижняя — собственный;
-  // у перевозчика собственного транспорта нет, поэтому нижняя панель — его разделы
-  const mobileBottomNav = internal && ownNav.length > 0 ? ownNav : attractedNav
+  // у внутреннего контура верхняя строка — привлечённый транспорт, нижняя — собственный
+  // плюс функции (ИИ, журналы); у перевозчика собственного транспорта нет, поэтому
+  // нижняя панель — его разделы
+  const mobileBottomNav = internal && (ownNav.length > 0 || funcsNav.length > 0)
+    ? [...ownNav, ...funcsNav]
+    : attractedNav
   // проформа для плашки аккаунта: ФИО, должность, организация (Task 111)
   const [profile, setProfile] = useState<ProfileDTO | null>(null)
   useEffect(() => {
@@ -995,17 +1007,17 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             {isAdmin && <div className="ml-auto"><AdminMenu nav={adminNav} tab={tab} onNavigate={onNavigate} /></div>}
           </div>
         </nav>
-        {/* ИИ-помощник и «Избранное» — у левого края между привлечённым и собственным
-            транспортом: янтарная полоса нейросети. Ряды платформы читаются цветом —
-            синий привлечённый транспорт, янтарный ИИ, зелёный собственный; кнопки
+        {/* «Функции» — у левого края между привлечённым и собственным транспортом:
+            янтарная полоса платформенных функций. Ряды платформы читаются цветом —
+            синий привлечённый транспорт, янтарный функции, зелёный собственный; кнопки
             плоские в общем стиле рядов, у каждой короткий тултип. */}
-        {internal && aiNav.length > 0 && (
-          <nav aria-label="ИИ-помощник" className="hidden border-t border-amber-400/25 bg-amber-400/10 md:block">
+        {internal && funcsNav.length > 0 && (
+          <nav aria-label="Функции" className="hidden border-t border-amber-400/25 bg-amber-400/10 md:block">
             <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
               <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300/80" aria-hidden>
-                ИИ
+                Функции
               </span>
-              {aiNav.map((item) => {
+              {funcsNav.map((item) => {
                 const { Icon } = TAB_ICONS[item.key]
                 const active = tab === item.key
                 return (

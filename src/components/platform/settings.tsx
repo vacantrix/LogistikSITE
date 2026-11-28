@@ -1,10 +1,10 @@
 'use client'
 
 /** «Настройки» — пороги уверенности и правила проверки (администратор) */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { History, Save, Server, ShieldCheck, UserCog } from 'lucide-react'
 import {
-  ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, type TabProps,
+  ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, useLiveTab, type TabProps,
 } from '@/components/platform/common'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -39,12 +39,15 @@ const toDraft = (s: SettingsDTO): Draft => ({
   minQuality: s.minQuality, confReupload: s.confReupload, confReject: s.confReject, confAuto: s.confAuto,
 })
 
-export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate }: TabProps) {
+export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavigate: _onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [settings, setSettings] = useState<SettingsDTO | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // пока у человека несохранённые правки — тихое автообновление не подтягивает
+  // серверные значения (не сбивает ввод); сохранил — снова синхронизируемся
+  const dirtyRef = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -58,6 +61,21 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // тихое автообновление: пороги, сохранённые другим администратором, приходят сами —
+  // общий «пульс» платформы + страховочный интервал; ошибка молчит, экран не мигает
+  const silentRefresh = useCallback(async () => {
+    if (dirtyRef.current) return
+    try {
+      const s = await api.settings()
+      setSettings(s)
+      setDraft(toDraft(s))
+      setError(null)
+    } catch {
+      /* тихое обновление молчит: прежние настройки остаются на экране */
+    }
+  }, [])
+  useLiveTab(silentRefresh, liveTick, 30_000)
 
   const save = async () => {
     if (!draft) return
@@ -86,6 +104,16 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
     }
   }
 
+  // «грязные» правки и ref для тихого обновления: ref смотрит их без пересоздания
+  // колбэка, а вычисление — до ранних выходов, чтобы хук звался на каждом рендере
+  const dirty = !!(draft && settings && (
+    draft.minQuality !== settings.minQuality ||
+    draft.confReupload !== settings.confReupload ||
+    draft.confReject !== settings.confReject ||
+    draft.confAuto !== settings.confAuto
+  ))
+  useEffect(() => { dirtyRef.current = dirty }, [dirty])
+
   if (settings === null && !error) return <LoadingBlock label="Загрузка настроек…" />
   if (error && !settings) return <ErrorBlock message={error} onRetry={() => { setError(null); void load() }} />
 
@@ -93,12 +121,6 @@ export default function SettingsTab({ activeCarrierId: _activeCarrierId, onNavig
   const a = draft ? draft.confReupload * 100 : 0
   const b = draft ? (draft.confAuto - draft.confReupload) * 100 : 0
   const c = draft ? (1 - draft.confAuto) * 100 : 0
-  const dirty = draft && settings && (
-    draft.minQuality !== settings.minQuality ||
-    draft.confReupload !== settings.confReupload ||
-    draft.confReject !== settings.confReject ||
-    draft.confAuto !== settings.confAuto
-  )
 
   return (
     <div>

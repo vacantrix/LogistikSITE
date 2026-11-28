@@ -14,6 +14,7 @@ import { RoleNotice, type TabKey } from '@/components/platform/common'
 import { LoginScreen } from '@/components/platform/login-screen'
 import { DriverAppTab } from '@/components/platform/driver-app'
 import { api, beginAddAccount, getSessionToken, UNAUTHORIZED_EVENT } from '@/lib/api'
+import { installTechLogger } from '@/lib/tech-log-client'
 import type { SessionUserDTO } from '@/lib/types'
 
 import BoardTab from '@/components/platform/board'
@@ -27,6 +28,7 @@ import RequestsRegistryTab from '@/components/platform/requests-registry'
 import DirectoryTab from '@/components/platform/directories'
 import ReportsTab from '@/components/platform/reports'
 import JournalTab from '@/components/platform/journal'
+import LogsTab from '@/components/platform/logs'
 import EdoTab from '@/components/platform/edo'
 import SupportTab from '@/components/platform/support'
 import AdminUsersTab from '@/components/platform/admin-users'
@@ -55,6 +57,11 @@ function tabFromLocation(): TabKey | null {
   const raw = new URLSearchParams(window.location.search).get('tab')
   return raw && navFor('admin').some((n) => n.key === raw) ? (raw as TabKey) : null
 }
+
+/** Ровный «пульс» платформы: такт, которым открытые окна догружают данные.
+ *  Шина WS присылает platform:update мгновенно; пульс гарантирует, что окна
+ *  продолжают обновляться, даже когда шина молчит — весь интерфейс живой. */
+const HEARTBEAT_MS = 15_000
 
 export default function Page() {
   // undefined — проверяем сессию, null — не вошёл
@@ -103,6 +110,11 @@ export default function Page() {
     else url.searchParams.set('tab', tab)
     window.history.replaceState(null, '', url)
   }, [tab, user])
+
+  // техническая консоль («Логи», Task: функции-журналы): перехватчик window.fetch
+  // записывает каждый вызов /api/* — метод, путь, код ответа, длительность — и
+  // батчами отправляет в /api/platform-log/tech. Один раз за жизнь страницы.
+  useEffect(() => { installTechLogger() }, [])
 
   // журнал платформы (Task 76): неперехваченные ошибки интерфейса уходят в
   // «Журнал событий» (троттлинг — не чаще раза в 5 секунд, без спама)
@@ -185,6 +197,24 @@ export default function Page() {
       socket.disconnect()
       wasConnectedRef.current = false
       setConnLost(false)
+    }
+  }, [userId])
+
+  // общий «пульс» платформы: все открытые окна постоянно обновляются сами — без
+  // перезагрузки страницы. Шина WS даёт мгновенные события, а этот ровный такт
+  // каждые 15 с догружает данные, даже когда шина молчит (нетель или пауза):
+  // каждый раздел реагирует на liveTick, как «привлечённый транспорт». Пока
+  // вкладка браузера скрыта — такт на паузе (без пустых запросов); вернулись
+  // к вкладке — сразу один такт: человек видит свежие данные в момент возврата
+  useEffect(() => {
+    if (!userId) return
+    const tick = () => setLiveTick((t) => t + 1)
+    const t = window.setInterval(() => { if (!document.hidden) tick() }, HEARTBEAT_MS)
+    const onVisible = () => { if (!document.hidden) tick() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [userId])
 
@@ -308,6 +338,7 @@ function PlatformView(props: {
           {tab === 'directory' && <DirectoryTab {...tabProps} />}
           {tab === 'reports' && <ReportsTab {...tabProps} />}
           {tab === 'journal' && <JournalTab {...tabProps} />}
+          {tab === 'logs' && <LogsTab {...tabProps} />}
           {tab === 'support' && <SupportTab {...tabProps} />}
           {tab === 'contacts' && <ContactsMemoryTab {...tabProps} />}
           {tab === 'ai' && <AiAssistantTab {...tabProps} />}

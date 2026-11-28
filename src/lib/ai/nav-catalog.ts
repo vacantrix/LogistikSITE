@@ -78,7 +78,7 @@ export function sanitizeNavFilters(tab: string, raw: unknown): Record<string, st
 /** Список фильтров раздела для системного промпта: «tab: key1, key2…» */
 export function aiNavFiltersPromptLines(): string {
   return Object.entries(AI_NAV_FILTERS)
-    .map(([tab, specs]) => `${tab}: ${Object.keys(specs).join(', ')}`)
+    .map(([tab, specs]) => `${tab}: ${Object.keys(specs ?? {}).join(', ')}`)
     .join('\n')
 }
 
@@ -91,7 +91,8 @@ export const AI_NAV_CATALOG: AiNavLinkMeta[] = [
   { tab: 'edo', label: 'Подписать ЭДО', hint: 'подписание документов через Диадок' },
   { tab: 'directory', label: 'Справочники', hint: 'машины, прицепы, водители, фирмы' },
   { tab: 'reports', label: 'Отчёты', hint: 'бумажные отчёты с выгрузкой Word' },
-  { tab: 'journal', label: 'Журнал событий', hint: 'что происходило на платформе' },
+  { tab: 'journal', label: 'Журнал событий', hint: 'что происходило на платформе: кто, что и когда сделал' },
+  { tab: 'logs', label: 'Логи платформы', hint: 'живой лог всех действий без исключения: попытки входа, действия, предупреждения и ошибки' },
   { tab: 'support', label: 'Обращения', hint: 'поддержка платформы' },
   { tab: 'contacts', label: 'Память контактов', hint: 'с кем работали: контакты, сделки, рейтинг' },
   { tab: 'own-requests', label: 'Заявки 1С', hint: 'заявки собственного транспорта из 1С' },

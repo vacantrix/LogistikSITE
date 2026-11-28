@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,6 +72,13 @@ export async function POST(req: Request) {
       engine,
     },
   })
+  await plog({
+    type: 'AI_FAVORITE_ADDED', source: 'api/ai/favorites',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Вариант из подбора ИИ сохранён в избранное: «${title}»${route ? ` (${route})` : ''}`,
+    objectType: 'ai_favorite', objectId: favorite.id,
+    meta: { key, title, route, rate, engine },
+  })
 
   return NextResponse.json({ ok: true, favorite })
 }
@@ -96,6 +104,12 @@ export async function DELETE(req: Request) {
     db.aiFavoriteMessage.deleteMany({ where: { favoriteKey: favorite.key } }),
     db.aiFavorite.delete({ where: { id: favorite.id } }),
   ])
+  await plog({
+    type: 'AI_FAVORITE_REMOVED', source: 'api/ai/favorites',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Вариант «${favorite.title}»${favorite.route ? ` (${favorite.route})` : ''} удалён из избранного ИИ`,
+    objectType: 'ai_favorite', objectId: favorite.id,
+  })
 
   return NextResponse.json({ ok: true, removed: 1 })
 }

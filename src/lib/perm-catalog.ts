@@ -63,6 +63,7 @@ export type PermKey =
   | 'section:directory'
   | 'section:reports'
   | 'section:journal'
+  | 'section:logs'
   | 'section:support'
   | 'section:contacts'
   | 'section:ai'
@@ -163,7 +164,8 @@ export const PERMS: PermItem[] = [
   { key: 'section:requests', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Реестр заявок', hint: 'Вкладка «Реестр заявок»' },
   { key: 'section:registry', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Реестр рейсов', hint: 'Вкладка «Реестр рейсов»' },
   { key: 'section:reports', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Отчёты', hint: 'Вкладка «Отчёты»' },
-  { key: 'section:journal', group: 'Разделы: привлечённый транспорт', contours: L, risk: 'normal', label: 'Журнал событий', hint: 'Вкладка «Журнал событий»' },
+  { key: 'section:journal', group: 'Разделы: функции', contours: L, risk: 'normal', label: 'Журнал событий', hint: 'Вкладка «Журнал событий»: кто что делал на платформе — действия пользователей, заявки, рейсы, документы' },
+  { key: 'section:logs', group: 'Разделы: функции', contours: L, risk: 'important', label: 'Логи платформы', hint: 'Вкладка «Логи платформы»: живой лог всех действий без исключения — включая попытки входа и действия диспетчерской' },
   { key: 'section:my', group: 'Разделы: кабинет перевозчика', contours: C, risk: 'normal', label: 'Мои заявки', hint: 'Вкладка «Мои заявки» в кабинете перевозчика' },
   { key: 'section:apply', group: 'Разделы: кабинет перевозчика', contours: C, risk: 'normal', label: 'Подать документы', hint: 'Вкладка «Подать документы»' },
   { key: 'section:crew', group: 'Разделы: кабинет перевозчика', contours: C, risk: 'normal', label: 'Назначение экипажей', hint: 'Вкладка «Назначение экипажей»' },
@@ -254,7 +256,7 @@ const allOf = (contour: Contour, except: PermKey[] = []): PermKey[] =>
  */
 export const LOGIST_VIEW_SECTIONS: PermKey[] = [
   'section:board', 'section:drafts', 'section:verify', 'section:requests', 'section:registry',
-  'section:reports', 'section:journal', 'section:edo', 'section:directory', 'section:support', 'section:contacts',
+  'section:reports', 'section:journal', 'section:logs', 'section:edo', 'section:directory', 'section:support', 'section:contacts',
 ]
 export const OWN_VIEW_SECTIONS: PermKey[] = [
   'section:ownRequests', 'section:ownAtisu', 'section:ownOccupancy',

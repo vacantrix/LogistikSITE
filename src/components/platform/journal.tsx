@@ -1,65 +1,53 @@
 'use client'
 
 /**
- * «Журнал событий» (Task 76) — единый журнал всей платформы для логиста.
+ * «Журнал событий» (Task 76, Task: функции-журналы) — единый журнал всей
+ * платформы для логиста: каждое действие показывает, кто его сделал, что
+ * произошло, когда и с каким объектом.
  *
  * Показывает:
- *  — бизнес-события всех ролей (вход/выход, заявки, ставки, документы, рейсы);
- *  — предупреждения (неудачный вход, замечания автопроверки);
- *  — логи ошибок: сбои сервера (включая необработанные — их ловит instrumentation),
- *    сбои интерфейса (репортит браузер) со стеком в раскрывающихся подробностях.
+ *  — действия всех пользователей обоих контуров: платформа (привлечённый
+ *    транспорт) и диспетчерская (собственный транспорт) — с пометкой контура;
+ *  — входы и попытки входа (неудачные — предупреждением);
+ *  — заявки, ставки, документы, рейсы, справочники, контакты, ИИ, служебное;
+ *  — предупреждения и логи ошибок сервера и интерфейса со стеком в подробностях.
+ *
+ * Строка: время · уровень · кто сделал · что произошло. Раскрывается в
+ * подробности: тип, источник, пользователь, IP, устройство, объект, до/после.
+ * Дни разделены заголовками — журнал читается как дневник платформы.
  *
  * Лента живая: автообновление каждые 15 секунд + догрузка по liveTick шины WS.
- * Фильтры — табы уровней со счётчиками и поиск по всем полям.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  AlertCircle, ChevronDown, Info, TriangleAlert, TimerReset,
+  AlertCircle, ChevronDown, Info, KeyRound, TriangleAlert, TimerReset,
 } from 'lucide-react'
 import {
   EmptyState, ErrorBlock, LoadingBlock, SectionHeader, StatusDot, type TabProps,
 } from '@/components/platform/common'
+import {
+  LEVEL_META, actorInitials, actorLabel, contourLabel, fmtLogTime, typeLabelOf,
+} from '@/components/platform/log-meta'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
 import { fmtDateTime } from '@/lib/status'
-import type { PlatformLogDTO, PlatformLogLevel } from '@/lib/types'
-
-const REFRESH_MS = 15_000
-
-/** Формат времени журнала: с секундами — события идут плотно */
-const fmtLogTime = (iso: string): string =>
-  new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-
-/** Уровни точкой и словом: цветной текст — у предупреждений и ошибок */
-const LEVEL_META: Record<PlatformLogLevel, { label: string; dot: string; tone?: 'warning' | 'danger' }> = {
-  INFO: { label: 'Событие', dot: 'bg-sky-500' },
-  WARN: { label: 'Внимание', dot: 'bg-amber-500', tone: 'warning' },
-  ERROR: { label: 'Ошибка', dot: 'bg-red-500', tone: 'danger' },
-}
-
-/** Русские подписи типов событий — журнал читается без знания кодов */
-const TYPE_LABEL: Record<string, string> = {
-  LOGIN: 'Вход', LOGIN_FAILED: 'Неудачный вход', LOGIN_DENIED: 'Вход отклонён', LOGOUT: 'Выход',
-  REQUEST_CREATED: 'Заявка опубликована', REQUEST_UPDATED: 'Заявка отредактирована', REQUEST_DELETED: 'Заявка удалена',
-  BID_PLACED: 'Ставка', BID_WITHDRAWN: 'Отзыв ставки', DEADLINE_EXTENDED: 'Срок продлён',
-  DIRECT_OFFER: 'Прямое назначение', RATE_RAISED: 'Ставка повышена',
-  CREW_ASSIGNED: 'Экипаж', CREW_APPROVED: 'Экипаж утверждён',
-  DOCS_VERIFIED: 'Проверка документов', OCR_FAILED: 'Сбой распознавания',
-  TRIP_CONFIRMED: 'Сверка подтверждена', DOCS_RETURNED: 'Возврат на доработку',
-  TRIP_CLOSED: 'Рейс закрыт', ETRN_1C: 'Накладная получена', REQUEST_DRAFTED: 'Черновик заявки',
-  EDO_PACK_CREATED: 'Комплект документов', EDO_SIGNED: 'Документ подписан',
-  DIADOC_SENT: 'Накладная отправлена', DIADOC_STATUS: 'Статус накладной', DIADOC_ERROR: 'Ошибка накладной',
-  SERVER_ERROR: 'Сбой сервера', ACTION_FAILED: 'Сбой действия', FINALIZE_FAILED: 'Сбой итогов',
-  CLIENT_ERROR: 'Ошибка интерфейса',
-}
-
-const typeLabelOf = (type: string): string => TYPE_LABEL[type] ?? type
+import type { PlatformLogDTO, PlatformLogLevel, PlatformLogEntryDTO } from '@/lib/types'
 
 type LevelTab = 'ALL' | PlatformLogLevel
+
+/** Заголовок дня: «Сегодня», «Вчера» или дата */
+function dayLabel(iso: string): string {
+  const d = new Date(iso)
+  const today = new Date()
+  const yesterday = new Date(Date.now() - 24 * 3600_000)
+  const same = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+  if (same(d, today)) return 'Сегодня'
+  if (same(d, yesterday)) return 'Вчера'
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+}
 
 export default function JournalTab({ liveTick }: TabProps) {
   const [data, setData] = useState<PlatformLogDTO | null>(null)
@@ -76,15 +64,10 @@ export default function JournalTab({ liveTick }: TabProps) {
       .catch((e) => setError(e instanceof Error ? e.message : 'Неизвестная ошибка'))
   }, [])
 
-  // первичная загрузка + догрузка по live-событиям шины + страховочный интервал
+  // первичная загрузка + догрузка по live-событиям шины и общему «пульсу» платформы
+  // (page.tsx, каждые 15 с) — локальный интервал больше не нужен: один источник такта
   useEffect(() => { void load() }, [load])
-
-  // живая лента: догрузка по шине WS + страховочный интервал
   useEffect(() => { if (liveTick > 0) void load() }, [liveTick, load])
-  useEffect(() => {
-    const timer = window.setInterval(() => void load(), REFRESH_MS)
-    return () => window.clearInterval(timer)
-  }, [load])
 
   const entries = data?.entries ?? []
 
@@ -94,7 +77,7 @@ export default function JournalTab({ liveTick }: TabProps) {
       // таб уровня + поиск по всем полям записи
       if (level !== 'ALL' && e.level !== level) return false
       if (!needle) return true
-      return [e.message, e.type, e.source, e.actorName, e.actorLogin, e.carrierName, e.requestNumber]
+      return [e.message, e.type, e.source, e.actorName, e.actorLogin, e.carrierName, e.requestNumber, e.ip, e.objectType]
         .some((v) => (v ?? '').toLowerCase().includes(needle))
     })
   }, [entries, q, level])
@@ -107,13 +90,25 @@ export default function JournalTab({ liveTick }: TabProps) {
 
   const stats = data?.stats
 
+  // группировка по дням: заголовок дня перед первой записью этого дня
+  const rowsWithDays = useMemo(() => {
+    const out: { e: PlatformLogEntryDTO; day: string | null }[] = []
+    let lastDay = ''
+    for (const e of filtered) {
+      const day = dayLabel(e.createdAt)
+      out.push({ e, day: day !== lastDay ? day : null })
+      lastDay = day
+    }
+    return out
+  }, [filtered])
+
   return (
     <div>
       <SectionHeader
-        eyebrow="Привлечённый транспорт"
-        tone="blue"
+        eyebrow="Функции"
+        tone="amber"
         title="Журнал событий"
-        desc="Все события платформы в одном месте: действия пользователей, заявки, рейсы, документы, предупреждения и логи ошибок сервера и интерфейса. Лента обновляется сама."
+        desc="Все действия на платформе в одном месте: кем сделано, что сделано и когда — заявки, рейсы, документы, справочники, ИИ, входы и попытки входа, действия диспетчерской, предупреждения и ошибки. Техническая работа кода — вызовы API и задержки — в разделе «Логи платформы». Лента обновляется сама."
       >
         <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
           Записей: {filtered.length}{filtered.length !== entries.length ? ` из ${entries.length}` : ''}
@@ -138,22 +133,23 @@ export default function JournalTab({ liveTick }: TabProps) {
             </Card>
             <Card className="border-slate-200 shadow-sm">
               <CardContent className="p-4">
+                <div className="mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                  <KeyRound className="h-5 w-5" aria-hidden />
+                </div>
+                <div className="text-2xl font-bold text-slate-900">{(stats?.logins24h.success ?? 0) + (stats?.logins24h.failed ?? 0)}</div>
+                <div className="text-sm font-medium text-slate-700">Попыток входа за 24 часа</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Успешных: {stats?.logins24h.success ?? 0} · отклонённых: {stats?.logins24h.failed ?? 0}
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border-slate-200 shadow-sm">
+              <CardContent className="p-4">
                 <div className="mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-50 text-amber-600">
                   <AlertCircle className="h-5 w-5" aria-hidden />
                 </div>
                 <div className="text-2xl font-bold text-slate-900">{stats?.counts24h.WARN ?? 0}</div>
                 <div className="text-sm font-medium text-slate-700">Предупреждений за 24 часа</div>
-              </CardContent>
-            </Card>
-            <Card className="border-slate-200 shadow-sm">
-              <CardContent className="p-4">
-                <div className="mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-red-50 text-red-600">
-                  <TriangleAlert className="h-5 w-5" aria-hidden />
-                </div>
-                <div className={`text-2xl font-bold ${(stats?.counts24h.ERROR ?? 0) > 0 ? 'text-red-600' : 'text-slate-900'}`}>
-                  {stats?.counts24h.ERROR ?? 0}
-                </div>
-                <div className="text-sm font-medium text-slate-700">Ошибок за 24 часа</div>
               </CardContent>
             </Card>
             <Card className="border-slate-200 shadow-sm">
@@ -198,7 +194,7 @@ export default function JournalTab({ liveTick }: TabProps) {
               <Input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Поиск: текст события, заявка, пользователь, источник…"
+                placeholder="Поиск: текст события, заявка, пользователь, источник, IP…"
                 aria-label="Поиск по журналу событий"
               />
             </CardContent>
@@ -217,62 +213,15 @@ export default function JournalTab({ liveTick }: TabProps) {
             <Card className="border-slate-200 shadow-sm">
               <CardContent className="p-0">
                 <ul className="divide-y divide-slate-100">
-                  {filtered.map((e) => {
-                    const meta = LEVEL_META[e.level]
-                    const expanded = expandedId === e.id
-                    return (
-                      <li key={e.id}>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedId(expanded ? null : e.id)}
-                          aria-expanded={expanded}
-                          className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
-                        >
-                          {/* время */}
-                          <span className="w-[104px] shrink-0 font-mono text-[11px] leading-5 text-slate-500">{fmtLogTime(e.createdAt)}</span>
-                          {/* уровень */}
-                          <StatusDot dot={meta.dot} tone={meta.tone} className="w-[88px] shrink-0">{meta.label}</StatusDot>
-                          {/* сообщение */}
-                          <span className="min-w-0 flex-1 break-words text-sm leading-snug text-slate-800">{e.message}</span>
-                          {/* контекст: заявка/перевозчик */}
-                          {(e.requestNumber || e.carrierName) && (
-                            <span className="hidden shrink-0 items-center gap-1 sm:flex">
-                              {e.requestNumber && (
-                                <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-white font-mono text-[11px] text-slate-700">
-                                  {e.requestNumber}
-                                </Badge>
-                              )}
-                              {e.carrierName && (
-                                <Badge variant="outline" className="max-w-[160px] truncate whitespace-nowrap border-slate-200 bg-white text-[10px] text-slate-600">
-                                  {e.carrierName}
-                                </Badge>
-                              )}
-                            </span>
-                          )}
-                          <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden />
-                        </button>
-                        {expanded && (
-                          <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-xs">
-                            <div className="flex flex-wrap gap-2">
-                              <Chip label="Тип" value={typeLabelOf(e.type)} />
-                              <Chip label="Источник" value={e.source} mono />
-                              {e.actorName && <Chip label="Пользователь" value={`${e.actorName} (${e.actorLogin ?? '—'})`} />}
-                              {e.carrierName && <Chip label="Перевозчик" value={e.carrierName} />}
-                              {e.requestNumber && <Chip label="Заявка" value={e.requestNumber} mono />}
-                            </div>
-                            {e.meta && Object.keys(e.meta).length > 0 && (
-                              <div>
-                                <div className="mb-1 font-medium text-slate-500">Технические подробности</div>
-                                <pre className="max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700">
-                                  {JSON.stringify(e.meta, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </li>
-                    )
-                  })}
+                  {rowsWithDays.map(({ e, day }) => (
+                    <JournalRow
+                      key={e.id}
+                      e={e}
+                      day={day}
+                      expanded={expandedId === e.id}
+                      onToggle={() => setExpandedId(expandedId === e.id ? null : e.id)}
+                    />
+                  ))}
                 </ul>
               </CardContent>
             </Card>
@@ -280,6 +229,107 @@ export default function JournalTab({ liveTick }: TabProps) {
         </div>
       )}
     </div>
+  )
+}
+
+/** Строка журнала (с заголовком дня) + раскрывающиеся подробности */
+function JournalRow({ e, day, expanded, onToggle }: {
+  e: PlatformLogEntryDTO
+  day: string | null
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const meta = LEVEL_META[e.level]
+  const actor = actorLabel(e)
+  return (
+    <li>
+      {day && (
+        <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-slate-100 bg-slate-50/95 px-4 py-1.5 backdrop-blur">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{day}</span>
+          <span className="h-px flex-1 bg-slate-200" aria-hidden />
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+      >
+        {/* время */}
+        <span className="w-[104px] shrink-0 font-mono text-[11px] leading-5 text-slate-500">{fmtLogTime(e.createdAt)}</span>
+        {/* уровень */}
+        <StatusDot dot={meta.dot} tone={meta.tone} className="w-[88px] shrink-0">{meta.label}</StatusDot>
+        {/* кто сделал: кружок с инициалами и имя */}
+        <span className="hidden w-[150px] shrink-0 items-center gap-1.5 text-sm text-slate-700 md:flex" title={`${actor}${e.actorLogin ? ` (${e.actorLogin})` : ''}`}>
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[9px] font-bold text-slate-500" aria-hidden>
+            {actorInitials(e)}
+          </span>
+          <span className="truncate">{actor}</span>
+        </span>
+        {/* что произошло */}
+        <span className="min-w-0 flex-1 break-words text-sm leading-snug text-slate-800">
+          {e.message}
+          {/* кто сделал — на узких экранах, где колонки нет */}
+          <span className="md:hidden"> <span className="text-slate-400">— {actor}</span></span>
+        </span>
+        {/* контекст: заявка / перевозчик / контур */}
+        <span className="hidden shrink-0 items-center gap-1 sm:flex">
+          {e.requestNumber && (
+            <Badge variant="outline" className="whitespace-nowrap border-slate-200 bg-white font-mono text-[11px] text-slate-700">
+              {e.requestNumber}
+            </Badge>
+          )}
+          {e.contour === 'dispatcher' && (
+            <Badge variant="outline" className="whitespace-nowrap border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700" title="Действие диспетчерской — собственный транспорт">
+              {contourLabel(e.contour)}
+            </Badge>
+          )}
+          {e.carrierName && (
+            <Badge variant="outline" className="max-w-[160px] truncate whitespace-nowrap border-slate-200 bg-white text-[10px] text-slate-600">
+              {e.carrierName}
+            </Badge>
+          )}
+        </span>
+        <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden />
+      </button>
+      {expanded && (
+        <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-xs">
+          <div className="flex flex-wrap gap-2">
+            <Chip label="Тип" value={typeLabelOf(e.type)} />
+            <Chip label="Код" value={e.type} mono />
+            <Chip label="Источник" value={e.source} mono />
+            <Chip label="Пользователь" value={`${actor}${e.actorLogin ? ` (${e.actorLogin})` : ''}`} />
+            {e.actorRole && <Chip label="Роль" value={e.actorRole} />}
+            {e.carrierName && <Chip label="Перевозчик" value={e.carrierName} />}
+            {e.requestNumber && <Chip label="Заявка" value={e.requestNumber} mono />}
+            {(e.objectType || e.objectId) && (
+              <Chip label="Объект" value={[e.objectType, e.objectId?.slice(0, 12)].filter(Boolean).join(' · ')} mono />
+            )}
+            <Chip label="Контур" value={contourLabel(e.contour)} />
+            {e.ip && <Chip label="IP" value={e.ip} mono />}
+          </div>
+          {(e.before || e.after) && (
+            <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+              {e.before && <span className="max-w-full truncate rounded bg-red-50 px-2 py-0.5 text-red-700" title={e.before}>было: {e.before}</span>}
+              {e.after && <span className="max-w-full truncate rounded bg-emerald-50 px-2 py-0.5 text-emerald-700" title={e.after}>стало: {e.after}</span>}
+            </div>
+          )}
+          {e.userAgent && (
+            <div className="truncate font-mono text-[11px] text-slate-500" title={e.userAgent}>
+              Устройство: {e.userAgent}
+            </div>
+          )}
+          {e.meta && Object.keys(e.meta).length > 0 && (
+            <div>
+              <div className="mb-1 font-medium text-slate-500">Технические подробности</div>
+              <pre className="max-h-48 overflow-auto rounded-lg border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-700 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent">
+                {JSON.stringify(e.meta, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   )
 }
 

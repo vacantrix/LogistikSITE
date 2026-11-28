@@ -4,6 +4,7 @@ import { analyzeIntakeDoc, buildIntakeDraft, type VerifyVerdict } from '@/lib/ve
 import { validatePortField, type PortFieldKind } from '@/lib/port-fields'
 import { imageDataUriError, loadVerifySettings } from '@/lib/settings'
 import { startOcrJob } from '@/lib/ocr-jobs'
+import { plog } from '@/lib/platform-log'
 import type { VehicleIntakeResult } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -138,5 +139,12 @@ export async function POST(req: NextRequest) {
   }, { login: auth.login, staff: isStaff(auth.role) })
 
   if (!started) return NextResponse.json({ error: 'Очередь распознавания переполнена — подождите немного и повторите' }, { status: 429 })
+  await plog({
+    type: 'INTAKE_SAVED', source: 'api/vehicles/intake',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Отправлены фото СТС ${kind === 'trailer' ? 'прицепа' : 'тягача'} на распознавание (${[front && 'лицевая', back && 'оборот'].filter(Boolean).join(' + ') || '—'})`,
+    objectType: kind,
+    meta: { kind, jobId: started.id, sides: [front, back].filter(Boolean).length },
+  })
   return NextResponse.json({ jobId: started.id }, { status: 202 })
 }

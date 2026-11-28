@@ -6,6 +6,7 @@ import { toCargoTypeDTO, toCarrierDTO, toDriverDTO, toTrailerDTO, toTruckDTO } f
 import { notifyLive } from '@/lib/notify'
 import { imageDataUriError } from '@/lib/settings'
 import { allowedFor, permDenied } from '@/lib/permissions'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,6 +76,11 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth
   // права (Task 111): ручное добавление записей — directory:addManual
   if (!(await allowedFor(auth, 'directory:addManual'))) {
+    await plog({
+      level: 'WARN', type: 'DIRECTORY_ENTRY_DENIED', source: 'api/directory',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: 'Попытка добавить запись справочника отклонена: нет права на ручное добавление',
+    })
     return NextResponse.json({ error: permDenied('directory:addManual') }, { status: 403 })
   }
 
@@ -123,13 +129,20 @@ export async function POST(req: NextRequest) {
             dangerous: data.dangerous === 'true' || data.dangerous === true,
           },
         })
+        await plog({
+          type: 'DIRECTORY_ENTRY_CREATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: `Груз «${cargoType.name}» добавлен в справочник`,
+          objectType: 'cargo', objectId: cargoType.id,
+          meta: { kind: 'cargo', category: cargoType.category, truckType: cargoType.truckType, dangerous: cargoType.dangerous },
+        })
         return NextResponse.json({ ok: true, cargoType: toCargoTypeDTO(cargoType) }, { status: 201 })
       }
       case 'carrier': {
         const name = s(data.name, 200)
         const inn = s(data.inn, 20)
         if (!name || !inn) return NextResponse.json({ error: 'Название и ИНН обязательны' }, { status: 400 })
-        await db.carrier.create({
+        const carrier = await db.carrier.create({
           data: {
             name, inn,
             // роль исполнителя: перевозчик (заказ-заявка) или экспедитор (поручение экспедитору)
@@ -137,6 +150,13 @@ export async function POST(req: NextRequest) {
             contractNo: s(data.contractNo, 100) || '—', contractDate: s(data.contractDate, 20) || '—',
             access: data.access !== 'false' && data.access !== false,
           },
+        })
+        await plog({
+          type: 'DIRECTORY_ENTRY_CREATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: `Перевозчик «${carrier.name}» (ИНН ${carrier.inn}) добавлен в справочник`,
+          objectType: 'carrier', objectId: carrier.id,
+          meta: { kind: 'carrier', inn: carrier.inn, role: carrier.role },
         })
         return NextResponse.json({ ok: true }, { status: 201 })
       }
@@ -166,6 +186,15 @@ export async function POST(req: NextRequest) {
           : await db.driver.create({ data: { carrierId, ...payload } })
         await savePhotos(driver.id)
         notifyLive({ type: 'DIRECTORY_UPDATED' })
+        await plog({
+          type: existing ? 'DIRECTORY_ENTRY_UPDATED' : 'DIRECTORY_ENTRY_CREATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: existing
+            ? `Водитель ${driver.fullName} обновлён (повторное добавление по паспорту)`
+            : `Водитель ${driver.fullName} добавлен в справочник`,
+          objectType: 'driver', objectId: driver.id,
+          meta: { kind: 'driver', carrierId, photos: photos.length, updated: Boolean(existing) },
+        })
         return NextResponse.json({ ok: true, driver: toDriverDTO(driver) }, { status: existing ? 200 : 201 })
       }
       case 'truck': {
@@ -184,6 +213,15 @@ export async function POST(req: NextRequest) {
           : await db.truck.create({ data: { carrierId, ...payload } })
         await savePhotos(truck.id)
         notifyLive({ type: 'DIRECTORY_UPDATED' })
+        await plog({
+          type: existing ? 'DIRECTORY_ENTRY_UPDATED' : 'DIRECTORY_ENTRY_CREATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: existing
+            ? `Тягач ${truck.brand === '—' ? '' : `${truck.brand} `}${truck.plate} обновлён (повторное добавление по госномеру)`
+            : `Тягач ${truck.brand === '—' ? '' : `${truck.brand} `}${truck.plate} добавлен в справочник`,
+          objectType: 'truck', objectId: truck.id,
+          meta: { kind: 'truck', plate: truck.plate, carrierId, photos: photos.length, updated: Boolean(existing) },
+        })
         return NextResponse.json({ ok: true, truck: toTruckDTO(truck) }, { status: existing ? 200 : 201 })
       }
       case 'trailer': {
@@ -203,6 +241,15 @@ export async function POST(req: NextRequest) {
           : await db.trailer.create({ data: { carrierId, ...trailerPayload } })
         await savePhotos(trailer.id)
         notifyLive({ type: 'DIRECTORY_UPDATED' })
+        await plog({
+          type: existingTrailer ? 'DIRECTORY_ENTRY_UPDATED' : 'DIRECTORY_ENTRY_CREATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: existingTrailer
+            ? `Прицеп ${trailer.type === '—' ? '' : `${trailer.type} `}${trailer.plate} обновлён (повторное добавление по госномеру)`
+            : `Прицеп ${trailer.type === '—' ? '' : `${trailer.type} `}${trailer.plate} добавлен в справочник`,
+          objectType: 'trailer', objectId: trailer.id,
+          meta: { kind: 'trailer', plate: trailer.plate, carrierId, photos: photos.length, updated: Boolean(existingTrailer) },
+        })
         return NextResponse.json({ ok: true, trailer: toTrailerDTO(trailer) }, { status: existingTrailer ? 200 : 201 })
       }
       default:
@@ -228,6 +275,11 @@ export async function PUT(req: NextRequest) {
   // права (Task 111): правка карточек — directory:edit (у администрации и логиста включено;
   // персональный deny в «Профилях и доступах» закрывает правку)
   if (!(await allowedFor(auth, 'directory:edit'))) {
+    await plog({
+      level: 'WARN', type: 'DIRECTORY_ENTRY_DENIED', source: 'api/directory',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: 'Попытка изменить запись справочника отклонена: нет права на правку карточек',
+    })
     return NextResponse.json({ error: permDenied('directory:edit') }, { status: 403 })
   }
 
@@ -264,6 +316,13 @@ export async function PUT(req: NextRequest) {
           await tx.request.updateMany({ where: { cargoTypeId: id, NOT: { cargo: name } }, data: { cargo: name } })
           return updated
         })
+        await plog({
+          type: 'DIRECTORY_ENTRY_UPDATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: `Груз «${cargoType.name}» изменён`,
+          objectType: 'cargo', objectId: cargoType.id,
+          meta: { kind: 'cargo', category: cargoType.category, truckType: cargoType.truckType },
+        })
         return NextResponse.json({ ok: true, cargoType: toCargoTypeDTO(cargoType) })
       }
       case 'driver': {
@@ -278,6 +337,13 @@ export async function PUT(req: NextRequest) {
           },
         })
         notifyLive({ type: 'DIRECTORY_UPDATED' })
+        await plog({
+          type: 'DIRECTORY_ENTRY_UPDATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: `Водитель ${driver.fullName} изменён`,
+          objectType: 'driver', objectId: driver.id,
+          meta: { kind: 'driver', fullName: driver.fullName },
+        })
         return NextResponse.json({ ok: true, driver: toDriverDTO(driver) })
       }
       case 'truck': {
@@ -292,6 +358,13 @@ export async function PUT(req: NextRequest) {
           },
         })
         notifyLive({ type: 'DIRECTORY_UPDATED' })
+        await plog({
+          type: 'DIRECTORY_ENTRY_UPDATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: `Тягач ${truck.brand === '—' ? '' : `${truck.brand} `}${truck.plate} изменён`,
+          objectType: 'truck', objectId: truck.id,
+          meta: { kind: 'truck', plate: truck.plate, techTill: truck.techTill },
+        })
         return NextResponse.json({ ok: true, truck: toTruckDTO(truck) })
       }
       case 'trailer': {
@@ -306,6 +379,13 @@ export async function PUT(req: NextRequest) {
           },
         })
         notifyLive({ type: 'DIRECTORY_UPDATED' })
+        await plog({
+          type: 'DIRECTORY_ENTRY_UPDATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: `Прицеп ${trailer.type === '—' ? '' : `${trailer.type} `}${trailer.plate} изменён`,
+          objectType: 'trailer', objectId: trailer.id,
+          meta: { kind: 'trailer', plate: trailer.plate, techTill: trailer.techTill },
+        })
         return NextResponse.json({ ok: true, trailer: toTrailerDTO(trailer) })
       }
       case 'carrier': {
@@ -322,6 +402,13 @@ export async function PUT(req: NextRequest) {
           },
         })
         notifyLive({ type: 'DIRECTORY_UPDATED' })
+        await plog({
+          type: 'DIRECTORY_ENTRY_UPDATED', source: 'api/directory',
+          actor: { login: auth.login, name: auth.name, role: auth.role },
+          message: `Перевозчик «${carrier.name}» (ИНН ${carrier.inn}) изменён`,
+          objectType: 'carrier', objectId: carrier.id,
+          meta: { kind: 'carrier', inn: carrier.inn, access: carrier.access, role: carrier.role },
+        })
         return NextResponse.json({ ok: true, carrier: { id: carrier.id, name: carrier.name } })
       }
       default:

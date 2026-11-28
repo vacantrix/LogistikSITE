@@ -1,6 +1,6 @@
 /** Клиентский слой запросов к API платформы */
 import type {
-  AccessDataDTO, AccessUserInput, AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, FileNodeDTO, FileReadDTO, IntakeDocVerdict, IntakeResult, NnLimitsDTO, NnStatusDTO, NnSettingsDTO, NnTestResultDTO, NnUpstreamDTO, OcrFieldDTO, OcrTemplateDTO, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
+  AccessDataDTO, AccessUserInput, AdminDbTableDTO, AdminDbTableData, AdminUserDTO, CargoTypeDTO, CarrierDTO, DiadocInfoDTO, DirectoryPhotoDTO, DriverDTO, DriverIntakeSaved, EdoPackageDTO, EventFeedItem, FileNodeDTO, FileReadDTO, IntakeDocVerdict, IntakeResult, NnLimitsDTO, NnStatusDTO, NnSettingsDTO, NnTestResultDTO, NnUpstreamDTO, OcrFieldDTO, OcrTemplateDTO, NotificationDTO, PlatformLogDTO, ProfileDTO, RequestDTO, ReportSummary, SessionUserDTO, SettingsDTO, TechLogDTO, TicketDTO, TicketThreadDTO, TrailerDTO, TruckDTO, VehicleIntakeResult,
 } from '@/lib/types'
 import type { ReportId, ReportPreview, ReportSettings } from '@/lib/reports/catalog'
 import type { EtrnT1Input } from '@/lib/diadoc/waybill'
@@ -395,10 +395,18 @@ export const api = {
   fileSave: (path: string, content: string) =>
     fetch('/api/admin/files', withAuth({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path, content }) })).then(json<{ ok: boolean; path: string; size: number; mtime: string }>),
 
-  /** Журнал событий платформы (Task 76, только логист): лента + статистика за 24 ч */
-  platformLog: (params?: { level?: string; q?: string; limit?: number }) => {
+  /** Журнал событий и логи платформы (Task 76, логист и администрация):
+   *  лента всех действий обоих контуров + статистика за 24 ч */
+  platformLog: (params?: { level?: string; q?: string; limit?: number; contour?: string; type?: string; source?: string; actor?: string }) => {
     const sp = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v !== undefined && v !== '') as [string, string][])
     return fetch(`/api/platform-log${sp.toString() ? `?${sp}` : ''}`, withAuth({ cache: 'no-store' })).then(json<PlatformLogDTO>)
+  },
+
+  /** Техническая консоль («Логи платформы», Task: функции-журналы): вызовы API,
+   *  коды ответов, задержки, сбои — короткие строки о работе кода (не людей) */
+  techLog: (params?: { limit?: number; kind?: string; q?: string }) => {
+    const sp = new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v !== undefined && v !== '') as [string, string][])
+    return fetch(`/api/platform-log/tech${sp.toString() ? `?${sp}` : ''}`, withAuth({ cache: 'no-store' })).then(json<TechLogDTO>)
   },
 
   /** ЭДО (Task 76): пакеты документов рейсов + действия (формирование/подписание) */

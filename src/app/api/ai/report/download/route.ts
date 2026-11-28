@@ -13,6 +13,7 @@ import {
 } from 'docx'
 import { requireUser } from '@/lib/auth'
 import { aiLog } from '@/lib/ai/core'
+import { plog } from '@/lib/platform-log'
 import { toAiReport } from '@/lib/ai/tools'
 
 export const runtime = 'nodejs'
@@ -36,8 +37,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Отчёт не прошёл проверку — попросите нейросеть собрать его заново' }, { status: 400 })
   }
 
-  // титул: название, период, главный вывод
-  const children: Paragraph[] = [
+  // титул: название, период, главный вывод + таблицы разделов
+  const children: (Paragraph | Table)[] = [
     new Paragraph({ text: report.title, heading: HeadingLevel.HEADING_1 }),
   ]
   if (report.period) {
@@ -85,9 +86,11 @@ export async function POST(req: Request) {
             ...s.table.rows.map(
               (r) =>
                 new TableRow({
-                  children: s.table!.columns.map((_, k) => ({
-                    children: [new Paragraph({ text: r[k] ?? '—' })],
-                  })),
+                  children: s.table!.columns.map((_, k) =>
+                    new TableCell({
+                      children: [new Paragraph({ text: r[k] ?? '—' })],
+                    }),
+                  ),
                 }),
             ),
           ],
@@ -116,6 +119,13 @@ export async function POST(req: Request) {
 
   const buffer = await Packer.toBuffer(doc)
   await aiLog('info', 'report_download', `Word-отчёт из чата скачан: «${report.title}»`)
+  await plog({
+    type: 'AI_REPORT_DOWNLOADED', source: 'api/ai/report/download',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Скачан Word-отчёт ИИ «${report.title}»`,
+    objectType: 'ai_report',
+    meta: { title: report.title, period: report.period ?? null, kpis: report.kpis.length, sections: report.sections.length },
+  })
 
   const fileName = 'ai-report.docx'
   return new NextResponse(new Uint8Array(buffer), {

@@ -5,6 +5,7 @@ import { requireUser, type SessionUser } from '@/lib/auth'
 import { allowedFor } from '@/lib/permissions'
 import { NOTIFY_PERM } from '@/lib/notify-users'
 import { requestScopeWhere } from '@/lib/transport-scope'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,12 +89,24 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => ({}))) as { ids?: unknown; all?: unknown }
   if (body.all === true) {
-    await db.notification.updateMany({ where: { userId: auth.id, read: false }, data: { read: true } })
+    const marked = await db.notification.updateMany({ where: { userId: auth.id, read: false }, data: { read: true } })
+    await plog({
+      type: 'NOTIFICATIONS_READ', source: 'api/notifications',
+      actor: { login: auth.login, name: auth.name, role: auth.role },
+      message: `Отмечены прочитанными все уведомления (${marked.count})`,
+      meta: { all: true, count: marked.count },
+    })
     return NextResponse.json({ ok: true, unread: 0 })
   }
   const ids = Array.isArray(body.ids) ? body.ids.filter((v): v is string => typeof v === 'string' && v.length > 0) : []
   if (ids.length === 0) return NextResponse.json({ error: 'Нет уведомлений для отметки' }, { status: 400 })
-  await db.notification.updateMany({ where: { userId: auth.id, id: { in: ids } }, data: { read: true } })
+  const marked = await db.notification.updateMany({ where: { userId: auth.id, id: { in: ids } }, data: { read: true } })
   const unread = await db.notification.count({ where: { userId: auth.id, read: false } })
+  await plog({
+    type: 'NOTIFICATIONS_READ', source: 'api/notifications',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Отмечены прочитанными уведомления: ${marked.count} из ${ids.length}`,
+    meta: { count: marked.count, requested: ids.length },
+  })
   return NextResponse.json({ ok: true, unread })
 }

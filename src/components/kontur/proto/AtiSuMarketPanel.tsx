@@ -152,9 +152,10 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
   )
 
   const run = useCallback(
-    async (f: Filters = filters, s: Settings = settings, sortOrder: (typeof SORTS)[number]['id'] = sort) => {
-      setLoading(true)
-      setError(null)
+    async (f: Filters = filters, s: Settings = settings, sortOrder: (typeof SORTS)[number]['id'] = sort, opts?: { silent?: boolean }) => {
+      const silent = !!opts?.silent
+      if (!silent) setLoading(true)
+      if (!silent) setError(null)
       try {
         const p = new URLSearchParams(query(f))
         p.set('sort', sortOrder)
@@ -167,10 +168,13 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
         if (!res.ok) throw new Error(json?.error?.message ?? `HTTP ${res.status}`)
         setData(json as MarketResponse)
       } catch (e) {
-        setError(String(e))
-        setData(null)
+        // тихое обновление не сносит выдачу: прежние грузы остаются, без плашки
+        if (!silent) {
+          setError(String(e))
+          setData(null)
+        }
       } finally {
-        setLoading(false)
+        if (!silent) setLoading(false)
       }
     },
     [query, sort]
@@ -211,9 +215,11 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
     // применяем только новый переход нейросети (ts), не каждое изменение фильтров человека
   }, [appliedFilters])
 
-  // Заявки: на монтировании (бейдж вкладки и отметки в выдаче) и на входе в раздел
-  const loadDeals = useCallback(async () => {
-    setDealsLoading(true)
+  // Заявки: на монтировании (бейдж вкладки и отметки в выдаче) и на входе в раздел.
+  // Тихий режим — без спиннера: автообновление приходит незаметно, прежний список на месте
+  const loadDeals = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = !!opts?.silent
+    if (!silent) setDealsLoading(true)
     try {
       const res = await authFetch('/api/atisu/deals')
       const json = await res.json()
@@ -221,9 +227,9 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
       setDeals(json.deals as AtiDealDto[])
       setDealsError(null)
     } catch (e) {
-      setDealsError(e instanceof Error ? e.message : String(e))
+      if (!silent) setDealsError(e instanceof Error ? e.message : String(e))
     } finally {
-      setDealsLoading(false)
+      if (!silent) setDealsLoading(false)
     }
   }, [])
 
@@ -235,6 +241,21 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
   useEffect(() => {
     if (mode === 'deals') void loadDeals()
   }, [mode, loadDeals])
+
+  // живая витрина: раз в 20 с выдача пересобирается с текущими фильтрами и сортировкой —
+  // новые грузы появляются сами, без кнопки; всё тихо (без спиннеров), фильтры и выбор
+  // человека не сбрасываются; скрытая вкладка — пауза, без пустых запросов
+  const liveRef = useRef({ mode, filters, settings, sort, run, loadDeals })
+  useEffect(() => { liveRef.current = { mode, filters, settings, sort, run, loadDeals } })
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      if (document.hidden) return
+      const l = liveRef.current
+      if (l.mode === 'deals') void l.loadDeals({ silent: true })
+      else void l.run(l.filters, l.settings, l.sort, { silent: true })
+    }, 20_000)
+    return () => window.clearInterval(t)
+  }, [])
 
   // количество активных заявок — для бейджа на вкладке у родителя
   const activeDealsCount = deals.filter((d) => d.status === 'active').length
@@ -506,7 +527,7 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
                     }}>
                       <Save className="mr-1 h-3.5 w-3.5" />Сохранить как фильтр
                     </Button>
-                    <Button type="button" size="sm" className="h-9 bg-[#0E1B2C] text-white hover:bg-[#16304f]" onClick={() => void run()} disabled={loading}>
+                    <Button type="button" size="sm" className="h-9" onClick={() => void run()} disabled={loading}>
                       {loading ? <span className="mr-1 h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden /> : <Search className="mr-1 h-3.5 w-3.5" />}
                       Найти грузы
                     </Button>
@@ -519,11 +540,7 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
 
           {mode === 'deals' && (
             <div className="space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs leading-relaxed text-slate-500">
-                  Грузы, по которым АЭМЗ договорилась с грузовладельцем: от предварительного согласования
-                  до заявки в силе.
-                </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => void loadDeals()} disabled={dealsLoading}>
                   <RotateCcw className={`mr-1 h-3.5 w-3.5 ${dealsLoading ? 'animate-spin' : ''}`} />
                   Обновить
@@ -536,17 +553,11 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
                     <span className="h-2 w-2 rounded-full bg-amber-500" aria-hidden />
                     Предварительное · {prelimDeals.length}
                   </div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                    Договорились по телефону: ставка и условия согласованы, документы ещё не обменяны.
-                  </div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-3">
                   <div className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-800">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
                     В силе · {fullDeals.length}
-                  </div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                    Полное согласование: документы обменяны, заявка вступила в силу.
                   </div>
                 </div>
               </div>
@@ -581,7 +592,6 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
 
           {mode === 'saved' && (
             <div className="space-y-2">
-              <div className="text-xs text-slate-500">Нажмите на фильтр, чтобы применить его к поиску.</div>
               {savedList.map((s) => (
                 <div key={s.id} className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2.5 transition-colors">
                   <button
@@ -615,7 +625,6 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
 
           {mode === 'history' && (
             <div className="space-y-2">
-              <div className="text-xs text-slate-500">Последние поиски за сегодня.</div>
               {(data?.history ?? []).map((h) => (
                 <div key={h.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2.5">
                   <div className="flex flex-wrap items-baseline gap-x-3 text-sm">
@@ -639,9 +648,6 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
 
           {mode === 'transport' && (
             <div className="space-y-2">
-              <div className="text-xs text-slate-500">
-                Поиск грузов под конкретную машину парка — подставляем её грузоподъёмность и объём.
-              </div>
               {state.vehicles.length === 0 && <div className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">В парке нет машин — добавьте в разделе «Справочники».</div>}
               {state.vehicles.map((v) => (
                 <button
@@ -667,7 +673,6 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
 
           {mode === 'tracked' && (
             <div className="space-y-2">
-              <div className="text-xs text-slate-500">Грузы, отмеченные звёздочкой в выдаче поиска.</div>
               {trackedList.length === 0 && <div className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">Пока ничего не отслеживается — отметьте груз звёздочкой в результатах поиска.</div>}
               {trackedList.map((l) => (
                 <LoadCard
@@ -727,12 +732,6 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
                   onOpenTrip={onOpenTrip}
                 />
               ))}
-            </div>
-
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
-              Контакты и условия договорённости остаются в кабинете, даже когда груз уйдёт с биржи.
-              Заявка «в силе» назначается составом кнопкой «В план» — груз сразу появится на доске
-              «Занятость» и в графике «Планирования».
             </div>
           </CardContent>
         </Card>
@@ -884,7 +883,7 @@ export function AtiSuMarketPanel({ state, mode, onModeChange, onDealsCount, onCh
     setHiddenLoads((h) => ({ ...h, [l.id]: l }))
     toast({
       title: 'Груз скрыт из выдачи',
-      description: `${l.from} → ${l.to} · вернётся по кнопке «показать скрытые» (демо)`,
+      description: `${l.from} → ${l.to} · вернётся по кнопке «показать скрытые»`,
     })
   }
   function unhideAll() {
@@ -927,7 +926,7 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
   const readyDates = `${shortDate(l.date_from)}–${shortDate(l.date_to)}`
   const perKm = (v: number) => v.toLocaleString('ru-RU', { maximumFractionDigits: 1 })
   const priority = l.priority_atis != null ? `${l.priority_atis.toFixed(2).replace('.', ',')} атис.` : null
-  const stubToast = (what: string) => toast({ title: 'Демо-заглушка', description: `${what} — после подключения API ATI.SU выполняется реально` })
+  const stubToast = (what: string) => toast({ title: 'Демо-режим', description: what })
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-colors hover:shadow-md">
@@ -956,7 +955,7 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
           <div className="space-y-1">
             <span className="inline-block rounded-sm bg-slate-100 px-1 text-[9px] font-bold leading-4 tracking-wide text-slate-500">RUS</span>
             <div
-              className="whitespace-nowrap text-[15px] font-bold leading-none text-[#0E1B2C]"
+              className="whitespace-nowrap text-[15px] font-bold leading-none text-slate-900"
               title="Плечо по дорогам, расчёт ATI.SU (у АЭМЗ — OSRM + Яндекс.Карты, поэтому «примерно»)"
             >
               ~{l.km} км
@@ -1023,7 +1022,7 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
           {/* [5] Ставка и сервисы ATI.SU */}
           <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
             <div className="flex items-baseline justify-between gap-2">
-              <div className="text-[15px] font-bold leading-none text-[#0E1B2C]">
+              <div className="text-[15px] font-bold leading-none text-slate-900">
                 {RUB(l.rate)} ₽ <span className="text-[11px] font-semibold text-slate-400">с НДС {l.nds_pct}%</span>
               </div>
               <div className="text-xs font-semibold text-slate-600">{perKm(l.per_km)} ₽/км</div>
@@ -1102,14 +1101,14 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
         <div className="mt-3 border-t border-slate-100 pt-2.5">
           <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1.5">
             <div className="min-w-0">
-              <span className="text-sm font-semibold text-[#0E1B2C]">{l.carrier.firm}</span>
+              <span className="text-sm font-semibold text-slate-900">{l.carrier.firm}</span>
               <span className="ml-1.5 text-[11px] text-slate-400">
                 Код:{l.carrier.firm_ati} · {l.carrier.city} · {l.carrier.role}, на АТИ с {l.carrier.on_ati_since} г.
               </span>
             </div>
             <div className="flex items-center gap-2">
               {l.medals > 0 && (
-                <span className="flex items-center gap-0.5" title={`Медали ATI.SU за активность и отзывы (демо-заглушка): ${l.medals}`}>
+                <span className="flex items-center gap-0.5" title={`Медали ATI.SU за активность и отзывы: ${l.medals}`}>
                   {Array.from({ length: l.medals }).map((_, i) => (
                     <Medal key={i} className="h-3.5 w-3.5 fill-amber-300 text-amber-500" aria-hidden />
                   ))}
@@ -1136,7 +1135,7 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
                 type="button"
                 onClick={() => stubToast('Мессенджер ATI.SU «Написать»')}
                 className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 transition-colors hover:text-blue-900"
-                title="Демо-заглушка: сообщение через мессенджер ATI.SU"
+                title="Демо-режим: сообщение через мессенджер ATI.SU"
               >
                 <Mail className="h-3.5 w-3.5" aria-hidden />Написать
               </button>
@@ -1177,9 +1176,6 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
                   <div className="mt-0.5 text-slate-600">{r.text}</div>
                 </div>
               ))}
-              <div className="text-[10px] text-slate-400">
-                Демо-заглушка: всего отзывов о фирме — {l.carrier.reviews}; в реальном API подтягиваются из ATI.SU.
-              </div>
             </div>
           )}
 
@@ -1197,8 +1193,8 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
                 <Button
                   type="button"
                   size="sm"
-                  className="h-7 bg-[#0E1B2C] text-white hover:bg-[#16304f]"
-                  onClick={() => { onNote(l, noteText.trim()); setNoteOpen(false); toast({ title: 'Заметка сохранена (демо)', description: `${l.from} → ${l.to}` }) }}
+                  className="h-7"
+                  onClick={() => { onNote(l, noteText.trim()); setNoteOpen(false); toast({ title: 'Заметка сохранена', description: `${l.from} → ${l.to}` }) }}
                 >
                   Сохранить
                 </Button>
@@ -1219,9 +1215,9 @@ function LoadCard({ l, tracked, offered, deal, dealBusy, note, onTrack, onOffer,
           <Button
             type="button"
             size="sm"
-            className="h-8 bg-[#0E1B2C] text-white hover:bg-[#16304f]"
+            className="h-8"
             onClick={() => onMatch(l)}
-            title="Прямо на этой заявке: откроется подбор под этот груз — сервис сам подберёт водителя из парка (где освободится машина, подача до погрузки, сроки 500–600 км/день, ставка по кругу). Расчёт запустится по кнопке «Произвести расчёт» в открывшемся окне"
+            title="Подбор водителя из парка под этот груз — расчёт по кнопке в открывшемся окне"
           >
             <Calculator className="mr-1 h-3.5 w-3.5" />
             Подбор водителя
@@ -1323,7 +1319,7 @@ function IconBtn({ children, active, onClick, title }: {
       onClick={onClick}
       title={title}
       aria-pressed={active}
-      className={`rounded-md p-1.5 transition-colors ${active ? 'bg-slate-100 text-[#0E1B2C]' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}
+      className={`rounded-md p-1.5 transition-colors ${active ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-700'}`}
     >
       {children}
     </button>
@@ -1394,7 +1390,7 @@ function DealCard({ d, busy, planned, onDocs, onCancel, onRestore, onNote, onMat
             <span>погрузка {d.loadDateFrom ? shortDate(d.loadDateFrom) : '—'}{d.loadDateTo ? `–${shortDate(d.loadDateTo)}` : ''}</span>
           </div>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-0.5">
-            {d.rate != null && <span className="text-lg font-bold leading-none text-[#0E1B2C]">{RUB(d.rate)} ₽</span>}
+            {d.rate != null && <span className="text-lg font-bold leading-none text-slate-900">{RUB(d.rate)} ₽</span>}
             {d.perKm != null && <span className="text-xs font-medium text-slate-600">{d.perKm} ₽/км</span>}
             {d.ndsPct != null && <span className="text-[11px] text-slate-400">НДС {d.ndsPct}%</span>}
           </div>
@@ -1493,9 +1489,9 @@ function DealCard({ d, busy, planned, onDocs, onCancel, onRestore, onNote, onMat
           <Button
             type="button"
             size="sm"
-            className="h-8 bg-[#0E1B2C] text-white hover:bg-[#16304f]"
+            className="h-8"
             onClick={() => onMatch(d)}
-            title="Прямо на этой заявке: откроется подбор под этот груз — сервис сам подберёт водителя из парка (где освободится машина, подача до погрузки, сроки 500–600 км/день, ставка по кругу). Расчёт запустится по кнопке «Произвести расчёт» в открывшемся окне"
+            title="Подбор водителя из парка под этот груз — расчёт по кнопке в открывшемся окне"
           >
             <Calculator className="mr-1 h-3.5 w-3.5" />
             Подбор водителя
@@ -1521,7 +1517,7 @@ function DealCard({ d, busy, planned, onDocs, onCancel, onRestore, onNote, onMat
           <Button
             type="button"
             size="sm"
-            className="h-8 bg-[#0E1B2C] text-white hover:bg-[#16304f]"
+            className="h-8"
             onClick={() => onDocs(d)}
             disabled={busy}
             title="Зафиксировать обмен документами — заявка вступает в силу (полное согласование)"
@@ -1612,7 +1608,7 @@ function DealCard({ d, busy, planned, onDocs, onCancel, onRestore, onNote, onMat
             <Button
               type="button"
               size="sm"
-              className="h-7 bg-[#0E1B2C] text-white hover:bg-[#16304f]"
+              className="h-7"
               disabled={busy}
               onClick={() => { onNote(d, noteText); setNoteOpen(false) }}
             >

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireUser } from '@/lib/auth'
 import { db } from '@/lib/db'
 import { aiLog } from '@/lib/ai/core'
+import { plog } from '@/lib/platform-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -56,6 +57,13 @@ export async function POST(req: Request) {
         where: { id: existing.id },
         data: { question, answer, modelKey, engine },
       })
+      await plog({
+        type: 'AI_SAVED_MESSAGE_ADDED', source: 'api/ai/saved-messages',
+        actor: { login: auth.login, name: auth.name, role: auth.role },
+        message: `Сохранённый ответ ИИ-помощника обновлён${question ? ` (вопрос: «${question.slice(0, 80)}»)` : ''}`,
+        objectType: 'ai_saved_message', objectId: updated.id,
+        meta: { messageId, updated: true },
+      })
       return NextResponse.json({ ok: true, message: updated, updated: true })
     }
   }
@@ -64,6 +72,13 @@ export async function POST(req: Request) {
     data: { userId: auth.id, messageId, question, answer, modelKey, engine },
   })
   await aiLog('info', 'chat_saved', `Ответ сохранён в избранное (${auth.login})`)
+  await plog({
+    type: 'AI_SAVED_MESSAGE_ADDED', source: 'api/ai/saved-messages',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: `Ответ ИИ-помощника сохранён в избранное${question ? ` (вопрос: «${question.slice(0, 80)}»)` : ''}`,
+    objectType: 'ai_saved_message', objectId: created.id,
+    meta: { messageId, modelKey, engine },
+  })
   return NextResponse.json({ ok: true, message: created })
 }
 
@@ -81,5 +96,12 @@ export async function DELETE(req: Request) {
   }
 
   await db.aiSavedMessage.delete({ where: { id } })
+  await plog({
+    type: 'AI_SAVED_MESSAGE_DELETED', source: 'api/ai/saved-messages',
+    actor: { login: auth.login, name: auth.name, role: auth.role },
+    message: 'Сохранённый ответ ИИ-помощника удалён из избранного',
+    objectType: 'ai_saved_message', objectId: id,
+    meta: { messageId: saved.messageId },
+  })
   return NextResponse.json({ ok: true })
 }

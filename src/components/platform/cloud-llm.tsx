@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Ban, CloudCog, Eye, KeyRound, Lock, PenLine, RefreshCw, ShieldCheck } from 'lucide-react'
 import {
-  ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, StatusDot, type TabProps,
+  ErrorBlock, LoadingBlock, NoticeLine, SectionHeader, StatusDot, useLiveTab, type TabProps,
 } from '@/components/platform/common'
 import { aiFetch } from '@/components/platform/ai-shared'
 import { AI_RIGHT_MODE_LABELS, type AiRight, type AiRightMode } from '@/lib/ai/rights'
@@ -47,7 +47,7 @@ interface EngineInfo {
   scope: string
 }
 
-export default function CloudLlmTab(_: TabProps) {
+export default function CloudLlmTab({ liveTick }: TabProps) {
   const { toast } = useToast()
   const [rights, setRights] = useState<AiRight[] | null>(null)
   const [lockedRights, setLockedRights] = useState<string[]>([])
@@ -65,12 +65,16 @@ export default function CloudLlmTab(_: TabProps) {
       setLockedRights(Array.isArray(json.locked) ? (json.locked as string[]) : [])
       setEngine(json.engine ?? null)
     } catch (e) {
+      // тихое автообновление не сносит матрицу: прежние права остаются, ошибка — строкой
       setError(e instanceof Error ? e.message : String(e))
-      setRights(null)
     }
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // живое окно: матрица прав и состояние движка обновляются сами — общий «пульс»
+  // платформы и страховочный интервал; переключатели не сбрасываются
+  useLiveTab(load, liveTick, 30_000)
 
   const changeRight = useCallback(async (right: AiRight, mode: AiRightMode) => {
     setSavingKey(right.key)
