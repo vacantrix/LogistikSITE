@@ -55,7 +55,18 @@ function roleOf(user: SessionUserDTO): RoleSelection {
 function tabFromLocation(): TabKey | null {
   if (typeof window === 'undefined') return null
   const raw = new URLSearchParams(window.location.search).get('tab')
-  return raw && navFor('admin').some((n) => n.key === raw) ? (raw as TabKey) : null
+  if (!raw) return null
+  // Старые ссылки объединённых разделов: «Занятость» → вид «Сейчас» планирования,
+  // «Справочники парка» → контур «Собственный парк» единого справочника
+  if (raw === 'own-occupancy') {
+    try { localStorage.setItem('aemz.plan.view', 'now') } catch { /* приватный режим */ }
+    return 'own-planning'
+  }
+  if (raw === 'own-directory') {
+    try { localStorage.setItem('aemz.directory.contour', 'own') } catch { /* приватный режим */ }
+    return 'directory'
+  }
+  return navFor('admin').some((n) => n.key === raw) ? (raw as TabKey) : null
 }
 
 /** Ровный «пульс» платформы: такт, которым открытые окна догружают данные.

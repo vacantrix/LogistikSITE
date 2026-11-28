@@ -1,12 +1,20 @@
 'use client'
 
 /**
- * «Справочники» — кадры и техника: логисту — весь парк перевозчиков,
- * перевозчику — только свой. Ровно три раздела (водители, тягачи, прицепы),
- * каждый открывается на весь экран с табличным списком и фильтрами.
- * На главной странице раздела — сводка «Кадры и техника»: кто и когда добавлен,
- * что истекает. Справочник грузов — внутренняя сущность платформы: в интерфейсе
- * не показывается, доступен только через API (для заявок). Отдельного раздела
+ * «Справочники» — ЕДИНЫЙ справочник платформы в двух контурах (без вариаций):
+ *  «Собственный парк АЭМЗ» — водители, тягачи и прицепы завода (данные
+ *  диспетчерской, /api/state — живые, как во всём собственном транспорте);
+ *  «Привлечённый транспорт» — кадры и техника перевозчиков: логисту — весь
+ *  парк, перевозчику — только свой. Оба контура живут в одном разделе с одним
+ *  переключателем; выбор запоминается. Контур видно по правам: справочники
+ *  привлечённого транспорта — section:directory, собственный парк —
+ *  section:ownDirectory (перевозчику контур парка не положен по определению).
+ *
+ * Контур «Привлечённый транспорт»: ровно три раздела (водители, тягачи, прицепы),
+ * каждый открывается на весь экран с табличным списком и фильтрами. На главной
+ * странице — сводка «Кадры и техника»: кто и когда добавлен, что истекает.
+ * Справочник грузов — внутренняя сущность платформы: в интерфейсе не
+ * показывается, доступен только через API (для заявок). Отдельного раздела
  * «Перевозчики» больше нет — парк фильтруется по перевозчику внутри раздела.
  * Логисту внизу — «Компании-исполнители»: роль компании (перевозчик или экспедитор)
  * определяет договорной документ рейса в «Подписать ЭДО».
@@ -28,6 +36,7 @@ import {
   Send,
   Truck,
   User,
+  Users,
   Wrench,
 } from 'lucide-react'
 import {
@@ -55,6 +64,9 @@ import { expiryInfo, rowTint, worseState, type ExpiryState } from '@/lib/expiry'
 import type {
   CarrierDTO, DirectoryPhotoDTO, DriverDTO, ExecutorRole, OwnershipType, TrailerDTO, TruckDTO,
 } from '@/lib/types'
+import { authFetch } from '@/lib/kontur/session-token'
+import { DirectoriesPanel } from '@/components/kontur/proto/DirectoriesPanel'
+import type { StateResponse } from '@/lib/kontur/client-types'
 
 const THIN_SCROLL = '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full'
 
@@ -264,7 +276,119 @@ function DirFilterBar({ query, onQuery, expiry, onExpiry, withExpiry, count, chi
   )
 }
 
-export default function DirectoriesTab({ activeCarrierId, role, onNavigate, liveTick }: TabProps) {
+/** Где запоминается выбранный контур единого справочника */
+const CONTOUR_KEY = 'aemz.directory.contour'
+type DirectoryContour = 'attracted' | 'own'
+
+/** Единый справочник: один раздел — два контура парка. Переключатель виден,
+ *  когда доступны оба; иначе раздел сразу открывает единственный разрешённый. */
+export default function DirectoriesTab(props: TabProps) {
+  const can = useCan()
+  const canAttracted = can('section:directory')
+  const canOwn = can('section:ownDirectory')
+  const [contour, setContourState] = useState<DirectoryContour>(() => {
+    try {
+      const saved = window.localStorage.getItem(CONTOUR_KEY)
+      if (saved === 'own' || saved === 'attracted') return saved
+    } catch { /* приватный режим — дефолт */ }
+    return 'attracted'
+  })
+  // права загрузились/изменились: контур должен оставаться разрешённым.
+  // Каноничный паттерн «корректировка при смене входа» (до коммита, без эффектов)
+  const [permSnap, setPermSnap] = useState({ attracted: canAttracted, own: canOwn })
+  if (permSnap.attracted !== canAttracted || permSnap.own !== canOwn) {
+    setPermSnap({ attracted: canAttracted, own: canOwn })
+    if (contour === 'own' && !canOwn && canAttracted) setContourState('attracted')
+    else if (contour === 'attracted' && !canAttracted && canOwn) setContourState('own')
+  }
+  const setContour = (c: DirectoryContour) => {
+    setContourState(c)
+    try { window.localStorage.setItem(CONTOUR_KEY, c) } catch { /* не критично */ }
+  }
+
+  const both = canAttracted && canOwn
+  const switcher = both ? (
+    <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1" role="group" aria-label="Парк справочника">
+        <button
+          type="button"
+          aria-pressed={contour === 'own'}
+          onClick={() => setContour('own')}
+          title="Водители, тягачи и прицепы собственного парка АЭМЗ — закрепления, ремонты и сроки документов"
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${contour === 'own' ? 'bg-white font-semibold text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+        >
+          <Truck className="h-3.5 w-3.5" aria-hidden />Собственный парк АЭМЗ
+        </button>
+        <button
+          type="button"
+          aria-pressed={contour === 'attracted'}
+          onClick={() => setContour('attracted')}
+          title="Водители и техника перевозчиков — привлечённый транспорт"
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${contour === 'attracted' ? 'bg-white font-semibold text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+        >
+          <Users className="h-3.5 w-3.5" aria-hidden />Привлечённый транспорт
+        </button>
+      </div>
+      <InfoTip label="Единый справочник">
+        Один справочник на оба контура парка. Переключение запоминается — в следующий
+        раз раздел откроется на том же контуре. Право «Справочники парка» открывает
+        собственный парк АЭМЗ, «Справочники» — привлечённый транспорт.
+      </InfoTip>
+    </div>
+  ) : null
+
+  if (contour === 'own' && canOwn) {
+    return (
+      <div>
+        {switcher}
+        <OwnParkDirectory liveTick={props.liveTick} />
+      </div>
+    )
+  }
+  return (
+    <div>
+      {switcher}
+      <AttractedDirectories {...props} />
+    </div>
+  )
+}
+
+/** Контур «Собственный парк АЭМЗ»: живые данные /api/state — шина WS и «пульс»
+ *  платформы перечитывают их без перезагрузки, как в «Планировании» и «Мониторинге» */
+function OwnParkDirectory({ liveTick }: { liveTick: number }) {
+  const [state, setState] = useState<StateResponse | null>(null)
+  const [error, setError] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
+
+  const load = useCallback(async () => {
+    try {
+      const res = await authFetch('/api/state')
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error?.message ?? `HTTP ${res.status}`)
+      }
+      setState(await res.json())
+      setError('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Данные диспетчерской недоступны')
+    }
+  }, [])
+
+  // живое окно: первичная загрузка + такты «пульса» платформы (WS + 15 с)
+  useEffect(() => { void load() }, [load, reloadKey, liveTick])
+
+  if (error) return <ErrorBlock message={error} onRetry={() => { setError(''); void load() }} />
+  if (!state) return <LoadingBlock label="Загрузка парка АЭМЗ…" />
+  return (
+    <div>
+      <SectionHeader eyebrow="Собственный транспорт" tone="emerald" title="Справочники парка" />
+      <DirectoriesPanel state={state} onChanged={() => setReloadKey((k) => k + 1)} />
+    </div>
+  )
+}
+
+/** Контур «Привлечённый транспорт»: кадры и техника перевозчиков */
+function AttractedDirectories({ activeCarrierId, role, onNavigate, liveTick }: TabProps) {
   const { toast } = useToast()
   const [carriers, setCarriers] = useState<CarrierDTO[] | null>(null)
   const [error, setError] = useState<string | null>(null)

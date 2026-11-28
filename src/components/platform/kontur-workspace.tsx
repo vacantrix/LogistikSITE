@@ -5,8 +5,10 @@
  *
  * Раньше диспетчерская была отдельным кабинетом /kontur со своей шапкой и входом.
  * Теперь её разделы — нижний уровень навигации платформы: «Заявки 1С», ATI.SU,
- * «Занятость», «Планирование», «Мониторинг», «Справочники парка» и «Аудит контура».
+ * «Планирование» (доска «Сейчас» + график «Гант»), «Мониторинг» и «Аудит контура».
  * Данные по-прежнему отдаёт /kontur/api/state: один источник для всех панелей.
+ * Справочники парка живут в единых «Справочниках» платформы (контур «Собственный
+ * парк»), занятость — вид «Сейчас» раздела «Планирование».
  *
  * Видимость и действия ограничены правами section:* и own:*: панели не показывают
  * чужие разделы, а API диспетчерской дублирует проверку на сервере.
@@ -24,8 +26,6 @@ import { authFetch } from '@/lib/kontur/session-token'
 import { RequestsPanel } from '@/components/kontur/proto/RequestsPanel'
 import { AtiSuPanel } from '@/components/kontur/proto/AtiSuPanel'
 import { MonitoringPanel } from '@/components/kontur/proto/MonitoringPanel'
-import { DirectoriesPanel } from '@/components/kontur/proto/DirectoriesPanel'
-import { OccupancyPanel } from '@/components/kontur/proto/OccupancyPanel'
 import { PlanningPanel } from '@/components/kontur/proto/PlanningPanel'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/kontur/ui/table'
 
@@ -48,16 +48,15 @@ type ContourAuditEntry = {
 const TITLES: Partial<Record<TabKey, string>> = {
   'own-requests': 'Заявки 1С',
   'own-atisu': 'ATI.SU',
-  'own-occupancy': 'Занятость',
   'own-planning': 'Планирование',
   'own-monitor': 'Мониторинг',
-  'own-directory': 'Справочники парка',
   'own-audit': 'Аудит контура',
 }
 
 // Описания разделов — под значком «i» заголовка (постоянных надписей в интерфейсе нет)
 const TITLES_DESC: Partial<Record<TabKey, string>> = {
   'own-requests': 'Заявки приходят из 1С автоматически (документ «Заказы грузоотправителей»). Логист ведёт заявку до рейса: проверка → состав из собственного парка → карточка рейса.',
+  'own-planning': 'Единая доска работы парка в двух видах: «Сейчас» — кто чем занят в моменте, «График» — план во времени. Один поиск, одни фильтры и одна очередь планирования на оба вида.',
 }
 
 const ALERT_ICONS: Record<Alert['kind'], ReactNode> = {
@@ -385,9 +384,6 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
           {tab === 'own-atisu' && (
             <AtiSuPanel state={state} initialSub={atisuSub} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAi={() => onNavigate('ai')} marketFilters={atisuFilters} />
           )}
-          {tab === 'own-occupancy' && (
-            <OccupancyPanel state={state} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAtiDeals={openAtiDeals} />
-          )}
           {tab === 'own-planning' && (
             <PlanningPanel state={state} onChanged={onChanged} onOpenTrip={openTripAnywhere} onOpenAtiDeals={openAtiDeals} onFindOrder={findOrder} />
           )}
@@ -401,7 +397,6 @@ export function KonturWorkspace({ tab, onNavigate, liveTick, navFilters }: {
               onOpenRequests={() => onNavigate('own-requests')}
             />
           )}
-          {tab === 'own-directory' && <DirectoriesPanel state={state} onChanged={onChanged} />}
           {tab === 'own-audit' && <ContourAuditPanel liveTick={liveTick} />}
         </>
       )}

@@ -75,10 +75,8 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup;
 
   { key: 'own-requests', label: 'Заявки 1С', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-atisu', label: 'ATI.SU', roles: ['logist', 'admin'], group: 'own' },
-  { key: 'own-occupancy', label: 'Занятость', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-planning', label: 'Планирование', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-monitor', label: 'Мониторинг', roles: ['logist', 'admin'], group: 'own' },
-  { key: 'own-directory', label: 'Справочники парка', roles: ['logist', 'admin'], group: 'own' },
   { key: 'own-audit', label: 'Аудит контура', roles: ['admin'], group: 'own' },
   { key: 'driver-app', label: 'Приложение водителя', roles: ['admin'], group: 'own' },
 
@@ -124,10 +122,8 @@ const TAB_ICONS: Record<TabKey, { Icon: ComponentType<{ className?: string }>; s
   favorites: { Icon: Star, short: 'Избранное' },
   'own-requests': { Icon: Inbox, short: 'Заявки 1С' },
   'own-atisu': { Icon: Gavel, short: 'ATI.SU' },
-  'own-occupancy': { Icon: LayoutGrid, short: 'Занятость' },
-  'own-planning': { Icon: CalendarDays, short: 'План' },
+  'own-planning': { Icon: CalendarDays, short: 'Планирование' },
   'own-monitor': { Icon: Radar, short: 'Мониторинг' },
-  'own-directory': { Icon: BookOpen, short: 'Парк' },
   'own-audit': { Icon: ScrollText, short: 'Аудит' },
   'driver-app': { Icon: Smartphone, short: 'Водитель' },
 }
@@ -157,8 +153,11 @@ function rowLabel(key: TabKey, label: string): string {
   return ROW_SHORT[key] ?? label
 }
 
-/** Разделы, закрытые правом: без права раздел не показывается в меню и не открывается */
-const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
+/** Разделы, закрытые правом: без права раздел не показывается в меню и не открывается.
+ *  Значение — одно право или набор: набор значит «хотя бы одно из прав».
+ *  Объединённые разделы: «Планирование» — график или вид «Сейчас» (бывшая
+ *  «Занятость»), «Справочники» — привлечённый транспорт или собственный парк АЭМЗ. */
+const SECTION_PERM: Partial<Record<TabKey, PermKey | PermKey[]>> = {
   board: 'section:board',
   drafts: 'section:drafts',
   my: 'section:my',
@@ -168,7 +167,7 @@ const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
   requests: 'section:requests',
   registry: 'section:registry',
   edo: 'section:edo',
-  directory: 'section:directory',
+  directory: ['section:directory', 'section:ownDirectory'],
   reports: 'section:reports',
   journal: 'section:journal',
   logs: 'section:logs',
@@ -184,17 +183,16 @@ const SECTION_PERM: Partial<Record<TabKey, PermKey>> = {
   arch: 'section:arch',
   'own-requests': 'section:ownRequests',
   'own-atisu': 'section:ownAtisu',
-  'own-occupancy': 'section:ownOccupancy',
-  'own-planning': 'section:ownPlanning',
+  'own-planning': ['section:ownPlanning', 'section:ownOccupancy'],
   'own-monitor': 'section:ownMonitor',
-  'own-directory': 'section:ownDirectory',
   'own-audit': 'section:ownAudit',
   'driver-app': 'section:driverApp',
 }
 
 export function sectionAllowed(tab: TabKey, can: (key: PermKey) => boolean): boolean {
   const key = SECTION_PERM[tab]
-  return !key || can(key)
+  if (!key) return true
+  return Array.isArray(key) ? key.some(can) : can(key)
 }
 
 export const isOwnTab = (tab: TabKey): boolean => tab.startsWith('own-')

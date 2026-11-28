@@ -19,7 +19,7 @@ import { expiryInfo } from '@/lib/expiry'
 import type { DocStatus, RequestMode, RequestStatus } from '@/lib/types'
 
 export type TabKey = 'board' | 'drafts' | 'apply' | 'my' | 'crew' | 'verify' | 'registry' | 'requests' | 'directory' | 'reports' | 'journal' | 'logs' | 'edo' | 'support' | 'contacts' | 'nn' | 'llm' | 'settings' | 'admin-users' | 'admin-db' | 'arch'
-  | 'own-requests' | 'own-atisu' | 'own-occupancy' | 'own-planning' | 'own-monitor' | 'own-directory' | 'own-audit' | 'ai'
+  | 'own-requests' | 'own-atisu' | 'own-planning' | 'own-monitor' | 'own-audit' | 'ai'
   | 'favorites'
   | 'driver-app'
 
