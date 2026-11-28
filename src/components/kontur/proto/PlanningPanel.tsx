@@ -203,9 +203,10 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
 }) {
   const { toast } = useToast()
   const can = useCan()
-  // право прежнего раздела «Занятость» теперь открывает вид «Сейчас»;
-  // без него раздел открывается сразу в виде «График»
+  // право прежнего раздела «Занятость» открывает вид «Сейчас», право прежнего
+  // «Планирования» — вид «График»: раздел доступен, если есть хотя бы одно
   const canOccupy = can('section:ownOccupancy')
+  const canGantt = can('section:ownPlanning')
   const [nowTick, setNowTick] = useState(() => Date.now())
   // общий поиск раздела: фильтрует и доску «Сейчас», и дорожки графика
   const [query, setQuery] = useState('')
@@ -234,16 +235,25 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
     return () => clearInterval(t)
   }, [])
 
-  // вид запоминается: восстанавливаем выбор браузера; без права на «Сейчас» — только «График»
+  // вид запоминается: восстанавливаем выбор браузера (внешняя система — один раз)
   useEffect(() => {
-    if (!canOccupy) {
+    if (!canOccupy && canGantt) {
       setView('gantt')
       return
     }
     let saved: string | null = null
     try { saved = localStorage.getItem(VIEW_STORAGE_KEY) } catch { /* приватный режим */ }
     if (saved === 'now' || saved === 'gantt') setView(saved)
-  }, [canOccupy])
+  }, [])
+
+  // права загрузились/изменились: вид должен оставаться разрешённым —
+  // корректировка при смене входа (до коммита, без каскада эффектов)
+  const [permSnap, setPermSnap] = useState({ canOccupy, canGantt })
+  if (permSnap.canOccupy !== canOccupy || permSnap.canGantt !== canGantt) {
+    setPermSnap({ canOccupy, canGantt })
+    if (!canOccupy && canGantt) setView('gantt')
+    else if (!canGantt && canOccupy) setView('now')
+  }
 
   // единый план с «Заявками», ATI.SU и доской занятости: один движок (src/lib/kontur/planner.ts)
   const plan = useMemo(() => buildPlan(state, nowTick), [state, nowTick])
@@ -299,7 +309,6 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
       return pa - pb || a.fullName.localeCompare(b.fullName, 'ru')
     })
     return rows
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.drivers, busyDriverIds, bindingByDriver, vehicleById, trailerById])
 
   // ——— недоступные: отметки справочника + водители без рейса на сломанной технике ———
@@ -311,7 +320,6 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
     })
     // человек-причина важнее техники: у отмеченных — их статус, у остальных — ремонт
     return rows.sort((a, b) => (a.status === 'active' ? 1 : 0) - (b.status === 'active' ? 1 : 0) || a.fullName.localeCompare(b.fullName, 'ru'))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.drivers, busyDriverIds, bindingByDriver, vehicleById, trailerById])
 
   const counts = useMemo(() => ({
@@ -357,6 +365,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
 
   function switchView(next: PlanView) {
     if (next === 'now' && !canOccupy) return
+    if (next === 'gantt' && !canGantt) return
     setView(next)
     // фильтры вида: «Недоступны» есть только на доске, «Просрочка» — только в графике
     if (next === 'gantt' && chip === 'off') setChip('all')
@@ -612,7 +621,7 @@ export function PlanningPanel({ state, onChanged, onOpenTrip, onOpenAtiDeals, on
             </InfoTip>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canOccupy && (
+            {canOccupy && canGantt && (
               <div className="flex overflow-hidden rounded-lg border border-slate-200" role="group" aria-label="Вид планирования">
                 <button type="button" className={viewSegCls(showNow)} onClick={() => switchView('now')} title="Доска занятости: кто чем занят сейчас">
                   Сейчас
