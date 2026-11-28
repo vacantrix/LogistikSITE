@@ -109,7 +109,7 @@ export async function buildReport(periodParams: { from?: string; to?: string; mo
     if (r.bestRate) { cur.sum += r.bestRate; cur.n++ }
     carMap.set(r.winner.name, cur)
   }
-  const allCarriers = await db.carrier.findMany({ include: { _count: { select: { wonRequests: true, bids: true } } } })
+  const allCarriers = await db.carrier.findMany({ where: { ownFleet: false }, include: { _count: { select: { wonRequests: true, bids: true } } } })
   for (const c of allCarriers) {
     if (!carMap.has(c.name)) carMap.set(c.name, { taken: 0, sum: 0, n: 0 }) // без рейсов (удалённые не в счёт)
   }

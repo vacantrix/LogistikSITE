@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { getSessionUser, shortName } from '@/lib/kontur/auth'
 import { denyUnless } from '@/lib/kontur/access'
 
@@ -54,14 +55,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: { code: 'VALIDATION', message: 'Выберите ТС и водителя из собственного парка' } }, { status: 400 })
     }
     const vehicle = await db.vehicle.findUnique({ where: { id: body.vehicleId } })
-    if (!vehicle || vehicle.ownership !== 'own') {
+    if (!vehicle || vehicle.ownershipType !== 'OWNED') {
       return NextResponse.json({ error: { code: 'VALIDATION', message: 'ТС должен принадлежать собственному парку АЭМЗ' } }, { status: 400 })
     }
     if (vehicle.isRepair) {
       return NextResponse.json({ error: { code: 'VALIDATION', message: 'ТС в ремонте — назначение недоступно' } }, { status: 400 })
     }
     const trailer = body.trailerId ? await db.trailer.findUnique({ where: { id: body.trailerId } }) : null
-    if (body.trailerId && (!trailer || trailer.ownership !== 'own')) {
+    if (body.trailerId && (!trailer || trailer.ownershipType !== 'OWNED')) {
       return NextResponse.json({ error: { code: 'VALIDATION', message: 'Прицеп должен принадлежать собственному парку АЭМЗ' } }, { status: 400 })
     }
     const driver = await db.driver.findUnique({ where: { id: body.driverId } })
@@ -118,8 +119,7 @@ export async function POST(req: Request) {
       },
     })
     await db.order.update({ where: { id: order.id }, data: { status: 'planned' } })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: user.role === 'admin' ? 'admin' : 'logist',
         actorName: shortName(user.fullName),
         object: 'trip',
@@ -127,8 +127,7 @@ export async function POST(req: Request) {
         field: 'assigned',
         became: `${driver.fullName} · ${vehicle.brand} (${vehicle.plate})`,
         comment: 'Назначение состава из собственного парка АЭМЗ',
-      },
-    })
+      })
     return NextResponse.json({ ok: true, tripId: trip.id })
   }
   if (body.action === 'append') {
@@ -181,8 +180,7 @@ export async function POST(req: Request) {
     })
     await db.order.update({ where: { id: order.id }, data: { status: 'planned' } })
     const driver = await db.driver.findUnique({ where: { id: trip.driverId } })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: user.role === 'admin' ? 'admin' : 'logist',
         actorName: shortName(user.fullName),
         object: 'trip',
@@ -190,8 +188,7 @@ export async function POST(req: Request) {
         field: 'leg_appended',
         became: `Плечо ${(maxSeq?.seq ?? 0) + 1} · заявка ${order.number}`,
         comment: 'Заявка добавлена плечом к рейсу по подсказке умного подбора',
-      },
-    })
+      })
     return NextResponse.json({ ok: true, tripId: trip.id, legId: leg.id, driverName: driver?.fullName ?? null })
   }
   return NextResponse.json({ error: { code: 'VALIDATION', message: 'Неизвестное действие' } }, { status: 400 })

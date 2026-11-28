@@ -24,16 +24,19 @@ export async function GET(req: NextRequest) {
   }
 
   const changedFilter = since ? { updatedAt: { gt: since } } : {}
+  // собственный парк АЭМЗ (ownFleet) — не контрагент площадки: в выгрузку
+  // справочников для 1С не попадает ни сам перевозчик, ни его водители/техника
+  const ownFilter = { carrier: { ownFleet: false } }
 
   const [carriers, drivers, trucks, trailers] = await Promise.all([
-    db.carrier.findMany({ where: since ? changedFilter : { access: true }, orderBy: { updatedAt: 'asc' } }),
-    db.driver.findMany({ where: changedFilter, orderBy: { updatedAt: 'asc' } }),
-    db.truck.findMany({ where: changedFilter, orderBy: { updatedAt: 'asc' } }),
-    db.trailer.findMany({ where: changedFilter, orderBy: { updatedAt: 'asc' } }),
+    db.carrier.findMany({ where: since ? { ...changedFilter, ownFleet: false } : { access: true, ownFleet: false }, orderBy: { updatedAt: 'asc' } }),
+    db.driver.findMany({ where: { ...changedFilter, ...ownFilter }, orderBy: { updatedAt: 'asc' } }),
+    db.truck.findMany({ where: { ...changedFilter, ...ownFilter }, orderBy: { updatedAt: 'asc' } }),
+    db.trailer.findMany({ where: { ...changedFilter, ...ownFilter }, orderBy: { updatedAt: 'asc' } }),
   ])
   // в инкрементальной выгрузке у водителя/ТС может не быть «своего» перевозчика среди изменённых — дочитываем
   const missing = [...new Set([...drivers, ...trucks, ...trailers].map((x) => x.carrierId))].filter((id) => !carriers.some((c) => c.id === id))
-  const refCarriers = missing.length ? await db.carrier.findMany({ where: { id: { in: missing } } }) : []
+  const refCarriers = missing.length ? await db.carrier.findMany({ where: { id: { in: missing }, ownFleet: false } }) : []
 
   const carrierById = new Map([...carriers, ...refCarriers].map((c) => [c.id, c]))
   const carrierRef = (id: string) => {

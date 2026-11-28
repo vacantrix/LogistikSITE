@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { getSessionUser, shortName } from '@/lib/kontur/auth'
 import { konturAllowedAny, OWN_SECTION_KEYS } from '@/lib/kontur/access'
 
@@ -111,8 +112,7 @@ export async function POST(req: Request) {
     }
     const status = body.result === 'called' ? 'called' : 'dismissed'
     await db.callTask.update({ where: { id: task.id }, data: { status, finishedAt: new Date() } })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist',
         actorName: shortName(user.fullName),
         object: 'call_task',
@@ -120,8 +120,7 @@ export async function POST(req: Request) {
         field: 'status',
         became: status,
         comment: `Мост на телефон: звонок ${task.driverName ?? task.driverPhone}`,
-      },
-    })
+      })
     return NextResponse.json({ ok: true })
   }
 

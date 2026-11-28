@@ -682,7 +682,7 @@ export async function buildReportDoc(def: ReportDef, s: ReportSettings): Promise
   const builder = BUILDERS[def.id]
   if (!builder || def.missing) throw new Error(`Отчёт «${def.title}» пока недоступен`)
   const p = periodOf(s)
-  const [reqs, carriers] = await Promise.all([loadRequests(), db.carrier.findMany({ select: { id: true, name: true } })])
+  const [reqs, carriers] = await Promise.all([loadRequests(), db.carrier.findMany({ where: { ownFleet: false }, select: { id: true, name: true } })])
   const carrierName = new Map(carriers.map((c) => [c.id, c.name]))
   const built = await builder({ def, s, p, reqs, carrierName })
 

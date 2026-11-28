@@ -15,8 +15,16 @@
  */
 import { db } from '@/lib/db'
 import { legacyPointValue } from '@/lib/points'
+import { ensureOwnFleetCarrier } from '@/lib/kontur/db'
 
 export async function normalizeLegacyData(): Promise<void> {
+  // единый справочник парка: служебный перевозчик-«АЭМЗ» (ownFleet) — контейнер
+  // собственных водителей и техники в общих таблицах Driver/Truck/Trailer
+  try {
+    await ensureOwnFleetCarrier()
+  } catch (e) {
+    console.error('[data-fixes] не удалось создать перевозчика собственного парка', e)
+  }
   const requests = await db.request.findMany({
     select: { id: true, fromPoint: true, toPoint: true, cargo: true, cargoTypeId: true },
   })

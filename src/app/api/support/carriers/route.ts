@@ -15,6 +15,7 @@ export async function GET() {
   if (!isStaff(auth.role)) return NextResponse.json({ error: 'Только для сотрудников платформы' }, { status: 403 })
 
   const carriers = await db.carrier.findMany({
+    where: { ownFleet: false }, // собственный парк АЭМЗ — не контрагент, обращений не пишет
     orderBy: { name: 'asc' },
     select: { id: true, name: true, inn: true, access: true },
   })

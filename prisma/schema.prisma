@@ -13,6 +13,9 @@ model Carrier {
   id           String    @id @default(cuid())
   name         String
   inn          String
+  // собственный парк АЭМЗ (справочники внутреннего контура): такая «компания» —
+  // не контрагент площадки — она не участвует в торгах, заявках, отчётах и выгрузке в 1С
+  ownFleet     Boolean   @default(false)
   // роль исполнителя рейса: CARRIER — перевозит сам (заказ-заявка на перевозку),
   // FORWARDER — экспедитор, организует перевозку (поручение экспедитору)
   role         String    @default("CARRIER")
@@ -168,8 +171,10 @@ model Driver {
   carrierId          String
   carrier            Carrier  @relation(fields: [carrierId], references: [id])
   fullName           String
-  birthDate          String
-  passport           String
+  // дефолт "" — для записей собственного парка АЭМЗ (единый справочник),
+  // где паспорт не обязателен; формы привлечённого контура заполняют всегда
+  birthDate          String   @default("")
+  passport           String   @default("")
   phone              String   @default("—") // телефон водителя
   birthPlace         String   @default("—") // место рождения (для 1С и пропуска в порт)
   address            String   @default("—") // адрес регистрации / место жительства (для пропуска в порт)
@@ -177,6 +182,11 @@ model Driver {
   passportIssuedBy   String   @default("—") // кем выдан паспорт (для 1С)
   passportIssuedDate String   @default("—") // дата выдачи паспорта (для 1С)
   position           String   @default("—") // должность (для 1С)
+  // ——— справочник собственного парка АЭМЗ (единый справочник: одна таблица Driver
+  // на оба контура; собственный парк лежит у Carrier-«АЭМЗ» с ownFleet = true) ———
+  licenseUntil       String? // ВУ действительно до, ДД.ММ.ГГГГ
+  status             String   @default("active") // active/vacation/sick/other — состояние водителя парка
+  statusComment      String? // комментарий к состоянию (болеет до 15.01, в отпуске…)
   // принадлежность (Task 62): OWNED — собственный штат, HIRED — наёмный от ИП/ООО, LEASE — аренда/лизинг
   ownershipType      String   @default("OWNED")
   ownerName          String   @default("—") // собственник / контрагент (ИП / ООО «Название»)
@@ -191,14 +201,20 @@ model Truck {
   carrier       Carrier  @relation(fields: [carrierId], references: [id])
   brand         String
   plate         String
-  vin           String
-  sts           String
+  // дефолты "" — для техники собственного парка АЭМЗ (единый справочник),
+  // где VIN/СТС не обязательны; формы привлечённого контура заполняют всегда
+  vin           String   @default("")
+  sts           String   @default("")
   techTill      String   @default("—") // техосмотр (диагностическая карта) до
-  owner         String
+  owner         String   @default("—")
   color         String   @default("—") // цвет кабины/тягача
   // принадлежность (Task 62): OWNED — собственный парк, HIRED — наёмный (ИП/ООО), LEASE — аренда/лизинг
   ownershipType String   @default("OWNED")
   leaseContract String   @default("—") // договор-основание (для аренды/лизинга)
+  // ——— справочник собственного парка АЭМЗ (единый справочник: одна таблица Truck) ———
+  isRepair      Boolean  @default(false) // в ремонте — недоступен для планирования
+  capacityT     Float? // грузоподъёмность, т
+  volumeM3      Float? // объём кузова, м³
   createdAt     DateTime @default(now())
   updatedAt     DateTime @default(now()) @updatedAt
 }
@@ -208,7 +224,9 @@ model Trailer {
   carrierId     String
   carrier       Carrier  @relation(fields: [carrierId], references: [id])
   plate         String
-  sts           String
+  // дефолт "" — для прицепов собственного парка АЭМЗ (единый справочник);
+  // формы привлечённого контура заполняют СТС всегда
+  sts           String   @default("")
   type          String
   techTill      String   @default("—") // техосмотр до
   color         String   @default("—") // цвет прицепа
@@ -216,6 +234,13 @@ model Trailer {
   // принадлежность (Task 62): OWNED — собственный парк, HIRED — наёмный (ИП/ООО), LEASE — аренда/лизинг
   ownershipType String   @default("OWNED")
   leaseContract String   @default("—") // договор-основание (для аренды/лизинга)
+  // ——— справочник собственного парка АЭМЗ (единый справочник: одна таблица Trailer) ———
+  brand          String   @default("") // марка прицепа
+  isRepair       Boolean  @default(false) // в ремонте — недоступен для планирования
+  volumeM3       Float? // объём, м³
+  sideLoadHeightM Float? // высота боковой загрузки, м
+  beltsCount     Int? // количество ремней
+  workingBoards   Boolean  @default(false) // рабочие борта
   createdAt     DateTime @default(now())
   updatedAt     DateTime @default(now()) @updatedAt
 }

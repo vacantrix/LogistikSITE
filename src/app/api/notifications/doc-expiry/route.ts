@@ -28,8 +28,10 @@ export async function POST() {
   }
 
   const [trucks, trailers] = await Promise.all([
-    db.truck.findMany({ select: { brand: true, plate: true, techTill: true, carrierId: true } }),
-    db.trailer.findMany({ select: { type: true, plate: true, techTill: true, carrierId: true } }),
+    // собственный парк АЭМЗ (ownFleet) не уведомляем — у него нет кабинета
+    // перевозчика; сроки документов парка видны в справочнике парка
+    db.truck.findMany({ where: { carrier: { ownFleet: false } }, select: { brand: true, plate: true, techTill: true, carrierId: true } }),
+    db.trailer.findMany({ where: { carrier: { ownFleet: false } }, select: { type: true, plate: true, techTill: true, carrierId: true } }),
   ])
 
   const bad = (date?: string | null) => {

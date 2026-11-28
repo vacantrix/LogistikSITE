@@ -127,9 +127,11 @@ log_step_end "bun install"
 
 log_step_start "bun run db:push"
 echo "[BUN] Setting up database..."
+# контурная часть общей базы: клиент диспетчерской + Dispatch*-таблицы.
+# Платформенный db:push таблиц контура не знает и удаляет их — поэтому:
+# сначала снимаем копию Dispatch*-данных, после пуша пересоздаём и возвращаем
+bash "$SCRIPT_DIR/kontur-db.sh" --backup
 bun run db:push
-# контурная часть общей базы: клиент диспетчерской + Dispatch*-таблицы
-# (платформенный db:push их не знает и удаляет — возвращаем сразу после пуша)
 bash "$SCRIPT_DIR/kontur-db.sh"
 log_step_end "bun run db:push"
 

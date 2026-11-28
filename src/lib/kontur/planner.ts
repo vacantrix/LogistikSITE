@@ -466,7 +466,7 @@ export function dealCandidates(deal: AtiDealDto, state: PlannerInput, now: Date 
     if (!veh) {
       // закреплённый занят/в ремонте — берём свободный тягач подходящей ёмкости
       const free = state.vehicles
-        .filter((v) => !v.isRepair && !busyVehicleIds.has(v.id) && v.ownership === 'own')
+        .filter((v) => !v.isRepair && !busyVehicleIds.has(v.id) && v.ownershipType === 'OWNED')
         .filter((v) => v.capacityT == null || v.capacityT >= weightT)
         .sort((a, b2) => (a.capacityT ?? 99) - (b2.capacityT ?? 99))[0]
       veh = free ?? null

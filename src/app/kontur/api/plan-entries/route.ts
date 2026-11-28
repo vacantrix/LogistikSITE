@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { getSessionUser, shortName } from '@/lib/kontur/auth'
 import { denyUnless } from '@/lib/kontur/access'
 
@@ -78,8 +79,7 @@ export async function POST(req: Request) {
       createdByName: shortName(user.fullName),
     },
   })
-  await db.auditLog.create({
-    data: {
+  await audit({
       actorRole: 'logist',
       actorName: shortName(user.fullName),
       object: 'plan_entry',
@@ -87,8 +87,7 @@ export async function POST(req: Request) {
       field: 'created',
       became: `${driver.fullName}: ${KIND_LABEL[finalKind]}${finalPoint ? ` · ${finalPoint}` : ''} на ${date}${time ? ` ${time}` : ''}`,
       comment: 'Ручной план в календаре «Планирования»',
-    },
-  })
+    })
 
   const when = time ? `${date} в ${time}` : `${date} (в течение дня)`
   return NextResponse.json({
@@ -129,8 +128,7 @@ export async function PUT(req: Request) {
       ? { closedAt: new Date(), closedByName: shortName(user.fullName) }
       : { closedAt: null, closedByName: null },
   })
-  await db.auditLog.create({
-    data: {
+  await audit({
       actorRole: 'logist',
       actorName: shortName(user.fullName),
       object: 'plan_entry',
@@ -139,8 +137,7 @@ export async function PUT(req: Request) {
       became: closing ? `закрыто: ${KIND_LABEL[entry.kind as Kind] ?? entry.kind} на ${entry.date}` : '',
       was: closing ? '' : `закрыто`,
       comment: closing ? 'Событие выполнено — снято с контроля просрочки' : 'Событие возвращено в план',
-    },
-  })
+    })
 
   return NextResponse.json({
     ok: true,
@@ -167,8 +164,7 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Запись не найдена' } }, { status: 404 })
   }
   await db.planEntry.delete({ where: { id } })
-  await db.auditLog.create({
-    data: {
+  await audit({
       actorRole: 'logist',
       actorName: shortName(user.fullName),
       object: 'plan_entry',
@@ -176,7 +172,6 @@ export async function DELETE(req: Request) {
       field: 'deleted',
       was: `${KIND_LABEL[entry.kind as Kind] ?? entry.kind} на ${entry.date}`,
       comment: 'Запись снята с плана',
-    },
-  })
+    })
   return NextResponse.json({ ok: true, message: 'Запись снята с плана' })
 }

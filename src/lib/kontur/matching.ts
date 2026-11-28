@@ -363,7 +363,7 @@ export async function buildMatchForOrder(orderId: string): Promise<MatchResult |
   const freeVehicles = vehicles
     .filter(
       (v) =>
-        v.ownership !== 'held' &&
+        v.ownershipType !== 'HIRED' &&
         !v.isRepair &&
         !busyVehicleIds.has(v.id) &&
         v.capacityT != null &&
@@ -372,7 +372,7 @@ export async function buildMatchForOrder(orderId: string): Promise<MatchResult |
     )
     .sort((a, b) => (a.capacityT ?? 0) - (b.capacityT ?? 0))
   const freeTrailers = trailers
-    .filter((t) => t.ownership !== 'held' && !t.isRepair && !busyTrailerIds.has(t.id) && docsState(parseRuDate(t.techTill), latestDocNeed).ok)
+    .filter((t) => t.ownershipType !== 'HIRED' && !t.isRepair && !busyTrailerIds.has(t.id) && docsState(parseRuDate(t.techTill), latestDocNeed).ok)
     .sort((a, b) => (a.type === 'шторный' ? 0 : 1) - (b.type === 'шторный' ? 0 : 1))
 
   const compCandidates: MatchCandidate[] = []

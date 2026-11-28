@@ -49,7 +49,9 @@ export async function GET() {
   if (auth instanceof NextResponse) return auth
 
   const carriers = await db.carrier.findMany({
-    where: isStaff(auth.role) ? {} : { id: auth.carrierId! },
+    // собственный парк АЭМЗ (ownFleet) — не контрагент площадки: в списке
+    // привлечённых перевозчиков его нет, справочник парка — отдельный контур
+    where: isStaff(auth.role) ? { ownFleet: false } : { id: auth.carrierId!, ownFleet: false },
     include: {
       drivers: { orderBy: { fullName: 'asc' } },
       trucks: { orderBy: { plate: 'asc' } },

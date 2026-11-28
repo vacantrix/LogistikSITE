@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { requireKonturPerm } from '@/lib/kontur/access'
 import { shortName } from '@/lib/kontur/auth'
 import {
@@ -109,8 +110,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       }),
     },
   })
-  await db.auditLog.create({
-    data: {
+  await audit({
       actorRole: auth.user.role === 'admin' ? 'admin' : 'logist',
       actorName: shortName(auth.user.fullName),
       object: 'leg',
@@ -123,8 +123,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
           ? `, ${Math.round(road.distanceM / 1000)} км (${source === 'yandex' ? 'геометрия Яндекса' : 'линия по точкам'})`
           : ', линия будет построена в приложении'
       }`,
-    },
-  })
+    })
 
   // Мост в приложение водителя (APK): обновляем активный рейс в журнале
   // синхронизации, чтобы маршрут пришёл мгновенно. Ошибка моста не отменяет
@@ -187,8 +186,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       payload: JSON.stringify({ legId: leg.id }),
     },
   })
-  await db.auditLog.create({
-    data: {
+  await audit({
       actorRole: auth.user.role === 'admin' ? 'admin' : 'logist',
       actorName: shortName(auth.user.fullName),
       object: 'leg',
@@ -197,8 +195,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       was: leg.routeLink ?? null,
       became: null,
       comment: 'Маршрут Яндекс.Карт удалён из плеча',
-    },
-  })
+    })
 
   // Пустая точка назначения в APK не нужна: оставляем прежнюю геометрию
   // до следующего назначения, чтобы навигация не пропала на ходу.

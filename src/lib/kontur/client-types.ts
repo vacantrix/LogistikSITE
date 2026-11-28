@@ -6,13 +6,13 @@ export type Driver = {
 }
 export type Vehicle = {
   id: string; brand: string; plate: string; capacityT?: number | null; volumeM3?: number | null
-  ownership?: string; isRepair: boolean
+  ownershipType?: string; isRepair: boolean
   vin?: string | null; sts?: string | null; techTill?: string | null
   createdAt?: string | null
 }
 export type Trailer = {
   id: string; brand: string; plate: string; type: string; volumeM3?: number | null
-  beltsCount?: number | null; workingBoards: boolean; ownership?: string
+  beltsCount?: number | null; workingBoards: boolean; ownershipType?: string
   sts?: string | null; techTill?: string | null; isRepair?: boolean
   createdAt?: string | null
 }

@@ -13,7 +13,8 @@
  *    зафиксирован внизу (position: fixed), виден поверх контента при скролле,
  *    до 5 иконок с подписями, лишние разделы — в меню «Ещё»;
  *  — учтены нижние безопасные зоны iOS/Android (env(safe-area-inset-bottom)).
- *  Десктоп: прежняя шапка с горизонтальным меню + колокольчик уведомлений (Task 69).
+ *  Десктоп: три колонки-меню в шапке — «Привлечённый», «Собственный» и «Функции»
+ *  (открываются наведением, плавно) + колокольчик уведомлений (Task 69).
  *
  *  Мультиаккаунт (Task 74): вместо отдельной кнопки «Выйти» — меню аккаунта:
  *  текущий пользователь, быстрое переключение на сохранённые в браузере аккаунты,
@@ -51,11 +52,13 @@ import { activateAccount, api, getSessionToken, listAccounts } from '@/lib/api'
  *  перевозчик/экспедитор (кабинет). Профиль и обращения — у всех ролей.
  *  Task 113: внутри разделов функции скрываются по гранулярным правам (useCan).
  *
- *  Двухуровневая навигация: group = attracted — верхний уровень «Привлечённый транспорт»,
- *  own — нижний уровень «Собственный транспорт», funcs — служебные функции платформы
- *  (ИИ-помощник, избранное, журнал событий и логи) в янтарной строке между ними,
- *  admin — служебное меню «Управление». Видимость каждого раздела дополнительно
- *  закрыта правом section:* (SECTION_PERM). */
+ *  Шапка — три колонки-меню (Task: «оптимизация места в шапке»):
+ *  group = attracted — «Привлечённый» (площадка, торги, сверка, реестры),
+ *  own — «Собственный» (заявки 1С, ATI.SU, планирование, мониторинг),
+ *  funcs — «Функции» (справочники, ИИ-помощник, избранное, журнал событий
+ *  и логи платформы — всё нетранспортное), admin — служебное меню «Управление».
+ *  Колонки открываются наведением (плавно), внутри — все разделы группы.
+ *  Видимость каждого раздела дополнительно закрыта правом section:* (SECTION_PERM). */
 type NavGroup = 'attracted' | 'own' | 'funcs' | 'admin'
 
 const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup; muted?: boolean }[] = [
@@ -68,7 +71,6 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup;
   { key: 'requests', label: 'Реестр заявок', roles: ['logist', 'admin'], group: 'attracted' },
   { key: 'registry', label: 'Реестр рейсов', roles: ['logist', 'admin'], group: 'attracted' },
   { key: 'edo', label: 'Подписать ЭДО', roles: ['logist', 'carrier', 'admin'], group: 'attracted', muted: true },
-  { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
   { key: 'reports', label: 'Отчёты', roles: ['logist', 'admin'], group: 'attracted' },
   { key: 'support', label: 'Обращения', roles: ['logist', 'carrier', 'admin'], group: 'attracted' },
   { key: 'contacts', label: 'Память контактов', roles: ['logist', 'admin'], group: 'attracted' },
@@ -80,8 +82,10 @@ const NAV_ALL: { key: TabKey; label: string; roles: RoleKind[]; group: NavGroup;
   { key: 'own-audit', label: 'Аудит контура', roles: ['admin'], group: 'own' },
   { key: 'driver-app', label: 'Приложение водителя', roles: ['admin'], group: 'own' },
 
-  // — «Функции» — янтарная строка между транспортными рядами: ИИ-помощник,
-  // избранное, журнал событий и логи платформы (не транспортные разделы) —
+  // — «Функции» — нетранспортные разделы платформы: единый справочник парка
+  // (привлечённый транспорт и собственный парк АЭМЗ), ИИ-помощник, избранное,
+  // журнал событий и логи платформы
+  { key: 'directory', label: 'Справочники', roles: ['logist', 'carrier', 'admin'], group: 'funcs' },
   { key: 'ai', label: 'ИИ-помощник', roles: ['logist', 'admin'], group: 'funcs' },
   { key: 'favorites', label: 'Избранное', roles: ['logist', 'admin'], group: 'funcs' },
   { key: 'journal', label: 'Журнал событий', roles: ['logist', 'admin'], group: 'funcs' },
@@ -151,6 +155,134 @@ const ROW_SHORT: Partial<Record<TabKey, string>> = {
 /** подпись кнопки в ряду шапки: короткая, если есть, иначе полная */
 function rowLabel(key: TabKey, label: string): string {
   return ROW_SHORT[key] ?? label
+}
+
+/** Названия колонок шапки: полные и компактные (на узких экранах) */
+const GROUP_LABEL: Record<NavGroup, { long: string; short: string }> = {
+  attracted: { long: 'Привлечённый транспорт', short: 'Привлечённый' },
+  own: { long: 'Собственный транспорт', short: 'Собственный' },
+  funcs: { long: 'Функции платформы', short: 'Функции' },
+  admin: { long: 'Управление', short: 'Управление' },
+}
+
+/** Цветовые акценты колонок шапки: точка-индикатор, текст триггера и активная подложка.
+ *  Ряды платформы читаются цветом: синий — привлечённый транспорт, зелёный —
+ *  собственный, янтарный — функции. */
+const GROUP_TONE: Record<'attracted' | 'own' | 'funcs', { dot: string; text: string; active: string }> = {
+  attracted: { dot: 'bg-blue-400', text: 'text-blue-100', active: 'bg-white/15 text-white' },
+  own: { dot: 'bg-emerald-400', text: 'text-emerald-100', active: 'bg-emerald-400/20 text-white' },
+  funcs: { dot: 'bg-amber-400', text: 'text-amber-100', active: 'bg-amber-400/20 text-white' },
+}
+
+/** Колонка шапки (десктоп): разделы одной группы в выпадающем меню.
+ *  Открывается наведением мыши с плавным появлением (opacity + сдвиг),
+ *  закрывается с небольшой задержкой — курсор успевает доехать до пунктов;
+ *  клик тоже переключает (тач-экраны), Escape закрывает (клавиатура).
+ *  Активный раздел группы показывается в самом триггере: видно, где находишься,
+ *  не открывая меню. */
+function HeaderMenu({ group, items, tab, onNavigate }: {
+  group: 'attracted' | 'own' | 'funcs'
+  items: { key: TabKey; label: string; muted?: boolean }[]
+  tab: TabKey
+  onNavigate: (t: TabKey) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const boxRef = useRef<HTMLDivElement | null>(null)
+  const clearTimers = () => {
+    if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null }
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
+  }
+  useEffect(() => clearTimers, [])
+
+  const openNow = () => { clearTimers(); setOpen(true) }
+  const scheduleOpen = () => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
+    if (open) return
+    openTimer.current = setTimeout(() => { openTimer.current = null; setOpen(true) }, 80)
+  }
+  const scheduleClose = () => {
+    if (openTimer.current) { clearTimeout(openTimer.current); openTimer.current = null }
+    closeTimer.current = setTimeout(() => { closeTimer.current = null; setOpen(false) }, 180)
+  }
+
+  const tone = GROUP_TONE[group]
+  const label = GROUP_LABEL[group]
+  const activeItem = items.find((n) => n.key === tab) ?? null
+
+  return (
+    <div
+      ref={boxRef}
+      className="relative"
+      onMouseEnter={scheduleOpen}
+      onMouseLeave={scheduleClose}
+      onFocus={scheduleOpen}
+      onBlur={(e) => {
+        // фокус ушёл из колонки целиком (триггер и пункты) — закрываем
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) scheduleClose()
+      }}
+    >
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => (open ? scheduleClose() : openNow())}
+        onKeyDown={(e) => { if (e.key === 'Escape') { clearTimers(); setOpen(false) } }}
+        title={label.long}
+        className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-[13px] transition-colors ${
+          activeItem ? tone.active : `${tone.text} hover:bg-white/10 hover:text-white`
+        }`}
+      >
+        <span className={`h-1.5 w-1.5 rounded-full ${tone.dot} ${activeItem ? '' : 'opacity-60'}`} aria-hidden />
+        <span className="hidden xl:inline">{label.short === 'Управление' ? label.long : label.short}</span>
+        <span className="xl:hidden">{label.short}</span>
+        {activeItem && (
+          <span className="hidden items-center gap-1 text-white/70 lg:inline-flex">
+            ·
+            <span className="font-medium text-white">{rowLabel(activeItem.key, activeItem.label)}</span>
+          </span>
+        )}
+        <ChevronDown
+          className={`h-3.5 w-3.5 opacity-70 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+          aria-hidden
+        />
+      </button>
+      {/* плавное раскрытие: панель всегда в доме, анимация opacity + сдвига */}
+      <div
+        role="menu"
+        aria-label={label.long}
+        className={`absolute left-0 top-full z-50 min-w-[290px] pt-1.5 transition-all duration-200 ease-out ${
+          open ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0'
+        }`}
+      >
+        <div className="max-h-[min(24rem,calc(100vh-11rem))] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl shadow-slate-900/20">
+          {items.map((n) => {
+            const { Icon } = TAB_ICONS[n.key]
+            const active = tab === n.key
+            return (
+              <button
+                key={n.key}
+                type="button"
+                role="menuitem"
+                onClick={() => { clearTimers(); setOpen(false); onNavigate(n.key) }}
+                aria-current={active ? 'page' : undefined}
+                title={n.muted ? `${n.label} — в подготовке` : n.label}
+                className={`flex min-h-[40px] w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors ${
+                  active ? 'bg-slate-100 font-semibold text-slate-900' : n.muted ? 'text-slate-400 hover:bg-slate-50' : 'text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="flex-1">{n.label}</span>
+                {n.muted && !active && <span className="text-[11px] font-normal text-slate-400">в подготовке</span>}
+                {active && <span className={`h-2 w-2 shrink-0 rounded-full ${tone.dot}`} aria-hidden />}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 /** Разделы, закрытые правом: без права раздел не показывается в меню и не открывается.
@@ -743,8 +875,8 @@ function SideMenuSheet({ nav, tab, onNavigate }: {
   const hasAi = nav.some((n) => n.key === 'ai')
   const groups: { title: string; items: { key: TabKey; label: string; muted?: boolean }[] }[] = [
     { title: 'Привлечённый транспорт', items: nav.filter((n) => n.group === 'attracted') },
-    { title: 'Функции', items: nav.filter((n) => n.group === 'funcs' && n.key !== 'ai') },
     { title: 'Собственный транспорт', items: nav.filter((n) => n.group === 'own') },
+    { title: 'Функции платформы', items: nav.filter((n) => n.group === 'funcs' && n.key !== 'ai') },
     { title: 'Управление', items: nav.filter((n) => n.group === 'admin') },
   ].filter((g) => g.items.length > 0)
   return (
@@ -852,18 +984,19 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
   const nav = navFor(role.kind).filter((n) => sectionAllowed(n.key, can))
   const attractedNav = nav.filter((n) => n.group === 'attracted')
   const ownNav = nav.filter((n) => n.group === 'own')
-  // ИИ-помощник, «Избранное», «Журнал событий» и «Логи» — не транспортные разделы:
-  // на десктопе выносим их в янтарную полосу «Функции» между двумя рядами навигации.
+  // «Функции» — нетранспортные разделы (единый справочник парка, ИИ-помощник,
+  // избранное, журнал событий, логи): колонка в шапке рядом с транспортными.
+  // Справочник парка есть и у перевозчика — колонка «Функции» ему тоже положена
   const funcsNav = nav.filter((n) => n.group === 'funcs')
   const ownTransportNav = ownNav
   const adminNav = nav.filter((n) => n.group === 'admin')
   const internal = role.kind !== 'carrier'
-  // у внутреннего контура верхняя строка — привлечённый транспорт, нижняя — собственный
-  // плюс функции (ИИ, журналы); у перевозчика собственного транспорта нет, поэтому
-  // нижняя панель — его разделы
-  const mobileBottomNav = internal && (ownNav.length > 0 || funcsNav.length > 0)
+  // у внутреннего контура верхняя строка — привлечённый транспорт, нижняя панель —
+  // собственный транспорт и функции; у перевозчика собственного транспорта нет,
+  // поэтому нижняя панель — его разделы (привлечённые + справочник из «Функций»)
+  const mobileBottomNav = internal
     ? [...ownNav, ...funcsNav]
-    : attractedNav
+    : [...attractedNav, ...funcsNav]
   // проформа для плашки аккаунта: ФИО, должность, организация (Task 111)
   const [profile, setProfile] = useState<ProfileDTO | null>(null)
   useEffect(() => {
@@ -890,8 +1023,9 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
-  // высота шапки — для sticky-шапок таблиц (реестры): меню разделов может переноситься
-  // на вторую строку (12 разделов у администратора), тогда офсет растёт вместе с шапкой
+  // высота шапки — для sticky-шапок таблиц (реестры): меню разделов больше не
+  // переносится на вторую строку (три колонки), но офсет остаётся — шапка растёт
+  // вместе с содержимым
   const headerRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
     const el = headerRef.current
@@ -976,96 +1110,24 @@ export function Shell({ tab, onNavigate, role, user, onLogout, onAddAccount, liv
             />
           </div>
         </div>
-        <nav aria-label="Привлечённый транспорт" className="hidden border-t border-white/10 md:block">
-          {/* Верхний уровень: всё, что относится к привлечённому транспорту.
-              Служебные разделы администрации — в меню «Управление», чтобы не занимать строку.
-              Кнопки компактные — чтобы весь ряд помещался без переноса. */}
-          <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
-            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-blue-300/70" aria-hidden>
-              <span className="hidden 2xl:inline">Привлечённый транспорт</span>
-              <span className="2xl:hidden">Привлечённый</span>
-            </span>
-            {attractedNav.map((item) => (
-              <button
-                key={item.key}
-                onClick={() => onNavigate(item.key)}
-                aria-current={tab === item.key ? 'page' : undefined}
-                className={`whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors ${
-                  tab === item.key
-                    ? 'bg-white font-semibold text-[#0E1B2C]'
-                    : item.muted
-                      ? 'text-blue-200/45 hover:bg-white/5 hover:text-blue-100'
-                      : 'text-blue-100 hover:bg-white/10 hover:text-white'
-                }`}
-                title={item.muted ? `${item.label} — в подготовке` : item.label}
-              >
-                {rowLabel(item.key, item.label)}
-              </button>
-            ))}
+        {/* Десктопная навигация — три колонки-меню (Task «оптимизация места в шапке»):
+            «Привлечённый», «Собственный» и «Функции». Колонка открывается наведением
+            (плавно), внутри — все разделы группы с иконками; активный раздел виден
+            прямо в триггере. Меню администрации — справа, как прежде. */}
+        <nav aria-label="Разделы платформы" className="hidden border-t border-white/10 md:block">
+          <div className="flex w-full items-center gap-1 px-2 py-1 sm:px-4">
+            {attractedNav.length > 0 && (
+              <HeaderMenu group="attracted" items={attractedNav} tab={tab} onNavigate={onNavigate} />
+            )}
+            {ownTransportNav.length > 0 && (
+              <HeaderMenu group="own" items={ownTransportNav} tab={tab} onNavigate={onNavigate} />
+            )}
+            {funcsNav.length > 0 && (
+              <HeaderMenu group="funcs" items={funcsNav} tab={tab} onNavigate={onNavigate} />
+            )}
             {isAdmin && <div className="ml-auto"><AdminMenu nav={adminNav} tab={tab} onNavigate={onNavigate} /></div>}
           </div>
         </nav>
-        {/* «Функции» — у левого края между привлечённым и собственным транспортом:
-            янтарная полоса платформенных функций. Ряды платформы читаются цветом —
-            синий привлечённый транспорт, янтарный функции, зелёный собственный; кнопки
-            плоские в общем стиле рядов, у каждой короткий тултип. */}
-        {internal && funcsNav.length > 0 && (
-          <nav aria-label="Функции" className="hidden border-t border-amber-400/25 bg-amber-400/10 md:block">
-            <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
-              <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-300/80" aria-hidden>
-                Функции
-              </span>
-              {funcsNav.map((item) => {
-                const { Icon } = TAB_ICONS[item.key]
-                const active = tab === item.key
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => onNavigate(item.key)}
-                    aria-current={active ? 'page' : undefined}
-                    className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-all duration-200 active:scale-95 ${
-                      active
-                        ? 'bg-amber-400 font-semibold text-[#0E1B2C]'
-                        : 'text-amber-100 hover:bg-amber-400/15 hover:text-white'
-                    }`}
-                    title={item.label}
-                  >
-                    <Icon className="h-3.5 w-3.5" aria-hidden />
-                    {item.label}
-                  </button>
-                )
-              })}
-            </div>
-          </nav>
-        )}
-        {internal && ownTransportNav.length > 0 && (
-          <nav aria-label="Собственный транспорт" className="hidden border-t border-white/10 md:block">
-            {/* Нижний уровень: собственный парк АЭМЗ — заявки 1С, ATI.SU, занятость,
-                планирование, мониторинг и справочники парка. Кнопки компактные — как в верхнем ряду. */}
-            <div className="flex w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:px-6">
-              <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/80" aria-hidden>
-                <span className="hidden 2xl:inline">Собственный транспорт</span>
-                <span className="2xl:hidden">Собственный</span>
-              </span>
-              {ownTransportNav.map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => onNavigate(item.key)}
-                  aria-current={tab === item.key ? 'page' : undefined}
-                  className={`whitespace-nowrap rounded-md px-2 py-1.5 text-[13px] transition-colors ${
-                    tab === item.key
-                      ? 'bg-emerald-400 font-semibold text-[#0E1B2C]'
-                      : 'text-emerald-100 hover:bg-emerald-400/10 hover:text-white'
-                  }`}
-                  title={item.muted ? `${item.label} — в подготовке` : item.label}
-                >
-                  {rowLabel(item.key, item.label)}
-                </button>
-              ))}
-            </div>
-          </nav>
-        )}
       </header>
 
       {/* Боковое меню (открывается справа по клику): все разделы + ИИ-помощник */}

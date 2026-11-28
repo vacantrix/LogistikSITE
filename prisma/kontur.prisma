@@ -1,9 +1,18 @@
 // Прототип правил B5 (ТЗ v5.0) — подмножество модели B4.
 // Продакшн-схема (PostgreSQL/Flyway, все 25 таблиц B4) — в этапе 2, db/migration.
 //
-// С этапа объединения баз таблицы диспетчерской живут в общей базе платформы
-// (combat.db) с префиксом Dispatch: платформенные User/Driver/Trailer и
-// диспетчерские DispatchUser/DispatchDriver/DispatchTrailer не пересекаются.
+// ЕДИНЫЙ СПРАВОЧНИК ПАРКА (одна база — одна таблица на сущность):
+// водители/тягачи/прицепы собственного парка АЭМЗ живут в платформенных таблицах
+// Driver/Truck/Trailer (у Carrier-«АЭМЗ» с ownFleet=true); этот клиент маппит
+// свои модели на те же таблицы (имя модели — привычное контуру: vehicle → таблица
+// Truck) и видит ТОЛЬКО собственный парк — скоуп carrierId зашит в клиенте
+// (src/lib/kontur/db.ts, $extends). Прежние таблицы DispatchDriver/DispatchVehicle/
+// DispatchTrailer — архив: данные переехали с сохранением id, ссылки рейсов,
+// планов и закреплений не менялись.
+//
+// Учётные записи контура — тоже платформенные (таблица User платформы):
+// отдельного DispatchUser-зеркала больше нет — сессия контура подхватывает
+// платформенную. Журнал аудита — единый PlatformLog (contour = dispatcher).
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/kontur-client"
@@ -14,61 +23,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Пользователи кабинета (ролевая система по мотивам LogistikSITE, адаптирована:
-// на контуре — логисты и администрация). Пароли — демо-контур, sha256.
-model User {
-  id           String   @id @default(uuid())
-  login        String   @unique
-  fullName     String
-  position     String
-  role         String // logist | admin
-  phone        String?
-  email        String?
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  @@map("DispatchUser")
-}
-
-// B4.2 — штатный водитель АЭМЗ. Поля справочника (паспорт, ВУ) — для контроля
-// сроков документов в разделе «Справочники» (стиль LogistikSITE, адаптация).
+// B4.2 — штатный водитель АЭМЗ. Единый справочник водителей (таблица Driver
+// платформы): контур видит только собственный парк (скоуп carrierId в db.ts),
+// поля — подмножество платформенной таблицы + поля парка (licenseUntil, status).
 model Driver {
   id            String   @id @default(uuid())
+  carrierId     String
   fullName      String
   phone         String
-  birthDate     String? // ДД.ММ.ГГГГ
-  passport      String? // серия и номер
+  birthDate     String?
+  passport      String?
   licenseUntil  String? // ВУ действительно до, ДД.ММ.ГГГГ
   status        String   @default("active") // active/vacation/sick/other
   statusComment String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  @@map("DispatchDriver")
+  @@map("Driver")
 }
 
-// B4.3 — транспорт принадлежит АЭМЗ: ownership "own" = собственный ТС (логистический
-// контур — назначение только из своего парка, привлечённый транспорт не используется)
+// B4.3 — транспорт принадлежит АЭМЗ: тягачи собственного парка. Единый
+// справочник техники (таблица Truck платформы), скоуп — carrierId парка;
+// ownershipType — общий словарь платформы: OWNED / HIRED / LEASE.
 model Vehicle {
-  id        String   @id @default(uuid())
-  brand     String
-  plate     String   @unique
-  vin       String?
-  sts       String? // СТС: серия и номер
-  techTill  String? // техосмотр до, ДД.ММ.ГГГГ
-  capacityT Float?
-  volumeM3  Float?
-  ownership String   @default("own") // own = собственный ТС АЭМЗ
-  isRepair  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  @@map("DispatchVehicle")
+  id            String   @id @default(uuid())
+  carrierId     String
+  brand         String
+  plate         String
+  vin           String?
+  sts           String? // СТС: серия и номер
+  techTill      String? // техосмотр до, ДД.ММ.ГГГГ
+  capacityT     Float?
+  volumeM3      Float?
+  ownershipType String   @default("OWNED") // OWNED = собственный ТС АЭМЗ
+  isRepair      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  @@map("Truck")
 }
 
-// B4.4 — прицепы также из собственного парка АЭМЗ
+// B4.4 — прицепы собственного парка АЭМЗ. Единый справочник (таблица Trailer
+// платформы), скоуп — carrierId парка; ownershipType — общий словарь платформы.
 model Trailer {
   id              String   @id @default(uuid())
+  carrierId       String
   brand           String
-  plate           String   @unique
+  plate           String
   type            String
   sts             String? // СТС: серия и номер
   techTill        String? // техосмотр до, ДД.ММ.ГГГГ
@@ -76,11 +75,11 @@ model Trailer {
   sideLoadHeightM Float?
   beltsCount      Int?
   workingBoards   Boolean  @default(false)
-  ownership       String   @default("own") // own = собственный прицеп АЭМЗ
+  ownershipType   String   @default("OWNED")
   isRepair        Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  @@map("DispatchTrailer")
+  @@map("Trailer")
 }
 
 // B4.5
@@ -409,17 +408,7 @@ model PlanEntry {
   @@map("DispatchPlanEntry")
 }
 
-// B4.24
-model AuditLog {
-  id        String   @id @default(uuid())
-  actorRole String // driver/logist/admin/system
-  actorName String?
-  object    String
-  objectId  String
-  field     String?
-  was       String?
-  became    String?
-  comment   String?
-  at        DateTime @default(now())
-  @@map("DispatchAuditLog")
-}
+// B4.24 — журнал аудита диспетчерской. Модель удалена: все действия контура
+// пишутся напрямую в единый журнал платформы PlatformLog (contour = dispatcher)
+// через src/lib/kontur/audit.ts. DispatchAuditLog — архивная таблица (данные
+// перенесены в PlatformLog идемпотентной миграцией data-fixes).

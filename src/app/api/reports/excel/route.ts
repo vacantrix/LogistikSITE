@@ -97,10 +97,10 @@ export async function GET(request: NextRequest) {
       },
       orderBy: { createdAt: 'asc' },
     }),
-    db.carrier.findMany({ orderBy: { name: 'asc' } }),
-    db.driver.findMany({ include: { carrier: { select: { name: true } } }, orderBy: { fullName: 'asc' } }),
-    db.truck.findMany({ include: { carrier: { select: { name: true } } }, orderBy: { plate: 'asc' } }),
-    db.trailer.findMany({ include: { carrier: { select: { name: true } } }, orderBy: { plate: 'asc' } }),
+    db.carrier.findMany({ where: { ownFleet: false }, orderBy: { name: 'asc' } }),
+    db.driver.findMany({ where: { carrier: { ownFleet: false } }, include: { carrier: { select: { name: true } } }, orderBy: { fullName: 'asc' } }),
+    db.truck.findMany({ where: { carrier: { ownFleet: false } }, include: { carrier: { select: { name: true } } }, orderBy: { plate: 'asc' } }),
+    db.trailer.findMany({ where: { carrier: { ownFleet: false } }, include: { carrier: { select: { name: true } } }, orderBy: { plate: 'asc' } }),
   ])
 
   const driverMap = new Map(drivers.map((d) => [d.id, d]))

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { getSessionUser, shortName } from '@/lib/kontur/auth'
 import { denyUnless } from '@/lib/kontur/access'
 
@@ -81,8 +82,7 @@ export async function POST(req: Request) {
       create: { driverId, vehicleId, trailerId: trailerId ?? null },
       update: { vehicleId, trailerId: trailerId ?? null },
     })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist',
         actorName: shortName(user.fullName),
         object: 'vehicle_binding',
@@ -90,8 +90,7 @@ export async function POST(req: Request) {
         field: 'pinned',
         became: `${driver.fullName}: ${vehicle.brand} (${vehicle.plate})${trailer ? ` + прицеп ${trailer.plate}` : ' (без прицепа)'}`,
         comment: 'Закрепление состава за водителем',
-      },
-    })
+      })
     return NextResponse.json({
       ok: true,
       binding,
@@ -110,16 +109,14 @@ export async function POST(req: Request) {
     }
     const driver = await db.driver.findUnique({ where: { id: driverId } })
     await db.vehicleBinding.delete({ where: { driverId } })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist',
         actorName: shortName(user.fullName),
         object: 'vehicle_binding',
         objectId: existing.id,
         field: 'unpinned',
         comment: `Открепление состава${driver ? `: ${driver.fullName}` : ''}`,
-      },
-    })
+      })
     return NextResponse.json({ ok: true })
   }
 

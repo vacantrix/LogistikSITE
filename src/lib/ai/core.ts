@@ -130,7 +130,7 @@ async function platformDataContext(mode: AiRightMode): Promise<{ text: string; s
   const full = mode === 'write'
   const [carriers, requests] = await Promise.all([
     db.carrier.findMany({
-      where: { access: true },
+      where: { access: true, ownFleet: false },
       include: { _count: { select: { drivers: true, trucks: true, trailers: true } } },
       orderBy: { name: 'asc' },
     }),

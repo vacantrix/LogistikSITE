@@ -1040,7 +1040,7 @@ export function RequestsPanel({ state, onChanged, query = '', focusTrip, onFocus
               <Select value={planVehicle} onValueChange={setPlanVehicle}>
                 <SelectTrigger><SelectValue placeholder="Выберите ТС" /></SelectTrigger>
                 <SelectContent>
-                  {state.vehicles.filter((v) => v.ownership !== 'held').map((v) => {
+                  {state.vehicles.filter((v) => v.ownershipType !== 'HIRED').map((v) => {
                     const busyV = state.trips.some((t) => t.status === 'active' && t.vehicleId === v.id) || v.isRepair
                     return (
                       <SelectItem key={v.id} value={v.id} disabled={busyV}>

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { recomputeDocs } from '@/lib/kontur/engine'
 
 export const dynamic = 'force-dynamic'
@@ -15,12 +16,10 @@ export async function POST(req: Request) {
       const file = await db.fileRec.findUnique({ where: { clientId } })
       if (!file || file.state === 'confirmed') continue
       await db.fileRec.update({ where: { clientId }, data: { state: 'confirmed' } })
-      await db.auditLog.create({
-        data: {
+      await audit({
           actorRole: 'driver', actorName: file.eventClientId || undefined,
           object: 'file', objectId: file.id, field: 'state', was: file.state, became: 'confirmed',
-        },
-      })
+        })
       await recomputeDocs(file.ownerId)
     }
     return NextResponse.json({ ok: true, confirmed: clientIds.length })
@@ -33,9 +32,7 @@ export async function POST(req: Request) {
     await db.fileRec.update({ where: { clientId }, data: { state: 'lost' } })
     await recomputeDocs(file.ownerId)
     // B5.4: docs_lost -> немедленный красный бейдж
-    await db.auditLog.create({
-      data: { actorRole: 'system', object: 'file', objectId: file.id, field: 'state', was: file.state, became: 'lost' },
-    })
+    await audit({ actorRole: 'system', object: 'file', objectId: file.id, field: 'state', was: file.state, became: 'lost' })
     return NextResponse.json({ ok: true })
   }
 

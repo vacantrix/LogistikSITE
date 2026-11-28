@@ -527,7 +527,7 @@ export async function buildVehicleHint(input: VehicleHintInput): Promise<Vehicle
 
   // ——— 2) свободные машины на базе: водитель без рейса + закреплённая машина ———
   const freeVehicles = vehicles
-    .filter((v) => v.ownership !== 'held' && !v.isRepair && !busyVehicleIds.has(v.id))
+    .filter((v) => v.ownershipType !== 'HIRED' && !v.isRepair && !busyVehicleIds.has(v.id))
     .sort((a, b) => (a.capacityT ?? 99) - (b.capacityT ?? 99))
   const availVehicles = [...freeVehicles]
   let freeOnBase = 0

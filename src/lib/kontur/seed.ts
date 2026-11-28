@@ -2,11 +2,13 @@
 // 150 водителей, 160 тягачей, 140 прицепов (300 единиц техники), 30 заявок во
 // всех стадиях жизненного цикла (новые, к планированию, запланированные,
 // в рейсе, выполненные, карантин) и 14 рейсов (активные + завершённые).
-// Парк — собственный АЭМЗ (ownership "own"); назначение — из своего парка.
+// Парк — собственный АЭМЗ: справочники единые с платформой (таблицы
+// Driver/Truck/Trailer, служебный перевозчик-«АЭМЗ» с ownFleet = true, скоуп
+// зашит в клиенте контура); назначение — из своего парка.
 // Поля справочника (паспорт, ВУ, VIN, СТС, техосмотр) — с реалистичным
 // распределением сроков: часть истекла, часть истекает (контроль в «Справочниках»).
-import { db } from '@/lib/kontur/db'
-import { hashPassword, DEMO_PASSWORD } from '@/lib/kontur/auth'
+import { db, ensureOwnFleetCarrier, OWN_CARRIER_ID } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import type { Prisma } from '@/generated/kontur-client'
 
 function minutesAgo(min: number): Date {
@@ -82,42 +84,14 @@ const nextSts = (): string => {
   return `23 ${pad2(int(1, 49))} ${c}`
 }
 
-/** Гарантирует наличие учётных записей контура (дёшево: один count при уже засеянной базе) */
-export async function ensureUsers(): Promise<void> {
-  if (await db.user.count()) return
-  const passHash = hashPassword(DEMO_PASSWORD)
-  await db.user.upsert({
-    where: { login: 'admin' },
-    update: {},
-    create: {
-      login: 'admin', fullName: 'Кузьмина Ирина Валерьевна', position: 'Администратор системы', role: 'admin',
-      phone: '+7 861 17 02 11', email: 'kuzmina@aemz.ru', passwordHash: passHash,
-    },
-  })
-  await db.user.upsert({
-    where: { login: 'logist1' },
-    update: {},
-    create: {
-      login: 'logist1', fullName: 'Ефремов Павел Николаевич', position: 'Ведущий специалист по логистике', role: 'logist',
-      phone: '+7 861 17 02 21', email: 'efremov@aemz.ru', passwordHash: passHash,
-    },
-  })
-  await db.user.upsert({
-    where: { login: 'logist2' },
-    update: {},
-    create: {
-      login: 'logist2', fullName: 'Тарасова Марина Львовна', position: 'Специалист по логистике', role: 'logist',
-      phone: '+7 861 17 02 22', email: 'tarasova@aemz.ru', passwordHash: passHash,
-    },
-  })
-}
-
 export async function seedDemo() {
+  // собственный парк АЭМЗ живёт в общих таблицах Driver/Truck/Trailer —
+  // сначала служебный перевозчик-«АЭМЗ» (ownFleet), к которому крепится парк
+  await ensureOwnFleetCarrier()
   await db.statusEvent.deleteMany()
   await db.tripEvent.deleteMany()
   await db.fileRec.deleteMany()
   await db.outbox1c.deleteMany()
-  await db.auditLog.deleteMany()
   await db.leg.deleteMany()
   await db.trip.deleteMany()
   await db.order.deleteMany()
@@ -126,33 +100,9 @@ export async function seedDemo() {
   await db.driver.deleteMany()
   await db.vehicle.deleteMany()
   await db.trailer.deleteMany()
-
-  // --- Пользователи кабинета (логисты + администрация) ---
-  const passHash = hashPassword(DEMO_PASSWORD)
-  await db.user.upsert({
-    where: { login: 'admin' },
-    update: { fullName: 'Кузьмина Ирина Валерьевна', position: 'Администратор системы', role: 'admin', passwordHash: passHash },
-    create: {
-      login: 'admin', fullName: 'Кузьмина Ирина Валерьевна', position: 'Администратор системы', role: 'admin',
-      phone: '+7 861 17 02 11', email: 'kuzmina@aemz.ru', passwordHash: passHash,
-    },
-  })
-  await db.user.upsert({
-    where: { login: 'logist1' },
-    update: { fullName: 'Ефремов Павел Николаевич', position: 'Ведущий специалист по логистике', role: 'logist', passwordHash: passHash },
-    create: {
-      login: 'logist1', fullName: 'Ефремов Павел Николаевич', position: 'Ведущий специалист по логистике', role: 'logist',
-      phone: '+7 861 17 02 21', email: 'efremov@aemz.ru', passwordHash: passHash,
-    },
-  })
-  await db.user.upsert({
-    where: { login: 'logist2' },
-    update: { fullName: 'Тарасова Марина Львовна', position: 'Специалист по логистике', role: 'logist', passwordHash: passHash },
-    create: {
-      login: 'logist2', fullName: 'Тарасова Марина Львовна', position: 'Специалист по логистике', role: 'logist',
-      phone: '+7 861 17 02 22', email: 'tarasova@aemz.ru', passwordHash: passHash,
-    },
-  })
+  // — учётные записи контура (DispatchUser) удалены вместе с таблицей:
+  // сессия контура работает от учётных записей платформы (auth.ts); демо-парк
+  // засевается без собственного списка пользователей.
 
   // --- Справочники (масштаб реального парка: 150 водителей, 160 тягачей, 140 прицепов) ---
   // Первые записи — «герои демо»: на них назначены рейсы и устройства,
@@ -166,19 +116,20 @@ export async function seedDemo() {
     { fullName: 'Зайцев Николай Фёдорович', phone: '+79181234506', status: 'active', birthDate: '22.01.1980', passport: '23 12 678901', licenseUntil: dateStr(600), createdAt: daysAgo(17) },
   ]
   const drivers = await Promise.all(
-    CORE_DRIVERS.map((d) => db.driver.create({ data: d })),
+    // carrierId парка: дубль на случай прямых вызовов (скоуп клиента тоже подставляет)
+    CORE_DRIVERS.map((d) => db.driver.create({ data: { carrierId: OWN_CARRIER_ID, ...d } })),
   )
 
   const plateTaken = new Set<string>()
   const nextPlate = makePlateFactory(plateTaken)
   const CORE_VEHICLES = [
-    { brand: 'КАМАЗ 6520', plate: 'АЕ 12345 23', capacityT: 20, volumeM3: 86, ownership: 'own', vin: makeVin('КАМАЗ 6520'), sts: nextSts(), techTill: dateStr(210), createdAt: daysAgo(4) },
-    { brand: 'Scania R450', plate: 'АЕ 23456 23', capacityT: 22, volumeM3: 92, ownership: 'own', vin: makeVin('Scania R450'), sts: nextSts(), techTill: dateStr(-9), createdAt: daysAgo(7) },
-    { brand: 'MAN TGS 33.400', plate: 'АЕ 34567 23', capacityT: 20, volumeM3: 88, ownership: 'own', vin: makeVin('MAN TGS 33.400'), sts: nextSts(), techTill: dateStr(18), createdAt: daysAgo(9) },
-    { brand: 'Volvo FH 460', plate: 'АЕ 45678 23', capacityT: 21, volumeM3: 90, ownership: 'own', isRepair: true, vin: makeVin('Volvo FH 460'), sts: nextSts(), techTill: dateStr(64), createdAt: daysAgo(12) },
+    { brand: 'КАМАЗ 6520', plate: 'АЕ 12345 23', capacityT: 20, volumeM3: 86, ownershipType: 'OWNED', vin: makeVin('КАМАЗ 6520'), sts: nextSts(), techTill: dateStr(210), createdAt: daysAgo(4) },
+    { brand: 'Scania R450', plate: 'АЕ 23456 23', capacityT: 22, volumeM3: 92, ownershipType: 'OWNED', vin: makeVin('Scania R450'), sts: nextSts(), techTill: dateStr(-9), createdAt: daysAgo(7) },
+    { brand: 'MAN TGS 33.400', plate: 'АЕ 34567 23', capacityT: 20, volumeM3: 88, ownershipType: 'OWNED', vin: makeVin('MAN TGS 33.400'), sts: nextSts(), techTill: dateStr(18), createdAt: daysAgo(9) },
+    { brand: 'Volvo FH 460', plate: 'АЕ 45678 23', capacityT: 21, volumeM3: 90, ownershipType: 'OWNED', isRepair: true, vin: makeVin('Volvo FH 460'), sts: nextSts(), techTill: dateStr(64), createdAt: daysAgo(12) },
   ]
   const vehicles = await Promise.all(
-    CORE_VEHICLES.map((v) => db.vehicle.create({ data: v })),
+    CORE_VEHICLES.map((v) => db.vehicle.create({ data: { carrierId: OWN_CARRIER_ID, ...v } })),
   )
   CORE_VEHICLES.forEach((v) => plateTaken.add(v.plate))
 
@@ -188,7 +139,7 @@ export async function seedDemo() {
     { brand: 'СЗАП 9327', plate: 'АК 33334 23', type: 'бортовой', volumeM3: 60, sideLoadHeightM: 1.4, beltsCount: 8, workingBoards: false, sts: nextSts(), techTill: dateStr(45), createdAt: daysAgo(13) },
   ]
   const trailers = await Promise.all(
-    CORE_TRAILERS.map((t) => db.trailer.create({ data: t })),
+    CORE_TRAILERS.map((t) => db.trailer.create({ data: { carrierId: OWN_CARRIER_ID, ...t } })),
   )
   CORE_TRAILERS.forEach((t) => plateTaken.add(t.plate))
 
@@ -214,6 +165,7 @@ export async function seedDemo() {
     const statusRoll = rnd()
     const status = statusRoll < 0.06 ? 'vacation' : statusRoll < 0.09 ? 'sick' : statusRoll < 0.11 ? 'other' : 'active'
     driverRows.push({
+      carrierId: OWN_CARRIER_ID,
       fullName,
       phone: `+7${pick(['918', '961', '962', '988', '999'])}${String(int(1000000, 9999999))}`,
       birthDate: dateStr(-int(7500, 20000)),
@@ -234,6 +186,7 @@ export async function seedDemo() {
     const techTill = i === 0 ? dateStr(-int(5, 30)) : i === 1 ? dateStr(-int(2, 60))
       : i < 4 ? dateStr(int(5, 28)) : roll < 0.06 ? dateStr(int(31, 88)) : dateStr(int(120, 420))
     vehicleRows.push({
+      carrierId: OWN_CARRIER_ID,
       brand,
       plate: nextPlate(),
       vin: makeVin(brand),
@@ -241,7 +194,7 @@ export async function seedDemo() {
       techTill,
       capacityT: int(18, 25),
       volumeM3: int(80, 96),
-      ownership: 'own',
+      ownershipType: 'OWNED',
       isRepair: rnd() < 0.05,
       createdAt: daysAgo(int(2, 180)),
     })
@@ -256,6 +209,7 @@ export async function seedDemo() {
     const techTill = i === 0 ? dateStr(-int(4, 40)) : i === 1 ? dateStr(int(6, 25))
       : roll < 0.06 ? dateStr(int(31, 88)) : dateStr(int(120, 420))
     trailerRows.push({
+      carrierId: OWN_CARRIER_ID,
       brand: pick(TRAILER_BRANDS),
       plate: nextPlate(),
       type,
@@ -264,7 +218,7 @@ export async function seedDemo() {
       volumeM3: type === 'шторный' ? int(86, 96) : type === 'бортовой' ? int(45, 62) : type === 'рефрижераторный' ? int(78, 92) : null,
       beltsCount: int(6, 12),
       workingBoards: type === 'бортовой' ? rnd() < 0.8 : rnd() < 0.2,
-      ownership: 'own',
+      ownershipType: 'OWNED',
       isRepair: rnd() < 0.04,
       createdAt: daysAgo(int(2, 180)),
     })
@@ -526,9 +480,7 @@ export async function seedDemo() {
   let genTrips = 0
 
   const assignAudit = (tripId: string, driverName: string) =>
-    db.auditLog.create({
-      data: { actorRole: 'logist', actorName: 'Ефремов П.Н.', object: 'trip', objectId: tripId, field: 'assigned', became: driverName, comment: 'Назначение состава из собственного парка АЭМЗ' },
-    })
+    audit({ actorRole: 'logist', actorName: 'Ефремов П.Н.', object: 'trip', objectId: tripId, field: 'assigned', became: driverName, comment: 'Назначение состава из собственного парка АЭМЗ' })
 
   // Запланированные: состав назначен, ожидает подтверждения водителя и выезда
   for (const o of planned2) {
@@ -662,12 +614,8 @@ export async function seedDemo() {
     await assignAudit(trip.id, driver.fullName)
   }
 
-  await db.auditLog.createMany({
-    data: [
-      { actorRole: 'logist', actorName: 'Ефремов П.Н.', object: 'trip', objectId: trip1.id, field: 'assigned', became: drivers[0].fullName, comment: 'Назначение состава из собственного парка АЭМЗ' },
-      { actorRole: 'logist', actorName: 'Ефремов П.Н.', object: 'trip', objectId: trip2.id, field: 'assigned', became: drivers[1].fullName, comment: 'Назначение состава из собственного парка АЭМЗ' },
-    ],
-  })
+  await audit({ actorRole: 'logist', actorName: 'Ефремов П.Н.', object: 'trip', objectId: trip1.id, field: 'assigned', became: drivers[0].fullName, comment: 'Назначение состава из собственного парка АЭМЗ' })
+  await audit({ actorRole: 'logist', actorName: 'Ефремов П.Н.', object: 'trip', objectId: trip2.id, field: 'assigned', became: drivers[1].fullName, comment: 'Назначение состава из собственного парка АЭМЗ' })
 
   // --- Закрепления состава (водитель ↔ тягач ↔ прицеп) ---
   // Герои демо закреплены за «своими» машинами рейсов; Зайцев — за Volvo FH

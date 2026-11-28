@@ -1,6 +1,8 @@
 // Движок правил B5 (ТЗ v5.0): лестница, артефакты, seq/часы, барьер корректировки,
-// отмена корректировки, замена состава, пакетный разбор, outbox, аудит.
+// отмена корректировки, замена состава, пакетный разбор, outbox, аудит —
+// аудит в единый журнал платформы (PlatformLog, контур dispatcher).
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { CONSTANTS, TRANSITIONS, FILE_REQUIRED_STATUS } from '@/lib/kontur/constants'
 import { applyLadderStatus } from '@/lib/kontur/monitor'
 
@@ -43,18 +45,8 @@ async function outboxInsert(eventType: string, payload: Record<string, unknown>)
   })
 }
 
-async function audit(entry: {
-  actorRole: string
-  actorName?: string
-  object: string
-  objectId: string
-  field?: string
-  was?: string
-  became?: string
-  comment?: string
-}) {
-  await db.auditLog.create({ data: entry })
-}
+// Аудит движка — единый журнал платформы: импорт audit из '@/lib/kontur/audit';
+// все места движка пишут через него (PlatformLog, контур dispatcher + JSONL)
 
 // B5.4: docs_pending / docs_lost выводятся из required_files принятых не-superseded
 // событий и состояния файлов

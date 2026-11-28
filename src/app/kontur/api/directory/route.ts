@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { db } from '@/lib/kontur/db'
+import { db, OWN_CARRIER_ID } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { getSessionUser, shortName } from '@/lib/kontur/auth'
 import { denyUnless } from '@/lib/kontur/access'
 
@@ -47,6 +48,7 @@ export async function POST(req: Request) {
       if (license && !DATE_RE.test(license)) return bad('Срок ВУ — в формате ДД.ММ.ГГГГ')
       const d = await db.driver.create({
         data: {
+          carrierId: OWN_CARRIER_ID,
           fullName: body.fullName.trim(),
           phone: body.phone.trim(),
           birthDate: dateOrNull(body.birthDate),
@@ -56,21 +58,20 @@ export async function POST(req: Request) {
           statusComment: body.statusComment?.trim() || null,
         },
       })
-      await db.auditLog.create({
-        data: { actorRole: user.role, actorName: shortName(user.fullName), object: 'driver', objectId: d.id, field: 'created', became: d.fullName, comment: 'Запись добавлена вручную в справочник «Водители»' },
-      })
+      await audit({ actorRole: user.role, actorName: shortName(user.fullName), object: 'driver', objectId: d.id, field: 'created', became: d.fullName, comment: 'Запись добавлена вручную в справочник «Водители»' })
       return NextResponse.json({ ok: true, driver: d })
     }
 
     if (body.kind === 'vehicle') {
       if (!body.brand?.trim()) return bad('Укажите марку ТС')
       if (!body.plate?.trim()) return bad('Укажите госномер')
-      const exists = await db.vehicle.findUnique({ where: { plate: body.plate.trim() } })
+      const exists = await db.vehicle.findFirst({ where: { plate: body.plate.trim() } })
       if (exists) return bad('Тягач с таким госномером уже есть в справочнике')
       const techTill = dateOrNull(body.techTill)
       if (techTill && !DATE_RE.test(techTill)) return bad('Техосмотр — в формате ДД.ММ.ГГГГ')
       const v = await db.vehicle.create({
         data: {
+          carrierId: OWN_CARRIER_ID,
           brand: body.brand.trim(),
           plate: body.plate.trim(),
           vin: dateOrNull(body.vin),
@@ -78,25 +79,24 @@ export async function POST(req: Request) {
           techTill,
           capacityT: numOrNull(body.capacityT),
           volumeM3: numOrNull(body.volumeM3),
-          ownership: 'own',
+          ownershipType: 'OWNED',
           isRepair: body.isRepair === true,
         },
       })
-      await db.auditLog.create({
-        data: { actorRole: user.role, actorName: shortName(user.fullName), object: 'vehicle', objectId: v.id, field: 'created', became: `${v.brand} · ${v.plate}`, comment: 'Запись добавлена вручную в справочник «Тягачи»' },
-      })
+      await audit({ actorRole: user.role, actorName: shortName(user.fullName), object: 'vehicle', objectId: v.id, field: 'created', became: `${v.brand} · ${v.plate}`, comment: 'Запись добавлена вручную в справочник «Тягачи»' })
       return NextResponse.json({ ok: true, vehicle: v })
     }
 
     if (body.kind === 'trailer') {
       if (!body.plate?.trim()) return bad('Укажите госномер прицепа')
       if (!body.type?.trim()) return bad('Укажите тип прицепа')
-      const exists = await db.trailer.findUnique({ where: { plate: body.plate.trim() } })
+      const exists = await db.trailer.findFirst({ where: { plate: body.plate.trim() } })
       if (exists) return bad('Прицеп с таким госномером уже есть в справочнике')
       const techTill = dateOrNull(body.techTill)
       if (techTill && !DATE_RE.test(techTill)) return bad('Техосмотр — в формате ДД.ММ.ГГГГ')
       const t = await db.trailer.create({
         data: {
+          carrierId: OWN_CARRIER_ID,
           brand: body.brand?.trim() || '—',
           plate: body.plate.trim(),
           type: body.type.trim(),
@@ -105,13 +105,11 @@ export async function POST(req: Request) {
           volumeM3: numOrNull(body.volumeM3),
           beltsCount: numOrNull(body.beltsCount),
           workingBoards: body.workingBoards === true,
-          ownership: 'own',
+          ownershipType: 'OWNED',
           isRepair: body.isRepair === true,
         },
       })
-      await db.auditLog.create({
-        data: { actorRole: user.role, actorName: shortName(user.fullName), object: 'trailer', objectId: t.id, field: 'created', became: `${t.plate} · ${t.type}`, comment: 'Запись добавлена вручную в справочник «Прицепы»' },
-      })
+      await audit({ actorRole: user.role, actorName: shortName(user.fullName), object: 'trailer', objectId: t.id, field: 'created', became: `${t.plate} · ${t.type}`, comment: 'Запись добавлена вручную в справочник «Прицепы»' })
       return NextResponse.json({ ok: true, trailer: t })
     }
 
@@ -149,9 +147,7 @@ export async function PATCH(req: Request) {
           statusComment: body.statusComment?.trim() || null,
         },
       })
-      await db.auditLog.create({
-        data: { actorRole: user.role, actorName: shortName(user.fullName), object: 'driver', objectId: d.id, field: 'updated', was: before.fullName, became: d.fullName, comment: 'Правка записи справочника «Водители»' },
-      })
+      await audit({ actorRole: user.role, actorName: shortName(user.fullName), object: 'driver', objectId: d.id, field: 'updated', was: before.fullName, became: d.fullName, comment: 'Правка записи справочника «Водители»' })
       return NextResponse.json({ ok: true, driver: d })
     }
 
@@ -173,9 +169,7 @@ export async function PATCH(req: Request) {
           isRepair: body.isRepair === true,
         },
       })
-      await db.auditLog.create({
-        data: { actorRole: user.role, actorName: shortName(user.fullName), object: 'vehicle', objectId: v.id, field: 'updated', was: before.plate, became: v.plate, comment: 'Правка записи справочника «Тягачи»' },
-      })
+      await audit({ actorRole: user.role, actorName: shortName(user.fullName), object: 'vehicle', objectId: v.id, field: 'updated', was: before.plate, became: v.plate, comment: 'Правка записи справочника «Тягачи»' })
       return NextResponse.json({ ok: true, vehicle: v })
     }
 
@@ -198,9 +192,7 @@ export async function PATCH(req: Request) {
           isRepair: body.isRepair === true,
         },
       })
-      await db.auditLog.create({
-        data: { actorRole: user.role, actorName: shortName(user.fullName), object: 'trailer', objectId: t.id, field: 'updated', was: before.plate, became: t.plate, comment: 'Правка записи справочника «Прицепы»' },
-      })
+      await audit({ actorRole: user.role, actorName: shortName(user.fullName), object: 'trailer', objectId: t.id, field: 'updated', was: before.plate, became: t.plate, comment: 'Правка записи справочника «Прицепы»' })
       return NextResponse.json({ ok: true, trailer: t })
     }
 

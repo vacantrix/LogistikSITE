@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/kontur/db'
+import { audit } from '@/lib/kontur/audit'
 import { getSessionUser, shortName } from '@/lib/kontur/auth'
 import { denyUnless, konturAllowedAny } from '@/lib/kontur/access'
 import { parseDealDate } from '@/lib/kontur/planner'
@@ -171,8 +172,7 @@ export async function POST(req: Request) {
       ? await db.atiDeal.update({ where: { loadId: load.id }, data })
       : await db.atiDeal.create({ data })
 
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist',
         actorName: actor,
         object: 'ati_deal',
@@ -180,8 +180,7 @@ export async function POST(req: Request) {
         field: 'preliminary',
         became: `${load.from} → ${load.to} · ${load.carrier.firm}`,
         comment: 'Предварительное согласование груза с биржи ATI.SU',
-      },
-    })
+      })
     return NextResponse.json({
       ok: true,
       deal,
@@ -206,8 +205,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: { code: 'CONFLICT', message: 'Документы уже обменяны — заявка в силе' } }, { status: 409 })
     }
     const updated = await db.atiDeal.update({ where: { id: dealId }, data: { stage: 'full', docsAt: new Date() } })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist',
         actorName: actor,
         object: 'ati_deal',
@@ -216,8 +214,7 @@ export async function POST(req: Request) {
         was: 'preliminary',
         became: 'full',
         comment: `Документы обменяны — заявка вступила в силу: ${deal.from} → ${deal.to}`,
-      },
-    })
+      })
     return NextResponse.json({
       ok: true,
       deal: updated,
@@ -255,7 +252,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: { code: 'VALIDATION', message: 'Водитель должен быть в строю' } }, { status: 400 })
     }
     const vehicle = await db.vehicle.findUnique({ where: { id: vehicleId } })
-    if (!vehicle || vehicle.ownership !== 'own' || vehicle.isRepair) {
+    if (!vehicle || vehicle.ownershipType !== 'OWNED' || vehicle.isRepair) {
       return NextResponse.json({ error: { code: 'VALIDATION', message: 'Тягач должен быть из собственного парка и не в ремонте' } }, { status: 400 })
     }
     if (deal.weightT != null && vehicle.capacityT != null && vehicle.capacityT < deal.weightT) {
@@ -299,19 +296,17 @@ export async function POST(req: Request) {
       await db.outbox1c.create({
         data: { eventType: 'trip.leg_appended', payload: JSON.stringify({ tripId: trip.id, legId: leg.id, dealId: deal.id, source: 'ati' }) },
       })
-      await db.auditLog.create({
-        data: {
+      await audit({
           actorRole: 'logist', actorName: actor, object: 'ati_deal', objectId: deal.id,
           field: 'planned', became: `плечо ${leg.seq} к рейсу ${trip.id.slice(0, 8)} · ${driver.fullName}`,
           comment: `Груз ATI.SU ${deal.from} → ${deal.to} добавлен плечом к рейсу`,
-        },
-      })
+        })
       return NextResponse.json({ ok: true, tripId: trip.id, legId: leg.id, message: `Груз ${deal.from} → ${deal.to} — плечо к рейсу ${driver.fullName}. Видно в «Занятости» и «Планировании».` })
     }
 
     // mode=new: новый рейс-черновик под груз (назначен, выезд по плану)
     const trailer = trailerId ? await db.trailer.findUnique({ where: { id: trailerId } }) : null
-    if (trailerId && (!trailer || trailer.ownership !== 'own')) {
+    if (trailerId && (!trailer || trailer.ownershipType !== 'OWNED')) {
       return NextResponse.json({ error: { code: 'VALIDATION', message: 'Прицеп должен принадлежать собственному парку' } }, { status: 400 })
     }
     const busy = await db.trip.findFirst({
@@ -338,13 +333,11 @@ export async function POST(req: Request) {
     await db.outbox1c.create({
       data: { eventType: 'trip.assigned', payload: JSON.stringify({ tripId: trip.id, driverId: driver.id, vehicleId: vehicle.id, dealId: deal.id, source: 'ati' }) },
     })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist', actorName: actor, object: 'ati_deal', objectId: deal.id,
         field: 'planned', became: `новый рейс ${trip.id.slice(0, 8)} · ${driver.fullName} · ${vehicle.brand} (${vehicle.plate})`,
         comment: `Груз ATI.SU ${deal.from} → ${deal.to} назначен свободному составу`,
-      },
-    })
+      })
     return NextResponse.json({
       ok: true, tripId: trip.id, legId: leg.id,
       message: `Груз ${deal.from} → ${deal.to} в плане: ${driver.fullName} на ${vehicle.plate}. Рейс назначен — выезд по плану.`,
@@ -362,13 +355,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Заявка не найдена' } }, { status: 404 })
     }
     const res = await cancelPlannedLegs(deal.id, 'Груз ATI.SU снят с состава')
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist', actorName: actor, object: 'ati_deal', objectId: deal.id,
         field: 'unplanned', was: 'planned', became: 'снят с состава',
         comment: `Груз ${deal.from} → ${deal.to} снят с плана (плеч отменено: ${res.legs.length})`,
-      },
-    })
+      })
     return NextResponse.json({ ok: true, ...res, message: `Груз снят с плана (плеч отменено: ${res.legs.length})` })
   }
 
@@ -391,8 +382,7 @@ export async function POST(req: Request) {
     })
     // каскад: назначенное по сделке плечо отменяется — занятость и график обновляются
     const cascade = await cancelPlannedLegs(deal.id, 'Сделка ATI.SU отменена')
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist',
         actorName: actor,
         object: 'ati_deal',
@@ -401,8 +391,7 @@ export async function POST(req: Request) {
         was: deal.stage,
         became: 'cancelled',
         comment: `Отмена заявки: ${deal.from} → ${deal.to}${typeof reason === 'string' && reason.trim() ? ` — ${reason.trim()}` : ''}`,
-      },
-    })
+      })
     return NextResponse.json({
       ok: true,
       deal: updated,
@@ -427,8 +416,7 @@ export async function POST(req: Request) {
       where: { id: dealId },
       data: { status: 'active', stage: 'preliminary', cancelReason: null, docsAt: null, agreedAt: new Date() },
     })
-    await db.auditLog.create({
-      data: {
+    await audit({
         actorRole: 'logist',
         actorName: actor,
         object: 'ati_deal',
@@ -437,8 +425,7 @@ export async function POST(req: Request) {
         was: 'cancelled',
         became: 'preliminary',
         comment: `Заявка возвращена в работу: ${deal.from} → ${deal.to}`,
-      },
-    })
+      })
     return NextResponse.json({ ok: true, deal: updated, message: `Заявка возвращена к предварительному согласованию: ${deal.from} → ${deal.to}` })
   }
 
